@@ -90,8 +90,14 @@ jobs:
 
       - name: Fail if the committed bundle is stale
         run: |
-          if ! git diff --exit-code --stat -- dist; then
-            echo "::error::dist/ is out of date. Run 'pnpm build' and commit the result."
+          # Every bundle, not just the root one: `git status --porcelain`
+          # answers for untracked output too, so a duty added to
+          # `tools/build.mjs` whose bundle was never committed fails here
+          # instead of shipping as a directory GitHub cannot resolve.
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            git diff --stat
+            echo "::error::The committed bundles are out of date. Run 'pnpm build' and commit the result."
             exit 1
           fi
 

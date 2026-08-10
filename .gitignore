@@ -5,7 +5,7 @@ coverage/
 # off the checked-out repository with no install step, so the bundle has to be
 # committed — see tools/build.mjs. CI fails when it is stale.
 
-# Local settings for `pnpm try`, which holds a real token. `.env.example` is the
+# Local settings for `pnpm try <duty>`, which holds a real token. `.env.example` is the
 # tracked half and carries no secret.
 .env
 

@@ -16,6 +16,12 @@ describe("refusal", () => {
   it("names no duty at all when the input was empty", () => {
     const message = refusal("");
     expect(message).toContain("is not a duty");
+    expect(message).toContain("ecoma-io/reeve/translate@v1");
+  });
+
+  it("points a bare `uses:` at the roadmap while a ref carries nothing", () => {
+    const message = refusal("", []);
+    expect(message).toContain("is not a duty");
     expect(message).toContain("docs/north-star.md#6-roadmap");
   });
 
@@ -53,13 +59,21 @@ describe("refusal", () => {
 });
 
 describe("the duty lists", () => {
-  it("plans every duty the documentation gives a contract to", () => {
-    expect(PLANNED).toEqual(["triage", "translate", "duplicate", "respond"]);
+  it("covers every duty the documentation gives a contract to", () => {
+    expect([...DUTIES, ...PLANNED].sort()).toEqual(
+      ["triage", "translate", "duplicate", "respond"].sort(),
+    );
   });
 
-  it("claims only duties that are also planned", () => {
-    // A ref cannot carry a duty nothing documents. This fails the day someone
-    // adds an entry to `DUTIES` without a page for it.
-    expect(DUTIES.every((duty) => PLANNED.includes(duty))).toBe(true);
+  it("carries `translate`, which this ref builds", () => {
+    expect(DUTIES).toContain("translate");
+  });
+
+  it("never lists the same duty as both built and planned", () => {
+    // Both lists reach a message, and only one of them is true of a given ref.
+    // A duty that stayed in `PLANNED` after it was built would still be
+    // answered correctly — built is checked first — but the roadmap branch
+    // would then be unreachable for it, which is a claim nothing tests.
+    expect(DUTIES.filter((duty) => PLANNED.includes(duty))).toEqual([]);
   });
 });

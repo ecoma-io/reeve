@@ -64,10 +64,10 @@ yourself bumping it by hand, that is the reason not to.
 | `pnpm lint`         | ESLint, with type information, zero warnings tolerated                                                        |
 | `pnpm typecheck`    | `tsc --noEmit` — esbuild strips types without checking them, so this is the only place a type error is caught |
 | `pnpm test`         | Vitest, unit and integration, with coverage thresholds                                                        |
-| `pnpm build`        | esbuild, `src/main.ts` → `dist/index.js`                                                                      |
+| `pnpm build`        | esbuild, one bundle per action — the listing's, and each duty's beside its own `action.yml`                   |
 | `pnpm format`       | Prettier, in place                                                                                            |
 | `pnpm format:check` | Prettier, read-only — what CI runs                                                                            |
-| `pnpm try`          | Runs the action here, against a real provider and a real thread — see below                                   |
+| `pnpm try <duty>`   | Runs one duty here, against a real provider and a real thread — see below                                     |
 
 Before you push, run all of the first six. A shorter local run just moves the
 red to the pull request. `pnpm try` is not one of them: it needs a network and a
@@ -82,7 +82,7 @@ suite nobody ran, and it should go red rather than green.
 report a floating promise, an `await` on something that is not a thenable, or a
 condition that can never be false. The rule set is `strictTypeChecked`
 deliberately, and the `no-unsafe-*` rules are errors rather than warnings for a
-specific reason: nearly every value this action handles arrives as `any` — a
+specific reason: nearly every value Reeve handles arrives as `any` — a
 webhook payload, a JSON body a model wrote — and the moment one of those is
 allowed to spread untyped, the parsing that was supposed to validate it has been
 skipped without anyone noticing.
@@ -97,29 +97,34 @@ Nothing in the suite reaches a model. The unit tests mock the provider and the
 integration tests drive the real bundle against a local HTTP stub, which is what
 makes them deterministic, offline, and safe to run on a fork's pull request. It
 is also the one thing they cannot tell you: whether a real endpoint answers the
-way this action assumes.
+way a duty assumes.
 
-`pnpm try` is that instrument. It does what a runner does — reads the defaults
-out of `action.yml`, sets `INPUT_*`, spawns the freshly built bundle — with the
-settings coming from a `.env` you own:
+`pnpm try <duty>` is that instrument. It does what a runner does — reads the
+defaults out of that duty's `action.yml`, sets `INPUT_*`, spawns the freshly
+built bundle from the duty's own directory — with the settings coming from a
+`.env` you own:
 
 ```sh
 cp .env.example .env
 # fill in GITHUB_TOKEN (`gh auth token` prints one), the repository, the number,
 # and whichever endpoint you have
-pnpm try
+pnpm try translate
 ```
+
+The duty is named rather than defaulted, because a duty ships from its own
+directory and that directory is what a workflow names too. Run it with no name
+and it lists the ones that exist.
 
 `.env` is git-ignored and `.env.example` is not, so the example file names no
 endpoint and holds no key. Two things are worth knowing before the first run:
 
 - **`DRY_RUN=true` is the shipped default, and it means nothing is written** —
   the body it would have written is printed instead. Turn it off only against a
-  thread you are willing to write to: the action edits the thread's own body
-  under a real account, appending below its marker and never over the author's
+  thread you are willing to write to: the duty writes to a real thread under a
+  real account, appending below its own marker and never over the author's
   text.
 - **An exported shell variable beats `.env`.** That is Node's own precedence:
-  `DRY_RUN=false pnpm try` is a one-off without an edit, and a `GITHUB_TOKEN`
+  `DRY_RUN=false pnpm try translate` is a one-off without an edit, and a `GITHUB_TOKEN`
   already exported in your shell is the one that will be used.
 
 This repository also runs its own duties on its own issues and pull requests —
@@ -232,7 +237,7 @@ section above is strict about it:
 | everything else | no release        | no release    |
 
 The bolded cell is the deliberate part. `bump-minor-pre-major` sends breaking
-changes to the minor digit while the version is below 1.0.0, so this action
+changes to the minor digit while the version is below 1.0.0, so a duty
 cannot back into a 1.0 it has not earned. 1.0.0 will be a decision someone
 makes, on the day the `action.yml` contract is one we are willing to keep.
 
@@ -304,7 +309,7 @@ answer for:
 - every model in the list fails.
 
 None of those is hypothetical. Each has been observed against a free endpoint,
-which is exactly the configuration this action is meant to survive.
+which is exactly the configuration Reeve is meant to survive.
 
 `fast-check` is available for the properties worth stating over a generated
 input space rather than a handful of examples — a sanitiser's output containing

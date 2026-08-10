@@ -1,0 +1,143 @@
+# The `translate` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/translate@v1`.
+name: Reeve - translate
+description: Translate an issue or pull request body into every language your project reads, in the thread's own body, with the author's words kept byte-for-byte and marked official.
+author: Ecoma
+
+branding:
+  icon: globe
+  color: purple
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read and write the thread. `GITHUB_TOKEN` is enough,
+      and it is what gives the run recursion prevention: a body this duty edits
+      does not start another run. A PAT or an App installation does not get
+      that from GitHub, and the fingerprint in the published marker is what
+      stops the loop instead.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The issue or pull request to translate. Defaults to the thread that
+      triggered the workflow, and is what a backfill sets to name an old one.
+
+      An event that carries no thread — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for issue `NaN`.
+    required: false
+    default: ""
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. The order is
+      preference and not last resort: the first one that answers is used, and a
+      model that fails is never asked again in the same run.
+    required: true
+
+  languages:
+    description: >-
+      What to translate into, comma or newline separated. `en`, or
+      `en:English`, or `zh-Hans:简体中文:Hans` — the code alone is enough when
+      the code is enough.
+
+      This says nothing about what an author may write in. The language the
+      thread was written in is detected and left out of its own translation.
+    required: false
+    default: en, vi, zh
+
+  drafts:
+    description: >-
+      How many translations to ask for per language. Every answer is scored
+      deterministically and the best is published. The quality lever that costs
+      calls instead of money.
+    required: false
+    default: "1"
+
+  judge-models:
+    description: >-
+      A panel of models asked which draft reads best, comma or newline
+      separated. Every one is asked — this is a panel, not a fallback list —
+      and the deterministic score breaks every tie. Empty means no panel, which
+      is the default and a perfectly good setting.
+    required: false
+    default: ""
+
+  max-body-chars:
+    description: >-
+      How much of the author's own text one run reads. A longer body has its
+      tail left behind, and the published block says so rather than pretending
+      otherwise. Raising this later translates the rest.
+    required: false
+    default: "6000"
+
+  translate-replies:
+    description: >-
+      Also translate the thread's replies, each detected and fingerprinted on
+      its own. Off by default because the ceiling is real: every reply, times
+      every language it is missing. One run reads the most recent hundred and
+      warns when there were more.
+    required: false
+    default: "false"
+
+  show-attribution:
+    description: >-
+      How much of the machinery the published block names. `none` shows the
+      language alone, `model` adds the model that wrote the winning draft, and
+      `detail` adds its score, how many drafts it beat, and how each judge
+      voted.
+    required: false
+    default: none
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and change nothing. The block
+      that would have been published is printed to the log.
+    required: false
+    default: "false"
+
+outputs:
+  source-language:
+    description: >-
+      The detected language code of the thread's body, or empty — empty means
+      none of the configured languages wrote it, which is an answer rather than
+      a failure.
+
+  translated:
+    description: JSON array of the language codes that were published.
+
+  skipped:
+    description: >-
+      JSON array of the language codes no model could translate this run. `[]`
+      on the run where everything worked, never unset — a language that failed
+      does not fail the job, so this is what a workflow branches on.
+
+  replies-translated:
+    description: How many replies got a translation. `0` when `translate-replies` is off.
+
+runs:
+  using: node24
+  main: dist/index.js

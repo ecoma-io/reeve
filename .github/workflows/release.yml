@@ -145,10 +145,12 @@ jobs:
           set -euo pipefail
           staged="reeve-${TAG#v}"
           mkdir "$staged"
-          # TODO(stage-0): the action contracts live in per-duty
-          # subdirectories, so this list grows to `translate/action.yml`,
-          # `triage/action.yml`, ... — see docs/north-star.md, Stage 0.
+          # The root listing, then one directory per duty — each carrying the
+          # `action.yml` a workflow names and the bundle it runs. A duty added
+          # to `tools/build.mjs` is added here too, or its bytes go unattested
+          # while the release claims otherwise.
           cp -r dist action.yml LICENSE README.md "$staged/"
+          cp -r translate "$staged/"
           tar --sort=name --owner=0 --group=0 --numeric-owner \
               --mode='a+rX,u+w,go-w' \
               --mtime="@$(git log -1 --format=%ct)" \

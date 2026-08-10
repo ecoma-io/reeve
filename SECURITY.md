@@ -35,17 +35,18 @@ including when the answer is that the report is not a vulnerability.
 
 ## Scope
 
-In scope: this repository's source, the committed `dist/` bundle, `action.yml`,
+In scope: this repository's source, every committed `dist/` bundle, every
+`action.yml`,
 and the build and release workflows — anything that decides what runs on a
 consumer's runner.
 
-Particularly in scope, because it is where this action's real risk lives:
+Particularly in scope, because it is where Reeve's real risk lives:
 
-- **anything a thread's title or body can make the action do** — prompt content
+- **anything a thread's title or body can make a duty do** — prompt content
   that escapes its untrusted-data framing, or model output that reaches a
   comment without passing the sanitiser;
 - **anything that lets a comment be written that a maintainer did not intend** —
-  a marker forged from injected text so the action edits the wrong comment, a
+  a marker forged from injected text so a duty edits the wrong comment, a
   container closed early so injected Markdown escapes the collapsed block, a
   `@mention` that survives to notify people on every re-run;
 - **anything that leaks the configured `api-key`** into logs, into a comment, or
@@ -54,7 +55,7 @@ Particularly in scope, because it is where this action's real risk lives:
 Out of scope:
 
 - vulnerabilities in third-party dependencies with no exploitable path through
-  this action — report those upstream;
+  Reeve — report those upstream;
 - a consumer's own workflow being misconfigured in a way this repository's
   documentation warns against. The clearest example: checking out
   `github.event.pull_request.head.sha` inside a `pull_request_target` workflow.

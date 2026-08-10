@@ -187,14 +187,19 @@ review conversation away from the line it is about.
 
 ---
 
-_The text above is the original and the version this project answers for.
-Everything below is a machine translation._
+> [!NOTE]
+> **The text above is the original, and it is the version this project answers for.**
+> Everything below is a machine translation by [Reeve](https://github.com/ecoma-io/reeve).
+> Where the two disagree, the text above is the one that counts.
 
-<details><summary><b>English</b></summary>
+<details open>
+<summary><b>English</b></summary>
 
 <the translation>
 
 </details>
+
+<sub>Translated from Vietnamese. Editing the text above republishes this; deleting this block regenerates it.</sub>
 ```
 
 Everything above the marker is kept on every run, so everything GitHub reads out
@@ -221,6 +226,22 @@ force a retranslation.
 
 A skipped language is not in the fingerprint, so the next run tries it again
 rather than reading its own claim and stopping.
+
+## Text with no prose in it
+
+A body that is a stack trace, a log paste, a diff or a bare URL is written the
+same way in every language, and there is nothing in it to translate into
+anything. That is checked before detection rather than after it, and it costs
+nothing: the same step that blanks the residue for [detection](../languages.md)
+answers it, and a body whose residue is empty ends the run there.
+
+Checked _before_ detection because detection would honestly answer `unknown` for
+such a body, and `unknown` means "translate into all of them" — the most
+expensive answer available, on the one input where no answer is worth anything.
+The log says so, `translated` is `[]`, and nothing is written.
+
+The same applies per reply when `translate-replies` is on: a reply that is only a
+stack trace is skipped and does not count towards `replies-translated`.
 
 ## What it will not do
 
