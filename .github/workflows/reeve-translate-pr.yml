@@ -30,6 +30,10 @@ permissions:
 jobs:
   translate:
     name: Translate
+    # Dependabot and Renovate open most of the pull requests here, and every one
+    # of their bodies is a generated changelog. `reeve-translate-issue.yml` has
+    # the longer note.
+    if: github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
