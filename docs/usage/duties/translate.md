@@ -151,6 +151,38 @@ Two things are worth knowing:
 Naming is presentation and nothing else. It is not masking: put the ids in
 secrets if they are secret, and this decides what a reader sees instead of them.
 
+### The run report
+
+Every run writes a page to the job's own summary — the tab beside the log, not
+the log itself — with three things on it:
+
+- **What was translated**, per text and per language: the model that wrote the
+  winning draft, its score, how many drafts it beat, and how each judge seat
+  voted.
+- **What was not**, and why: a language no model could translate, a body that
+  was empty, a thread whose fingerprint already matched.
+- **What it cost**: requests, prompt tokens and completion tokens, broken down
+  by stage and by model, with a total.
+
+This is deliberately not in the thread. A contributor opened the thread to read
+an issue, and a token count in the body is noise in a notification email sent to
+everyone watching it. `show-attribution` stays `none` by default for exactly
+that reason — the detail is on the page belonging to the person who configured
+the run.
+
+Two honesty rules, so the numbers can be checked against an invoice:
+
+- **Nothing is estimated.** Token counts come from the provider's own `usage`
+  field. Many OpenAI-compatible gateways send none, and a run against one of
+  those reports its requests and says how many came back uncounted, rather than
+  filling the gap with arithmetic.
+- **A failed request is in the total.** Rotating past a model that was out of
+  quota costs a request, the provider counted it, and so does this.
+
+The page is written even when the run failed halfway, because a run that fell
+over on the third of twelve replies is exactly the one whose bill is worth
+seeing.
+
 ## Outputs
 
 | Output               | Value                                                                                 |

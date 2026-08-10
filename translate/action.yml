@@ -121,6 +121,10 @@ inputs:
       language alone, `model` adds the model that wrote the winning draft, and
       `detail` adds its score, how many drafts it beat, and how each judge
       voted.
+
+      `none` is the default because all of it — and the token count besides — is
+      already written to the job summary, which is read by the person who
+      configured the run rather than by everyone the thread notifies.
     required: false
     default: none
 

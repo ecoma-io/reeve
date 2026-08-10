@@ -28,9 +28,29 @@ export interface Message {
   readonly content: string;
 }
 
+/**
+ * What one request cost, as the provider reported it.
+ *
+ * Reported and never inferred. A token count Reeve computed itself would be an
+ * estimate wearing a number's clothes, and the one thing a bill has to be is
+ * checkable against the provider's own.
+ */
+export interface Usage {
+  readonly prompt: number;
+  readonly completion: number;
+}
+
 export interface Success {
   readonly ok: true;
   readonly model: string;
+  /**
+   * What it cost, when a provider said. Absent or null is the ordinary case —
+   * gateways drop the field, and a null rendered as zero would put a free line
+   * in a bill that was not free. Only the provider fills this in; a failure a
+   * caller derives from an answer it did not like leaves it alone, because the
+   * request underneath was already counted where it was made.
+   */
+  readonly usage?: Usage | null;
   readonly content: string;
   /**
    * The provider's `finish_reason`, verbatim, or null when it sent none.
@@ -46,6 +66,12 @@ export interface Failure {
   readonly ok: false;
   readonly model: string;
   readonly reason: string;
+  /**
+   * What it cost anyway. A request that answered `HTTP 200` with nothing usable
+   * in it is a failure to Reeve and a billable completion to the provider, and
+   * a ledger that only counted the answers it liked would understate the run.
+   */
+  readonly usage?: Usage | null;
 }
 
 export type Completion = Success | Failure;
@@ -259,7 +285,7 @@ export function createProvider(config: ProviderConfig): Provider {
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {
-        return { ok: false, model, reason: describeRequestError(error, timeoutMs) };
+        return { ok: false, model, usage: null, reason: describeRequestError(error, timeoutMs) };
       }
 
       let text: string;
@@ -269,6 +295,7 @@ export function createProvider(config: ProviderConfig): Provider {
         return {
           ok: false,
           model,
+          usage: null,
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error, timeoutMs)})`,
         };
       }
@@ -289,19 +316,29 @@ function readCompletion(model: string, status: number, text: string): Completion
   try {
     payload = JSON.parse(text);
   } catch {
-    return { ok: false, model, reason: `${at}: body was not JSON — ${excerpt(text)}` };
+    return { ok: false, model, usage: null, reason: `${at}: body was not JSON — ${excerpt(text)}` };
   }
 
+  // Read before any verdict, because a response Reeve refuses was still paid
+  // for. The one exception is a body that would not parse, which carries no
+  // number anybody could read.
+  const usage = readUsage(payload);
+
   const reported = readErrorMessage(payload);
-  if (reported !== null) return { ok: false, model, reason: `${at}: ${reported}` };
+  if (reported !== null) return { ok: false, model, usage, reason: `${at}: ${reported}` };
 
   if (status < 200 || status >= 300) {
-    return { ok: false, model, reason: `${at}: ${excerpt(text)}` };
+    return { ok: false, model, usage, reason: `${at}: ${excerpt(text)}` };
   }
 
   const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
   if (choice === null) {
-    return { ok: false, model, reason: `${at}: no choices in the response — ${excerpt(text)}` };
+    return {
+      ok: false,
+      model,
+      usage,
+      reason: `${at}: no choices in the response — ${excerpt(text)}`,
+    };
   }
 
   const content = asRecord(choice.message)?.content;
@@ -309,19 +346,48 @@ function readCompletion(model: string, status: number, text: string): Completion
     // A provider whose `content` is an array of parts, or a reasoning model
     // that put everything in `reasoning_content` and left this empty. Both are
     // outside the protocol Reeve speaks; rotation is the answer.
-    return { ok: false, model, reason: `${at}: message content was not a string` };
+    return { ok: false, model, usage, reason: `${at}: message content was not a string` };
   }
   if (content.trim().length === 0) {
-    return { ok: false, model, reason: `${at}: answered with empty content` };
+    return { ok: false, model, usage, reason: `${at}: answered with empty content` };
   }
 
   const finishReason = choice.finish_reason;
   return {
     ok: true,
     model,
+    usage,
     content,
     finishReason: typeof finishReason === "string" ? finishReason : null,
   };
+}
+
+/**
+ * The `usage` object, or null for the many providers that send none.
+ *
+ * Either field being absent is not fatal to the other: a gateway that reports
+ * `prompt_tokens` and nothing else has still told the run something true, and
+ * the missing half counts as zero rather than discarding the half that arrived.
+ * A `usage` with neither field is nothing at all, and null says so — the
+ * summary can then report how many requests went uncounted instead of adding
+ * zeroes to a total nobody could check.
+ */
+function readUsage(payload: unknown): Usage | null {
+  const usage = asRecord(asRecord(payload)?.usage);
+  if (usage === null) return null;
+
+  const prompt = asCount(usage.prompt_tokens);
+  const completion = asCount(usage.completion_tokens);
+  if (prompt === null && completion === null) return null;
+
+  return { prompt: prompt ?? 0, completion: completion ?? 0 };
+}
+
+/** A token count as a provider sends it, or null for anything that is not one. */
+function asCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : null;
 }
 
 /** The outcome of trying a list of models in order. */

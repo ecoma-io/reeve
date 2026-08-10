@@ -51,6 +51,33 @@ This is D5, and it is the doctrine most often argued with during review. The
 argument is always some version of "but a partial answer is better than none".
 It is not, when the partial answer is indistinguishable from a successful one.
 
+## What a run reports, and where
+
+Three audiences, three places, and the difference is not cosmetic:
+
+| Where               | Who reads it                     | What belongs there                                              |
+| ------------------- | -------------------------------- | --------------------------------------------------------------- |
+| **The thread**      | Everyone the thread notifies     | The work itself, and as little machinery as the duty can manage |
+| **The job summary** | The maintainer who configured it | The whole run: what was decided per item, and what it cost      |
+| **The log**         | Whoever is debugging this run    | Everything, in the order it happened                            |
+
+The rule that follows: **the summary is where a run explains itself, and the
+thread is not.** A contributor opened the thread to read an issue, and a token
+count in the body is noise in a notification email sent to everyone watching.
+The same numbers on the job's own page are exactly what the person paying for
+the provider came to see.
+
+The cost half of that page comes from the meter, which wraps the provider rather
+than being called by a duty. Anything a duty had to remember to report would be
+reported for the stages somebody remembered — a stage that is not metered simply
+does not appear, which is a hole a reader can see rather than a total that is
+quietly wrong. Nothing in it is estimated: a provider that reports no `usage` is
+recorded as a request with no numbers, and the page says how many of those there
+were.
+
+Writing the summary can never fail a job. It is a record of work that is already
+done, and a runner too old to offer the page is not a reason to lose the run.
+
 ## The boundary
 
 The core is the product. A duty is a policy about one kind of work, expressed

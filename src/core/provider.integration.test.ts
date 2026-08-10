@@ -80,11 +80,12 @@ afterEach(async () => {
   }
 });
 
-function completion(content: string): string {
+function completion(content: string, usage?: Record<string, number>): string {
   return JSON.stringify({
     id: "chatcmpl-local",
     object: "chat.completion",
     choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
+    ...(usage === undefined ? {} : { usage }),
   });
 }
 
@@ -109,6 +110,9 @@ describe("the provider against a real endpoint", () => {
       model: "local-model",
       content: "Xin chào",
       finishReason: "stop",
+      // This endpoint sends no `usage`, which is the ordinary case for the
+      // gateways this project is built for and is reported rather than guessed.
+      usage: null,
     });
 
     const [entry] = received;
