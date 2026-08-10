@@ -1,0 +1,18 @@
+node_modules/
+coverage/
+pnpm-lock.yaml
+
+# esbuild's output, committed because the runner needs it. Reformatting a
+# generated file only makes the next build's diff noisier.
+dist/
+
+# Verbatim third-party legal text — reflowing it would alter a document that is
+# only valid unmodified.
+LICENSE
+
+# Written by release-please, and rewritten on every release. Prettier disagrees
+# with its output, so leaving these in would turn every release pull request red
+# on files no human edits — and the fix each time would be a formatting commit
+# that release-please overwrites on the next run.
+CHANGELOG.md
+.release-please-manifest.json

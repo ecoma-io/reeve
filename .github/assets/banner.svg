@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="Reeve — repository upkeep, in every contributor's language">
+  <title>Reeve — repository upkeep, in every contributor's language</title>
+  <!--
+    Layout, type scale and colours are held identical to the other banners in
+    this organisation on purpose: they sit side by side under one owner, and a
+    reader should read them as one family before reading either name. Only the
+    mark and the words differ.
+
+    The mark is `logo.svg` inlined rather than referenced — an `<image href>` to
+    a sibling file does not resolve when GitHub serves the SVG, and a banner
+    that renders as a broken box is worse than a duplicated forty lines.
+  -->
+  <rect width="1280" height="640" fill="#F8FAFC" />
+
+  <!-- The mark, optically centred at (250, 320). Its box runs larger than the
+       upright marks in this family at the same spot because this one lies wider
+       than it is tall and leaves two corners of its own viewBox empty: matching
+       their box would match the footprint and lose the weight. -->
+  <svg x="105" y="175" width="290" height="290" viewBox="0 0 512 512">
+    <clipPath id="banner-source-bubble">
+      <rect x="64" y="92" width="240" height="180" rx="48" />
+    </clipPath>
+    <g fill="#4F46E5">
+      <polygon points="104,250 80,326 176,258" stroke="#4F46E5" stroke-width="28" stroke-linejoin="round" />
+      <rect x="64" y="92" width="240" height="180" rx="48" />
+    </g>
+    <g fill="#14B8A6">
+      <polygon points="408,342 432,418 336,350" stroke="#14B8A6" stroke-width="28" stroke-linejoin="round" />
+      <rect x="208" y="184" width="240" height="180" rx="48" />
+    </g>
+    <rect x="208" y="184" width="240" height="180" rx="48" fill="#7C3AED" clip-path="url(#banner-source-bubble)" />
+    <g fill="#FFFFFF">
+      <rect x="104" y="126" width="160" height="18" rx="9" />
+      <rect x="104" y="160" width="104" height="18" rx="9" />
+      <rect x="248" y="286" width="104" height="18" rx="9" />
+      <rect x="248" y="320" width="160" height="18" rx="9" />
+    </g>
+  </svg>
+
+  <g font-family="Liberation Sans, Arial, Helvetica, sans-serif">
+    <text x="436" y="257" font-size="25" letter-spacing="1" fill="#475569">ECOMA</text>
+    <text x="436" y="355" font-size="100" font-weight="700" letter-spacing="-1" fill="#0F172A">REEVE</text>
+    <text x="436" y="403" font-size="30" fill="#475569">Repository upkeep, in every contributor's language</text>
+  </g>
+
+  <!-- What was written, the overlap, what is read — the same three colours the
+       mark is built from, in the order the mark reads them. -->
+  <g>
+    <rect x="436" y="431" width="120" height="10" rx="5" fill="#4F46E5" />
+    <rect x="564" y="431" width="120" height="10" rx="5" fill="#7C3AED" />
+    <rect x="692" y="431" width="120" height="10" rx="5" fill="#14B8A6" />
+  </g>
+</svg>

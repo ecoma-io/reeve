@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    // esbuild emits the bundle the action actually runs; `tsc` only ever
+    // judges. Keeping emit off here is what makes `pnpm typecheck` a gate
+    // rather than a second, competing build.
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+
+    // This code runs on the Actions runner, never in a browser: no DOM lib,
+    // and Node's own globals (process, fetch, AbortSignal) come from here.
+    "types": ["node"]
+  },
+  // Everything that is type-checked, which is everything. A file outside this
+  // list is a file `pnpm typecheck` silently skips, so adding a top-level
+  // script means adding it here in the same commit.
+  "include": ["src/**/*", "tools/**/*", "*.config.ts", "*.config.mts"],
+  "exclude": ["node_modules", "dist"]
+}

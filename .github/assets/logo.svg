@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Reeve">
+  <title>Reeve</title>
+  <!--
+    Two speech bubbles, interlocked — and the region where they overlap is a
+    third colour.
+
+    The subject is a thread, so the mark is made of the shape a thread is made
+    of. One bubble is what somebody wrote; the other is what the person on the
+    other end reads. Neither is drawn over the other and neither wins: what
+    Reeve produces is the intersection, and the intersection is the only violet
+    in the mark. That is the whole argument in one shape — the work only exists
+    where two parties who share no language can be brought to meet.
+
+    The knocked-out lines inside each bubble run long-then-short on the left and
+    short-then-long on the right. Same message, different shape on the page: the
+    reason the same report cannot be judged by its length, stated in the mark it
+    is judged under.
+
+    Palette and geometry are the organisation's, unchanged — rounded rectangles,
+    indigo #4F46E5, teal #14B8A6, violet #7C3AED — so the marks in this
+    organisation read as one family side by side.
+
+    Small sizes: the interior lines and the tails go to mush below ~24px, and
+    that is fine. What survives is two overlapping rounded forms with a
+    contrasting core, which is still the mark.
+  -->
+  <defs>
+    <!--
+      Clips the teal bubble to the indigo one, so the overlap is computed from
+      the two bubble rectangles rather than authored as a third rectangle
+      somebody would have to keep in sync by hand. Move either bubble and the
+      violet follows.
+    -->
+    <clipPath id="reeve-source-bubble">
+      <rect x="64" y="92" width="240" height="180" rx="48" />
+    </clipPath>
+  </defs>
+
+  <!-- What a contributor wrote. -->
+  <g fill="#4F46E5">
+    <!--
+      The tail is stroked in its own fill colour with a round join: it rounds
+      the point without needing arcs authored into the path, and it is the only
+      way the corner radius here stays in the same family as the bubbles' rx.
+    -->
+    <polygon points="104,250 80,326 176,258" stroke="#4F46E5" stroke-width="28" stroke-linejoin="round" />
+    <rect x="64" y="92" width="240" height="180" rx="48" />
+  </g>
+
+  <!-- What a maintainer reads. -->
+  <g fill="#14B8A6">
+    <polygon points="408,342 432,418 336,350" stroke="#14B8A6" stroke-width="28" stroke-linejoin="round" />
+    <rect x="208" y="184" width="240" height="180" rx="48" />
+  </g>
+
+  <!-- The overlap. The product. -->
+  <rect
+    x="208"
+    y="184"
+    width="240"
+    height="180"
+    rx="48"
+    fill="#7C3AED"
+    clip-path="url(#reeve-source-bubble)"
+  />
+
+  <!-- Text, in each bubble's own clear area — never across the overlap. -->
+  <g fill="#FFFFFF">
+    <rect x="104" y="126" width="160" height="18" rx="9" />
+    <rect x="104" y="160" width="104" height="18" rx="9" />
+    <rect x="248" y="286" width="104" height="18" rx="9" />
+    <rect x="248" y="320" width="160" height="18" rx="9" />
+  </g>
+</svg>

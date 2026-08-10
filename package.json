@@ -1,0 +1,75 @@
+{
+  "name": "@ecoma-io/reeve",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Automated upkeep for a repository — triage, translation and the duties after them — in whatever language the contributor wrote in, with any OpenAI-compatible model, inside an authority you wrote down.",
+  "keywords": [
+    "github-action",
+    "maintenance",
+    "automation",
+    "triage",
+    "translation",
+    "multilingual",
+    "i18n",
+    "llm",
+    "openai",
+    "openai-compatible",
+    "issues",
+    "pull-requests",
+    "open-source-maintenance",
+    "ecoma"
+  ],
+  "homepage": "https://github.com/ecoma-io/reeve#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ecoma-io/reeve.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ecoma-io/reeve/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Mai Ngọc Hóa (John Martin)",
+    "email": "john.itvn@gmail.com"
+  },
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=11"
+  },
+  "scripts": {
+    "prepare": "lefthook install",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "build": "node tools/build.mjs",
+    "try": "node tools/try.mjs"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "eld": "^2.0.3"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/eslint-plugin": "^1.6.26",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "fast-check": "^4.9.0",
+    "globals": "^17.9.0",
+    "lefthook": "^2.1.10",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0",
+    "vitest": "^4.1.10"
+  }
+}

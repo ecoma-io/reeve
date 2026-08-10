@@ -1,0 +1,33 @@
+# The Marketplace listing, and the one action in this repository that does no
+# work.
+#
+# GitHub reads a Marketplace listing from an `action.yml` at the repository root
+# and from nowhere else, while every duty ships from its own subdirectory so a
+# workflow can name the one it wants. So this file exists to be listed, and the
+# code behind it exists to refuse.
+#
+# The name has to collide with no existing action, user or organisation, which
+# `Reeve` alone would not survive — so the listing carries the brand plus what
+# it does, which is also what someone searching the Marketplace actually types.
+name: Reeve - multilingual repository upkeep
+description: Triage, translation and the duties after them — in whatever language the contributor wrote in, with any OpenAI-compatible model, inside an authority you wrote down.
+author: Ecoma
+
+branding:
+  icon: check-square
+  color: purple
+
+inputs:
+  duty:
+    description: >-
+      The duty you meant to run. Naming one here does not run it — this action
+      cannot run any duty — but it is what turns a puzzling red job into a line
+      you can paste.
+
+      A workflow uses a duty directly: `uses: ecoma-io/reeve/triage@v1`.
+    required: false
+    default: ""
+
+runs:
+  using: node24
+  main: dist/index.js
