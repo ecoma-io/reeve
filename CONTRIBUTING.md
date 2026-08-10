@@ -128,12 +128,45 @@ endpoint and holds no key. Two things are worth knowing before the first run:
   already exported in your shell is the one that will be used.
 
 This repository also runs its own duties on its own issues and pull requests —
-`.github/workflows/reeve-*.yml`, pointed at the working tree with `uses: ./`
-rather than at a tag, so a change is dogfooded on the pull request that makes it.
-The provider comes from repository secrets, which a maintainer sets. A fork has
-none, so the duty is skipped there and the run says so in a notice — a fork
-inheriting workflows it cannot configure should not inherit a red tick for it
-either.
+`.github/workflows/reeve-*.yml`, pointed at the working tree with
+`uses: ./translate` rather than at a tag, so a change is dogfooded on the pull
+request that makes it. The path is the duty's own directory for the same reason
+a consumer writes `ecoma-io/reeve/translate@v1`: the action at the root refuses.
+
+The provider comes from **organisation** secrets, which a maintainer sets, and
+they are named on two tiers because they change on two different schedules:
+
+| Secret                     | Tier      | What it is                                          |
+| -------------------------- | --------- | --------------------------------------------------- |
+| `ECOMA_LLM_BASE_URL`       | provider  | The OpenAI-compatible endpoint the organisation has |
+| `ECOMA_LLM_API_KEY`        | provider  | Its key. Unset is a keyless endpoint, not a gap.    |
+| `ECOMA_REEVE_MODELS`       | this repo | Model ids, in preference order                      |
+| `ECOMA_REEVE_JUDGE_MODELS` | this repo | The judge panel                                     |
+
+Both lists are commas, and every id carries the name it is to be called by:
+
+```
+ECOMA_REEVE_MODELS        vendor/big=House model, vendor/small=Backup
+ECOMA_REEVE_JUDGE_MODELS  vendor/a | vendor/b = Referee, vendor/c=Second opinion
+```
+
+A `|` chains one seat's fallbacks, so `vendor/a | vendor/b = Referee` is **one**
+vote by whichever of the two answers, not two votes. Name every id here for a
+reason beyond taste: the ids are masked out of the log, and the run report is
+not the log — it is a page the job writes for itself, where an unnamed id would
+appear as itself. The name is also what a reader of that page wants anyway.
+
+The split is the point. An endpoint and a key belong to whoever the organisation
+buys from, and every repository doing anything with a model wants the same two —
+so rotating a key is one edit rather than one edit per consumer, which is the
+version that does not leave a stale copy behind. A model list belongs to the
+thing making the call: Reeve wants ids it has measured its scoring against, and
+a judge panel is a concept no other consumer even has. Another repository adds
+`ECOMA_<THING>_MODELS` and reuses the endpoint.
+
+A fork has neither tier and never will, so the duty is skipped there and the run
+says so in a notice — a fork inheriting workflows it cannot configure should not
+inherit a red tick for it either.
 
 ## The committed bundle
 
