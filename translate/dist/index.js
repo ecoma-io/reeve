@@ -25615,7 +25615,7 @@ function count(value) {
   return COUNT.format(value);
 }
 function cell(text) {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  return text.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
 }
 
 // src/core/sanitize.ts

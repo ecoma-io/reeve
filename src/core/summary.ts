@@ -67,7 +67,13 @@ export function count(value: number): string {
   return COUNT.format(value);
 }
 
-/** Cell text that cannot break the row it sits in. */
+/**
+ * Cell text that cannot break the row it sits in.
+ *
+ * The backslash goes first and in the same pass, because it is the escape
+ * character: a name ending in one would otherwise have it escape the `\` this
+ * function just added, and the `|` behind it would end the cell after all.
+ */
 export function cell(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  return text.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
 }

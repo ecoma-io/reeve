@@ -95,6 +95,12 @@ describe("cell", () => {
     expect(cell("a | b")).toBe("a \\| b");
   });
 
+  it("keeps a trailing backslash from escaping the escape", () => {
+    // `a\` before a pipe: escape the pipe alone and the `\` the caller wrote
+    // consumes the one added here, leaving the pipe bare and the row short.
+    expect(cell("a\\|b")).toBe("a\\\\\\|b");
+  });
+
   it("flattens a newline, which would otherwise end the row", () => {
     expect(cell("one\ntwo")).toBe("one two");
   });
