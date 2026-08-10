@@ -57,9 +57,12 @@ import {
   type Provider,
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
+import { createMeter, metered } from "../../core/meter.js";
+import { writeSummary } from "../../core/summary.js";
 
 import { translate } from "./draft.js";
 import { judge } from "./judge.js";
+import { summarize, type Looked } from "./summary.js";
 import {
   marker,
   publication,
@@ -163,15 +166,29 @@ function targets(languages: readonly Language[], from: Language | null): readonl
   return languages.filter((language) => language.code.toLowerCase() !== source);
 }
 
+/**
+ * One provider per stage, each counting its own requests.
+ *
+ * Three handles on the same endpoint rather than one, because the meter records
+ * a purpose and a stage is the only thing that knows its own. Built once in
+ * `run` and passed down, so a stage cannot be metered as another one by being
+ * called from the wrong place.
+ */
+interface Stages {
+  readonly detect: Provider;
+  readonly draft: Provider;
+  readonly judge: Provider;
+}
+
 async function translateInto(
   to: Language,
   settings: Settings,
-  provider: Provider,
+  stages: Stages,
   from: Language | null,
   source: string,
 ): Promise<Posted | null> {
   const drafted = await translate({
-    provider,
+    provider: stages.draft,
     models: settings.models,
     source,
     from,
@@ -196,7 +213,7 @@ async function translateInto(
   }
 
   const verdict = await judge({
-    provider,
+    provider: stages.judge,
     judges: settings.judges,
     source,
     to,
@@ -241,16 +258,21 @@ async function translateInto(
   };
 }
 
-/** What one text cost and produced, whether it was a body or a reply. */
-interface Report {
-  readonly from: Language | null;
-  readonly posted: readonly Posted[];
-  readonly skipped: readonly Language[];
+/**
+ * What one text cost and produced, whether it was a body or a reply.
+ *
+ * `Looked` is the reporting half and lives with the summary that renders it;
+ * what this adds is the one thing only the caller needs — whether anything was
+ * actually written, which is what `replies-translated` counts.
+ */
+interface Report extends Looked {
   /** True when this text got a translation written to it this run. */
   readonly published: boolean;
 }
 
-const NOTHING: Report = { from: null, posted: [], skipped: [], published: false };
+function nothing(what: string, note: string): Report {
+  return { what, from: null, posted: [], skipped: [], note, published: false };
+}
 
 /**
  * Steps 1–7 for one text, wherever it lives.
@@ -265,12 +287,12 @@ async function translateText(
   body: string,
   thread: Thread,
   settings: Settings,
-  provider: Provider,
+  stages: Stages,
 ): Promise<Report> {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     core.info(`${what} has an empty body — nothing to translate.`);
-    return NOTHING;
+    return nothing(what, "empty body");
   }
 
   // A stack trace, a log paste, a bare URL: text with no prose in it is written
@@ -281,7 +303,7 @@ async function translateText(
   // no answer is worth anything.
   if (residue(source).trim().length === 0) {
     core.info(`${what} has no prose in it — nothing to translate.`);
-    return NOTHING;
+    return nothing(what, "no prose to translate");
   }
 
   // Before a single request is made, because the whole value of this check is
@@ -298,7 +320,7 @@ async function translateText(
   const wanted = translationFingerprint(source, settings.languages);
   if (published === wanted) {
     core.info(`${what} already carries the translation for this text and these languages.`);
-    return NOTHING;
+    return nothing(what, "already translated");
   }
 
   if (truncated) {
@@ -311,7 +333,7 @@ async function translateText(
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(provider, settings.models),
+    createLanguagePicker(stages.detect, settings.models),
   );
   core.info(
     detection.language === null
@@ -322,7 +344,7 @@ async function translateText(
   const posted: Posted[] = [];
   const skipped: Language[] = [];
   for (const to of targets(settings.languages, detection.language)) {
-    const translated = await translateInto(to, settings, provider, detection.language, source);
+    const translated = await translateInto(to, settings, stages, detection.language, source);
     if (translated === null) {
       core.warning(`${what} ${to.code}: no model produced a translation this run.`);
       skipped.push(to);
@@ -358,7 +380,7 @@ async function translateText(
         ? `Dry run — ${what} would have been left alone: no language produced a translation.`
         : `Dry run — ${what} would have become:\n${assemble(official, marker, would)}`,
     );
-    return { from: detection.language, posted, skipped, published: false };
+    return { what, from: detection.language, posted, skipped, note: null, published: false };
   }
 
   const outcome = await publish(thread, marker, publication(translated));
@@ -369,9 +391,11 @@ async function translateText(
   );
 
   return {
+    what,
     from: detection.language,
     posted,
     skipped,
+    note: null,
     published: outcome.action === "published",
   };
 }
@@ -391,7 +415,8 @@ async function translateReplies(
   api: ReturnType<typeof getOctokit>,
   at: { owner: string; repo: string; number: number },
   settings: Settings,
-  provider: Provider,
+  stages: Stages,
+  looked: Looked[],
 ): Promise<number> {
   const { replies, more } = await listReplies(api, at);
   if (more) {
@@ -408,38 +433,64 @@ async function translateReplies(
       reply.body,
       createReply(api, at, reply),
       settings,
-      provider,
+      stages,
     );
+    looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
 
 export async function run(): Promise<void> {
+  // Declared out here, and written in `finally`, so a run that fails halfway
+  // still reports what it did and what it spent. A crash on the third of twelve
+  // replies is exactly the run somebody wants the bill for.
+  const looked: Looked[] = [];
+  const meter = createMeter();
+  let settings: Settings | null = null;
+
   try {
-    const settings = readSettings();
+    settings = readSettings();
     const api = getOctokit(settings.token);
     const at = { ...context.repo, number: settings.number };
     const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
 
+    const stages: Stages = {
+      detect: metered(provider, meter, "detect"),
+      draft: metered(provider, meter, "draft"),
+      judge: metered(provider, meter, "judge"),
+    };
+
     const thread = createThread(api, at);
     const body = await thread.read();
-    const translated = await translateText(
-      `#${String(at.number)}`,
-      body,
-      thread,
-      settings,
-      provider,
-    );
+    const translated = await translateText(`#${String(at.number)}`, body, thread, settings, stages);
+    looked.push(translated);
 
     // Even when the body needed nothing. A new comment on an already-translated
     // thread is the ordinary case for this feature: the body's fingerprint still
     // matches, and the reply is the only thing that changed.
-    const replies = settings.replies ? await translateReplies(api, at, settings, provider) : 0;
+    const replies = settings.replies
+      ? await translateReplies(api, at, settings, stages, looked)
+      : 0;
 
     report(translated, replies);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
+  } finally {
+    // Nothing to report when the settings themselves were the problem: no
+    // request was made, and a page saying so would be a page about a typo.
+    if (settings !== null) {
+      await writeSummary(
+        summarize({
+          thread: settings.number,
+          dryRun: settings.dryRun,
+          looked,
+          spent: meter.spent(),
+          modelNames: settings.modelNames,
+          judgeNames: settings.judgeNames,
+        }),
+      );
+    }
   }
 }
 

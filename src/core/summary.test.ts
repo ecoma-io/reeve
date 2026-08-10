@@ -1,0 +1,113 @@
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import * as core from "@actions/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { cell, count, table, writeSummary } from "./summary.js";
+
+// `@actions/core` is kept real and driven through the environment, because the
+// environment is what the runner actually gives an action: `GITHUB_STEP_SUMMARY`
+// is a path to a file, and a mock of the summary API would prove only that the
+// mock was called. What is replaced is the two reporting calls, which are
+// effects on the runner rather than values.
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  warning: vi.fn(),
+  debug: vi.fn(),
+}));
+
+const environment = { ...process.env };
+
+// One path for the whole file: `@actions/core` resolves the summary path once
+// and keeps it, exactly as it does inside a job.
+const file = join(await mkdtemp(join(tmpdir(), "reeve-summary-")), "summary.md");
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  await writeFile(file, "");
+  process.env.GITHUB_STEP_SUMMARY = file;
+});
+
+afterEach(() => {
+  process.env = { ...environment };
+});
+
+describe("writeSummary", () => {
+  it("writes the report to the page the runner gave it", async () => {
+    await writeSummary("## Reeve\n\nSomething happened.\n");
+
+    expect(await readFile(file, "utf8")).toBe("## Reeve\n\nSomething happened.\n");
+  });
+
+  it("adds to what an earlier step wrote rather than replacing it", async () => {
+    // The summary is the job's, not this action's: a workflow running two
+    // duties gets two reports, and one overwriting the other loses a run.
+    await writeFile(file, "## An earlier step\n");
+
+    await writeSummary("## Reeve\n");
+
+    expect(await readFile(file, "utf8")).toBe("## An earlier step\n## Reeve\n");
+  });
+
+  it("says nothing when there is no summary to write to", async () => {
+    // A local `node dist/index.js`, or `act`. Warning here would train a reader
+    // to ignore warnings.
+    delete process.env.GITHUB_STEP_SUMMARY;
+
+    await writeSummary("## Reeve\n");
+
+    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.debug)).toHaveBeenCalled();
+  });
+
+  it("warns rather than fails when the page cannot be written", async () => {
+    // The report is a record of work already done. Losing it is not a reason to
+    // lose the run — and a summary file has a size limit a long backfill can
+    // reach.
+    vi.spyOn(core.summary, "write").mockRejectedValueOnce(new Error("summary is too large"));
+
+    await expect(writeSummary("## Reeve\n")).resolves.toBeUndefined();
+
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(
+      expect.stringContaining("summary is too large"),
+    );
+  });
+});
+
+describe("table", () => {
+  it("renders a header, a rule, and the rows", () => {
+    expect(table(["A", "B"], [["1", "2"]])).toBe("| A | B |\n| --- | --- |\n| 1 | 2 |");
+  });
+
+  it("renders nothing at all for no rows", () => {
+    // A header over a rule reads like a bug in the report rather than as the
+    // absence it is, and only the caller knows what to say instead.
+    expect(table(["A", "B"], [])).toBe("");
+  });
+});
+
+describe("cell", () => {
+  it("keeps a pipe inside the cell it was written in", () => {
+    // `a | b` is how a judge seat with a fallback is configured, so this is the
+    // ordinary case rather than a hostile one.
+    expect(cell("a | b")).toBe("a \\| b");
+  });
+
+  it("keeps a trailing backslash from escaping the escape", () => {
+    // `a\` before a pipe: escape the pipe alone and the `\` the caller wrote
+    // consumes the one added here, leaving the pipe bare and the row short.
+    expect(cell("a\\|b")).toBe("a\\\\\\|b");
+  });
+
+  it("flattens a newline, which would otherwise end the row", () => {
+    expect(cell("one\ntwo")).toBe("one two");
+  });
+});
+
+describe("count", () => {
+  it("groups thousands, in one locale rather than the runner's", () => {
+    expect(count(1234567)).toBe("1,234,567");
+  });
+});

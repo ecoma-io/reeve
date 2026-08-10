@@ -151,6 +151,18 @@ Run `dry-run: true` over a month of your own history — it produces every outpu
 and spends only the model calls — and replace the middle column with your
 numbers.
 
+## Measuring it instead of estimating it
+
+Every run writes what it actually spent to the job summary: requests, prompt
+tokens and completion tokens, per stage and per model, with a total. That is the
+column above, measured on your data rather than assumed.
+
+Two things about those numbers. They are the provider's own `usage` field and
+never Reeve's arithmetic, so a gateway that reports nothing produces a page that
+says how many requests went uncounted rather than a total that cannot be
+checked. And a request that failed and was rotated past is in the total, because
+it is on the invoice.
+
 ## What Reeve will never do about cost
 
 **It will not silently downgrade.** A run does not quietly switch to a worse model

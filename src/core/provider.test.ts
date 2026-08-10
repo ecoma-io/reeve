@@ -290,6 +290,49 @@ describe("createProvider", () => {
       expect(expectSuccess(await subject().complete("m", HELLO)).finishReason).toBe("length");
     });
 
+    it("reports what the answer cost, when the provider says", async () => {
+      fetchMock.mockResolvedValue(
+        json({
+          choices: [{ message: { content: "hi" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 812, completion_tokens: 3, total_tokens: 815 },
+        }),
+      );
+
+      expect(expectSuccess(await subject().complete("m", HELLO)).usage).toEqual({
+        prompt: 812,
+        completion: 3,
+      });
+    });
+
+    it("reports null rather than zero when the provider says nothing", async () => {
+      // A gateway that sends no `usage` is the ordinary case, and zeroes would
+      // put a free line in a bill that was not free.
+      fetchMock.mockResolvedValue(answering("hi"));
+
+      expect(expectSuccess(await subject().complete("m", HELLO)).usage).toBeNull();
+    });
+
+    it("keeps the half of a usage that arrived", async () => {
+      fetchMock.mockResolvedValue(
+        json({ choices: [{ message: { content: "hi" } }], usage: { prompt_tokens: 40 } }),
+      );
+
+      expect(expectSuccess(await subject().complete("m", HELLO)).usage).toEqual({
+        prompt: 40,
+        completion: 0,
+      });
+    });
+
+    it.each([
+      ["a usage with neither count in it", { total_tokens: 9 }],
+      ["counts that are not numbers", { prompt_tokens: "40", completion_tokens: null }],
+      ["a negative count", { prompt_tokens: -1 }],
+    ])("reports no usage for %s", async (_case, usage) => {
+      fetchMock.mockResolvedValue(json({ choices: [{ message: { content: "hi" } }], usage }));
+
+      expect(expectSuccess(await subject().complete("m", HELLO)).usage).toBeNull();
+    });
+
     it("reports no finish reason when the provider sent none", async () => {
       fetchMock.mockResolvedValue(json({ choices: [{ message: { content: "hi" } }] }));
 
@@ -426,6 +469,23 @@ describe("createProvider", () => {
       fetchMock.mockResolvedValue(answering("   \n  "));
 
       expect(expectFailure(await subject().complete("m", HELLO)).reason).toContain("empty content");
+    });
+  });
+
+  it("counts a billable answer it could not use", async () => {
+    // `HTTP 200` with empty content is a failure to Reeve and a completion the
+    // provider charged for. A ledger that only counted the answers it liked
+    // would understate the run.
+    fetchMock.mockResolvedValue(
+      json({
+        choices: [{ message: { content: "   " } }],
+        usage: { prompt_tokens: 30, completion_tokens: 1 },
+      }),
+    );
+
+    expect(expectFailure(await subject().complete("m", HELLO)).usage).toEqual({
+      prompt: 30,
+      completion: 1,
     });
   });
 

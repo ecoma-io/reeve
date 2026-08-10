@@ -11109,11 +11109,11 @@ var require_pluralizer = __commonJS({
         this.singular = singular;
         this.plural = plural;
       }
-      pluralize(count) {
-        const one = count === 1;
+      pluralize(count2) {
+        const one = count2 === 1;
         const keys = one ? singulars : plurals;
         const noun = one ? this.singular : this.plural;
-        return { ...keys, count, noun };
+        return { ...keys, count: count2, noun };
       }
     };
   }
@@ -20084,11 +20084,11 @@ var Summary = class {
    */
   addTable(rows) {
     const tableBody = rows.map((row) => {
-      const cells = row.map((cell) => {
-        if (typeof cell === "string") {
-          return this.wrap("td", cell);
+      const cells = row.map((cell2) => {
+        if (typeof cell2 === "string") {
+          return this.wrap("td", cell2);
         }
-        const { header, data, colspan, rowspan } = cell;
+        const { header, data, colspan, rowspan } = cell2;
         const tag = header ? "th" : "td";
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
@@ -20184,6 +20184,7 @@ var Summary = class {
   }
 };
 var _summary = new Summary();
+var summary = _summary;
 
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/platform.js
 import os3 from "os";
@@ -20242,6 +20243,9 @@ function setOutput(name, value) {
 function setFailed(message) {
   process.exitCode = ExitCode.Failure;
   error(message);
+}
+function debug(message) {
+  issueCommand("debug", {}, message);
 }
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
@@ -25220,7 +25224,7 @@ function createProvider(config) {
           signal: AbortSignal.timeout(timeoutMs)
         });
       } catch (error2) {
-        return { ok: false, model, reason: describeRequestError(error2, timeoutMs) };
+        return { ok: false, model, usage: null, reason: describeRequestError(error2, timeoutMs) };
       }
       let text;
       try {
@@ -25229,6 +25233,7 @@ function createProvider(config) {
         return {
           ok: false,
           model,
+          usage: null,
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
         };
       }
@@ -25242,31 +25247,49 @@ function readCompletion(model, status, text) {
   try {
     payload = JSON.parse(text);
   } catch {
-    return { ok: false, model, reason: `${at}: body was not JSON \u2014 ${excerpt(text)}` };
+    return { ok: false, model, usage: null, reason: `${at}: body was not JSON \u2014 ${excerpt(text)}` };
   }
+  const usage = readUsage(payload);
   const reported = readErrorMessage(payload);
-  if (reported !== null) return { ok: false, model, reason: `${at}: ${reported}` };
+  if (reported !== null) return { ok: false, model, usage, reason: `${at}: ${reported}` };
   if (status < 200 || status >= 300) {
-    return { ok: false, model, reason: `${at}: ${excerpt(text)}` };
+    return { ok: false, model, usage, reason: `${at}: ${excerpt(text)}` };
   }
   const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
   if (choice === null) {
-    return { ok: false, model, reason: `${at}: no choices in the response \u2014 ${excerpt(text)}` };
+    return {
+      ok: false,
+      model,
+      usage,
+      reason: `${at}: no choices in the response \u2014 ${excerpt(text)}`
+    };
   }
   const content = asRecord(choice.message)?.content;
   if (typeof content !== "string") {
-    return { ok: false, model, reason: `${at}: message content was not a string` };
+    return { ok: false, model, usage, reason: `${at}: message content was not a string` };
   }
   if (content.trim().length === 0) {
-    return { ok: false, model, reason: `${at}: answered with empty content` };
+    return { ok: false, model, usage, reason: `${at}: answered with empty content` };
   }
   const finishReason = choice.finish_reason;
   return {
     ok: true,
     model,
+    usage,
     content,
     finishReason: typeof finishReason === "string" ? finishReason : null
   };
+}
+function readUsage(payload) {
+  const usage = asRecord(asRecord(payload)?.usage);
+  if (usage === null) return null;
+  const prompt2 = asCount(usage.prompt_tokens);
+  const completion = asCount(usage.completion_tokens);
+  if (prompt2 === null && completion === null) return null;
+  return { prompt: prompt2 ?? 0, completion: completion ?? 0 };
+}
+function asCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
 }
 async function rotateModels(models, attempt) {
   const failures = [];
@@ -25517,6 +25540,84 @@ async function publish(thread, marker2, publication2) {
   return { action: "published" };
 }
 
+// src/core/meter.ts
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(model, messages, options);
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
+// src/core/summary.ts
+async function writeSummary(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
+    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
+    return;
+  }
+  try {
+    await summary.addRaw(markdown).write();
+  } catch (error2) {
+    warning(
+      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
+    );
+  }
+}
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+var COUNT = new Intl.NumberFormat("en-US");
+function count(value) {
+  return COUNT.format(value);
+}
+function cell(text) {
+  return text.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+
 // src/core/sanitize.ts
 var OPENER = "<!--";
 var CLOSER = "-->";
@@ -25568,12 +25669,12 @@ function refused(reason) {
 }
 function measured(checks) {
   let weighted = 0;
-  let total = 0;
+  let total2 = 0;
   for (const check of checks) {
     weighted += check.value * check.weight;
-    total += check.weight;
+    total2 += check.weight;
   }
-  return { value: total === 0 ? 1 : weighted / total, admissible: true, reason: null, checks };
+  return { value: total2 === 0 ? 1 : weighted / total2, admissible: true, reason: null, checks };
 }
 function shared(before, after) {
   const remaining2 = /* @__PURE__ */ new Map();
@@ -25693,16 +25794,16 @@ function structureCheck(before, after) {
   const source = structure(before);
   const draft = structure(after);
   let difference = 0;
-  let total = 0;
+  let total2 = 0;
   for (const kind of COUNTED) {
     difference += Math.abs(source[kind] - draft[kind]);
-    total += Math.max(source[kind], draft[kind]);
+    total2 += Math.max(source[kind], draft[kind]);
   }
   return {
     name: "structure",
     weight: WEIGHTS.structure,
-    value: total === 0 ? 1 : 1 - difference / total,
-    note: `${String(difference)} of ${String(total)} headings, list items, table rows and code blocks differ in count`
+    value: total2 === 0 ? 1 : 1 - difference / total2,
+    note: `${String(difference)} of ${String(total2)} headings, list items, table rows and code blocks differ in count`
   };
 }
 function lengthCheck(before, after) {
@@ -25953,6 +26054,114 @@ ${numbered}` }
   ];
 }
 
+// src/duties/translate/summary.ts
+function summarize(run2) {
+  const parts = [
+    `## Reeve \xB7 translate`,
+    "",
+    `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was written" : ""}.`,
+    "",
+    translations(run2.looked),
+    "",
+    cost(run2)
+  ];
+  return `${parts.join("\n").trimEnd()}
+`;
+}
+function translations(looked) {
+  const rows = [];
+  for (const text of looked) {
+    for (const entry of text.posted) {
+      const decision = entry.decision;
+      rows.push([
+        cell(text.what),
+        cell(`${entry.to.label} (${entry.to.code})`),
+        "translated",
+        cell(entry.model),
+        decision === void 0 ? "\u2014" : decision.score.toFixed(2),
+        decision === void 0 ? "1" : String(decision.drafts),
+        decision === void 0 || decision.votes.length === 0 ? "\u2014" : cell(decision.votes.map((vote) => `${vote.model}\u2192${vote.pick}`).join(", "))
+      ]);
+    }
+    for (const language of text.skipped) {
+      rows.push([
+        cell(text.what),
+        cell(`${language.label} (${language.code})`),
+        "**no draft**",
+        "\u2014",
+        "\u2014",
+        "\u2014",
+        "\u2014"
+      ]);
+    }
+    if (text.note !== null) {
+      rows.push([cell(text.what), "\u2014", cell(text.note), "\u2014", "\u2014", "\u2014", "\u2014"]);
+    }
+  }
+  const rendered = table(["Text", "Language", "Result", "Model", "Score", "Drafts", "Votes"], rows);
+  if (rendered.length === 0) return "### Translations\n\nNothing was translated this run.";
+  const languages = looked.flatMap((text) => text.posted.map((entry) => entry.to.code));
+  const detected = looked.map((text) => text.from === null ? null : `${text.what}: ${text.from.label}`).filter((line) => line !== null);
+  return [
+    "### Translations",
+    "",
+    rendered,
+    "",
+    `${String(languages.length)} translation${languages.length === 1 ? "" : "s"} this run.` + (detected.length === 0 ? " No source language was one of the configured ones." : ` Source language \u2014 ${detected.join("; ")}.`)
+  ].join("\n");
+}
+function cost(run2) {
+  const sum = total(run2.spent);
+  const rows = run2.spent.map((spend) => [
+    STAGE[spend.purpose],
+    cell(shown(spend.purpose === "judge" ? run2.judgeNames : run2.modelNames, spend.model)),
+    count(spend.requests),
+    spend.failed === 0 ? "\u2014" : count(spend.failed),
+    count(spend.prompt),
+    count(spend.completion),
+    count(spend.prompt + spend.completion)
+  ]);
+  if (rows.length === 0) {
+    return [
+      "### Cost",
+      "",
+      "No model was asked anything this run \u2014 every decision was made by code."
+    ].join("\n");
+  }
+  rows.push([
+    "**Total**",
+    "",
+    `**${count(sum.requests)}**`,
+    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
+    `**${count(sum.prompt)}**`,
+    `**${count(sum.completion)}**`,
+    `**${count(sum.prompt + sum.completion)}**`
+  ]);
+  const lines = [
+    "### Cost",
+    "",
+    table(["Stage", "Model", "Requests", "Failed", "Prompt", "Completion", "Tokens"], rows)
+  ];
+  if (sum.unreported > 0) {
+    lines.push(
+      "",
+      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
+    );
+  }
+  if (sum.failed > 0) {
+    lines.push(
+      "",
+      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
+    );
+  }
+  return lines.join("\n");
+}
+var STAGE = {
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging"
+};
+
 // src/duties/translate/publish.ts
 var marker = markerFor("translate");
 var HOME = "https://github.com/ecoma-io/reeve";
@@ -26067,9 +26276,9 @@ function targets(languages, from) {
   const source = from.code.toLowerCase();
   return languages.filter((language) => language.code.toLowerCase() !== source);
 }
-async function translateInto(to, settings, provider, from, source) {
+async function translateInto(to, settings, stages, from, source) {
   const drafted = await translate({
-    provider,
+    provider: stages.draft,
     models: settings.models,
     source,
     from,
@@ -26087,7 +26296,7 @@ async function translateInto(to, settings, provider, from, source) {
     );
   }
   const verdict = await judge2({
-    provider,
+    provider: stages.judge,
     judges: settings.judges,
     source,
     to,
@@ -26118,21 +26327,23 @@ async function translateInto(to, settings, provider, from, source) {
     } : {}
   };
 }
-var NOTHING = { from: null, posted: [], skipped: [], published: false };
-async function translateText(what, body, thread, settings, provider) {
+function nothing(what, note) {
+  return { what, from: null, posted: [], skipped: [], note, published: false };
+}
+async function translateText(what, body, thread, settings, stages) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
-    return NOTHING;
+    return nothing(what, "empty body");
   }
   if (residue(source).trim().length === 0) {
     info(`${what} has no prose in it \u2014 nothing to translate.`);
-    return NOTHING;
+    return nothing(what, "no prose to translate");
   }
   const wanted = translationFingerprint(source, settings.languages);
   if (published === wanted) {
     info(`${what} already carries the translation for this text and these languages.`);
-    return NOTHING;
+    return nothing(what, "already translated");
   }
   if (truncated) {
     warning(
@@ -26142,7 +26353,7 @@ async function translateText(what, body, thread, settings, provider) {
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(provider, settings.models)
+    createLanguagePicker(stages.detect, settings.models)
   );
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
@@ -26150,7 +26361,7 @@ async function translateText(what, body, thread, settings, provider) {
   const posted = [];
   const skipped = [];
   for (const to of targets(settings.languages, detection.language)) {
-    const translated2 = await translateInto(to, settings, provider, detection.language, source);
+    const translated2 = await translateInto(to, settings, stages, detection.language, source);
     if (translated2 === null) {
       warning(`${what} ${to.code}: no model produced a translation this run.`);
       skipped.push(to);
@@ -26176,20 +26387,22 @@ async function translateText(what, body, thread, settings, provider) {
       would.sections.length === 0 ? `Dry run \u2014 ${what} would have been left alone: no language produced a translation.` : `Dry run \u2014 ${what} would have become:
 ${assemble(official, marker, would)}`
     );
-    return { from: detection.language, posted, skipped, published: false };
+    return { what, from: detection.language, posted, skipped, note: null, published: false };
   }
   const outcome = await publish(thread, marker, publication(translated));
   info(
     outcome.action === "none" ? `${what}: nothing written \u2014 ${outcome.reason}.` : `${what}: ${outcome.action}.`
   );
   return {
+    what,
     from: detection.language,
     posted,
     skipped,
+    note: null,
     published: outcome.action === "published"
   };
 }
-async function translateReplies(api, at, settings, provider) {
+async function translateReplies(api, at, settings, stages, looked) {
   const { replies, more } = await listReplies(api, at);
   if (more) {
     warning(
@@ -26203,31 +26416,48 @@ async function translateReplies(api, at, settings, provider) {
       reply.body,
       createReply(api, at, reply),
       settings,
-      provider
+      stages
     );
+    looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
 async function run() {
+  const looked = [];
+  const meter = createMeter();
+  let settings = null;
   try {
-    const settings = readSettings();
+    settings = readSettings();
     const api = getOctokit(settings.token);
     const at = { ...context2.repo, number: settings.number };
     const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
+    const stages = {
+      detect: metered(provider, meter, "detect"),
+      draft: metered(provider, meter, "draft"),
+      judge: metered(provider, meter, "judge")
+    };
     const thread = createThread(api, at);
     const body = await thread.read();
-    const translated = await translateText(
-      `#${String(at.number)}`,
-      body,
-      thread,
-      settings,
-      provider
-    );
-    const replies = settings.replies ? await translateReplies(api, at, settings, provider) : 0;
+    const translated = await translateText(`#${String(at.number)}`, body, thread, settings, stages);
+    looked.push(translated);
+    const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked) : 0;
     report(translated, replies);
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
+  } finally {
+    if (settings !== null) {
+      await writeSummary(
+        summarize({
+          thread: settings.number,
+          dryRun: settings.dryRun,
+          looked,
+          spent: meter.spent(),
+          modelNames: settings.modelNames,
+          judgeNames: settings.judgeNames
+        })
+      );
+    }
   }
 }
 function report(translated, replies) {

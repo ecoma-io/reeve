@@ -125,6 +125,9 @@ function saying(content: string, finishReason = "stop"): Answer {
     status: 200,
     payload: {
       choices: [{ message: { role: "assistant", content }, finish_reason: finishReason }],
+      // Reported the way an OpenAI-compatible provider reports it, so the run
+      // summary is driven by a real response shape rather than by a fixture.
+      usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
     },
   };
 }
@@ -281,6 +284,8 @@ interface Run {
    *  said something should not have to know which. */
   readonly log: string;
   readonly outputs: Record<string, string>;
+  /** The job summary page, as the runner would render it. */
+  readonly summary: string;
 }
 
 /**
@@ -315,13 +320,16 @@ async function runAction(
 ): Promise<Run> {
   const scratch = await mkdtemp(join(tmpdir(), "reeve-"));
   const outputFile = join(scratch, "outputs");
+  const summaryFile = join(scratch, "summary.md");
   await writeFile(outputFile, "");
+  await writeFile(summaryFile, "");
 
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     GITHUB_REPOSITORY: "ecoma-io/reeve",
     GITHUB_API_URL: stub.url,
     GITHUB_OUTPUT: outputFile,
+    GITHUB_STEP_SUMMARY: summaryFile,
     GITHUB_EVENT_NAME: "issues",
     ...extra,
   };
@@ -342,8 +350,9 @@ async function runAction(
   const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
 
   const outputs = readOutputs(await readFile(outputFile, "utf8"));
+  const summary = await readFile(summaryFile, "utf8");
   await rm(scratch, { recursive: true, force: true });
-  return { code, log, outputs };
+  return { code, log, outputs, summary };
 }
 
 /**
@@ -444,6 +453,32 @@ describe("the action", () => {
     expect(stub.body).toContain("Votes: `Referee`→`House model`.");
     expect(stub.body).not.toContain("judge-a");
     expect(stub.body).not.toContain("judge-b");
+  });
+
+  it("reports the run on the job summary page, where the thread stays clean", async () => {
+    // Everything a maintainer wants and no contributor does: which language got
+    // what, from which model, and what the whole thing cost. The body itself is
+    // left with the default `show-attribution: none`.
+    const run = await runAction(stub, { models: "stub-model = House model" });
+
+    expect(run.code).toBe(0);
+    expect(run.summary).toContain("## Reeve · translate");
+    expect(run.summary).toContain("Thread #42");
+    expect(run.summary).toContain("| #42 | English (en) | translated | House model |");
+    expect(run.summary).toContain("| Drafting | House model | 1 | — | 100 | 20 | 120 |");
+    expect(run.summary).toContain("| **Total** |");
+    expect(stub.body).not.toContain("House model");
+  });
+
+  it("reports what a language cost even when no model would translate it", async () => {
+    // The run that most needs a bill is the one that produced nothing.
+    stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.summary).toContain("**no draft**");
+    expect(run.summary).toContain("unusable and rotated past");
   });
 
   it("keeps the author's own text as the official half, byte-for-byte", async () => {
