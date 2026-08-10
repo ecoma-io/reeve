@@ -1,0 +1,89 @@
+// Dependency updates run through Renovate, covering the two ecosystems that
+// live here: npm/pnpm (the single root package.json + pnpm-lock.yaml) and
+// github-actions (.github/workflows/*.yml) — both auto-detected by Renovate's
+// default managers.
+//
+// Activation: this file alone does nothing. Renovate only runs once the
+// official Renovate GitHub App (Mend) is installed on the repository by someone
+// with organisation admin rights — https://github.com/apps/renovate. Chosen
+// over self-hosting Renovate as a scheduled workflow because a self-hosted run
+// needs its own PAT or App token to let its pull requests trigger the required
+// checks (the default GITHUB_TOKEN cannot trigger other workflows, so every
+// single Renovate PR would need a manual "Approve workflows to run"). The App
+// has no such gap, and it avoids introducing a long-lived credential this
+// repository does not otherwise hold.
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  timezone: "UTC",
+  // Weekly, not continuous. This is a small, single-maintainer action; a drip
+  // of pull requests through the day would be noise rather than signal.
+  schedule: ["before 6am on monday"],
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["before 6am on monday"],
+  },
+  // Must satisfy the commitlint gate (CONTRIBUTING.md): Conventional Commits,
+  // with a scope drawn from commitlint.config.mjs's enum.
+  semanticCommits: "enabled",
+  semanticCommitType: "chore",
+  semanticCommitScope: "deps",
+  packageRules: [
+    {
+      // Actions are pinned to a full commit SHA (OpenSSF Scorecard's
+      // Pinned-Dependencies check, and the reason a tag is not a fixed
+      // reference). Renovate keeps the `# vX.Y.Z` comment beside the SHA in
+      // step with what it bumps.
+      matchManagers: ["github-actions"],
+      semanticCommitScope: "ci",
+      pinDigests: true,
+    },
+    {
+      // The one exception to the rule above, and it is a mechanism constraint
+      // rather than a preference. The SLSA generator reads its own ref to
+      // attest which builder produced the provenance, so calling it by digest
+      // makes it refuse to run — pinning it would not tighten the supply
+      // chain, it would stop releases from being signed at all. Left on a
+      // tag, which slsa-framework could in principle repoint; Renovate keeps
+      // it current so that window stays short, and the delay gives a bad
+      // release time to be noticed before this repository consumes it.
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["slsa-framework/slsa-github-generator"],
+      semanticCommitScope: "ci",
+      pinDigests: false,
+      minimumReleaseAge: "3 days",
+    },
+    {
+      // Anything bundled into `dist/` is code this action ships and runs inside
+      // someone else's repository with a write token. That is a different risk
+      // profile from a devDependency, so these are never grouped with anything
+      // else and never merged without reading what changed.
+      matchDepTypes: ["dependencies"],
+      semanticCommitScope: "deps",
+      groupName: null,
+      minimumReleaseAge: "3 days",
+    },
+    {
+      // TypeScript stays on 5.x. TypeScript 7 is the native (tsgo) rewrite and
+      // typescript-eslint refuses to load against it outright — "typescript-eslint
+      // does not support TS 7.0" — which turns `pnpm lint` red on every file at
+      // once. Lift this rule when it has shipped support, not when the bump is
+      // offered.
+      matchPackageNames: ["typescript"],
+      allowedVersions: "<6",
+    },
+    {
+      // Formatter and linter bumps arrive together, because a Prettier release
+      // that reflows files and an ESLint release that re-reports them are one
+      // review, not two.
+      matchPackageNames: [
+        "prettier",
+        "eslint",
+        "eslint-config-prettier",
+        "typescript-eslint",
+        "@eslint/js",
+      ],
+      groupName: "lint and format toolchain",
+    },
+  ],
+}

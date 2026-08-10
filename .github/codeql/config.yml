@@ -1,0 +1,20 @@
+name: Reeve
+
+# `dist/index.js` is a build artifact, and analysing it answers no question that
+# analysing the source does not already answer better.
+#
+# It is the esbuild output of `src/`, which CodeQL reads directly and in
+# TypeScript, plus every dependency inlined — so the only findings unique to the
+# bundle are findings in third-party code. Two arrived the moment the bundle
+# stopped being a stub and started carrying the real dependency graph: undici
+# hashing `Sec-WebSocket-Accept` with SHA-1, which RFC 6455 mandates and no
+# consumer can change, and `eld`'s ngram-export helper leaving a backslash
+# unescaped in a browser-only `download()` path this action never reaches.
+# Neither is fixable here, and both would be re-reported on every rebuild.
+#
+# What this gives up is vulnerable-dependency detection, and that is not what
+# CodeQL is for: Dependabot reads the lockfile, where a vulnerable dependency is
+# named and versioned rather than inferred from minified-adjacent output. What
+# it keeps is every finding in code this repository actually writes.
+paths-ignore:
+  - dist

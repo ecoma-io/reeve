@@ -1,0 +1,103 @@
+name: Duty output quality
+description: A duty ran and produced something wrong or unusable — not a crash, a bad decision.
+title: "quality: "
+labels: ["quality", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form exists because a wrong decision is a real defect and a
+        different one from a crash. It also asks for something no other form
+        does: **the input the duty saw**. Every accepted report here becomes a
+        pinned evaluation case, so the same failure cannot come back quietly.
+
+        A weak model producing a merely mediocre result is expected and is not a
+        defect on its own — the honest fix for that is a better model or more
+        drafts. What is a defect is anything the code could have detected and
+        refused: those got through a gate, and the gate is the bug.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I am willing for the text below to be committed to this repository as an evaluation fixture.
+          required: true
+
+  - type: dropdown
+    id: duty
+    attributes:
+      label: Which duty
+      options:
+        - triage
+        - translate
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: failure
+    attributes:
+      label: What went wrong
+      description: Pick the closest. The first four are things the core is meant to catch regardless of duty — see docs/north-star.md.
+      options:
+        - It did something the warrant does not name
+        - It altered or removed something a person wrote or decided
+        - Markdown structure broke — headings, lists, links, or fences lost or malformed
+        - Output was truncated, or stopped partway through
+        - The decision itself is wrong in a way that would mislead someone acting on it
+        - It re-did work it had already done, instead of recognising its own output
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: input
+    attributes:
+      label: What the duty saw
+      description: Exactly what was in the thread, unedited, plus the relevant part of your warrant or taxonomy. Trim to the smallest piece that still reproduces it.
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: produced
+    attributes:
+      label: What it produced
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should have produced
+      description: It does not have to be perfect — the part that matters is which specific thing should have been different, and why your project draws the line there.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      value: |
+        - Action version (the ref in `uses:`):
+        - Provider (never the key):
+        - Model that produced this, if the log names it:
+        - Duty inputs as configured:
+        - Drafts:
+        - Judge models:
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: reproducible
+    attributes:
+      label: Reproducibility
+      options:
+        - label: I re-ran it and got a comparable result — this is not a one-off sample.
+          required: false
+        - label: This happens with more than one model.
+          required: false

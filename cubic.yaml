@@ -1,0 +1,18 @@
+# Settings for the cubic AI reviewer, version-controlled rather than clicked.
+#
+# https://docs.cubic.dev/configure/cubic-yaml — the file has to be at the repo
+# root under this exact name; cubic reads no other path.
+version: 1
+
+# The review itself stays on: a second reader that never gets tired is worth
+# having on a repository whose whole job is to be correct about somebody else's
+# text.
+reviews:
+  enabled: true
+
+pr_descriptions:
+  # A pull request here already explains itself. The body is written to say what
+  # changed and why the change is shaped that way — the part a reader cannot
+  # recover from the diff — and a generated summary restates the part they can,
+  # above it, where it is read first. Off, so the description is the author's.
+  generate: false

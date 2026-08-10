@@ -1,0 +1,140 @@
+name: Analysis
+
+# Static analysis, not "security" — the name matters because what runs here is
+# wider than vulnerabilities, and it is the name a reader chasing "what analysis
+# is in place?" will look for.
+#
+# Two analysers, answering two parts of one question: what this code does
+# (CodeQL) and how this repository is run (Scorecard).
+#
+# CodeQL's `actions` leg is not optional here the way it is elsewhere. This
+# repository IS a GitHub Action, and the classes that leg reports — expression
+# injection of `github.event.*` into a `run:` block, an untrusted checkout under
+# `pull_request_target`, a job with no `permissions:` — are precisely the
+# mistakes this action's own consumers will make in the workflows they copy from
+# our README. An analyser that reads our workflow files is the closest thing we
+# have to reviewing theirs.
+#
+# Semgrep is deliberately absent rather than pending. Its value in a sibling
+# repository comes from repository-specific rules, and this repository has none
+# worth writing yet: the sinks that will matter — model prose reaching a comment
+# without passing the sanitiser, a thread body interpolated into a prompt
+# without its untrusted-data framing — do not exist until the runtime does. A
+# rules directory scaffolded empty would be a green check that reads nothing.
+#
+# Merging analysers into one workflow is only safe because Scorecard's publish
+# restrictions are scoped the way they are. Publishing results forbids top-level
+# `env`/`defaults` and any WORKFLOW-level write permission, and allows
+# `id-token: write` on the Scorecard job alone. So nothing is declared above the
+# jobs except read permissions, and CodeQL's `security-events: write` stays at
+# its own job level.
+# https://github.com/ossf/scorecard-action#workflow-restrictions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # One weekly cron covers both analyses: a workflow's schedule triggers every
+  # job in it, so two crons would mean each analysis running twice a week under
+  # the other's name.
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+# A push to main gets a run of its own per commit; a new push to a pull request
+# supersedes the in-flight run for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: read-all
+
+jobs:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only this job uploads SARIF, so the write stays here rather than at the
+    # top level — where Scorecard would reject it outright, and where any job
+    # added later would silently inherit it.
+    # A job-level `permissions` block REPLACES the workflow-level one rather
+    # than merging with it, so read access has to be restated: omit it and
+    # checkout loses read access to the repository.
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          # `none` is the only mode `actions` has: workflow files are read as
+          # data, never built.
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # What is excluded, and why, lives in the config rather than here.
+          config-file: .github/codeql/config.yml
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  scorecard:
+    name: OpenSSF Scorecard
+    # Scorecard measures repository-wide posture, not a diff, and publishing is
+    # only supported from the default branch — so a pull-request run would have
+    # nothing to say and no right to publish it. `workflow_dispatch` is excluded
+    # for the same reason: the action documents publishing from it as
+    # experimental.
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Needed to upload results to the code-scanning dashboard.
+      security-events: write
+      # Needed for the GitHub OIDC token that `publish_results` uses to prove
+      # authorship of the published score. Scorecard's restrictions allow this
+      # on exactly one job per workflow, and this is it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # This repository is public and Apache-2.0, so publishing to the public
+      # OpenSSF Scorecard API is appropriate: it feeds the public score badge
+      # and the deps.dev / OSV consumers that read it, exposing nothing the
+      # repository does not already show. For an action other repositories will
+      # run with a write token, that published score is also the cheapest
+      # evidence a prospective consumer has that this one is maintained.
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@d1ba80a13dd99fba24a470575428917156a28b43 # v4.37.5
+        with:
+          sarif_file: results.sarif

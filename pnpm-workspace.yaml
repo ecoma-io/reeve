@@ -1,0 +1,29 @@
+# pnpm's settings file. This repository is a single package, not a workspace —
+# the file exists because pnpm moved its settings out of `package.json` into
+# here, and pnpm 11 no longer reads the `pnpm` field there at all. There is
+# deliberately no `packages:` key: adding one would make this a workspace, which
+# is not what a single action repository is.
+
+# Every dependency install script is blocked until it is decided on here, and
+# pnpm fails the install while any decision is missing — so an unreviewed
+# postinstall cannot run in CI just because it shipped in a new release. That
+# guarantee is worth more here than in most repositories: what this build
+# produces is a committed bundle that runs in other people's repositories with a
+# write token, and an install script is the one step that runs before any of our
+# own gates get a chance to look at anything.
+#
+# esbuild: false — this is a first-class dependency here, not an incidental one,
+# so the decision is measured rather than inherited. Its postinstall swaps the
+# JavaScript `bin/esbuild` shim for the native binary, which saves a few
+# milliseconds of process startup and nothing else: the shim resolves
+# `@esbuild/<platform>` at run time either way, and that package arrives as an
+# ordinary optional dependency. Verified with the script blocked — `pnpm build`
+# produces a byte-identical `dist/index.js`.
+#
+# lefthook: false — its postinstall only runs `lefthook install`, which this
+# package's `prepare` script already does, and which lefthook itself skips
+# whenever `CI` is set. The binary comes from optionalDependencies and needs no
+# build step, so nothing is lost by never running it.
+allowBuilds:
+  esbuild: false
+  lefthook: false

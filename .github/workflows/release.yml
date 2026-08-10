@@ -1,0 +1,222 @@
+name: Release
+
+# The delivery half. Unlike a library, an action has no package registry in the
+# picture: consumers write `uses: ecoma-io/reeve@v0.1.0` and GitHub resolves
+# that straight to a git ref in this repository. So "publish" here means exactly
+# two things — a release exists at the exact tag, and a floating tag points at
+# it — and both are things this workflow can actually do. There is no rehearsal
+# step and no credential to provision.
+#
+# Version numbers are not chosen by hand. release-please reads the conventional
+# commits since the last release, opens a pull request carrying the bump and the
+# changelog entry, and cuts the release when that pull request merges. The
+# maintainer act is reviewing and merging it, not remembering what `feat:` means
+# for the second digit.
+#
+# **Everything lives in this one workflow, and that is forced rather than
+# preferred.** release-please tags the release with `GITHUB_TOKEN`, and GitHub
+# does not start a workflow from an event that token caused — recursion
+# prevention. A separate `on: push: tags:` workflow would therefore never run,
+# so the steps that have to happen after a release are here, gated on the
+# action's own `release_created` output.
+#
+# Marketplace listing is the one part that is not automatable: the first
+# publication is a checkbox on the release page, done once by a maintainer. Once
+# ticked, every later release from this workflow updates the listing on its own.
+#
+# The signing half below answers a question the delivery half cannot. What a
+# consumer's runner executes is `dist/index.js` — three megabytes of bundled
+# JavaScript, running in their repository with a write token, and far past what
+# anyone reads before pinning. CI proves that bundle matches `src/` at the tag,
+# and the release job below proves it a second time, but both of those are this
+# repository asserting something about itself. Provenance is the same claim in a
+# form a stranger can check without trusting us: the sha256 of the exact bytes,
+# signed by Sigstore against the identity of the workflow that produced them.
+# That is why the archive exists at all — nobody installs an action from a
+# tarball, they verify one from it.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Two merges landing close together must not race for the same release pull
+# request. Never cancel: a run stopped between "release created" and "floating
+# tag moved" would leave consumers pinned to the previous version with no
+# signal that a release happened.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Committing the version bump, creating the tag and the release, and
+      # moving the floating tag.
+      contents: write
+      # Opening and updating the release pull request.
+      pull-requests: write
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
+      major: ${{ steps.release.outputs.major }}
+      minor: ${{ steps.release.outputs.minor }}
+      digests: ${{ steps.digest.outputs.digests }}
+    steps:
+      - uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Everything below runs only on the push that merged a release pull
+      # request. On every other push to `main` the step above has just opened or
+      # refreshed that pull request, and there is nothing to deliver.
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.release.outputs.release_created
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        if: steps.release.outputs.release_created
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.release.outputs.release_created
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.release.outputs.release_created
+
+      # CI already proved this on the release pull request, and it is proved
+      # again here on purpose. The artifact being released IS the committed
+      # bundle, so "the bundle matches its source" is the one property whose
+      # failure would ship silently and run wrong code in every consumer's
+      # repository.
+      #
+      # A failure here leaves the release created with no floating tag pointing
+      # at it, which is the recoverable order: delete the release, fix the
+      # bundle, release again.
+      - name: Verify the committed bundle matches its source
+        if: steps.release.outputs.release_created
+        run: |
+          pnpm build
+          if ! git diff --exit-code --stat -- dist; then
+            echo "::error::dist/ does not match src/ at this tag. The floating tag was not moved."
+            exit 1
+          fi
+
+      # The floating tag is what a consumer pins to get fixes without editing
+      # their workflow, so what it is allowed to deliver decides its shape.
+      #
+      # From 1.0.0 on that is `v1`: semver promises a major line adds features
+      # and fixes bugs without breaking anyone.
+      #
+      # Below 1.0.0 no such promise exists. `bump-minor-pre-major` in the
+      # release-please config sends breaking changes to the minor digit, which
+      # is what keeps this action out of a premature 1.0 — and it is exactly why
+      # `v0` must not exist. Anyone pinned to it would take a breaking change
+      # silently on the next minor. So the floating tag is `v0.1`, `v0.2`, and
+      # so on: the widest ref that can still only ever deliver patches. Both
+      # cases are read off the version just released rather than configured
+      # anywhere.
+      #
+      # This is deliberately the last thing that happens in the whole workflow,
+      # in its own job below `provenance` rather than as a step here. Moving the
+      # tag is what silently updates every consumer pinned to it, so it may not
+      # fire until the release it points at is complete — archive attached and
+      # attestation signed. The recoverable order is a release nobody is pointed
+      # at yet; the unrecoverable one is consumers already running code whose
+      # provenance never arrived.
+      - name: Build the archive that provenance will attest
+        if: steps.release.outputs.release_created
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          staged="reeve-${TAG#v}"
+          mkdir "$staged"
+          # TODO(stage-0): the action contracts live in per-duty
+          # subdirectories, so this list grows to `translate/action.yml`,
+          # `triage/action.yml`, ... — see docs/north-star.md, Stage 0.
+          cp -r dist action.yml LICENSE README.md "$staged/"
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mode='a+rX,u+w,go-w' \
+              --mtime="@$(git log -1 --format=%ct)" \
+              -cf - "$staged" | gzip -n -9 > reeve-action.tar.gz
+
+      - name: Record the digest for provenance
+        id: digest
+        if: steps.release.outputs.release_created
+        run: echo "digests=$(sha256sum reeve-action.tar.gz | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the archive to the release
+        if: steps.release.outputs.release_created
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh release upload "$TAG" reeve-action.tar.gz --clobber
+
+  # Signs the digest recorded above, and uploads `reeve-action.intoto.jsonl`
+  # to the same release. Sigstore issues the certificate against this workflow's
+  # OIDC identity, so the attestation says which workflow, at which commit, in
+  # which repository produced those exact bytes — checkable with
+  # `slsa-verifier` by someone who trusts none of it.
+  provenance:
+    name: Sign the archive
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    permissions:
+      actions: read # read this run's own metadata, to attest what built the archive
+      id-token: write # mint the OIDC token Sigstore signs against
+      contents: write # attach the attestation to the release
+    # The one `uses:` in this repository not pinned to a commit SHA, and the
+    # only one that may not be. The generator reads its own ref to attest which
+    # builder produced the provenance, so it refuses to run when called by
+    # digest or by a shortened `@vX` tag — pinning it would not tighten the
+    # supply chain, it would stop releases from being signed at all. The
+    # accepted residual risk is the one the pinning rule normally prevents: this
+    # tag is a pointer slsa-framework could repoint. Renovate keeps it current
+    # (`.github/renovate.json5` carves it out of digest pinning by name), and
+    # the upgrade is reviewed like any other.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.release.outputs.digests }}
+      upload-assets: true
+      upload-tag-name: ${{ needs.release.outputs.tag }}
+      provenance-name: reeve-action.intoto.jsonl
+
+  floating-tag:
+    name: Move the floating tag
+    needs: [release, provenance]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Move the floating tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.release.outputs.sha }}
+          MAJOR: ${{ needs.release.outputs.major }}
+          MINOR: ${{ needs.release.outputs.minor }}
+        run: |
+          if [ "$MAJOR" = "0" ]; then
+            FLOATING="v0.$MINOR"
+          else
+            FLOATING="v$MAJOR"
+          fi
+          echo "Pointing $FLOATING at $SHA"
+          gh api -X PATCH "repos/$REPO/git/refs/tags/$FLOATING" -f sha="$SHA" -F force=true \
+            || gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/$FLOATING" -f sha="$SHA"

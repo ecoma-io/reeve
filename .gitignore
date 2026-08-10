@@ -1,0 +1,25 @@
+node_modules/
+coverage/
+
+# NOTE: `dist/` is deliberately NOT ignored. A JavaScript action runs straight
+# off the checked-out repository with no install step, so the bundle has to be
+# committed — see tools/build.mjs. CI fails when it is stale.
+
+# Local settings for `pnpm try`, which holds a real token. `.env.example` is the
+# tracked half and carries no secret.
+.env
+
+# Editors / OS
+.DS_Store
+*.local
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Claude Code local overrides — the shared settings.json IS tracked.
+.claude/settings.local.json
