@@ -19287,8 +19287,8 @@ function error(message, properties = {}) {
 }
 
 // src/refusal.ts
-var DUTIES = [];
-var PLANNED = ["triage", "translate", "duplicate", "respond"];
+var DUTIES = ["translate"];
+var PLANNED = ["triage", "duplicate", "respond"];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#6-roadmap";
 function normalise(raw) {
   return raw.trim().toLowerCase();

@@ -26,20 +26,41 @@ both and belongs to neither.
 **Decided:** these three roles are core state, resolved once per run at stage 4
 and passed to every duty. A duty never detects a language itself.
 
-## Detection is code, never a model
+## Detection is code first, and a model only as a closed question
 
-Detection runs at stage 4 — before anything untrusted has been near a provider.
-That placement is not an optimisation; it is a containment property. Asking a
-model "what language is this?" means handing a stranger's text to a model in
-order to answer a question a library answers offline, for free, deterministically,
-and identically on every re-run.
+Detection runs at stage 4, in the core, and the answer it produces is the one
+every duty above it is handed. Two properties make that placement worth
+defending.
+
+The first is cost, and it is the reason the order is script narrowing, then a
+bundled byte-ngram profile, then anything else. Both of those are library calls:
+offline, free, deterministic, and identical on every re-run. Asking a model
+"what language is this?" as the _first_ move would mean paying per thread to
+answer a question a library already answers — and a language layer that costs a
+call per thread is the first thing a large repository turns off, which takes
+[D1](../north-star.md#d1--no-duty-is-english-only) down with it.
+
+The second is that an open question to a model is not the same object as a
+closed one. "What language is this?" has no bounded answer set, so its result
+cannot be checked; "which of these two configured languages is it?" has exactly
+as many answers as there are survivors, and every one of them is a language the
+project already named. That is why the last step, when both free steps leave more
+than one candidate standing, is allowed: it is a choice between survivors, never
+an open question, and its result is validated against the survivor set before
+anything uses it. `unknown` is what comes back when nothing decides — a real
+answer, not a default.
 
 It also has to be idempotent. A detector that returns a different answer on the
 second run turns [D9](../north-star.md#d9--re-running-is-cheap-and-safe) into a
 lie, because the duty would produce different output for an unchanged thread.
+The free steps are idempotent by construction; the last step is bounded to the
+survivor set, so the worst it can do is disagree between two languages the
+project reads — and the fingerprint in the published marker is what keeps that
+from re-spending on an unchanged thread.
 
-**Decided:** language detection is a deterministic library call. No duty may
-escalate a detection question to a model.
+**Decided:** detection is core's, resolved once per run in the order free → free
+→ bounded choice. No duty may detect a language itself, and no step anywhere may
+ask a model an open-ended "what language is this?".
 
 ### What gets detected
 

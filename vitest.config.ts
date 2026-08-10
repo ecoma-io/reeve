@@ -8,10 +8,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
-      // The entry point calls `run()` at import time, so importing it to
-      // measure it would execute the action. It is covered by driving the
-      // built bundle instead, which is what a runner does.
-      exclude: ["src/main.ts"],
+      // Every entry point calls `run()` at import time, so importing one to
+      // measure it would execute the action. They are covered by driving the
+      // built bundles instead, which is what a runner does.
+      exclude: ["src/main.ts", "src/duties/*/main.ts"],
       reporter: ["text", "lcov"],
       // A floor, not a target. It exists so a pull request that adds a module
       // and no tests for it goes red rather than diluting the number quietly.

@@ -18,18 +18,23 @@
 
 /**
  * The duties this ref actually carries, in the order the documentation
- * introduces them. Empty until the first one lands.
+ * introduces them.
  *
  * A list rather than a boolean because the message a consumer needs differs by
  * case: with nothing built the honest answer is the roadmap, and with something
  * built the answer is a corrected `uses:` line. Both are below, and both are
- * exercised by tests, so the second does not arrive untested on the day this
- * array stops being empty.
+ * exercised by tests.
  */
-export const DUTIES: readonly string[] = [];
+export const DUTIES: readonly string[] = ["translate"];
 
-/** Duties with a documented contract and no code at this ref. */
-export const PLANNED: readonly string[] = ["triage", "translate", "duplicate", "respond"];
+/**
+ * Duties with a documented contract and no code at this ref.
+ *
+ * A name in both lists would be answered by the first branch below, so a duty
+ * moves from here to `DUTIES` in the pull request that builds it rather than in
+ * a follow-up.
+ */
+export const PLANNED: readonly string[] = ["triage", "duplicate", "respond"];
 
 const ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#6-roadmap";
 

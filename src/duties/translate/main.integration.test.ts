@@ -1,0 +1,960 @@
+/**
+ * The translate duty, driven the way a runner drives it.
+ *
+ * Its entry point calls `run()` at import, so it cannot be imported and measured —
+ * importing it would run it. What a runner actually does is spawn
+ * `translate/dist/index.js` with `INPUT_*` in the environment and read
+ * `GITHUB_OUTPUT` afterwards, and that is exactly what happens below. It is the only place the
+ * wiring is exercised at all: the modules underneath each have their own tests,
+ * and none of them can catch an input read under the wrong name or an output
+ * that never got written.
+ *
+ * Two collaborators are real and one is not. The bundle is real, rebuilt here so
+ * a case can never pass against a stale artifact. GitHub and the provider are a
+ * local HTTP server — `@actions/github` reads its base URL from `GITHUB_API_URL`
+ * and `base-url` is an input, so both point at it and nothing in this file
+ * reaches a network or a model.
+ */
+import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
+import { readFile, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+
+import { marker } from "./publish.js";
+
+// A spawn per case, each loading a 3 MB bundle and identifying a language from
+// bundled profile data. Comfortably under this, and not worth flaking over.
+vi.setConfig({ testTimeout: 30_000 });
+
+const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
+/** Where this duty is published from: a repository subdirectory of its own. */
+const DUTY = join(ROOT, "translate");
+const BUNDLE = join(DUTY, "dist", "index.js");
+
+/** Long enough, and diacritical enough, to be identified without a model. */
+const VIETNAMESE =
+  "Nút chuyển chế độ tối không lưu lại sau khi tải lại trang, tôi nghĩ nó nên được ghi vào bộ nhớ cục bộ.";
+const ENGLISH =
+  "The dark mode toggle does not persist after a page reload; I think it should be written to local storage.";
+/** Han script throughout, so the cases below can tell it from the other two. */
+const CHINESE = "深色模式切换在页面重新加载后不会保留，我认为应该将其写入本地存储。";
+
+const STRUCTURED = [
+  VIETNAMESE,
+  "",
+  "```sh",
+  "pnpm build",
+  "```",
+  "",
+  "Chi tiết: https://example.com/docs.",
+].join("\n");
+const STRUCTURED_ENGLISH = [
+  ENGLISH,
+  "",
+  "```sh",
+  "pnpm build",
+  "```",
+  "",
+  "Details: https://example.com/docs.",
+].join("\n");
+
+beforeAll(async () => {
+  // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
+  // case driving the committed bundle would be driving whatever was committed
+  // last rather than the source under review.
+  await promisify(execFile)(process.execPath, [join(ROOT, "tools", "build.mjs")], { cwd: ROOT });
+}, 120_000);
+
+// ---------------------------------------------------------------------------
+// The stub standing in for GitHub and for the provider.
+// ---------------------------------------------------------------------------
+
+/** One chat completion request, as the stub saw it. */
+interface Ask {
+  readonly model: string;
+  readonly system: string;
+  /**
+   * The text being translated. Carried because a run with replies turned on
+   * makes several requests for the same target language, and only this tells
+   * them apart — a case that scripted an answer per language alone would answer
+   * the body's request with the reply's translation and pass anyway.
+   */
+  readonly user: string;
+  readonly authorization: string | null;
+}
+
+interface Answer {
+  readonly status: number;
+  readonly payload: unknown;
+}
+
+/** Everything a request is answered from, and everything a case may change. */
+interface State {
+  /**
+   * The body of the thread, read and written exactly as GitHub's would be.
+   *
+   * One mutable field rather than a fixture and a record of writes, because the
+   * behaviour being driven here is a run reading back what the previous run
+   * wrote. A stub that answered `GET` from something the `PATCH` had not
+   * touched could not tell a loop that terminates from one that does not.
+   */
+  body: string;
+  /**
+   * The replies, by id, read and written the way GitHub's comment endpoints do.
+   *
+   * A map rather than a list because the write is addressed by id: a run that
+   * translated the third reply into the second one's body would still pass a
+   * list-shaped assertion that only counted how many changed.
+   */
+  readonly replies: Map<number, string>;
+  answer: (ask: Ask) => Answer;
+  readonly asked: Ask[];
+}
+
+type Stub = State & { readonly url: string; close(): Promise<void> };
+
+/** A completion the provider answered normally. */
+function saying(content: string, finishReason = "stop"): Answer {
+  return {
+    status: 200,
+    payload: {
+      choices: [{ message: { role: "assistant", content }, finish_reason: finishReason }],
+    },
+  };
+}
+
+/**
+ * An endpoint that translates into the languages it was given text for, and is
+ * out of quota for every other one.
+ *
+ * Keyed on the target code as the translation prompt spells it — `into English
+ * (en)`. Detection's prompt writes a code the other way round (`en (English)`),
+ * so a run that reached the model to detect a language falls through to the
+ * quota answer and the case says so instead of quietly passing.
+ */
+function translating(into: Record<string, string>): (ask: Ask) => Answer {
+  return (ask) => {
+    for (const [code, text] of Object.entries(into)) {
+      if (ask.system.includes(`(${code})`)) return saying(text);
+    }
+    return { status: 429, payload: { error: { message: `no quota for ${ask.model}` } } };
+  };
+}
+
+/**
+ * An endpoint keyed on the text it was sent rather than on the target language.
+ *
+ * What `translating` cannot express once replies are on: a run translates the
+ * body and three replies into the same language, so an answer chosen by target
+ * alone would put the reply's translation in the body and the case would still
+ * pass. Each entry matches on a distinctive fragment of the source.
+ */
+function answering(pairs: [source: string, answer: string][]): (ask: Ask) => Answer {
+  return (ask) => {
+    for (const [source, answer] of pairs) {
+      if (ask.user.includes(source)) return saying(answer);
+    }
+    return { status: 429, payload: { error: { message: `nothing scripted for ${ask.model}` } } };
+  };
+}
+
+async function startStub(): Promise<Stub> {
+  // The state is created before the server so the handler can close over it,
+  // and the port and the shutdown are folded onto that same object afterwards —
+  // a case sets `stub.body` and the next request reads it.
+  const state: State = { body: "", replies: new Map(), answer: translating({}), asked: [] };
+
+  const server = createServer((request, response) => {
+    void route(state, request, response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the stub server did not open a port");
+  }
+
+  return Object.assign(state, {
+    url: `http://127.0.0.1:${String(address.port)}`,
+    close: () =>
+      new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      ),
+  });
+}
+
+async function route(
+  stub: State,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const path = (request.url ?? "/").split("?")[0] ?? "/";
+  const method = request.method ?? "GET";
+  const raw = await readAll(request);
+
+  const issue = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path);
+  if (method === "GET" && issue) {
+    send(response, 200, { number: Number(issue[1]), body: stub.body });
+    return;
+  }
+  if (method === "PATCH" && issue) {
+    stub.body = bodyOf(raw);
+    send(response, 200, { number: Number(issue[1]), body: stub.body });
+    return;
+  }
+
+  // Listed newest last, which is GitHub's own order and the one a reader sees.
+  const comments = /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.exec(path);
+  if (method === "GET" && comments) {
+    send(
+      response,
+      200,
+      [...stub.replies].map(([id, body]) => ({ id, body })),
+    );
+    return;
+  }
+
+  const comment = /^\/repos\/[^/]+\/[^/]+\/issues\/comments\/(\d+)$/.exec(path);
+  if (method === "PATCH" && comment) {
+    const id = Number(comment[1]);
+    stub.replies.set(id, bodyOf(raw));
+    send(response, 200, { id, body: stub.replies.get(id) });
+    return;
+  }
+
+  if (method === "POST" && path === "/v1/chat/completions") {
+    const ask = askOf(raw, request.headers.authorization ?? null);
+    stub.asked.push(ask);
+    const answered = stub.answer(ask);
+    send(response, answered.status, answered.payload);
+    return;
+  }
+
+  send(response, 404, { message: `no stub for ${method} ${path}` });
+}
+
+function askOf(raw: string, authorization: string | null): Ask {
+  const parsed: unknown = JSON.parse(raw);
+  const payload = parsed as { model?: unknown; messages?: { role?: string; content?: string }[] };
+  const system = payload.messages?.find((message) => message.role === "system")?.content;
+  const user = payload.messages?.find((message) => message.role === "user")?.content;
+  return { model: String(payload.model), system: system ?? "", user: user ?? "", authorization };
+}
+
+function bodyOf(raw: string): string {
+  const parsed: unknown = JSON.parse(raw);
+  const payload = parsed as { body?: unknown };
+  return typeof payload.body === "string" ? payload.body : "";
+}
+
+async function readAll(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk as Buffer));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function send(response: ServerResponse, status: number, payload: unknown): void {
+  const text = JSON.stringify(payload);
+  response.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": String(Buffer.byteLength(text)),
+  });
+  response.end(text);
+}
+
+// ---------------------------------------------------------------------------
+// Driving the bundle.
+// ---------------------------------------------------------------------------
+
+interface Run {
+  readonly code: number | null;
+  /** Both streams, in one string: workflow commands go to stdout, and a crash
+   *  that never reached `setFailed` goes to stderr. A case asserting the run
+   *  said something should not have to know which. */
+  readonly log: string;
+  readonly outputs: Record<string, string>;
+}
+
+/**
+ * One consumer's settings — deliberately not a copy of `action.yml`'s defaults,
+ * which the runner supplies and this file never sees. A case names only what it
+ * changes.
+ */
+function baseInputs(stub: Stub): Record<string, string> {
+  return {
+    "github-token": "stub-token",
+    number: "42",
+    "base-url": `${stub.url}/v1`,
+    "api-key": "sk-stub-key",
+    models: "stub-model",
+    // The short form, so this suite drives the derivation too: the labels and
+    // the scripts below are read off the runtime's own CLDR data inside the
+    // bundle, which is the only place the built artifact's ICU is exercised.
+    languages: "en, vi",
+    drafts: "1",
+    "judge-models": "",
+    "max-body-chars": "6000",
+    "translate-replies": "false",
+    "show-attribution": "none",
+    "dry-run": "false",
+  };
+}
+
+async function runAction(
+  stub: Stub,
+  inputs: Record<string, string> = {},
+  extra: NodeJS.ProcessEnv = {},
+): Promise<Run> {
+  const scratch = await mkdtemp(join(tmpdir(), "reeve-"));
+  const outputFile = join(scratch, "outputs");
+  await writeFile(outputFile, "");
+
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    GITHUB_REPOSITORY: "ecoma-io/reeve",
+    GITHUB_API_URL: stub.url,
+    GITHUB_OUTPUT: outputFile,
+    GITHUB_EVENT_NAME: "issues",
+    ...extra,
+  };
+  for (const [name, value] of Object.entries({ ...baseInputs(stub), ...inputs })) {
+    env[`INPUT_${name.toUpperCase()}`] = value;
+  }
+
+  const child = spawn(process.execPath, [BUNDLE], {
+    cwd: ROOT,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => (log += chunk));
+  child.stderr.on("data", (chunk: string) => (log += chunk));
+  const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+
+  const outputs = readOutputs(await readFile(outputFile, "utf8"));
+  await rm(scratch, { recursive: true, force: true });
+  return { code, log, outputs };
+}
+
+/**
+ * `GITHUB_OUTPUT` as the runner reads it back.
+ *
+ * `@actions/core` writes each output heredoc-style, `name<<delimiter`, so a
+ * value containing newlines survives. Parsed rather than asserted as raw text,
+ * because the delimiter carries a fresh uuid per line.
+ */
+function readOutputs(text: string): Record<string, string> {
+  const outputs: Record<string, string> = {};
+  for (const match of text.matchAll(/^([^\r\n<]+)<<(\S+)\r?\n([\s\S]*?)\r?\n\2\r?$/gm)) {
+    const [, name, , value] = match;
+    if (name !== undefined && value !== undefined) outputs[name] = value;
+  }
+  return outputs;
+}
+
+// ---------------------------------------------------------------------------
+
+let stub: Stub;
+
+beforeEach(async () => {
+  stub = await startStub();
+  stub.body = VIETNAMESE;
+  stub.answer = translating({ en: ENGLISH });
+});
+
+afterEach(async () => {
+  await stub.close();
+});
+
+describe("the action", () => {
+  it("appends the translation to the body of a thread it has not translated", async () => {
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.body.startsWith(VIETNAMESE)).toBe(true);
+    expect(stub.body).toContain(ENGLISH);
+    expect(stub.body).toContain("<summary><b>English</b></summary>");
+    expect(stub.body).toContain("Translated from Tiếng Việt.");
+  });
+
+  it("names no model in a body by default, so the block stays short", async () => {
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.body).not.toContain("stub-model");
+  });
+
+  it("names the model that translated once the workflow asks for it", async () => {
+    const run = await runAction(stub, { "show-attribution": "model" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain("<summary><b>English</b> · <code>stub-model</code></summary>");
+  });
+
+  it("says how the draft won once the workflow asks for the detail", async () => {
+    // Three drafts, so there is a contest to report: the whole point of
+    // `detail` is the part a single uncontested draft has nothing to say about.
+    // Which ranking settles it is left open — the stub answers every draft the
+    // same way, so scoring alone can decide it and never reach a judge.
+    const run = await runAction(stub, { "show-attribution": "detail", drafts: "3" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain("Translated by `stub-model`.");
+    expect(stub.body).toMatch(/Scored \d\.\d\d of 1\.00, best of 3 drafts, decided by \w+\./);
+  });
+
+  it("keeps the author's own text as the official half, byte-for-byte", async () => {
+    // The reason the translation is appended rather than written over: a body
+    // GitHub reads `Fixes #1` and a task list out of has to keep working, and
+    // the author is answerable for those words rather than for a model's.
+    stub.body = `${VIETNAMESE}\n\nFixes #1\n\n- [x] xong`;
+    const author = stub.body;
+
+    await runAction(stub);
+
+    expect(stub.body.startsWith(author)).toBe(true);
+    expect(marker.split(stub.body).official).toBe(author);
+    expect(stub.body).toContain("the version this project answers for");
+  });
+
+  it("does not translate the thread into the language it is already written in", async () => {
+    const run = await runAction(stub);
+
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(stub.body).not.toContain("Tiếng Việt</b>");
+  });
+
+  it("reports what it did on every output, so a workflow can branch on it", async () => {
+    const run = await runAction(stub);
+
+    expect(run.outputs).toEqual({
+      "source-language": "vi",
+      translated: JSON.stringify(["en"]),
+      skipped: JSON.stringify([]),
+      "replies-translated": "0",
+    });
+  });
+
+  it("identifies the source language without contacting a provider to do it", async () => {
+    // Script narrowing and the local profile decide, so the only request a
+    // one-language run makes is the translation itself. This is the whole
+    // reason detection is a ladder, and it is invisible from inside any one
+    // module.
+    await runAction(stub);
+
+    expect(stub.asked).toHaveLength(1);
+    expect(stub.asked[0]?.system).toContain("into English (en)");
+  });
+
+  it("sends the api key as a bearer token to the configured endpoint", async () => {
+    await runAction(stub);
+
+    expect(stub.asked[0]?.authorization).toBe("Bearer sk-stub-key");
+  });
+
+  it("registers the api key for masking before anything can log it", async () => {
+    const run = await runAction(stub);
+
+    expect(run.log).toContain("::add-mask::sk-stub-key");
+  });
+
+  it("replaces the block it already owns rather than appending a second one", async () => {
+    await runAction(stub);
+    stub.body = stub.body.replace(VIETNAMESE, `${VIETNAMESE} Thêm một câu.`);
+    stub.answer = translating({ en: `${ENGLISH} Edited.` });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain("Edited.");
+    expect(stub.body.split("reeve:translate")).toHaveLength(2);
+  });
+
+  it("spends nothing at all on a rerun of a thread it already translated", async () => {
+    // The loop this change creates and the guard that closes it. Writing the
+    // body fires `issues: edited`, which the workflow listens for, and the run
+    // that event starts must recognise its own output — before it constructs a
+    // provider, or an edit-triggered rerun would re-spend the whole budget on
+    // every thread in the repository. GitHub declines to start a workflow from
+    // its own `GITHUB_TOKEN`, but a PAT and an App installation get no such
+    // protection, so termination cannot rest on which token a consumer chose.
+    await runAction(stub);
+    const written = stub.body;
+    stub.asked.length = 0;
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toBe(written);
+    expect(stub.asked).toHaveLength(0);
+    expect(run.log).toContain("already carries the translation");
+  });
+
+  it("translates again once the author edits the text the block was written for", async () => {
+    // The other half of the same guard: it must recognise its own output
+    // without also refusing to notice that the text no longer means what the
+    // published translation says it means.
+    await runAction(stub);
+    stub.body = stub.body.replace(VIETNAMESE, `${VIETNAMESE} Thêm một câu nữa.`);
+    stub.asked.length = 0;
+    stub.answer = translating({ en: `${ENGLISH} One more sentence.` });
+
+    await runAction(stub);
+
+    expect(stub.asked).not.toHaveLength(0);
+    expect(stub.body).toContain("One more sentence.");
+  });
+
+  it("carries a code block and a URL across untouched", async () => {
+    stub.body = STRUCTURED;
+    stub.answer = translating({ en: STRUCTURED_ENGLISH });
+
+    await runAction(stub);
+
+    expect(stub.body).toContain("```sh\npnpm build\n```");
+    expect(stub.body).toContain("https://example.com/docs");
+  });
+
+  it("skips the language nothing could translate and still publishes the one that worked", async () => {
+    // The failure Reeve is most likely to meet in the wild: a free tier
+    // with enough quota for one request and not two. The Chinese translation
+    // being unavailable must not cost the thread the English one.
+    stub.answer = translating({ en: ENGLISH });
+
+    const run = await runAction(stub, { languages: "en, zh, vi" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(run.outputs.skipped).toBe(JSON.stringify(["zh"]));
+    expect(stub.body).toContain(ENGLISH);
+    expect(stub.body).toContain("Not translated this run: 中文.");
+    // A warning rather than an info line: a green run that quietly did less
+    // than it was asked to is exactly what has to be visible from the run
+    // summary, without opening the log. The provider's own reason goes with it,
+    // because the published block deliberately does not carry it.
+    expect(run.log).toContain("::warning::#42 zh: no model produced a translation this run.");
+    expect(run.log).toContain("HTTP 429");
+  });
+
+  it("retries next run the language a provider could not translate this one", async () => {
+    // The marker has to record what the run *got*, not what it was configured
+    // for. Recording the configured set makes the skip permanent: a language
+    // lost to a one-off 429 is claimed as translated, the next run matches its
+    // own claim and stops, and the thread never gets it — from a green run,
+    // with a warning nobody reads twice.
+    stub.answer = translating({ en: ENGLISH });
+    await runAction(stub, { languages: "en, zh, vi" });
+    expect(stub.body).not.toContain(CHINESE);
+    stub.asked.length = 0;
+
+    // Same text, same configuration, quota back.
+    stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+    const run = await runAction(stub, { languages: "en, zh, vi" });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).not.toHaveLength(0);
+    expect(stub.body).toContain(CHINESE);
+    expect(stub.body).not.toContain("Not translated this run");
+  });
+
+  it("stops once every configured language is actually in the body", async () => {
+    // The other half: recording what was achieved must not cost the loop guard
+    // it was meant to protect. A run that translated everything writes a marker
+    // the next run matches, and that run makes no request.
+    stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+    await runAction(stub, { languages: "en, zh, vi" });
+    const written = stub.body;
+    stub.asked.length = 0;
+
+    const run = await runAction(stub, { languages: "en, zh, vi" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toBe(written);
+    expect(stub.asked).toHaveLength(0);
+    expect(run.log).toContain("already carries the translation");
+  });
+
+  it("says in the published block that the tail of a long body was left behind", async () => {
+    stub.body = `${VIETNAMESE}\n\n${VIETNAMESE}`;
+
+    const run = await runAction(stub, { "max-body-chars": String(VIETNAMESE.length) });
+
+    expect(stub.body).toContain("The body was longer than this run's limit");
+    expect(run.log).toContain("Raise `max-body-chars`");
+  });
+
+  it("translates the tail once the limit that left it behind is raised", async () => {
+    // `Raise \`max-body-chars\` to translate the rest` was advice with no
+    // effect. The marker hashed the whole body while the run translated a
+    // prefix of it, so the raised run matched its own marker and skipped — and
+    // the block's promise to have left the tail behind became permanent.
+    const long = `${VIETNAMESE}\n\n${VIETNAMESE}`;
+    stub.body = long;
+    await runAction(stub, { "max-body-chars": String(VIETNAMESE.length) });
+    expect(stub.body).toContain("The body was longer than this run's limit");
+    stub.asked.length = 0;
+
+    const run = await runAction(stub, { "max-body-chars": String(long.length + 100) });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).not.toHaveLength(0);
+    expect(stub.body).not.toContain("The body was longer than this run's limit");
+  });
+
+  it("writes nothing and stays green for a thread with an empty body", async () => {
+    stub.body = "   \n\n  ";
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toBe("   \n\n  ");
+    expect(stub.asked).toHaveLength(0);
+    expect(run.outputs).toEqual({
+      "source-language": "",
+      translated: JSON.stringify([]),
+      skipped: JSON.stringify([]),
+      "replies-translated": "0",
+    });
+  });
+
+  it("writes nothing on a dry run, and logs the body it would have written", async () => {
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toBe(VIETNAMESE);
+    expect(run.log).toContain("reeve:translate");
+    expect(run.log).toContain(ENGLISH);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+  });
+
+  it("translates the thread the event names when no number was configured", async () => {
+    const scratch = await mkdtemp(join(tmpdir(), "reeve-event-"));
+    const eventFile = join(scratch, "event.json");
+    await writeFile(eventFile, JSON.stringify({ issue: { number: 7 } }));
+
+    const run = await runAction(stub, { number: "" }, { GITHUB_EVENT_PATH: eventFile });
+    await rm(scratch, { recursive: true, force: true });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain(ENGLISH);
+  });
+
+  it("fails loudly on an event that names no thread, rather than asking for issue NaN", async () => {
+    const run = await runAction(stub, { number: "" }, { GITHUB_EVENT_NAME: "schedule" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("::error::");
+    expect(run.log).toContain("this event (schedule) names no issue or pull request");
+    expect(stub.body).toBe(VIETNAMESE);
+  });
+
+  it("fails loudly on a count that is not a whole number", async () => {
+    const run = await runAction(stub, { drafts: "0" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("drafts: expected a whole number of 1 or more, got `0`");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("fails loudly on an attribution level it has no rendering for", async () => {
+    // Silently falling back to `none` would publish a hundred bodies with less
+    // in them than the workflow asked for, and the fingerprint means the run
+    // that fixes the spelling will not go back and rewrite them.
+    const run = await runAction(stub, { "show-attribution": "verbose" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("show-attribution: expected `none`, `model` or `detail`");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("fails loudly when no model was configured at all", async () => {
+    const run = await runAction(stub, { models: "  " });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("models: no entries");
+  });
+
+  it("fails loudly on a bare code the runtime knows no language by", async () => {
+    // Derivation is what makes `languages: en, vi` legal, and this is the one
+    // way it can be wrong: a code CLDR has no name for would otherwise become a
+    // language nobody can read the name of. The bundle carries its own ICU, so
+    // this is also the only place the derivation is measured against the built
+    // artifact rather than against the test runner's runtime.
+    const run = await runAction(stub, { languages: "en, qqq" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("`qqq` is not a language code");
+    expect(run.log).toContain("code:Label:Script");
+  });
+});
+
+describe("the action, translating the replies", () => {
+  /** A reply in each of the two languages a case might need it in. */
+  const VIETNAMESE_REPLY = "Tôi cũng gặp phải lỗi này trên máy của tôi, và nó xảy ra mỗi lần.";
+  const ENGLISH_REPLY = "I hit this on my machine too, and it happens every single time.";
+
+  beforeEach(() => {
+    // The body is emptied so a case's assertions are about its replies alone —
+    // `replies-translated` is a count, and a body translated alongside them
+    // would make every number below ambiguous. The one case that cares about
+    // both at once sets a body back and scripts per source text.
+    stub.body = "";
+    stub.replies.set(991, VIETNAMESE_REPLY);
+    stub.answer = translating({ en: ENGLISH_REPLY });
+  });
+
+  it("leaves every reply alone unless it was asked to translate them", async () => {
+    // Off by default, and the cost is why: a forty-reply discussion is forty
+    // more texts. A consumer who upgrades must not discover the feature by
+    // finding their whole thread rewritten.
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toBe(VIETNAMESE_REPLY);
+    expect(run.outputs["replies-translated"]).toBe("0");
+  });
+
+  it("appends the translation to the reply's own body", async () => {
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toContain(ENGLISH_REPLY);
+    expect(stub.replies.get(991)).toContain("the version this project answers for");
+    expect(marker.split(stub.replies.get(991) ?? "").official).toBe(VIETNAMESE_REPLY);
+    expect(run.outputs["replies-translated"]).toBe("1");
+  });
+
+  it("writes a reply's translation to that reply and not to the thread body", async () => {
+    // The failure that would be invisible in review and catastrophic in a
+    // thread: the comment endpoint confused for the issue one. Scripted per
+    // source text, so each translation is identifiable wherever it lands.
+    stub.body = VIETNAMESE;
+    stub.answer = answering([
+      [VIETNAMESE.slice(0, 40), ENGLISH],
+      [VIETNAMESE_REPLY.slice(0, 40), ENGLISH_REPLY],
+    ]);
+
+    await runAction(stub, { "translate-replies": "true" });
+
+    expect(stub.body).toContain(ENGLISH);
+    expect(stub.body).not.toContain(ENGLISH_REPLY);
+    expect(stub.replies.get(991)).toContain(ENGLISH_REPLY);
+    expect(stub.replies.get(991)).not.toContain(ENGLISH);
+    expect(marker.split(stub.body).official).toBe(VIETNAMESE);
+  });
+
+  it("detects each reply's own language rather than inheriting the thread's", async () => {
+    // A Vietnamese issue routinely collects English answers. Translating an
+    // English reply into English would publish a block saying nothing, so each
+    // reply gets its own detection.
+    stub.replies.set(992, ENGLISH_REPLY);
+    stub.answer = translating({ en: ENGLISH_REPLY, vi: VIETNAMESE_REPLY });
+
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(stub.replies.get(991)).toContain("<b>English</b>");
+    expect(stub.replies.get(992)).toContain("<b>Tiếng Việt</b>");
+    expect(run.outputs["replies-translated"]).toBe("2");
+  });
+
+  it("translates a new reply on a thread whose body needs nothing", async () => {
+    // The ordinary case for this feature: the body was translated last week,
+    // its fingerprint still matches, and the reply is the only thing that
+    // changed. A run that returned early on the body would never reach it.
+    stub.body = VIETNAMESE;
+    stub.answer = answering([
+      [VIETNAMESE.slice(0, 40), ENGLISH],
+      [VIETNAMESE_REPLY.slice(0, 40), ENGLISH_REPLY],
+    ]);
+    await runAction(stub, { "translate-replies": "true" });
+    const body = stub.body;
+
+    stub.replies.set(992, `${VIETNAMESE_REPLY} Thêm một câu.`);
+    stub.answer = answering([[VIETNAMESE_REPLY.slice(0, 40), `${ENGLISH_REPLY} One more.`]]);
+
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(run.log).toContain("already carries the translation");
+    expect(stub.body).toBe(body);
+    expect(stub.replies.get(992)).toContain("One more.");
+    expect(run.outputs["replies-translated"]).toBe("1");
+  });
+
+  it("spends nothing on a rerun of replies it already translated", async () => {
+    // Per-reply fingerprints, which is what makes a backfill over a long
+    // discussion affordable: the second run costs one listing and no
+    // completions at all.
+    await runAction(stub, { "translate-replies": "true" });
+    const written = stub.replies.get(991);
+    stub.asked.length = 0;
+
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toBe(written);
+    expect(stub.asked).toHaveLength(0);
+    expect(run.outputs["replies-translated"]).toBe("0");
+  });
+
+  it("translates a reply again once its author edits it", async () => {
+    await runAction(stub, { "translate-replies": "true" });
+    stub.replies.set(991, `${VIETNAMESE_REPLY} Thêm một câu nữa.`);
+    stub.answer = translating({ en: `${ENGLISH_REPLY} One more sentence.` });
+
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(stub.replies.get(991)).toContain("One more sentence.");
+    expect(stub.replies.get(991)?.split("reeve:translate")).toHaveLength(2);
+    expect(run.outputs["replies-translated"]).toBe("1");
+  });
+
+  it("keeps going when one reply is a stack trace with no prose in it", async () => {
+    // A reply with no prose in it is not a failure — a stack trace is written
+    // the same way in every language, so there is nothing in it to translate —
+    // and it must not stop the run before the reply after it.
+    stub.replies.set(992, "```\n  at foo (bar.js:1:2)\n```");
+    stub.replies.set(993, VIETNAMESE_REPLY);
+
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(993)).toContain(ENGLISH_REPLY);
+    expect(run.outputs["replies-translated"]).toBe("2");
+  });
+
+  it("keeps going when a provider runs out of quota partway down the thread", async () => {
+    // The failure a free tier actually produces. A run that translated the
+    // first reply and then hit a limit must publish that one and warn about the
+    // rest, not lose it. The body is left empty so the count below is the
+    // replies' own.
+    stub.body = "";
+    let served = 0;
+    stub.replies.set(992, `${VIETNAMESE_REPLY} Hai.`);
+    stub.replies.set(993, `${VIETNAMESE_REPLY} Ba.`);
+    stub.answer = () => {
+      served += 1;
+      return served > 1
+        ? { status: 429, payload: { error: { message: "out of quota" } } }
+        : saying(ENGLISH_REPLY);
+    };
+
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toContain(ENGLISH_REPLY);
+    expect(stub.replies.get(992)).toBe(`${VIETNAMESE_REPLY} Hai.`);
+    expect(run.outputs["replies-translated"]).toBe("1");
+    expect(run.log).toContain("no model produced a translation this run");
+  });
+
+  it("writes no reply on a dry run, and logs what each would have become", async () => {
+    const run = await runAction(stub, { "translate-replies": "true", "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toBe(VIETNAMESE_REPLY);
+    expect(run.log).toContain("comment 991 would have become");
+    expect(run.log).toContain(ENGLISH_REPLY);
+    expect(run.outputs["replies-translated"]).toBe("0");
+  });
+
+  it("names the reply in the log, so a thirteen-text run is readable", async () => {
+    const run = await runAction(stub, { "translate-replies": "true" });
+
+    expect(run.log).toContain("#42 comment 991");
+  });
+});
+
+describe("the action contract", () => {
+  /**
+   * Every input `action.yml` declares, read straight out of it.
+   *
+   * A regex rather than a parser because there is no YAML dependency here and
+   * the shape being read is two levels deep and fully indented — every input is
+   * a key at exactly two spaces inside the `inputs:` block.
+   */
+  async function declaredInputs(): Promise<string[]> {
+    const text = await readFile(join(DUTY, "action.yml"), "utf8");
+    const block = /\ninputs:\n([\s\S]*?)\noutputs:\n/.exec(text)?.[1] ?? "";
+    return [...block.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map(([, name]) => name ?? "");
+  }
+
+  /**
+   * Every input the duty actually reads — its own, and the five it inherits.
+   *
+   * Both files, because the shared inputs are read once in the core and
+   * declared once per duty: a duty that dropped `api-key` from its `action.yml`
+   * would still read it, and nothing else would notice.
+   */
+  async function readInputs(): Promise<string[]> {
+    const sources = await Promise.all([
+      readFile(join(ROOT, "src", "duties", "translate", "main.ts"), "utf8"),
+      readFile(join(ROOT, "src", "core", "inputs.ts"), "utf8"),
+    ]);
+    return [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
+      ([, name]) => name ?? "",
+    );
+  }
+
+  it("reads every input it declares, under the name it declared", async () => {
+    // The one drift no other test can see: renaming an input in `action.yml`
+    // alone leaves the action reading an empty string forever, silently and on
+    // every run.
+    expect([...(await readInputs())].sort()).toEqual([...(await declaredInputs())].sort());
+  });
+
+  it("offers every input to a local run, under the name `pnpm try` reads", async () => {
+    // `tools/try.mjs` derives the `.env` key from the input name, so a new
+    // input is configurable locally the moment it exists — but nothing would
+    // say so, and an undocumented knob is one nobody turns. The example file is
+    // the document, and this is what stops it going stale.
+    const text = await readFile(join(ROOT, ".env.example"), "utf8");
+    const documented = [...text.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map(([, name]) => name);
+
+    for (const input of await declaredInputs()) {
+      expect(documented).toContain(input.replace(/-/g, "_").toUpperCase());
+    }
+  });
+
+  it("declares the entry point this suite drives", async () => {
+    const text = await readFile(join(DUTY, "action.yml"), "utf8");
+
+    expect(text).toContain("main: dist/index.js");
+  });
+
+  it("keeps every source file reviewable as text", async () => {
+    // A control character in a source file is not a style question. Git
+    // classifies a file holding a NUL as binary, so a pull request touching it
+    // renders `Bin 12990 -> 16484 bytes` where the diff belongs — and a module
+    // nobody can read a diff of is a module nobody reviewed, however carefully
+    // they meant to. It reached `publish.ts` once, as the separator
+    // `fingerprint` hashes with, and survived two pull requests over exactly
+    // the code that decides what gets written into a public thread.
+    //
+    // The escape `\u0000` hashes the identical byte and leaves the file text,
+    // so this costs the code nothing. Tab, newline and carriage return are
+    // ordinary; the rest of C0 is not.
+    const offenders: string[] = [];
+    for (const file of await readdir(join(ROOT, "src"), { recursive: true })) {
+      if (!file.endsWith(".ts")) continue;
+      const text = await readFile(join(ROOT, "src", file), "utf8");
+      // eslint-disable-next-line no-control-regex -- finding one is the point
+      const found = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.exec(text);
+      if (found !== null) {
+        const at = found[0].codePointAt(0) ?? 0;
+        offenders.push(`${file} holds U+${at.toString(16).padStart(4, "0").toUpperCase()}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+});
