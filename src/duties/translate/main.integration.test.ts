@@ -401,6 +401,19 @@ describe("the action", () => {
     expect(stub.body).toContain("<summary><b>English</b> · <code>stub-model</code></summary>");
   });
 
+  it("shows the name a workflow gave a model, and never the id it was given for", async () => {
+    // The point of naming a model is that the id is a maintainer's to keep: a
+    // block that printed both would publish the secret next to the cover for it.
+    const run = await runAction(stub, {
+      models: "stub-model = House model",
+      "show-attribution": "model",
+    });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain("<summary><b>English</b> · <code>House model</code></summary>");
+    expect(stub.body).not.toContain("stub-model");
+  });
+
   it("says how the draft won once the workflow asks for the detail", async () => {
     // Three drafts, so there is a contest to report: the whole point of
     // `detail` is the part a single uncontested draft has nothing to say about.
@@ -411,6 +424,26 @@ describe("the action", () => {
     expect(run.code).toBe(0);
     expect(stub.body).toContain("Translated by `stub-model`.");
     expect(stub.body).toMatch(/Scored \d\.\d\d of 1\.00, best of 3 drafts, decided by \w+\./);
+  });
+
+  it("names a judge seat by the name it was given, whichever model filled it", async () => {
+    // The seat is the voter, so the fallback model that actually answered votes
+    // as `Referee` — and the ids of both stay out of the thread.
+    const votes = (ask: Ask): Answer =>
+      ask.system.includes("choosing the best") ? saying("1") : translating({ en: ENGLISH })(ask);
+    stub.answer = (ask) => (ask.model === "judge-a" ? { status: 429, payload: {} } : votes(ask));
+
+    const run = await runAction(stub, {
+      models: "stub-model = House model",
+      drafts: "2",
+      "judge-models": "judge-a | judge-b = Referee",
+      "show-attribution": "detail",
+    });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain("Votes: `Referee`→`House model`.");
+    expect(stub.body).not.toContain("judge-a");
+    expect(stub.body).not.toContain("judge-b");
   });
 
   it("keeps the author's own text as the official half, byte-for-byte", async () => {

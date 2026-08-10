@@ -53,10 +53,24 @@ describe("readShared", () => {
       token: "ghs_token",
       number: 42,
       models: ["gpt-4o-mini", "gpt-4o"],
+      modelNames: new Map(),
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-secret",
       dryRun: false,
     });
+  });
+
+  it("carries the names a workflow gave its models, kept beside the ids", () => {
+    // Nothing between here and publication has any business with them, which is
+    // exactly why they travel separately rather than folded into the ids.
+    given({ ...COMPLETE, models: "gpt-4o-mini = Quick, gpt-4o" });
+    issue.number = 42;
+
+    const shared = readShared();
+
+    expect(shared.models).toEqual(["gpt-4o-mini", "gpt-4o"]);
+    expect(shared.modelNames.get("gpt-4o-mini")).toBe("Quick");
+    expect(shared.modelNames.has("gpt-4o")).toBe(false);
   });
 
   it("registers the key as a secret before anything can log it", () => {

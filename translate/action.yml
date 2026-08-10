@@ -56,6 +56,11 @@ inputs:
       Model ids, comma or newline separated, in preference order. The order is
       preference and not last resort: the first one that answers is used, and a
       model that fails is never asked again in the same run.
+
+      `id = Name` gives a model a display name, and everything a person reads —
+      the published block, every warning — shows the name instead of the id. A
+      model nobody named shows its id. The name is cut at the first `=`, because
+      an id is never an assignment and a name may well contain one.
     required: true
 
   languages:
@@ -87,6 +92,9 @@ inputs:
       has already voted or already failed is skipped by every later seat, so one
       model never counts twice. Empty means no panel, which is the default and a
       perfectly good setting.
+
+      `a | b = Careful` names the seat rather than a model: it is one voter
+      called `Careful` whichever of the two delivered its vote.
     required: false
     default: ""
 

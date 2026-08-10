@@ -87,8 +87,42 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const EXCERPT_CHARS = 200;
 
 /**
+ * The name to show for a model id, for every id anybody named.
+ *
+ * A model id is a provider's identifier and routinely a maintainer's secret —
+ * which provider an organisation happens to have access to is nobody else's
+ * business, and a workflow that masks its ids in the log has already decided
+ * that. Attribution then has to choose between naming the id in a public thread
+ * and saying nothing at all, and both are bad answers. A name is the third one:
+ * `Careful` is what a reader needs and `qwen/qwen3-32b-preview` is not.
+ *
+ * Absent means nobody named it, and the id is what gets shown. That is the
+ * default and stays a perfectly good setting.
+ */
+export type Names = ReadonlyMap<string, string>;
+
+/** What to show for a model: the name it was given, or the id nobody named. */
+export function shown(names: Names, id: string): string {
+  return names.get(id) ?? id;
+}
+
+/** A `models` input read: the ids to try in order, and what to call them. */
+export interface Roster {
+  /** Model ids in preference order. */
+  readonly models: readonly string[];
+  readonly names: Names;
+}
+
+/** A `judge-models` input read: the seats to fill, and what to call them. */
+export interface Panel {
+  /** One entry per seat, each the chain that seat may be filled from. */
+  readonly seats: readonly (readonly string[])[];
+  readonly names: Names;
+}
+
+/**
  * Splits a `models` input into ids to try in order — one chain, not a set of
- * groups.
+ * groups — and the names it gave them.
  *
  * Exact repeats are dropped. Rotation only ever reaches a model because the one
  * before it failed, so trying the same id twice cannot succeed where it just
@@ -104,19 +138,31 @@ const EXCERPT_CHARS = 200;
  * misunderstanding worth stopping on the first run rather than one whose only
  * symptom is that the ids all ran together into one that no provider has.
  */
-export function parseModels(raw: string): string[] {
-  const ids = [...new Set(parseList(raw))];
+export function parseModels(raw: string): Roster {
+  const models: string[] = [];
+  const names = new Map<string, string>();
 
-  const grouped = ids.find((id) => id.includes("|"));
-  if (grouped !== undefined) {
-    throw new Error(
-      "models: `|` groups fallbacks into one judge seat and means nothing here — " +
-        "`models` is already a single rotation chain, so separate its ids with `,`. " +
-        `Got \`${grouped}\`.`,
-    );
+  for (const entry of parseList(raw)) {
+    const { ids, name } = split(entry);
+    if (ids.includes("|")) {
+      throw new Error(
+        "models: `|` groups fallbacks into one judge seat and means nothing here — " +
+          "`models` is already a single rotation chain, so separate its ids with `,`. " +
+          `Got \`${ids.trim()}\`.`,
+      );
+    }
+
+    const id = ids.trim();
+    // The repeat keeps its first position and its first name. A later entry
+    // renaming it would be two answers to "what is this model called", and the
+    // rotation it is trying to change is already fixed by then.
+    if (id.length === 0 || models.includes(id)) continue;
+
+    models.push(id);
+    if (name !== null) names.set(id, name);
   }
 
-  return ids;
+  return { models, names };
 }
 
 /**
@@ -135,18 +181,57 @@ export function parseModels(raw: string): string[] {
  *
  * An input with no `|` in it parses to one seat per id, which is what it always
  * meant — this widens the syntax rather than changing it.
+ *
+ * **A name belongs to the seat, not to the model that happens to fill it.**
+ * `a | b = Careful` is one voter called `Careful` whichever of the two answers,
+ * which is the honest reading: a reader of the thread is being told which
+ * opinion this was, and "the seat's fallback was in today" is not a distinction
+ * they can do anything with. So the name is recorded against every model in the
+ * seat, and the first seat to claim a model is the one that names it.
  */
-export function parseSeats(raw: string): string[][] {
-  return parseList(raw)
-    .map((seat) => [
+export function parseSeats(raw: string): Panel {
+  const seats: string[][] = [];
+  const names = new Map<string, string>();
+
+  for (const entry of parseList(raw)) {
+    const { ids, name } = split(entry);
+    const chain = [
       ...new Set(
-        seat
+        ids
           .split("|")
           .map((id) => id.trim())
           .filter((id) => id.length > 0),
       ),
-    ])
-    .filter((seat) => seat.length > 0);
+    ];
+    if (chain.length === 0) continue;
+
+    seats.push(chain);
+    if (name === null) continue;
+    for (const id of chain) if (!names.has(id)) names.set(id, name);
+  }
+
+  return { seats, names };
+}
+
+/**
+ * One configured entry cut at its name.
+ *
+ * The **first** `=`, because a model id is a path and a version and never an
+ * assignment, while a name is prose somebody wrote and may well contain one.
+ * `a = up to 8k = fine` is the model `a` called `up to 8k = fine`, which is the
+ * only reading that does not make the punctuation in a display name a parse
+ * error.
+ *
+ * A name that is empty is no name rather than a blank one. `models: a =` is a
+ * line somebody stopped writing, and showing an empty `<code></code>` in a
+ * hundred threads is a worse answer than showing the id.
+ */
+function split(entry: string): { ids: string; name: string | null } {
+  const at = entry.indexOf("=");
+  if (at === -1) return { ids: entry, name: null };
+
+  const name = entry.slice(at + 1).trim();
+  return { ids: entry.slice(0, at), name: name.length > 0 ? name : null };
 }
 
 export function createProvider(config: ProviderConfig): Provider {

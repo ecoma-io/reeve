@@ -69,7 +69,11 @@ export interface Posted {
   readonly to: Language;
   /** The winning draft, already sanitised. */
   readonly text: string;
-  /** The model that wrote it, named so a bad translation can be traced to it. */
+  /**
+   * What to call the model that wrote it, so a bad translation can be traced
+   * back. Already the display name the workflow gave it, or the id when it gave
+   * it none — this is a rendering, and nothing here looks a model up again.
+   */
   readonly model: string;
   /**
    * How the winner was chosen, for `detail`. Absent when the caller had nothing
@@ -87,7 +91,7 @@ export interface Decision {
   readonly drafts: number;
   /** Which ranking settled it. */
   readonly decidedBy: "score" | "judges";
-  /** Every judge that voted, and what it picked. */
+  /** Every judge that voted, and what it picked — both already display names. */
   readonly votes: readonly { readonly model: string; readonly pick: string }[];
 }
 
@@ -276,7 +280,7 @@ function footer(translated: Translated): string {
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
 }
 
-/** A label and a model id arrive from a workflow file and land between tags. */
+/** A label and a model name arrive from a workflow file and land between tags. */
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

@@ -49,7 +49,13 @@ import { createLanguagePicker, detectLanguage, residue } from "../../core/detect
 import { createReply, createThread, listReplies, type Thread } from "../../core/forge.js";
 import { readShared, whole } from "../../core/inputs.js";
 import { parseLanguages, type Language } from "../../core/languages.js";
-import { createProvider, parseSeats, type Provider } from "../../core/provider.js";
+import {
+  createProvider,
+  parseSeats,
+  shown,
+  type Names,
+  type Provider,
+} from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
 
 import { translate } from "./draft.js";
@@ -67,8 +73,12 @@ interface Settings {
   readonly token: string;
   readonly number: number;
   readonly models: readonly string[];
+  /** What to call each of them, keyed by model id. */
+  readonly modelNames: Names;
   readonly languages: readonly Language[];
   readonly judges: readonly (readonly string[])[];
+  /** What to call each seat, keyed by every model that seat may be filled by. */
+  readonly judgeNames: Names;
   readonly drafts: number;
   readonly maxBodyChars: number;
   readonly replies: boolean;
@@ -89,11 +99,13 @@ interface Settings {
  */
 function readSettings(): Settings {
   const shared = readShared();
+  const panel = parseSeats(core.getInput("judge-models"));
 
   return {
     ...shared,
     languages: parseLanguages(core.getInput("languages", { required: true })),
-    judges: parseSeats(core.getInput("judge-models")),
+    judges: panel.seats,
+    judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
     maxBodyChars: whole("max-body-chars", core.getInput("max-body-chars")),
     replies: core.getBooleanInput("translate-replies"),
@@ -168,12 +180,18 @@ async function translateInto(
     drafts: settings.drafts,
   });
 
+  // Named as the workflow named them, everywhere a person reads them. A
+  // maintainer who called a model `Careful` did so because the id is theirs to
+  // keep, and a warning quoting the id would hand it to the log they masked it
+  // out of.
+  const model = (id: string): string => shown(settings.modelNames, id);
+
   for (const failure of drafted.failures) {
-    core.warning(`${to.code}: ${failure.model} failed — ${failure.reason}`);
+    core.warning(`${to.code}: ${model(failure.model)} failed — ${failure.reason}`);
   }
   for (const refused of drafted.refused) {
     core.warning(
-      `${to.code}: ${refused.model} was refused — ${refused.score.reason ?? "unscored"}`,
+      `${to.code}: ${model(refused.model)} was refused — ${refused.score.reason ?? "unscored"}`,
     );
   }
 
@@ -185,15 +203,18 @@ async function translateInto(
     attempts: drafted.attempts,
   });
 
+  const seat = (id: string): string => shown(settings.judgeNames, id);
+
   for (const failure of verdict.failures) {
-    core.warning(`${to.code}: judge ${failure.model} — ${failure.reason}`);
+    core.warning(`${to.code}: judge ${seat(failure.model)} — ${failure.reason}`);
   }
 
   if (verdict.winner === null) return null;
 
-  const votes = verdict.votes.map((vote) => `${vote.model}→${vote.pick}`).join(", ");
+  const cast = verdict.votes.map((vote) => ({ model: seat(vote.model), pick: model(vote.pick) }));
+  const votes = cast.map((vote) => `${vote.model}→${vote.pick}`).join(", ");
   core.info(
-    `${to.code}: ${verdict.winner.model} by ${verdict.decidedBy}` +
+    `${to.code}: ${model(verdict.winner.model)} by ${verdict.decidedBy}` +
       ` (score ${verdict.winner.score.value.toFixed(3)}${votes.length > 0 ? `, ${votes}` : ""})`,
   );
 
@@ -206,14 +227,14 @@ async function translateInto(
   return {
     to,
     text: verdict.winner.text,
-    model: verdict.winner.model,
+    model: model(verdict.winner.model),
     ...(contested
       ? {
           decision: {
             score: verdict.winner.score.value,
             drafts: drafted.attempts.length,
             decidedBy: verdict.decidedBy,
-            votes: verdict.votes.map((vote) => ({ model: vote.model, pick: vote.pick })),
+            votes: cast,
           },
         }
       : {}),

@@ -6,6 +6,7 @@ import {
   parseModels,
   parseSeats,
   rotateModels,
+  shown,
   type Completion,
   type Failure,
   type Provider,
@@ -89,25 +90,28 @@ function expectSuccess(completion: Completion): Success {
 
 describe("parseModels", () => {
   it("splits the input with the shared list convention", () => {
-    expect(parseModels("gpt-4o-mini,llama-3.3-70b")).toEqual(["gpt-4o-mini", "llama-3.3-70b"]);
+    expect(parseModels("gpt-4o-mini,llama-3.3-70b").models).toEqual([
+      "gpt-4o-mini",
+      "llama-3.3-70b",
+    ]);
     expect(mockedParseList).toHaveBeenCalledWith("gpt-4o-mini,llama-3.3-70b");
   });
 
   it("drops an exact repeat, keeping the first position", () => {
     // Rotation only reaches a model because the one before it failed, so a
     // second attempt at the same id cannot succeed where the first did not.
-    expect(parseModels("a,b,a,c,b")).toEqual(["a", "b", "c"]);
+    expect(parseModels("a,b,a,c,b").models).toEqual(["a", "b", "c"]);
   });
 
   it("keeps ids that differ only in case, because a model id is case-sensitive", () => {
-    expect(parseModels("Llama-3,llama-3")).toEqual(["Llama-3", "llama-3"]);
+    expect(parseModels("Llama-3,llama-3").models).toEqual(["Llama-3", "llama-3"]);
   });
 
   it("returns nothing rather than refusing an empty list", () => {
     // Empty is an error for `models` and the default for `judge-models`. Only
     // the caller knows which one it is holding.
     mockedParseList.mockReturnValue([]);
-    expect(parseModels("")).toEqual([]);
+    expect(parseModels("")).toEqual({ models: [], names: new Map() });
   });
 
   it("refuses a seat separator rather than running the ids it groups together", () => {
@@ -115,40 +119,86 @@ describe("parseModels", () => {
     // every model failing for a reason that names an id nobody configured.
     expect(() => parseModels("a|b,c")).toThrow(/`models` is already a single rotation chain/);
   });
+
+  it("takes the name after `=` and leaves the id without it", () => {
+    const roster = parseModels("openai/gpt-4o = Careful,b");
+    expect(roster.models).toEqual(["openai/gpt-4o", "b"]);
+    expect(shown(roster.names, "openai/gpt-4o")).toBe("Careful");
+  });
+
+  it("shows the id of a model nobody named", () => {
+    expect(shown(parseModels("a,b").names, "b")).toBe("b");
+  });
+
+  it("cuts at the first `=`, because a name may contain one and an id may not", () => {
+    const roster = parseModels("a = why = because");
+    expect(roster.models).toEqual(["a"]);
+    expect(shown(roster.names, "a")).toBe("why = because");
+  });
+
+  it("treats an empty name as no name rather than as a blank one", () => {
+    // `a =` is a workflow half-edited, and a block reading "Translated by ."
+    // says less than one naming the id.
+    expect(shown(parseModels("a =   ").names, "a")).toBe("a");
+  });
+
+  it("keeps the first name of a repeated id, as it keeps its first position", () => {
+    expect(shown(parseModels("a = First,a = Second").names, "a")).toBe("First");
+  });
 });
 
 describe("parseSeats", () => {
   it("reads an input with no seat separator as one seat per id, as it always meant", () => {
-    expect(parseSeats("a,b,c")).toEqual([["a"], ["b"], ["c"]]);
+    expect(parseSeats("a,b,c").seats).toEqual([["a"], ["b"], ["c"]]);
   });
 
   it("groups the models of one seat into one chain", () => {
-    expect(parseSeats("a|a2,b")).toEqual([["a", "a2"], ["b"]]);
+    expect(parseSeats("a|a2,b").seats).toEqual([["a", "a2"], ["b"]]);
   });
 
   it("trims around the seat separator, which is written with spaces far more often than not", () => {
-    expect(parseSeats("a | a2 | a3")).toEqual([["a", "a2", "a3"]]);
+    expect(parseSeats("a | a2 | a3").seats).toEqual([["a", "a2", "a3"]]);
   });
 
   it("drops an exact repeat inside a seat, which could only ever be one wasted request", () => {
-    expect(parseSeats("a|b|a")).toEqual([["a", "b"]]);
+    expect(parseSeats("a|b|a").seats).toEqual([["a", "b"]]);
   });
 
   it("keeps a repeat across seats, because only the run knows whether it costs a vote", () => {
     // Two seats naming the same model is a configuration the panel resolves at
     // the point it knows which models are still unspent — `a|b` and `b|c` are
     // two votes on a good morning and this is the same shape.
-    expect(parseSeats("a,a")).toEqual([["a"], ["a"]]);
+    expect(parseSeats("a,a").seats).toEqual([["a"], ["a"]]);
   });
 
   it("drops a seat with nothing in it rather than seating a judge with no model", () => {
     mockedParseList.mockReturnValue(["a", "|", "b"]);
-    expect(parseSeats("a,|,b")).toEqual([["a"], ["b"]]);
+    expect(parseSeats("a,|,b").seats).toEqual([["a"], ["b"]]);
   });
 
   it("returns nothing for the empty input, which is the default rather than an error", () => {
     mockedParseList.mockReturnValue([]);
-    expect(parseSeats("")).toEqual([]);
+    expect(parseSeats("")).toEqual({ seats: [], names: new Map() });
+  });
+
+  it("gives a seat's name to every model that may fill it", () => {
+    // The name is the voter's, and the voter is the seat: whichever of the two
+    // answers, the panel heard from `Careful` once.
+    const panel = parseSeats("a | b = Careful, c = Quick");
+    expect(panel.seats).toEqual([["a", "b"], ["c"]]);
+    expect(shown(panel.names, "a")).toBe("Careful");
+    expect(shown(panel.names, "b")).toBe("Careful");
+    expect(shown(panel.names, "c")).toBe("Quick");
+  });
+
+  it("leaves an unnamed seat's models showing their ids", () => {
+    expect(shown(parseSeats("a|b").names, "b")).toBe("b");
+  });
+
+  it("keeps the first seat's name for a model two seats name", () => {
+    // One id, one thing to call it. The first seat that named it is the one a
+    // reader met first.
+    expect(shown(parseSeats("a = First,a = Second").names, "a")).toBe("First");
   });
 });
 
