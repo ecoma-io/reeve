@@ -1,0 +1,67 @@
+name: Pull request translation
+
+# The pull request half of the dogfooding pair; `reeve-translate-issue.yml`
+# explains the shared shape, the `./translate` path and the masking step.
+
+on:
+  # Not `pull_request`: a fork's token is read-only there, so the job could
+  # never write the body it exists to write. `pull_request_target` runs against
+  # the BASE ref with a write token, which is safe here for one reason and it is
+  # worth stating precisely — nothing from the head is checked out or executed.
+  # The body is read through the API and framed as untrusted data in every
+  # prompt that sees it.
+  pull_request_target:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      number:
+        description: Pull request number to (re-)translate
+        required: true
+
+concurrency:
+  group: reeve-translate-pr-${{ github.event.pull_request.number || inputs.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  translate:
+    name: Translate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROVIDER_MODELS: ${{ secrets.PROVIDER_MODELS }}
+    steps:
+      # No `ref:` here, deliberately. `pull_request_target` already checks out
+      # the base branch, and that default IS the guarantee this job needs: it
+      # holds a write token, so the only code it may run — including
+      # `uses: ./translate`, which is this repository's own duty out of that
+      # checkout — is the trusted base-branch copy, never anything a pull
+      # request author wrote.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.PROVIDER_MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was translated."
+
+      - if: env.PROVIDER_MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          JUDGE_MODELS: ${{ secrets.PROVIDER_JUDGE_MODELS }}
+        run: |
+          for id in $(printf '%s,%s' "$PROVIDER_MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.PROVIDER_MODELS != ''
+        uses: ./translate
+        with:
+          number: ${{ github.event.pull_request.number || inputs.number }}
+          base-url: ${{ secrets.PROVIDER_BASE_URL }}
+          api-key: ${{ secrets.PROVIDER_API_KEY }}
+          models: ${{ secrets.PROVIDER_MODELS }}
+          judge-models: ${{ secrets.PROVIDER_JUDGE_MODELS }}
+          drafts: "2"

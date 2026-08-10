@@ -128,8 +128,10 @@ endpoint and holds no key. Two things are worth knowing before the first run:
   already exported in your shell is the one that will be used.
 
 This repository also runs its own duties on its own issues and pull requests —
-`.github/workflows/reeve-*.yml`, pointed at the working tree with `uses: ./`
-rather than at a tag, so a change is dogfooded on the pull request that makes it.
+`.github/workflows/reeve-*.yml`, pointed at the working tree with
+`uses: ./translate` rather than at a tag, so a change is dogfooded on the pull
+request that makes it. The path is the duty's own directory for the same reason
+a consumer writes `ecoma-io/reeve/translate@v1`: the action at the root refuses.
 The provider comes from repository secrets, which a maintainer sets. A fork has
 none, so the duty is skipped there and the run says so in a notice — a fork
 inheriting workflows it cannot configure should not inherit a red tick for it
