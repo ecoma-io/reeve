@@ -58,6 +58,17 @@ permissions:
 jobs:
   translate:
     name: Translate
+    # A bot's issue is not a thread anybody is reading in a second language, and
+    # one of them here is Renovate's dependency dashboard: Renovate rewrites
+    # that body wholesale whenever it re-runs, which would strip the block this
+    # duty appends and be answered by another translation of a body Renovate is
+    # about to rewrite again. Two machines editing one issue at each other.
+    #
+    # This is a property of this repository's threads, not of the duty, so it is
+    # a condition on the workflow rather than an input. `workflow_dispatch` has
+    # no issue in its payload and the comparison is against nothing, which is
+    # how a manual run of a bot's thread stays possible.
+    if: github.event.issue.user.type != 'Bot'
     runs-on: ubuntu-latest
     # Detection plus drafts plus judging, every one of them on a free tier that
     # is slow when it is not rate-limiting. Generous on purpose; a model that
