@@ -53,7 +53,10 @@ jobs:
         env:
           JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          for id in $(printf '%s,%s' "$MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
+          # The trailing newline is load-bearing: `read` drops a final line
+          # that has none, and that line is the last judge seat.
+          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
 

@@ -17,6 +17,11 @@ name: Issue translation
 # announce it. The masking step below extends that to the ids the duty names in
 # its own warnings, which the runner would otherwise print in full.
 #
+# Masking is a log mechanism, and the run report is not the log — it is a page
+# the job writes for itself. So every id in these secrets is given a display
+# name (`id=House model`), which is what the report prints and what a reader
+# wants there anyway. An unnamed id would appear on that page as itself.
+#
 # The names sit on two tiers, because they change on two different schedules.
 # `ECOMA_LLM_*` is the endpoint and its key: one provider, shared by every
 # repository in the organisation that calls a model, so rotating a key is one
@@ -77,12 +82,21 @@ jobs:
       # ("this model failed, that judge voted"), and the runner only masks a
       # secret's exact value — the whole list — never the ids inside it. So each
       # one is registered here, before the step that can log it.
+      #
+      # Ids only, which is what the splitting is for. An entry is `id=Name` and
+      # a judge seat chains its fallbacks with `|`, so `a | b = Referee` holds
+      # two ids and one name: mask what is left of the `=`, and leave the name
+      # alone. A masked name would be a report full of `***` with no way to tell
+      # one model from another, which is the opposite of what naming them is for.
       - if: env.MODELS != ''
         name: Keep the provider out of the log
         env:
           JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          for id in $(printf '%s,%s' "$MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
+          # The trailing newline is load-bearing: `read` drops a final line
+          # that has none, and that line is the last judge seat.
+          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
 

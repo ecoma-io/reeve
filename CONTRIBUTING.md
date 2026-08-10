@@ -143,6 +143,19 @@ they are named on two tiers because they change on two different schedules:
 | `ECOMA_REEVE_MODELS`       | this repo | Model ids, in preference order                      |
 | `ECOMA_REEVE_JUDGE_MODELS` | this repo | The judge panel                                     |
 
+Both lists are commas, and every id carries the name it is to be called by:
+
+```
+ECOMA_REEVE_MODELS        vendor/big=House model, vendor/small=Backup
+ECOMA_REEVE_JUDGE_MODELS  vendor/a | vendor/b = Referee, vendor/c=Second opinion
+```
+
+A `|` chains one seat's fallbacks, so `vendor/a | vendor/b = Referee` is **one**
+vote by whichever of the two answers, not two votes. Name every id here for a
+reason beyond taste: the ids are masked out of the log, and the run report is
+not the log — it is a page the job writes for itself, where an unnamed id would
+appear as itself. The name is also what a reader of that page wants anyway.
+
 The split is the point. An endpoint and a key belong to whoever the organisation
 buys from, and every repository doing anything with a model wants the same two —
 so rotating a key is one edit rather than one edit per consumer, which is the
