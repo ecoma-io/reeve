@@ -69,7 +69,7 @@ description.
 
 | Input               | Default      | Worth knowing                                                                                                         |
 | ------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `models`            | _required_   | Order is preference, not last resort. Put the model you actually want first.                                          |
+| `models`            | _required_   | Order is preference, not last resort. Put the model you actually want first. `id = Name` names one. See below.        |
 | `languages`         | `en, vi, zh` | What to translate **into**. Says nothing about what an author may write in. See [Languages](../languages.md).         |
 | `drafts`            | `1`          | Attempts per language, scored deterministically, best published. The quality lever that costs calls instead of money. |
 | `judge-models`      | _empty_      | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.              |
@@ -118,6 +118,38 @@ Two rules keep a plurality honest:
 Nothing here is required. `judge-models: model-a` is one seat with no fallback,
 which is what a plain list has always meant and remains a perfectly good setting.
 So is leaving it empty.
+
+### Naming a model, so the id never has to be public
+
+A model id is a provider's identifier, and on a repository that routes through a
+gateway it is routinely something a maintainer keeps to themselves. `=` gives one
+a name, and everything a person reads — the published block, every warning in the
+log — uses the name instead:
+
+```yaml
+models: |
+  openai/gpt-5-mini = House model
+  anthropic/claude-haiku-4-5 = Backup
+judge-models: |
+  fast-model | fast-model-backup = Quick reader
+  careful-model = Careful reader
+```
+
+The id is what the provider is asked for and is all the id is ever used for. A
+model nobody named shows its id, which is the old behaviour and is fine when the
+id is not a secret.
+
+Two things are worth knowing:
+
+- **A name belongs to the seat, not to the model that happens to fill it.**
+  `fast-model | fast-model-backup = Quick reader` is one voter called
+  `Quick reader` whichever of the two answered — which is the honest rendering,
+  because the panel heard one vote from one seat.
+- **The name is cut at the first `=`.** An id is a path and a version and never
+  an assignment; a name is prose somebody wrote and may well contain one.
+
+Naming is presentation and nothing else. It is not masking: put the ids in
+secrets if they are secret, and this decides what a reader sees instead of them.
 
 ## Outputs
 

@@ -15,7 +15,7 @@
 import * as core from "@actions/core";
 import { context } from "@actions/github";
 
-import { parseModels } from "./provider.js";
+import { parseModels, type Names } from "./provider.js";
 
 /** What every duty gets, whatever else its own `action.yml` declares. */
 export interface Shared {
@@ -24,6 +24,13 @@ export interface Shared {
   readonly number: number;
   /** Model ids in preference order. Never empty. */
   readonly models: readonly string[];
+  /**
+   * What to call each of them where a person will read it. Kept beside the ids
+   * rather than folded into them, because everything between here and
+   * publication works on the id a provider answers to and only the last step
+   * has any business showing a name.
+   */
+  readonly modelNames: Names;
   readonly baseUrl: string;
   /** Empty for a keyless provider, which is a supported configuration. */
   readonly apiKey: string;
@@ -37,15 +44,16 @@ export function readShared(): Shared {
   // put the key in a public workflow log.
   if (apiKey.length > 0) core.setSecret(apiKey);
 
-  const models = parseModels(core.getInput("models", { required: true }));
-  if (models.length === 0) {
+  const roster = parseModels(core.getInput("models", { required: true }));
+  if (roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
 
   return {
     token: core.getInput("github-token", { required: true }),
     number: threadNumber(),
-    models,
+    models: roster.models,
+    modelNames: roster.names,
     baseUrl: core.getInput("base-url", { required: true }),
     apiKey,
     dryRun: core.getBooleanInput("dry-run"),
