@@ -1,12 +1,13 @@
 /**
  * The ballot a judge is handed when the candidates are translations.
  *
- * Everything about *how* a panel works — that every judge is asked rather than
- * rotated through, that a plurality decides, that the score breaks every tie,
- * that each seat sees the candidates in its own rotation so position bias is
- * spread rather than pooled — is the core's, and it is written down there. What
- * is left here is the only part that is about translation: the original, the
- * numbered drafts, and the criteria to rank them by.
+ * Everything about *how* a panel works — that every seat is asked rather than
+ * rotated through, that the models within one seat are its availability and not
+ * more votes, that a plurality decides, that the score breaks every tie, that
+ * each seat sees the candidates in its own rotation so position bias is spread
+ * rather than pooled — is the core's, and it is written down there. What is left
+ * here is the only part that is about translation: the original, the numbered
+ * drafts, and the criteria to rank them by.
  *
  * The criteria are the same ones `score` measures, in the same order of
  * importance, deliberately: a judge that ranked fluency over an untouched code
@@ -24,8 +25,8 @@ export type { Vote, Verdict } from "../../core/judge.js";
 
 export interface TranslationJudgeRequest {
   readonly provider: Provider;
-  /** Judge model ids, as `parseModels` left them. Empty is the default, not an error. */
-  readonly judges: readonly string[];
+  /** One entry per seat, as `parseSeats` left them. Empty is the default, not an error. */
+  readonly judges: readonly (readonly string[])[];
   /** The body being translated, as the thread wrote it. */
   readonly source: string;
   readonly to: Language;

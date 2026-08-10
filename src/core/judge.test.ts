@@ -62,7 +62,7 @@ function request(over: Partial<JudgeRequest<Candidate>> = {}): JudgeRequest<Cand
 describe("judge", () => {
   describe("when there is nothing for a panel to decide", () => {
     it("returns no winner when nothing was admitted", async () => {
-      const verdict = await judge(request({ candidates: [], judges: ["j"] }));
+      const verdict = await judge(request({ candidates: [], judges: [["j"]] }));
 
       expect(verdict.winner).toBeNull();
       expect(verdict.decidedBy).toBe("score");
@@ -72,7 +72,7 @@ describe("judge", () => {
       const provider = answering({ j: "1" });
 
       const verdict = await judge(
-        request({ provider, candidates: [candidate("only")], judges: ["j"] }),
+        request({ provider, candidates: [candidate("only")], judges: [["j"]] }),
       );
 
       expect(verdict.winner?.model).toBe("only");
@@ -92,7 +92,7 @@ describe("judge", () => {
     it("elects the candidate it picked, over the one the score ranked first", async () => {
       const provider = answering({ j: "2" });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.winner?.model).toBe("second");
       expect(verdict.decidedBy).toBe("judges");
@@ -102,7 +102,7 @@ describe("judge", () => {
     it("says the score decided when the judge failed", async () => {
       const provider = answering({ j: { ok: false, model: "j", reason: "quota exhausted" } });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.winner?.model).toBe("first");
       expect(verdict.decidedBy).toBe("score");
@@ -120,7 +120,7 @@ describe("judge", () => {
     ])("counts %s", async (_case, content) => {
       const provider = answering({ j: content });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.votes).toEqual([{ model: "j", pick: "second" }]);
     });
@@ -132,7 +132,7 @@ describe("judge", () => {
       // answer.
       const provider = answering({ j: "2 is better than 1" });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.votes).toEqual([]);
       expect(verdict.failures[0]?.reason).toContain("named more than one candidate");
@@ -141,7 +141,7 @@ describe("judge", () => {
     it("counts a ballot that repeats the same candidate", async () => {
       const provider = answering({ j: "2, candidate 2" });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.votes).toEqual([{ model: "j", pick: "second" }]);
     });
@@ -149,7 +149,7 @@ describe("judge", () => {
     it("spoils a ballot naming no candidate, and says what it answered instead", async () => {
       const provider = answering({ j: "Both are good answers." });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.failures[0]?.reason).toBe(
         "answered with no candidate number — Both are good answers.",
@@ -160,7 +160,7 @@ describe("judge", () => {
       // A judge quoting a line number or a version from the body has not voted.
       const provider = answering({ j: "See section 7" });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.votes).toEqual([]);
       expect(verdict.failures[0]?.reason).toContain("answered with no candidate number");
@@ -169,7 +169,7 @@ describe("judge", () => {
     it("does not read a longer number as the candidate it starts with", async () => {
       const provider = answering({ j: "12" });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.votes).toEqual([]);
     });
@@ -181,7 +181,7 @@ describe("judge", () => {
         j: { ok: true, model: "j", content: "2", finishReason: "length" },
       });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.votes).toEqual([{ model: "j", pick: "second" }]);
     });
@@ -189,7 +189,7 @@ describe("judge", () => {
     it("shortens a long unusable answer before it reaches the log", async () => {
       const provider = answering({ j: "no".repeat(200) });
 
-      const verdict = await judge(request({ provider, judges: ["j"] }));
+      const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.failures[0]?.reason).toMatch(/…$/);
       expect(verdict.failures[0]?.reason.length).toBeLessThan(200);
@@ -204,7 +204,7 @@ describe("judge", () => {
       // orders, and `z` is the dissent the plurality overrules.
       const provider = answering({ x: "2", y: "1", z: "1" });
 
-      const verdict = await judge(request({ provider, judges: ["x", "y", "z"] }));
+      const verdict = await judge(request({ provider, judges: [["x"], ["y"], ["z"]] }));
 
       expect(verdict.votes).toEqual([
         { model: "x", pick: "second" },
@@ -217,7 +217,7 @@ describe("judge", () => {
     it("leaves the better-scoring candidate in front when the panel splits evenly", async () => {
       const provider = answering({ x: "2", y: "2" });
 
-      const verdict = await judge(request({ provider, judges: ["x", "y"] }));
+      const verdict = await judge(request({ provider, judges: [["x"], ["y"]] }));
 
       expect(verdict.votes.map((vote) => vote.pick)).toEqual(["second", "first"]);
       expect(verdict.winner?.model).toBe("first");
@@ -229,7 +229,7 @@ describe("judge", () => {
     it("decides on the judges that answered, without retrying the ones that did not", async () => {
       const provider = answering({ x: { ok: false, model: "x", reason: "quota" }, y: "1" });
 
-      const verdict = await judge(request({ provider, judges: ["x", "y"] }));
+      const verdict = await judge(request({ provider, judges: [["x"], ["y"]] }));
 
       const asked = vi.mocked(provider.complete).mock.calls.map(([model]) => model);
       expect(asked).toEqual(["x", "y"]);
@@ -242,7 +242,7 @@ describe("judge", () => {
       // reason a quorum means anything.
       const provider = answering({ x: "1", y: "1", z: "1" });
 
-      await judge(request({ provider, judges: ["x", "y", "z"] }));
+      await judge(request({ provider, judges: [["x"], ["y"], ["z"]] }));
 
       expect(provider.complete).toHaveBeenCalledTimes(3);
     });
@@ -255,7 +255,7 @@ describe("judge", () => {
       await judge(
         request({
           provider,
-          judges: ["x", "y", "z"],
+          judges: [["x"], ["y"], ["z"]],
           candidates: [candidate("first"), candidate("second"), candidate("third")],
         }),
       );
@@ -267,12 +267,13 @@ describe("judge", () => {
     });
 
     it("keeps every candidate on every ballot, whatever the seat", async () => {
-      const provider = answering({ y: "1" });
+      const provider = answering({ x: "1", y: "1" });
 
       await judge(
-        request({ provider, judges: ["y", "y"], candidates: [candidate("a"), candidate("b")] }),
+        request({ provider, judges: [["x"], ["y"]], candidates: [candidate("a"), candidate("b")] }),
       );
 
+      expect(provider.complete).toHaveBeenCalledTimes(2);
       for (const [, messages] of vi.mocked(provider.complete).mock.calls) {
         expect(messages[0]?.content).toContain("An answer from a.");
         expect(messages[0]?.content).toContain("An answer from b.");
@@ -285,13 +286,146 @@ describe("judge", () => {
       const provider = answering({ j: "1" });
       const duty = vi.fn(ballot);
 
-      await judge(request({ provider, judges: ["j"], ballot: duty }));
+      await judge(request({ provider, judges: [["j"]], ballot: duty }));
 
       expect(duty).toHaveBeenCalledTimes(1);
       expect(vi.mocked(provider.complete).mock.calls[0]?.[1]).toEqual(duty.mock.results[0]?.value);
     });
   });
+
+  describe("a seat with more than one model in it", () => {
+    it("does not ask the fallback when the seat's first model voted", async () => {
+      const provider = answering({ a: "1", a2: "1" });
+
+      const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
+
+      expect(asked(provider)).toEqual(["a"]);
+      expect(verdict.votes).toEqual([{ model: "a", pick: "first" }]);
+    });
+
+    it("falls back when the seat's first model could not be reached", async () => {
+      const provider = answering({ a: { ok: false, model: "a", reason: "quota" }, a2: "1" });
+
+      const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
+
+      expect(asked(provider)).toEqual(["a", "a2"]);
+      expect(verdict.votes).toEqual([{ model: "a2", pick: "first" }]);
+    });
+
+    it("falls back when the seat's first model answered without choosing", async () => {
+      // A request spent on "both are good" leaves the seat exactly as empty as
+      // a request that never connected, and the fallback is what empty is for.
+      const provider = answering({ a: "Both are good answers.", a2: "2" });
+
+      const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
+
+      expect(asked(provider)).toEqual(["a", "a2"]);
+      expect(verdict.votes).toEqual([{ model: "a2", pick: "second" }]);
+      expect(verdict.failures[0]?.reason).toContain("answered with no candidate number");
+    });
+
+    it("casts one vote however far down the chain it had to go", async () => {
+      const provider = answering({
+        a: { ok: false, model: "a", reason: "quota" },
+        a2: { ok: false, model: "a2", reason: "quota" },
+        a3: "1",
+      });
+
+      const verdict = await judge(request({ provider, judges: [["a", "a2", "a3"]] }));
+
+      expect(verdict.votes).toHaveLength(1);
+      expect(verdict.failures).toHaveLength(2);
+    });
+
+    it("reports every model it rotated past, so the log names the whole chain", async () => {
+      const provider = answering({ a: { ok: false, model: "a", reason: "quota" }, a2: "1" });
+
+      const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
+
+      expect(verdict.failures).toEqual([{ ok: false, model: "a", reason: "quota" }]);
+    });
+
+    it("leaves the score deciding when the whole chain is exhausted", async () => {
+      const provider = answering({
+        a: { ok: false, model: "a", reason: "quota" },
+        a2: { ok: false, model: "a2", reason: "quota" },
+      });
+
+      const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
+
+      expect(verdict.winner?.model).toBe("first");
+      expect(verdict.decidedBy).toBe("score");
+    });
+  });
+
+  describe("one model, one vote", () => {
+    it("skips a model a later seat names when an earlier seat already voted with it", async () => {
+      // `a, a|b` on the morning nothing is wrong. Counting `a` twice would be a
+      // plurality of one model.
+      const provider = answering({ a: "1", b: "1" });
+
+      const verdict = await judge(request({ provider, judges: [["a"], ["a", "b"]] }));
+
+      expect(asked(provider)).toEqual(["a", "b"]);
+      // Seat 1 is shown [second, first], so its "1" is a vote for `second`.
+      expect(verdict.votes).toEqual([
+        { model: "a", pick: "first" },
+        { model: "b", pick: "second" },
+      ]);
+    });
+
+    it("skips a model a later seat names when an earlier seat already rotated past it", async () => {
+      const provider = answering({
+        a: { ok: false, model: "a", reason: "quota" },
+        b: "1",
+        c: "1",
+      });
+
+      await judge(
+        request({
+          provider,
+          judges: [
+            ["a", "b"],
+            ["a", "c"],
+          ],
+        }),
+      );
+
+      // `a` is asked once, by the seat that reached it first. Quota does not
+      // clear inside a run, so the second seat's copy of it is not a chance.
+      expect(asked(provider)).toEqual(["a", "b", "c"]);
+    });
+
+    it("casts nothing for a seat every model of which is spoken for, and says so", async () => {
+      const provider = answering({ a: "1" });
+
+      const verdict = await judge(request({ provider, judges: [["a"], ["a"]] }));
+
+      expect(asked(provider)).toEqual(["a"]);
+      expect(verdict.votes).toHaveLength(1);
+      expect(verdict.failures).toEqual([
+        { ok: false, model: "a", reason: expect.stringContaining("seat cast nothing") as string },
+      ]);
+    });
+
+    it("says nothing about a seat that names no model at all", async () => {
+      // Unreachable through `parseSeats`, which drops an empty seat — and a
+      // duty builds this request itself, so the type is the only thing between
+      // an empty seat and a failure naming a model that is the empty string.
+      const provider = answering({ a: "1" });
+
+      const verdict = await judge(request({ provider, judges: [["a"], []] }));
+
+      expect(verdict.failures).toEqual([]);
+      expect(verdict.votes).toHaveLength(1);
+    });
+  });
 });
+
+/** The models a provider was asked, in the order it was asked them. */
+function asked(provider: Provider): string[] {
+  return vi.mocked(provider.complete).mock.calls.map(([model]) => model);
+}
 
 /** The candidate presented first on a ballot. */
 function leading(text: string): string {

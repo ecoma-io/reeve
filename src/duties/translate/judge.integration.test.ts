@@ -112,7 +112,7 @@ describe("choosing between drafts a real run produced", () => {
 
     const verdict = await judge({
       provider: scripted({ "judge-a": "2", "judge-b": "1" }),
-      judges: ["judge-a", "judge-b"],
+      judges: [["judge-a"], ["judge-b"]],
       source: SOURCE,
       to: english,
       attempts: admitted,
@@ -134,7 +134,7 @@ describe("choosing between drafts a real run produced", () => {
     const provider = scripted({ "judge-a": "1" });
     const verdict = await judge({
       provider,
-      judges: ["judge-a"],
+      judges: [["judge-a"]],
       source: SOURCE,
       to: english,
       attempts: admitted,
@@ -154,7 +154,7 @@ describe("choosing between drafts a real run produced", () => {
 
     await judge({
       provider,
-      judges: ["judge-a"],
+      judges: [["judge-a"]],
       source: SOURCE,
       to: english,
       attempts: admitted,
@@ -171,7 +171,7 @@ describe("choosing between drafts a real run produced", () => {
 
     const verdict = await judge({
       provider: scripted({}),
-      judges: ["judge-a", "judge-b"],
+      judges: [["judge-a"], ["judge-b"]],
       source: SOURCE,
       to: english,
       attempts: admitted,
@@ -188,7 +188,7 @@ describe("choosing between drafts a real run produced", () => {
 
     const verdict = await judge({
       provider: scripted({ "judge-a": "1" }),
-      judges: ["judge-a"],
+      judges: [["judge-a"]],
       source: SOURCE,
       to: english,
       attempts: admitted,
