@@ -10,12 +10,19 @@ name: Issue translation
 # refuses to do anything. A workflow elsewhere writes the same path against a
 # tag: `uses: ecoma-io/reeve/translate@v1`.
 #
-# The provider is configured entirely through repository secrets — including the
-# endpoint and the model ids, which are not credentials. That is deliberate:
-# which provider this repository happens to have access to is nobody's business
-# but the maintainer's, and a public workflow log is a poor place to announce
-# it. The masking step below extends that to the ids the duty names in its own
-# warnings, which the runner would otherwise print in full.
+# The provider is configured entirely through organisation secrets — including
+# the endpoint and the model ids, which are not credentials. That is deliberate:
+# which provider this organisation happens to have access to is nobody's
+# business but the maintainer's, and a public workflow log is a poor place to
+# announce it. The masking step below extends that to the ids the duty names in
+# its own warnings, which the runner would otherwise print in full.
+#
+# The names sit on two tiers, because they change on two different schedules.
+# `ECOMA_LLM_*` is the endpoint and its key: one provider, shared by every
+# repository in the organisation that calls a model, so rotating a key is one
+# edit rather than one per consumer. `ECOMA_REEVE_*` is what this repository
+# asks that provider for — ids its scoring has been measured against, and a
+# judge panel no other consumer has a concept of. CONTRIBUTING has the table.
 
 on:
   # `edited` is what makes a corrected issue get a corrected translation, and it
@@ -56,13 +63,13 @@ jobs:
     # lets a fork — which has no provider configured and never will — skip the
     # work instead of failing it, while still saying so out loud.
     env:
-      PROVIDER_MODELS: ${{ secrets.PROVIDER_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - if: env.PROVIDER_MODELS == ''
+      - if: env.MODELS == ''
         run: echo "::notice::No provider is configured for this repository, so nothing was translated."
 
       # The duty masks its own api key, and cannot mask what it does not know is
@@ -70,25 +77,25 @@ jobs:
       # ("this model failed, that judge voted"), and the runner only masks a
       # secret's exact value — the whole list — never the ids inside it. So each
       # one is registered here, before the step that can log it.
-      - if: env.PROVIDER_MODELS != ''
+      - if: env.MODELS != ''
         name: Keep the provider out of the log
         env:
-          JUDGE_MODELS: ${{ secrets.PROVIDER_JUDGE_MODELS }}
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          for id in $(printf '%s,%s' "$PROVIDER_MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
+          for id in $(printf '%s,%s' "$MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
 
-      - if: env.PROVIDER_MODELS != ''
+      - if: env.MODELS != ''
         uses: ./translate
         with:
           number: ${{ github.event.issue.number || inputs.number }}
-          base-url: ${{ secrets.PROVIDER_BASE_URL }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           # Empty when the endpoint is keyless, which is a supported
           # configuration rather than a missing secret.
-          api-key: ${{ secrets.PROVIDER_API_KEY }}
-          models: ${{ secrets.PROVIDER_MODELS }}
-          judge-models: ${{ secrets.PROVIDER_JUDGE_MODELS }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
           # Two answers and a vote between them: the quality lever that exists
           # when a stronger model is not on the menu, which is exactly the setup
           # this repository is dogfooding.

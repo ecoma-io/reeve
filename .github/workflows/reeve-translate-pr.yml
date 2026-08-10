@@ -1,7 +1,8 @@
 name: Pull request translation
 
 # The pull request half of the dogfooding pair; `reeve-translate-issue.yml`
-# explains the shared shape, the `./translate` path and the masking step.
+# explains the shared shape, the `./translate` path, the two secret tiers and
+# the masking step.
 
 on:
   # Not `pull_request`: a fork's token is read-only there, so the job could
@@ -32,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PROVIDER_MODELS: ${{ secrets.PROVIDER_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
     steps:
       # No `ref:` here, deliberately. `pull_request_target` already checks out
       # the base branch, and that default IS the guarantee this job needs: it
@@ -44,24 +45,24 @@ jobs:
         with:
           persist-credentials: false
 
-      - if: env.PROVIDER_MODELS == ''
+      - if: env.MODELS == ''
         run: echo "::notice::No provider is configured for this repository, so nothing was translated."
 
-      - if: env.PROVIDER_MODELS != ''
+      - if: env.MODELS != ''
         name: Keep the provider out of the log
         env:
-          JUDGE_MODELS: ${{ secrets.PROVIDER_JUDGE_MODELS }}
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          for id in $(printf '%s,%s' "$PROVIDER_MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
+          for id in $(printf '%s,%s' "$MODELS" "$JUDGE_MODELS" | tr ',' '\n'); do
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
 
-      - if: env.PROVIDER_MODELS != ''
+      - if: env.MODELS != ''
         uses: ./translate
         with:
           number: ${{ github.event.pull_request.number || inputs.number }}
-          base-url: ${{ secrets.PROVIDER_BASE_URL }}
-          api-key: ${{ secrets.PROVIDER_API_KEY }}
-          models: ${{ secrets.PROVIDER_MODELS }}
-          judge-models: ${{ secrets.PROVIDER_JUDGE_MODELS }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
           drafts: "2"
