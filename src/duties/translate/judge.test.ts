@@ -45,14 +45,14 @@ function request(over: Partial<TranslationJudgeRequest> = {}): TranslationJudgeR
 /** The messages the first judge was sent. */
 async function ballotOf(over: Partial<TranslationJudgeRequest> = {}): Promise<string[]> {
   const provider = answering({ j: "1" });
-  await judge(request({ ...over, provider, judges: ["j"] }));
+  await judge(request({ ...over, provider, judges: [["j"]] }));
   const [call] = vi.mocked(provider.complete).mock.calls;
   return (call?.[1] ?? []).map((message) => message.content);
 }
 
 describe("judge", () => {
   it("hands the panel the drafts, and elects what it picked", async () => {
-    const verdict = await judge(request({ provider: answering({ j: "2" }), judges: ["j"] }));
+    const verdict = await judge(request({ provider: answering({ j: "2" }), judges: [["j"]] }));
 
     expect(verdict.winner?.model).toBe("second");
     expect(verdict.decidedBy).toBe("judges");
@@ -62,7 +62,7 @@ describe("judge", () => {
     // The panel is generic and cannot know what a candidate is; naming them is
     // this module's half of that contract, and it is what makes `votes`
     // publishable in a thread.
-    const verdict = await judge(request({ provider: answering({ j: "2" }), judges: ["j"] }));
+    const verdict = await judge(request({ provider: answering({ j: "2" }), judges: [["j"]] }));
 
     expect(verdict.votes).toEqual([{ model: "j", pick: "second" }]);
   });

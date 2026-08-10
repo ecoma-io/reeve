@@ -106,13 +106,19 @@ not tolerated:
       model-b-free
       model-c-free
     drafts: 3
-    judge-models: model-a-free
+    judge-models: model-a-free | model-b-free
 ```
 
 Free models are individually weak and operationally flaky. Both are handled by
 the same machinery: **flaky** by rotation — a model that fails is passed, never
 retried, because a provider limit does not clear inside one run — and **weak** by
 drafts and deterministic scoring.
+
+The judge above is one seat with a fallback, not two votes: `model-b-free` is
+asked only on the run where `model-a-free` is out of quota, and it costs one
+request either way. Spending a second request on a second opinion is what a
+second seat is for, written `model-a-free, model-b-free` — worth knowing before
+you double a free tier's daily call count by accident.
 
 Give a keyless configuration more models than you think it needs. The list is the
 budget.

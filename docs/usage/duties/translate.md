@@ -72,7 +72,7 @@ description.
 | `models`            | _required_   | Order is preference, not last resort. Put the model you actually want first.                                          |
 | `languages`         | `en, vi, zh` | What to translate **into**. Says nothing about what an author may write in. See [Languages](../languages.md).         |
 | `drafts`            | `1`          | Attempts per language, scored deterministically, best published. The quality lever that costs calls instead of money. |
-| `judge-models`      | _empty_      | A panel, not a fallback list. Independent of `drafts` — drafts with no judge is a perfectly good setting.             |
+| `judge-models`      | _empty_      | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.              |
 | `max-body-chars`    | `6000`       | Bounds what is **read from the thread**, not what the model answers. Measured against the author's half only.         |
 | `translate-replies` | `false`      | Off because the ceiling is real. See below.                                                                           |
 | `show-attribution`  | `none`       | How much of the machinery the published block names. See below.                                                       |
@@ -82,6 +82,42 @@ description.
 tail is left behind and the published block says so rather than pretending it
 translated everything. Raising the limit later translates the rest, because the
 fingerprint is over the part that was actually read.
+
+### `judge-models` has two levels, and they mean opposite things
+
+`models` is one rotation chain: the first model that answers is used and the rest
+are spare. `judge-models` is not that, and the difference is the whole reason a
+panel means anything.
+
+```yaml
+judge-models: |
+  fast-model | fast-model-backup
+  careful-model
+  third-model | third-backup | third-last-resort
+```
+
+Comma or newline separates **seats**. Every seat is asked, so the above is three
+votes and three requests per language. `|` separates the models **inside** one
+seat, and they are that seat's availability rather than more votes: the second
+is asked only when the first could not deliver the seat's vote, and the seat
+casts one ballot however far down it had to go.
+
+A seat rotates past a model that answered as readily as one that did not. A judge
+asked for a single digit that replies "both are excellent" has spent a request
+and produced nothing, which is exactly what the next model in the seat is for.
+
+Two rules keep a plurality honest:
+
+- **One model, one vote.** A model that has already voted, or already failed, is
+  skipped by every later seat. Without it, `a | b` and `b | c` both land on `b`
+  on the morning `a` is rate limited, and a majority counted over one model
+  answering twice is not a majority.
+- **A seat that cannot be filled casts nothing**, and says so in the log. Three
+  configured seats quietly becoming two is precisely the thing you want told.
+
+Nothing here is required. `judge-models: model-a` is one seat with no fallback,
+which is what a plain list has always meant and remains a perfectly good setting.
+So is leaving it empty.
 
 ## Outputs
 

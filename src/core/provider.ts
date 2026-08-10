@@ -4,7 +4,7 @@
  *
  * Two rules shape everything here.
  *
- * **Nothing throws.** Every way a request can go wrong comes back as
+ * **No request failure throws.** Every way a request can go wrong comes back as
  * `{ ok: false, reason }`, because the caller's response to a failure is always
  * the same — try the next model — and an exception would make that the caller's
  * control flow instead of its decision. A `reason` is written to be read in a
@@ -87,18 +87,66 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const EXCERPT_CHARS = 200;
 
 /**
- * Splits a `models` or `judge-models` input into ids to try in order.
+ * Splits a `models` input into ids to try in order — one chain, not a set of
+ * groups.
  *
  * Exact repeats are dropped. Rotation only ever reaches a model because the one
  * before it failed, so trying the same id twice cannot succeed where it just
  * did not — it spends a request on a foregone conclusion, which on the free
  * tier Reeve is built for is the request that mattered.
  *
- * An empty result is returned rather than refused: it is an error for `models`
- * and the default for `judge-models`, and only the caller knows which it holds.
+ * An empty result is returned rather than refused, because only the caller
+ * knows whether an empty list is a problem: `readShared` refuses one for
+ * `models`, and `parseSeats` returns one for a `judge-models` nobody set.
+ *
+ * `|` is refused rather than tolerated. It is the seat separator, and a
+ * `models` written with it is somebody expecting groups here — which is a
+ * misunderstanding worth stopping on the first run rather than one whose only
+ * symptom is that the ids all ran together into one that no provider has.
  */
 export function parseModels(raw: string): string[] {
-  return [...new Set(parseList(raw))];
+  const ids = [...new Set(parseList(raw))];
+
+  const grouped = ids.find((id) => id.includes("|"));
+  if (grouped !== undefined) {
+    throw new Error(
+      "models: `|` groups fallbacks into one judge seat and means nothing here — " +
+        "`models` is already a single rotation chain, so separate its ids with `,`. " +
+        `Got \`${grouped}\`.`,
+    );
+  }
+
+  return ids;
+}
+
+/**
+ * Splits a `judge-models` input into seats, each its own chain to rotate
+ * through.
+ *
+ * `,` and a newline separate seats; `|` separates the models inside one. So
+ * `a | b, c` is two votes, and the second model of the first seat is only ever
+ * asked because the first one could not deliver a vote.
+ *
+ * The two levels exist because a panel and a rotation want opposite things from
+ * a list, and both are legitimate. A seat is a voter, so more seats mean more
+ * votes; a chain is availability, so more links mean the same one vote survives
+ * a model being out of quota. Writing them on one axis makes you choose, and a
+ * maintainer configuring free models needs both.
+ *
+ * An input with no `|` in it parses to one seat per id, which is what it always
+ * meant — this widens the syntax rather than changing it.
+ */
+export function parseSeats(raw: string): string[][] {
+  return parseList(raw)
+    .map((seat) => [
+      ...new Set(
+        seat
+          .split("|")
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0),
+      ),
+    ])
+    .filter((seat) => seat.length > 0);
 }
 
 export function createProvider(config: ProviderConfig): Provider {

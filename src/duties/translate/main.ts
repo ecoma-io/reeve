@@ -49,7 +49,7 @@ import { createLanguagePicker, detectLanguage, residue } from "../../core/detect
 import { createReply, createThread, listReplies, type Thread } from "../../core/forge.js";
 import { readShared, whole } from "../../core/inputs.js";
 import { parseLanguages, type Language } from "../../core/languages.js";
-import { createProvider, parseModels, type Provider } from "../../core/provider.js";
+import { createProvider, parseSeats, type Provider } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
 
 import { translate } from "./draft.js";
@@ -68,7 +68,7 @@ interface Settings {
   readonly number: number;
   readonly models: readonly string[];
   readonly languages: readonly Language[];
-  readonly judges: readonly string[];
+  readonly judges: readonly (readonly string[])[];
   readonly drafts: number;
   readonly maxBodyChars: number;
   readonly replies: boolean;
@@ -93,7 +93,7 @@ function readSettings(): Settings {
   return {
     ...shared,
     languages: parseLanguages(core.getInput("languages", { required: true })),
-    judges: parseModels(core.getInput("judge-models")),
+    judges: parseSeats(core.getInput("judge-models")),
     drafts: whole("drafts", core.getInput("drafts")),
     maxBodyChars: whole("max-body-chars", core.getInput("max-body-chars")),
     replies: core.getBooleanInput("translate-replies"),

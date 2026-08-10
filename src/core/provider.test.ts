@@ -4,6 +4,7 @@ import { parseList } from "./list.js";
 import {
   createProvider,
   parseModels,
+  parseSeats,
   rotateModels,
   type Completion,
   type Failure,
@@ -107,6 +108,47 @@ describe("parseModels", () => {
     // the caller knows which one it is holding.
     mockedParseList.mockReturnValue([]);
     expect(parseModels("")).toEqual([]);
+  });
+
+  it("refuses a seat separator rather than running the ids it groups together", () => {
+    // Left alone, `a|b` is one id no provider has, and the only symptom is
+    // every model failing for a reason that names an id nobody configured.
+    expect(() => parseModels("a|b,c")).toThrow(/`models` is already a single rotation chain/);
+  });
+});
+
+describe("parseSeats", () => {
+  it("reads an input with no seat separator as one seat per id, as it always meant", () => {
+    expect(parseSeats("a,b,c")).toEqual([["a"], ["b"], ["c"]]);
+  });
+
+  it("groups the models of one seat into one chain", () => {
+    expect(parseSeats("a|a2,b")).toEqual([["a", "a2"], ["b"]]);
+  });
+
+  it("trims around the seat separator, which is written with spaces far more often than not", () => {
+    expect(parseSeats("a | a2 | a3")).toEqual([["a", "a2", "a3"]]);
+  });
+
+  it("drops an exact repeat inside a seat, which could only ever be one wasted request", () => {
+    expect(parseSeats("a|b|a")).toEqual([["a", "b"]]);
+  });
+
+  it("keeps a repeat across seats, because only the run knows whether it costs a vote", () => {
+    // Two seats naming the same model is a configuration the panel resolves at
+    // the point it knows which models are still unspent — `a|b` and `b|c` are
+    // two votes on a good morning and this is the same shape.
+    expect(parseSeats("a,a")).toEqual([["a"], ["a"]]);
+  });
+
+  it("drops a seat with nothing in it rather than seating a judge with no model", () => {
+    mockedParseList.mockReturnValue(["a", "|", "b"]);
+    expect(parseSeats("a,|,b")).toEqual([["a"], ["b"]]);
+  });
+
+  it("returns nothing for the empty input, which is the default rather than an error", () => {
+    mockedParseList.mockReturnValue([]);
+    expect(parseSeats("")).toEqual([]);
   });
 });
 

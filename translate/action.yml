@@ -79,10 +79,14 @@ inputs:
 
   judge-models:
     description: >-
-      A panel of models asked which draft reads best, comma or newline
-      separated. Every one is asked — this is a panel, not a fallback list —
-      and the deterministic score breaks every tie. Empty means no panel, which
-      is the default and a perfectly good setting.
+      A panel of models asked which draft reads best. Comma or newline
+      separates seats and every seat is asked — this is a panel, not a fallback
+      list — and the deterministic score breaks every tie. Within one seat, `|`
+      names models to fall back through: `a | b, c` is two votes, and `b` is
+      asked only when `a` could not deliver the first seat's vote. A model that
+      has already voted or already failed is skipped by every later seat, so one
+      model never counts twice. Empty means no panel, which is the default and a
+      perfectly good setting.
     required: false
     default: ""
 

@@ -11824,7 +11824,7 @@ var require_headers = __commonJS({
       while (j > i && isHTTPWhiteSpaceCharCode(potentialValue.charCodeAt(i))) ++i;
       return i === 0 && j === potentialValue.length ? potentialValue : potentialValue.substring(i, j);
     }
-    function fill(headers, object) {
+    function fill2(headers, object) {
       if (Array.isArray(object)) {
         for (let i = 0; i < object.length; ++i) {
           const header = object[i];
@@ -12049,7 +12049,7 @@ var require_headers = __commonJS({
         this.#guard = "none";
         if (init !== void 0) {
           init = webidl.converters.HeadersInit(init, "Headers contructor", "init");
-          fill(this, init);
+          fill2(this, init);
         }
       }
       // https://fetch.spec.whatwg.org/#dom-headers-append
@@ -12229,7 +12229,7 @@ var require_headers = __commonJS({
       });
     };
     module.exports = {
-      fill,
+      fill: fill2,
       // for test.
       compareHeaderName,
       Headers: Headers2,
@@ -12246,7 +12246,7 @@ var require_headers = __commonJS({
 var require_response = __commonJS({
   "node_modules/.pnpm/undici@6.28.0/node_modules/undici/lib/web/fetch/response.js"(exports, module) {
     "use strict";
-    var { Headers: Headers2, HeadersList, fill, getHeadersGuard, setHeadersGuard, setHeadersList } = require_headers();
+    var { Headers: Headers2, HeadersList, fill: fill2, getHeadersGuard, setHeadersGuard, setHeadersList } = require_headers();
     var { extractBody, cloneBody, mixinBody, hasFinalizationRegistry, streamRegistry, bodyUnusable } = require_body();
     var util = require_util();
     var nodeUtil = __require("node:util");
@@ -12550,7 +12550,7 @@ var require_response = __commonJS({
         response[kState].statusText = init.statusText;
       }
       if ("headers" in init && init.headers != null) {
-        fill(response[kHeaders], init.headers);
+        fill2(response[kHeaders], init.headers);
       }
       if (body) {
         if (nullBodyStatus.includes(response.status)) {
@@ -25156,7 +25156,21 @@ function findClosingRun(text, from, runLength) {
 var DEFAULT_TIMEOUT_MS = 12e4;
 var EXCERPT_CHARS = 200;
 function parseModels(raw) {
-  return [...new Set(parseList(raw))];
+  const ids = [...new Set(parseList(raw))];
+  const grouped = ids.find((id) => id.includes("|"));
+  if (grouped !== void 0) {
+    throw new Error(
+      `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${grouped}\`.`
+    );
+  }
+  return ids;
+}
+function parseSeats(raw) {
+  return parseList(raw).map((seat) => [
+    ...new Set(
+      seat.split("|").map((id) => id.trim()).filter((id) => id.length > 0)
+    )
+  ]).filter((seat) => seat.length > 0);
 }
 function createProvider(config) {
   const endpoint2 = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -25701,13 +25715,13 @@ async function translate(request2) {
   const attempts = [];
   const refused2 = [];
   const failures = [];
-  const exhausted = /* @__PURE__ */ new Set();
+  const exhausted2 = /* @__PURE__ */ new Set();
   for (let draft = 0; draft < drafts; draft += 1) {
-    const order = remaining(models, draft, exhausted);
+    const order = remaining(models, draft, exhausted2);
     if (order.length === 0) break;
     const rotation = await rotateModels(order, (model) => answer(provider, model, messages));
     for (const failure of rotation.failures) {
-      exhausted.add(failure.model);
+      exhausted2.add(failure.model);
       failures.push(failure);
     }
     if (!rotation.success) break;
@@ -25726,8 +25740,8 @@ async function translate(request2) {
     failures
   };
 }
-function remaining(models, draft, exhausted) {
-  const live = models.filter((model) => !exhausted.has(model));
+function remaining(models, draft, exhausted2) {
+  const live = models.filter((model) => !exhausted2.has(model));
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
 }
@@ -25790,22 +25804,48 @@ async function judge(request2) {
   const votes = [];
   const failures = [];
   const tally = /* @__PURE__ */ new Map();
-  for (const [seat, model] of judges.entries()) {
-    const shown = rotated(candidates, seat);
-    const answer2 = await provider.complete(model, ballot2(shown));
-    const counted = read(answer2, shown, by);
-    if (!counted.ok) {
-      failures.push(counted);
+  const spent = /* @__PURE__ */ new Set();
+  for (const [seat, chain] of judges.entries()) {
+    const order = chain.filter((model) => !spent.has(model));
+    if (order.length === 0) {
+      const collapsed = exhausted(chain);
+      if (collapsed !== null) failures.push(collapsed);
       continue;
     }
-    votes.push({ model, pick: counted.pick });
-    tally.set(counted.pick, (tally.get(counted.pick) ?? 0) + 1);
+    const shown = rotated(candidates, seat);
+    const cast = await fill(provider, order, shown, ballot2, by);
+    for (const failure of cast.failures) {
+      spent.add(failure.model);
+      failures.push(failure);
+    }
+    if (cast.vote === null) continue;
+    spent.add(cast.vote.model);
+    votes.push(cast.vote);
+    tally.set(cast.vote.pick, (tally.get(cast.vote.pick) ?? 0) + 1);
   }
   let elected = leader;
   for (const candidate of candidates) {
     if ((tally.get(by(candidate)) ?? 0) > (tally.get(by(elected)) ?? 0)) elected = candidate;
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
+}
+async function fill(provider, order, shown, ballot2, by) {
+  const failures = [];
+  for (const model of order) {
+    const counted = read(await provider.complete(model, ballot2(shown)), shown, by);
+    if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    failures.push(counted);
+  }
+  return { vote: null, failures };
+}
+function exhausted(chain) {
+  const [primary] = chain;
+  if (primary === void 0) return null;
+  return {
+    ok: false,
+    model: primary,
+    reason: "seat cast nothing \u2014 every model it names had already been asked by an earlier seat, so counting it again would be one model voting twice"
+  };
 }
 function rotated(candidates, start) {
   const at = start % candidates.length;
@@ -25972,7 +26012,7 @@ function readSettings() {
   return {
     ...shared2,
     languages: parseLanguages(getInput("languages", { required: true })),
-    judges: parseModels(getInput("judge-models")),
+    judges: parseSeats(getInput("judge-models")),
     drafts: whole("drafts", getInput("drafts")),
     maxBodyChars: whole("max-body-chars", getInput("max-body-chars")),
     replies: getBooleanInput("translate-replies"),

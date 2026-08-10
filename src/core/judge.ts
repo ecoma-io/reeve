@@ -11,11 +11,33 @@
  * never knows what is being judged — only that there are candidates, that they
  * arrived in rank order, and that a judge answers with a number.
  *
- * **A judge is a voter, not a fallback.** `models` is a list to rotate through
- * until one answers; `judge-models` is a panel, and every member is asked. A
- * judge that fails or answers unusably loses its vote and the rest still
- * decide. Rotating instead would make the second judge a stand-in for the
- * first, and a panel of stand-ins is one judge with extra names.
+ * **A seat is a voter; the models inside it are that voter's availability.**
+ * `judge-models` is a panel — `a, b, c` is three votes and every one of them is
+ * asked, where `models` would have stopped at the first answer. Rotating the
+ * panel instead would make the second judge a stand-in for the first, and a
+ * panel of stand-ins is one judge with extra names.
+ *
+ * A seat may still name more than one model, written `a | b`. That is not a
+ * second vote and never becomes one: `b` is asked only when `a` could not
+ * deliver the seat's vote at all, and the seat casts one ballot either way. The
+ * distinction is worth the syntax because the two things fail differently — a
+ * panel is about disagreement, and a chain is about a free tier being out of
+ * quota at nine in the morning.
+ *
+ * **A seat rotates past a model that answered as readily as one that did not.**
+ * A judge asked for a single digit that replies "both are good" has spent a
+ * request and produced nothing, which is what the next model in the seat is
+ * for. The alternative — spend the request, lose the vote, leave the fallback
+ * untouched — treats "the provider was down" and "the model would not answer
+ * the question" as different kinds of silence, and to the panel they are the
+ * same kind.
+ *
+ * **One model casts one vote, whatever the seats say.** A model that has
+ * already voted, and a model that has already failed, are both skipped by every
+ * later seat. Without that, `a | b, b | c` is two seats that both resolve to
+ * `b` on the morning `a` is rate-limited, and a plurality counted over one
+ * model answering twice is not a plurality. A seat whose every model is spoken
+ * for casts nothing and says so.
  *
  * **The score breaks every tie.** With no judges configured, no vote cast, or
  * the panel split evenly, the ranking that came in decides. So a judge can only
@@ -66,8 +88,12 @@ export interface Verdict<T> {
 
 export interface JudgeRequest<T> {
   readonly provider: Provider;
-  /** Judge model ids, as `parseModels` left them. Empty is the default, not an error. */
-  readonly judges: readonly string[];
+  /**
+   * One entry per seat, each the models that seat may be filled by in
+   * preference order, as `parseSeats` left them. Empty is the default, not an
+   * error.
+   */
+  readonly judges: readonly (readonly string[])[];
   /** The admitted candidates, best score first. */
   readonly candidates: readonly T[];
   /**
@@ -94,21 +120,34 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
   const votes: Vote[] = [];
   const failures: Failure[] = [];
   const tally = new Map<string, number>();
+  // Every model an earlier seat has finished with, whichever way it finished.
+  // One set rather than two: "already voted" and "already failed" are different
+  // reasons and the same instruction — do not ask this model again.
+  const spent = new Set<string>();
 
-  for (const [seat, model] of judges.entries()) {
-    // Rotated per seat, so the candidate the score put first does not lead
-    // every ballot. The order is this judge's alone, and the number it answers
-    // with is read back through the same order.
-    const shown = rotated(candidates, seat);
-    const answer = await provider.complete(model, ballot(shown));
-    const counted = read(answer, shown, by);
-    if (!counted.ok) {
-      failures.push(counted);
+  for (const [seat, chain] of judges.entries()) {
+    const order = chain.filter((model) => !spent.has(model));
+    if (order.length === 0) {
+      const collapsed = exhausted(chain);
+      if (collapsed !== null) failures.push(collapsed);
       continue;
     }
 
-    votes.push({ model, pick: counted.pick });
-    tally.set(counted.pick, (tally.get(counted.pick) ?? 0) + 1);
+    // Rotated per seat, so the candidate the score put first does not lead
+    // every ballot. The order is this seat's alone, and the number its judge
+    // answers with is read back through the same order.
+    const shown = rotated(candidates, seat);
+    const cast = await fill(provider, order, shown, ballot, by);
+
+    for (const failure of cast.failures) {
+      spent.add(failure.model);
+      failures.push(failure);
+    }
+    if (cast.vote === null) continue;
+
+    spent.add(cast.vote.model);
+    votes.push(cast.vote);
+    tally.set(cast.vote.pick, (tally.get(cast.vote.pick) ?? 0) + 1);
   }
 
   // Walked in score order and taken on strictly more, so an even split leaves
@@ -124,6 +163,61 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
   }
 
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
+}
+
+/** What one seat produced: at most one vote, and everything it rotated past. */
+interface Cast {
+  readonly vote: Vote | null;
+  readonly failures: readonly Failure[];
+}
+
+/**
+ * One seat filled: the first of its models that delivers a vote.
+ *
+ * The same shape as `rotateModels` and deliberately not a call to it, because
+ * the two stop on different things. Rotation stops at a usable *completion*; a
+ * seat stops at a usable *vote*, and the gap between them is a model that
+ * answered the question it was not asked. Passing that stricter predicate into
+ * the shared helper would mean returning the completion and reading it a second
+ * time to recover the choice, which is a worse trade than four lines.
+ */
+async function fill<T>(
+  provider: Provider,
+  order: readonly string[],
+  shown: readonly T[],
+  ballot: (shown: readonly T[]) => readonly Message[],
+  by: (candidate: T) => string,
+): Promise<Cast> {
+  const failures: Failure[] = [];
+
+  for (const model of order) {
+    const counted = read(await provider.complete(model, ballot(shown)), shown, by);
+    if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    failures.push(counted);
+  }
+
+  return { vote: null, failures };
+}
+
+/**
+ * A seat every one of whose models an earlier seat already spoke for.
+ *
+ * Reported rather than skipped quietly: a panel that was configured as three
+ * votes and cast two is a thing the maintainer who wrote the configuration
+ * needs to see, and the run it happens on is the one where a model was rate
+ * limited — which is exactly when nobody is watching for it.
+ */
+function exhausted(chain: readonly string[]): Failure | null {
+  const [primary] = chain;
+  if (primary === undefined) return null;
+
+  return {
+    ok: false,
+    model: primary,
+    reason:
+      "seat cast nothing — every model it names had already been asked by an earlier seat, " +
+      "so counting it again would be one model voting twice",
+  };
 }
 
 /** The list starting at `start` and wrapping, leaving every entry present once. */
