@@ -27,6 +27,11 @@ on:
     - cron: "0 4 * * 1"
   workflow_dispatch: {}
 
+# Nothing, at the top — each job below declares exactly what its own duty
+# uses, and a workflow-level default would be a grant both jobs inherit
+# whether they need it or not.
+permissions: {}
+
 jobs:
   triage:
     name: Sweep — triage
