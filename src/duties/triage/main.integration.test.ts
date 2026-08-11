@@ -43,6 +43,9 @@ const BUNDLE = join(DUTY, "dist", "index.js");
 /** Long enough, and English enough, to be identified without a model. */
 const REPORT =
   "The dark mode toggle does not persist after a page reload; it should be written to local storage.";
+/** The same report, in Vietnamese — diacritical enough to be told from `REPORT` by script alone. */
+const VIETNAMESE_REPORT =
+  "Nút chuyển chế độ tối không lưu lại sau khi tải lại trang, tôi nghĩ nó nên được ghi vào bộ nhớ cục bộ.";
 
 /** A taxonomy in the shape a maintainer writes one, granting only what it says. */
 const WARRANT = [
@@ -772,6 +775,34 @@ describe("the action", () => {
 
     expect(run.outputs.language).toBe("English");
     expect(stub.asked).toHaveLength(1);
+  });
+
+  it("still takes languages from the input when the warrant never mentions the key", async () => {
+    // `WARRANT` above carries no `languages:` key, so this is today's
+    // behaviour, unchanged: the input alone decides what detection is choosing
+    // between, exactly as it did before the warrant could speak on this at all.
+    stub.answer = triaging(verdict());
+    stub.title = "Không thể đăng nhập";
+    stub.body = VIETNAMESE_REPORT;
+
+    const run = await runAction(stub, { languages: "vi" });
+
+    expect(run.outputs.language).toBe("Tiếng Việt");
+    expect(run.log).not.toContain("languages: read from");
+  });
+
+  it("lets the warrant's own `languages:` key win over the input, and says so once", async () => {
+    stub.answer = triaging(verdict());
+    await writeFile(warrantPath, `${WARRANT}\nlanguages:\n  - en\n`);
+
+    const run = await runAction(stub, { languages: "vi" });
+
+    // The report is English; had the input's `vi` been consulted instead, the
+    // model would have been asked to pick between only Vietnamese and nothing,
+    // which detection still recognises correctly. The point of this case is
+    // the log line: it must name why `vi` was never even considered.
+    expect(run.outputs.language).toBe("English");
+    expect(run.log).toContain(`languages: read from \`${warrantPath}\`'s \`languages:\` key`);
   });
 
   it("tells the model what language it is reading", async () => {
