@@ -14,7 +14,12 @@ function answering(answers: Record<string, string | Completion>): Provider {
     complete: vi.fn((model: string): Promise<Completion> => {
       const answer = answers[model];
       if (answer === undefined) {
-        return Promise.resolve({ ok: false, model, reason: "not configured in this case" });
+        return Promise.resolve({
+          ok: false,
+          model,
+          reason: "not configured in this case",
+          kind: "protocol",
+        });
       }
       return Promise.resolve(
         typeof answer === "string"
@@ -100,13 +105,17 @@ describe("judge", () => {
     });
 
     it("says the score decided when the judge failed", async () => {
-      const provider = answering({ j: { ok: false, model: "j", reason: "quota exhausted" } });
+      const provider = answering({
+        j: { ok: false, model: "j", reason: "quota exhausted", kind: "protocol" },
+      });
 
       const verdict = await judge(request({ provider, judges: [["j"]] }));
 
       expect(verdict.winner?.model).toBe("first");
       expect(verdict.decidedBy).toBe("score");
-      expect(verdict.failures).toEqual([{ ok: false, model: "j", reason: "quota exhausted" }]);
+      expect(verdict.failures).toEqual([
+        { ok: false, model: "j", reason: "quota exhausted", kind: "protocol" },
+      ]);
     });
   });
 
@@ -227,7 +236,10 @@ describe("judge", () => {
     });
 
     it("decides on the judges that answered, without retrying the ones that did not", async () => {
-      const provider = answering({ x: { ok: false, model: "x", reason: "quota" }, y: "1" });
+      const provider = answering({
+        x: { ok: false, model: "x", reason: "quota", kind: "protocol" },
+        y: "1",
+      });
 
       const verdict = await judge(request({ provider, judges: [["x"], ["y"]] }));
 
@@ -304,7 +316,10 @@ describe("judge", () => {
     });
 
     it("falls back when the seat's first model could not be reached", async () => {
-      const provider = answering({ a: { ok: false, model: "a", reason: "quota" }, a2: "1" });
+      const provider = answering({
+        a: { ok: false, model: "a", reason: "quota", kind: "protocol" },
+        a2: "1",
+      });
 
       const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
 
@@ -326,8 +341,8 @@ describe("judge", () => {
 
     it("casts one vote however far down the chain it had to go", async () => {
       const provider = answering({
-        a: { ok: false, model: "a", reason: "quota" },
-        a2: { ok: false, model: "a2", reason: "quota" },
+        a: { ok: false, model: "a", reason: "quota", kind: "protocol" },
+        a2: { ok: false, model: "a2", reason: "quota", kind: "protocol" },
         a3: "1",
       });
 
@@ -338,17 +353,22 @@ describe("judge", () => {
     });
 
     it("reports every model it rotated past, so the log names the whole chain", async () => {
-      const provider = answering({ a: { ok: false, model: "a", reason: "quota" }, a2: "1" });
+      const provider = answering({
+        a: { ok: false, model: "a", reason: "quota", kind: "protocol" },
+        a2: "1",
+      });
 
       const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
 
-      expect(verdict.failures).toEqual([{ ok: false, model: "a", reason: "quota" }]);
+      expect(verdict.failures).toEqual([
+        { ok: false, model: "a", reason: "quota", kind: "protocol" },
+      ]);
     });
 
     it("leaves the score deciding when the whole chain is exhausted", async () => {
       const provider = answering({
-        a: { ok: false, model: "a", reason: "quota" },
-        a2: { ok: false, model: "a2", reason: "quota" },
+        a: { ok: false, model: "a", reason: "quota", kind: "protocol" },
+        a2: { ok: false, model: "a2", reason: "quota", kind: "protocol" },
       });
 
       const verdict = await judge(request({ provider, judges: [["a", "a2"]] }));
@@ -376,7 +396,7 @@ describe("judge", () => {
 
     it("skips a model a later seat names when an earlier seat already rotated past it", async () => {
       const provider = answering({
-        a: { ok: false, model: "a", reason: "quota" },
+        a: { ok: false, model: "a", reason: "quota", kind: "protocol" },
         b: "1",
         c: "1",
       });
@@ -404,7 +424,12 @@ describe("judge", () => {
       expect(asked(provider)).toEqual(["a"]);
       expect(verdict.votes).toHaveLength(1);
       expect(verdict.failures).toEqual([
-        { ok: false, model: "a", reason: expect.stringContaining("seat cast nothing") as string },
+        {
+          ok: false,
+          model: "a",
+          reason: expect.stringContaining("seat cast nothing") as string,
+          kind: "protocol",
+        },
       ]);
     });
 

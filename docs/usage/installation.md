@@ -42,11 +42,11 @@ repository already has, so a first run costs you nothing typed twice: `triage`
 may only `label`, against the taxonomy sitting in your repository settings
 already.
 
-**This arrives with [Stage 1](../north-star.md#7-roadmap). Until then, a
-warrant is required, and its absence fails the run rather than granting the
-implicit one described above** — see [The warrant](warrant.md) for what to
-write today. Everything from here down is what you configure once a rung below
-stops being enough; read it the day you need it, not before.
+**This is [Stage 1](../north-star.md#7-roadmap): no warrant needed, and no
+`.github/reeve.yml` either.** See [The warrant](warrant.md) for when a written
+one starts earning its keep. Everything from here down is what you configure
+once a rung below stops being enough; read it the day you need it, not
+before.
 
 ## 1. Pick a provider
 

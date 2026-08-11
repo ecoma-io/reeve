@@ -24149,10 +24149,10 @@ function iterator(octokit, route, parameters) {
           if (!url && "total_commits" in normalizedResponse.data) {
             const parsedUrl = new URL(normalizedResponse.url);
             const params = parsedUrl.searchParams;
-            const page = parseInt(params.get("page") || "1", 10);
+            const page2 = parseInt(params.get("page") || "1", 10);
             const per_page = parseInt(params.get("per_page") || "250", 10);
-            if (page * per_page < normalizedResponse.data.total_commits) {
-              params.set("page", String(page + 1));
+            if (page2 * per_page < normalizedResponse.data.total_commits) {
+              params.set("page", String(page2 + 1));
               url = parsedUrl.toString();
             }
           }
@@ -25258,7 +25258,13 @@ function createProvider(config) {
           signal: AbortSignal.timeout(timeoutMs)
         });
       } catch (error2) {
-        return { ok: false, model, usage: null, reason: describeRequestError(error2, timeoutMs) };
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          reason: describeRequestError(error2, timeoutMs)
+        };
       }
       let text;
       try {
@@ -25268,6 +25274,7 @@ function createProvider(config) {
           ok: false,
           model,
           usage: null,
+          kind: "capacity",
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
         };
       }
@@ -25277,17 +25284,24 @@ function createProvider(config) {
 }
 function readCompletion(model, status, text) {
   const at = `HTTP ${String(status)}`;
+  const kind = classifyStatus(status);
   let payload;
   try {
     payload = JSON.parse(text);
   } catch {
-    return { ok: false, model, usage: null, reason: `${at}: body was not JSON \u2014 ${excerpt(text)}` };
+    return {
+      ok: false,
+      model,
+      usage: null,
+      kind,
+      reason: `${at}: body was not JSON \u2014 ${excerpt(text)}`
+    };
   }
   const usage = readUsage(payload);
   const reported = readErrorMessage(payload);
-  if (reported !== null) return { ok: false, model, usage, reason: `${at}: ${reported}` };
+  if (reported !== null) return { ok: false, model, usage, kind, reason: `${at}: ${reported}` };
   if (status < 200 || status >= 300) {
-    return { ok: false, model, usage, reason: `${at}: ${excerpt(text)}` };
+    return { ok: false, model, usage, kind, reason: `${at}: ${excerpt(text)}` };
   }
   const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
   if (choice === null) {
@@ -25295,15 +25309,16 @@ function readCompletion(model, status, text) {
       ok: false,
       model,
       usage,
+      kind,
       reason: `${at}: no choices in the response \u2014 ${excerpt(text)}`
     };
   }
   const content = asRecord(choice.message)?.content;
   if (typeof content !== "string") {
-    return { ok: false, model, usage, reason: `${at}: message content was not a string` };
+    return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
   }
   if (content.trim().length === 0) {
-    return { ok: false, model, usage, reason: `${at}: answered with empty content` };
+    return { ok: false, model, usage, kind, reason: `${at}: answered with empty content` };
   }
   const finishReason = choice.finish_reason;
   return {
@@ -25313,6 +25328,11 @@ function readCompletion(model, status, text) {
     content,
     finishReason: typeof finishReason === "string" ? finishReason : null
   };
+}
+function classifyStatus(status) {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429 || status >= 500 && status < 600) return "capacity";
+  return "protocol";
 }
 function readUsage(payload) {
   const usage = asRecord(asRecord(payload)?.usage);
@@ -25325,11 +25345,55 @@ function readUsage(payload) {
 function asCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
 }
-async function rotateModels(models, attempt) {
+var AuthenticationFailure = class extends Error {
+  failure;
+  constructor(failure) {
+    super(`${failure.model}: ${failure.reason}`);
+    this.name = "AuthenticationFailure";
+    this.failure = failure;
+  }
+};
+function createWeather() {
+  const order = [];
+  const dead = /* @__PURE__ */ new Set();
+  return {
+    grounded: (model) => dead.has(model),
+    ground: (model) => {
+      if (dead.has(model)) return;
+      dead.add(model);
+      order.push(model);
+    },
+    get starved() {
+      return order;
+    }
+  };
+}
+function starved(models, weather) {
+  return models.length > 0 && models.every((model) => weather.grounded(model));
+}
+function weatherFailure(model) {
+  return {
+    ok: false,
+    model,
+    kind: "capacity",
+    usage: null,
+    reason: "already rotated past for capacity earlier in this run \u2014 a provider's limit does not clear inside one job, so it was not asked again"
+  };
+}
+function reckon(failure, weather) {
+  if (failure.kind === "auth") throw new AuthenticationFailure(failure);
+  if (failure.kind === "capacity") weather?.ground(failure.model);
+}
+async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
     const completion = await attempt(model);
     if (completion.ok) return { success: completion, failures };
+    reckon(completion, weather);
     failures.push(completion);
   }
   return { success: null, failures };
@@ -25379,11 +25443,12 @@ async function detectLanguage(text, languages, pick) {
   }
   return { language: null, by: "none", candidates };
 }
-function createLanguagePicker(provider, models) {
+function createLanguagePicker(provider, models, weather) {
   return async (text, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) => provider.complete(model, question(text, candidates))
+      (model) => provider.complete(model, question(text, candidates)),
+      weather
     );
     if (!rotation.success) return null;
     const { content } = rotation.success;
@@ -25480,6 +25545,40 @@ function createReply(api, at, reply) {
     }
   };
 }
+var SWEEP_PAGE = 100;
+var SWEEP_PAGES = 10;
+async function listOpenThreads(api, at, since) {
+  const listed = [];
+  for (let page2 = 1; page2 <= SWEEP_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      sort: "created",
+      direction: "desc",
+      per_page: SWEEP_PAGE,
+      page: page2
+    });
+    let stop = false;
+    for (const entry of data) {
+      const createdAt = new Date(entry.created_at);
+      if (since !== null && createdAt < since) {
+        stop = true;
+        break;
+      }
+      listed.push({
+        number: entry.number,
+        title: entry.title ?? "",
+        body: entry.body ?? "",
+        labels: (entry.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+        createdAt,
+        isPullRequest: entry.pull_request !== void 0
+      });
+    }
+    if (stop || data.length < SWEEP_PAGE) break;
+  }
+  return listed;
+}
 
 // src/core/inputs.ts
 function readShared() {
@@ -25489,15 +25588,46 @@ function readShared() {
   if (roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
+  const sweep = getBooleanInput("sweep");
+  const configuredNumber = getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
+    );
+  }
   return {
     token: getInput("github-token", { required: true }),
-    number: threadNumber(),
+    number: sweep ? null : threadNumber(),
     models: roster.models,
     modelNames: roster.names,
     baseUrl: getInput("base-url", { required: true }),
     apiKey,
-    dryRun: getBooleanInput("dry-run")
+    dryRun: getBooleanInput("dry-run"),
+    sweep,
+    since: parseSince(getInput("since")),
+    limit: whole("limit", getInput("limit"))
   };
+}
+function parseSince(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
+  }
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
+  );
 }
 function threadNumber() {
   const configured = getInput("number");
@@ -25925,16 +26055,20 @@ function links(prose) {
 
 // src/duties/translate/draft.ts
 async function translate(request2) {
-  const { provider, models, source, from, to, languages, drafts } = request2;
+  const { provider, models, source, from, to, languages, drafts, weather } = request2;
   const messages = prompt(source, from, to);
   const attempts = [];
   const refused2 = [];
   const failures = [];
-  const exhausted2 = /* @__PURE__ */ new Set();
+  const exhausted2 = new Set(weather?.starved ?? []);
   for (let draft = 0; draft < drafts; draft += 1) {
     const order = remaining(models, draft, exhausted2);
     if (order.length === 0) break;
-    const rotation = await rotateModels(order, (model) => answer(provider, model, messages));
+    const rotation = await rotateModels(
+      order,
+      (model) => answer(provider, model, messages),
+      weather
+    );
     for (const failure of rotation.failures) {
       exhausted2.add(failure.model);
       failures.push(failure);
@@ -25963,7 +26097,12 @@ function remaining(models, draft, exhausted2) {
 async function answer(provider, model, messages) {
   const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
-    return { ok: false, model, reason: "the answer was cut off before it finished" };
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished"
+    };
   }
   return completion;
 }
@@ -26012,7 +26151,7 @@ function onlyFence(markdown) {
 
 // src/core/judge.ts
 async function judge(request2) {
-  const { provider, judges, candidates, by, ballot: ballot2 } = request2;
+  const { provider, judges, candidates, by, ballot: ballot2, weather } = request2;
   const [leader] = candidates;
   if (leader === void 0 || candidates.length < 2 || judges.length === 0) {
     return { winner: leader ?? null, decidedBy: "score", votes: [], failures: [] };
@@ -26029,7 +26168,7 @@ async function judge(request2) {
       continue;
     }
     const shown2 = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown2, ballot2, by);
+    const cast = await fill(provider, order, shown2, ballot2, by, weather);
     for (const failure of cast.failures) {
       spent.add(failure.model);
       failures.push(failure);
@@ -26045,11 +26184,16 @@ async function judge(request2) {
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
-async function fill(provider, order, shown2, ballot2, by) {
+async function fill(provider, order, shown2, ballot2, by, weather) {
   const failures = [];
   for (const model of order) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
     const counted = read(await provider.complete(model, ballot2(shown2)), shown2, by);
     if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    reckon(counted, weather);
     failures.push(counted);
   }
   return { vote: null, failures };
@@ -26060,6 +26204,7 @@ function exhausted(chain) {
   return {
     ok: false,
     model: primary,
+    kind: "protocol",
     reason: "seat cast nothing \u2014 every model it names had already been asked by an earlier seat, so counting it again would be one model voting twice"
   };
 }
@@ -26080,6 +26225,7 @@ function read(answer2, shown2, by) {
     return {
       ok: false,
       model: answer2.model,
+      kind: "protocol",
       reason: `answered with no candidate number \u2014 ${excerpt2(answer2.content)}`
     };
   }
@@ -26087,6 +26233,7 @@ function read(answer2, shown2, by) {
     return {
       ok: false,
       model: answer2.model,
+      kind: "protocol",
       reason: `named more than one candidate \u2014 ${excerpt2(answer2.content)}`
     };
   }
@@ -26100,13 +26247,14 @@ function excerpt2(text) {
 
 // src/duties/translate/judge.ts
 async function judge2(request2) {
-  const { provider, judges, source, to, attempts } = request2;
+  const { provider, judges, source, to, attempts, weather } = request2;
   const panel = {
     provider,
     judges,
     candidates: attempts,
     by: (attempt) => attempt.model,
-    ballot: (shown2) => ballot(source, to, shown2)
+    ballot: (shown2) => ballot(source, to, shown2),
+    ...weather === void 0 ? {} : { weather }
   };
   return judge(panel);
 }
@@ -26200,6 +26348,32 @@ function translations(looked) {
     "",
     `${String(languages.length)} translation${languages.length === 1 ? "" : "s"} this run.` + (detected.length === 0 ? " No source language was one of the configured ones." : ` Source language \u2014 ${detected.join("; ")}.`)
   ].join("\n");
+}
+function summarizeSweep(run2) {
+  const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
+  const rendered = table(["Thread", "Outcome"], rows);
+  const parts = [
+    "## Reeve \xB7 translate \u2014 sweep",
+    "",
+    `${run2.dryRun ? "**Dry run** \u2014 nothing was published. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (already translated), ${String(run2.remaining)} remaining.`,
+    "",
+    rendered.length === 0 ? "Nothing was processed this run." : rendered
+  ];
+  if (run2.starvedRun) {
+    parts.push(
+      "",
+      "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
+    );
+  }
+  parts.push(
+    "",
+    cost(
+      run2.spent,
+      (spend) => shown(spend.purpose === "judge" ? run2.judgeNames : run2.modelNames, spend.model)
+    )
+  );
+  return `${parts.join("\n").trimEnd()}
+`;
 }
 
 // src/duties/translate/publish.ts
@@ -26316,7 +26490,7 @@ function targets(languages, from) {
   const source = from.code.toLowerCase();
   return languages.filter((language) => language.code.toLowerCase() !== source);
 }
-async function translateInto(to, settings, stages, from, source) {
+async function translateInto(to, settings, stages, from, source, weather) {
   const drafted = await translate({
     provider: stages.draft,
     models: settings.models,
@@ -26324,7 +26498,8 @@ async function translateInto(to, settings, stages, from, source) {
     from,
     to,
     languages: settings.languages,
-    drafts: settings.drafts
+    drafts: settings.drafts,
+    weather
   });
   const model = (id) => shown(settings.modelNames, id);
   for (const failure of drafted.failures) {
@@ -26340,7 +26515,8 @@ async function translateInto(to, settings, stages, from, source) {
     judges: settings.judges,
     source,
     to,
-    attempts: drafted.attempts
+    attempts: drafted.attempts,
+    weather
   });
   const seat = (id) => shown(settings.judgeNames, id);
   for (const failure of verdict.failures) {
@@ -26370,7 +26546,7 @@ async function translateInto(to, settings, stages, from, source) {
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], note, published: false };
 }
-async function translateText(what, body, thread, settings, stages) {
+async function translateText(what, body, thread, settings, stages, weather) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -26393,7 +26569,7 @@ async function translateText(what, body, thread, settings, stages) {
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models)
+    createLanguagePicker(stages.detect, settings.models, weather)
   );
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
@@ -26401,7 +26577,14 @@ async function translateText(what, body, thread, settings, stages) {
   const posted = [];
   const skipped = [];
   for (const to of targets(settings.languages, detection.language)) {
-    const translated2 = await translateInto(to, settings, stages, detection.language, source);
+    const translated2 = await translateInto(
+      to,
+      settings,
+      stages,
+      detection.language,
+      source,
+      weather
+    );
     if (translated2 === null) {
       warning(`${what} ${to.code}: no model produced a translation this run.`);
       skipped.push(to);
@@ -26442,7 +26625,7 @@ ${assemble(official, marker, would)}`
     published: outcome.action === "published"
   };
 }
-async function translateReplies(api, at, settings, stages, looked) {
+async function translateReplies(api, at, settings, stages, looked, weather) {
   const { replies, more } = await listReplies(api, at);
   if (more) {
     warning(
@@ -26456,55 +26639,149 @@ async function translateReplies(api, at, settings, stages, looked) {
       reply.body,
       createReply(api, at, reply),
       settings,
-      stages
+      stages,
+      weather
     );
     looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
+async function processThread(api, at, body, settings, stages, weather) {
+  const thread = createThread(api, at);
+  const translated = await translateText(
+    `#${String(at.number)}`,
+    body,
+    thread,
+    settings,
+    stages,
+    weather
+  );
+  const looked = [translated];
+  const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked, weather) : 0;
+  return { looked, translated, replies };
+}
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0 };
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function describeOutcome(result) {
+  if (result.translated.note !== null) return result.translated.note;
+  const parts = [];
+  if (result.translated.posted.length > 0) {
+    parts.push(`published ${result.translated.posted.map((entry) => entry.to.code).join(", ")}`);
+  }
+  if (result.translated.skipped.length > 0) {
+    parts.push(`skipped ${result.translated.skipped.map((language) => language.code).join(", ")}`);
+  }
+  if (parts.length === 0) parts.push("no target languages");
+  if (result.replies > 0) {
+    parts.push(`${String(result.replies)} repl${result.replies === 1 ? "y" : "ies"} translated`);
+  }
+  return parts.join("; ");
+}
+async function runSweep(acc, api, settings, stages, weather) {
+  const listed = await listOpenThreads(api, context2.repo, settings.since);
+  acc.candidates = listed.length;
+  for (const thread of listed) {
+    if (acc.results.length >= settings.limit) break;
+    if (marker.split(thread.body).fingerprint !== null) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    const at = { ...context2.repo, number: thread.number };
+    const result = await processThread(api, at, thread.body, settings, stages, weather);
+    acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
+  }
+}
 async function run() {
-  const looked = [];
   const meter = createMeter();
+  const weather = createWeather();
   let settings = null;
+  let single = null;
+  let bulk = null;
   try {
     settings = readSettings();
     const api = getOctokit(settings.token);
-    const at = { ...context2.repo, number: settings.number };
     const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
     const stages = {
       detect: metered(provider, meter, "detect"),
       draft: metered(provider, meter, "draft"),
       judge: metered(provider, meter, "judge")
     };
-    const thread = createThread(api, at);
-    const body = await thread.read();
-    const translated = await translateText(`#${String(at.number)}`, body, thread, settings, stages);
-    looked.push(translated);
-    const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked) : 0;
-    report(translated, replies);
+    if (settings.sweep) {
+      bulk = newAccumulator();
+      await runSweep(bulk, api, settings, stages, weather);
+    } else {
+      const number = settings.number;
+      if (number === null) throw new Error("number: required outside `sweep`.");
+      const at = { ...context2.repo, number };
+      const body = await createThread(api, at).read();
+      const result = await processThread(api, at, body, settings, stages, weather);
+      single = { number, result };
+    }
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
-      await writeSummary(
-        summarize({
-          thread: settings.number,
-          dryRun: settings.dryRun,
-          looked,
-          spent: meter.spent(),
-          modelNames: settings.modelNames,
-          judgeNames: settings.judgeNames
-        })
-      );
+      const rosterStarved = starved(settings.models, weather);
+      if (rosterStarved) {
+        warning(
+          "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
+        );
+      }
+      if (settings.sweep && bulk !== null) {
+        reportSweep(bulk, rosterStarved);
+        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+      } else if (!settings.sweep && single !== null) {
+        report(single.result.translated, single.result.replies, rosterStarved);
+        await writeSummary(page(settings, single.number, single.result.looked, meter.spent()));
+      }
     }
   }
 }
-function report(translated, replies) {
+function report(translated, replies, rosterStarved) {
   setOutput("source-language", translated.from?.code ?? "");
   setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   setOutput("replies-translated", String(replies));
+  setOutput("starved", String(rosterStarved));
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function reportSweep(bulk, rosterStarved) {
+  setOutput("processed", String(bulk.results.length));
+  setOutput("skipped", String(bulk.skipped));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(rosterStarved));
+}
+function page(settings, thread, looked, spent) {
+  return summarize({
+    thread,
+    dryRun: settings.dryRun,
+    looked,
+    spent,
+    modelNames: settings.modelNames,
+    judgeNames: settings.judgeNames
+  });
+}
+function sweepPage(settings, bulk, spent) {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    results: bulk.results,
+    skipped: bulk.skipped,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    spent,
+    modelNames: settings.modelNames,
+    judgeNames: settings.judgeNames
+  });
 }
 await run();
 export {

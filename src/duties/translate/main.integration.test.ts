@@ -94,17 +94,42 @@ interface Answer {
   readonly payload: unknown;
 }
 
+/** One entry in a sweep's open-thread listing, as the stub returns it. */
+interface ListedIssue {
+  readonly number: number;
+  readonly body: string;
+  readonly createdAt: string;
+  /** Present, and true, only for the entries a sweep must still translate as a pull request. */
+  readonly pullRequest?: boolean;
+}
+
 /** Everything a request is answered from, and everything a case may change. */
 interface State {
   /**
-   * The body of the thread, read and written exactly as GitHub's would be.
+   * The body of thread #42, read and written exactly as GitHub's would be.
    *
    * One mutable field rather than a fixture and a record of writes, because the
    * behaviour being driven here is a run reading back what the previous run
    * wrote. A stub that answered `GET` from something the `PATCH` had not
    * touched could not tell a loop that terminates from one that does not.
+   *
+   * Kept as the one field every single-thread case already reaches for —
+   * `bodies` below is the general form a sweep needs, keyed by number, and #42
+   * is deliberately excluded from it so nothing here has to change.
    */
   body: string;
+  /**
+   * Every other thread's current body, by number — what a sweep's own re-read
+   * inside `publish()` answers with. Seeded from `issues` below, and updated by
+   * a `PATCH` the same way `body` is.
+   */
+  readonly bodies: Map<number, string>;
+  /**
+   * The open backlog a sweep lists, newest first — the order this suite has to
+   * hand it in, since the stub serves it back verbatim rather than sorting it.
+   * Empty for every case outside `describe("the sweep", ...)`.
+   */
+  issues: ListedIssue[];
   /**
    * The replies, by id, read and written the way GitHub's comment endpoints do.
    *
@@ -171,7 +196,14 @@ async function startStub(): Promise<Stub> {
   // The state is created before the server so the handler can close over it,
   // and the port and the shutdown are folded onto that same object afterwards —
   // a case sets `stub.body` and the next request reads it.
-  const state: State = { body: "", replies: new Map(), answer: translating({}), asked: [] };
+  const state: State = {
+    body: "",
+    bodies: new Map(),
+    issues: [],
+    replies: new Map(),
+    answer: translating({}),
+    asked: [],
+  };
 
   const server = createServer((request, response) => {
     void route(state, request, response);
@@ -200,17 +232,54 @@ async function route(
   response: ServerResponse,
 ): Promise<void> {
   const path = (request.url ?? "/").split("?")[0] ?? "/";
+  const query = new URLSearchParams((request.url ?? "").split("?")[1] ?? "");
   const method = request.method ?? "GET";
   const raw = await readAll(request);
 
   const issue = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path);
   if (method === "GET" && issue) {
-    send(response, 200, { number: Number(issue[1]), body: stub.body });
+    const number = Number(issue[1]);
+    const listed = stub.issues.find((entry) => entry.number === number);
+    // A number a sweep's own listing named keeps its own body, seeded from that
+    // listing and then from whatever it was last `PATCH`ed to — which is what a
+    // sweep's later re-read inside `publish()` has to see, to avoid mistaking
+    // the author's own text for something it just wrote. Every other number,
+    // which is every single-thread case in the suite above, reads and writes
+    // the one `stub.body` field it always has, whatever number it happens to be
+    // driving this thread as.
+    const body = listed === undefined ? stub.body : (stub.bodies.get(number) ?? listed.body);
+    send(response, 200, { number, body });
     return;
   }
   if (method === "PATCH" && issue) {
-    stub.body = bodyOf(raw);
-    send(response, 200, { number: Number(issue[1]), body: stub.body });
+    const number = Number(issue[1]);
+    const written = bodyOf(raw);
+    if (stub.issues.some((entry) => entry.number === number)) stub.bodies.set(number, written);
+    else stub.body = written;
+    send(response, 200, { number, body: written });
+    return;
+  }
+
+  // A sweep's listing. `page` is honoured so a case could exercise pagination
+  // directly, but every case in this suite fits on page one — pagination and
+  // the `since` cutoff are exercised in isolation, against `listOpenThreads`
+  // itself, in `forge.test.ts`.
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues$/.test(path)) {
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      page === 1
+        ? stub.issues.map((entry) => ({
+            number: entry.number,
+            title: "",
+            body: entry.body,
+            labels: [],
+            created_at: entry.createdAt,
+            ...(entry.pullRequest === true ? { pull_request: {} } : {}),
+          }))
+        : [],
+    );
     return;
   }
 
@@ -310,6 +379,9 @@ function baseInputs(stub: Stub): Record<string, string> {
     "translate-replies": "false",
     "show-attribution": "none",
     "dry-run": "false",
+    sweep: "false",
+    since: "",
+    limit: "50",
   };
 }
 
@@ -481,6 +553,37 @@ describe("the action", () => {
     expect(run.summary).toContain("unusable and rotated past");
   });
 
+  it("rotates through the whole roster before starving, and reports it on the output", async () => {
+    // D12: capacity is weather. A run that ran the roster dry still publishes
+    // whatever it drafted (nothing, here) rather than failing red, and
+    // `starved` is how a workflow tells that run from an ordinary one.
+    stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+
+    const run = await runAction(stub, { models: "stub-model-a, stub-model-b" });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked.map((ask) => ask.model)).toEqual(["stub-model-a", "stub-model-b"]);
+    expect(run.outputs.starved).toBe("true");
+    expect(run.log).toContain(
+      "This run delivered what it could rather than failing red — weather, not a broken " +
+        "configuration.",
+    );
+  });
+
+  it("fails red the instant a model reports an authentication problem, asking no other", async () => {
+    // D12's other half: an auth failure is a broken configuration, not
+    // weather, so it stops the run immediately — rotating to `stub-model-b`
+    // would spend a call proving nothing, since the same key is wrong for both.
+    stub.answer = () => ({ status: 401, payload: { error: { message: "invalid api key" } } });
+
+    const run = await runAction(stub, { models: "stub-model-a, stub-model-b" });
+
+    expect(run.code).not.toBe(0);
+    expect(stub.asked).toHaveLength(1);
+    expect(stub.body).toBe(VIETNAMESE);
+    expect(run.log).toContain("stub-model-a: HTTP 401: invalid api key");
+  });
+
   it("keeps the author's own text as the official half, byte-for-byte", async () => {
     // The reason the translation is appended rather than written over: a body
     // GitHub reads `Fixes #1` and a task list out of has to keep working, and
@@ -510,6 +613,9 @@ describe("the action", () => {
       translated: JSON.stringify(["en"]),
       skipped: JSON.stringify([]),
       "replies-translated": "0",
+      starved: "false",
+      processed: "0",
+      remaining: "0",
     });
   });
 
@@ -692,6 +798,9 @@ describe("the action", () => {
       translated: JSON.stringify([]),
       skipped: JSON.stringify([]),
       "replies-translated": "0",
+      starved: "false",
+      processed: "0",
+      remaining: "0",
     });
   });
 
@@ -942,6 +1051,150 @@ describe("the action, translating the replies", () => {
   });
 });
 
+describe("the sweep", () => {
+  /** One entry in the backlog `stub.issues` lists, newest-first order left to the case. */
+  function candidate(
+    number: number,
+    body: string,
+    createdAt: string,
+    over: Partial<ListedIssue> = {},
+  ): ListedIssue {
+    return { number, body, createdAt, ...over };
+  }
+
+  /**
+   * `sweep: true` needs `number` cleared — `baseInputs` sets `number: "42"` for
+   * the single-thread suite above, and `readShared` refuses the two together.
+   */
+  function sweepInputs(over: Record<string, string> = {}): Record<string, string> {
+    return { sweep: "true", number: "", ...over };
+  }
+
+  it(
+    "shrinks the roster run-wide, never retrying a model a capacity failure already " +
+      "grounded on an earlier thread",
+    async () => {
+      stub.issues = [
+        candidate(101, VIETNAMESE, "2026-01-03T00:00:00Z"),
+        candidate(102, VIETNAMESE, "2026-01-02T00:00:00Z"),
+      ];
+      stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+
+      const run = await runAction(stub, sweepInputs({ models: "stub-model-a, stub-model-b" }));
+
+      expect(run.code).toBe(0);
+      // Both models are asked once each, and only once — on #101. #102 is never
+      // reached: `starved` is checked before a thread is processed on every
+      // iteration of the loop, against the one `Weather` object the whole run
+      // shares, so a roster grounded dry on the first thread stays dry for the
+      // rest of it.
+      expect(stub.asked.map((ask) => ask.model)).toEqual(["stub-model-a", "stub-model-b"]);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.remaining).toBe("1");
+      expect(run.outputs.starved).toBe("true");
+      expect(run.summary).toContain("| #101 |");
+      expect(run.summary).not.toContain("| #102 |");
+    },
+  );
+
+  it("keeps only threads created on or after a calendar `since` date", async () => {
+    stub.issues = [
+      candidate(201, VIETNAMESE, "2026-01-10T00:00:00Z"),
+      candidate(202, VIETNAMESE, "2025-06-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs({ since: "2026-01-01" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.outputs.remaining).toBe("0");
+    expect(stub.bodies.get(201)).toContain(ENGLISH);
+    expect(run.summary).toContain("| #201 |");
+    expect(run.summary).not.toContain("| #202 |");
+  });
+
+  it("keeps only threads created within a duration-style `since`", async () => {
+    const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const old = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    stub.issues = [candidate(301, VIETNAMESE, recent), candidate(302, VIETNAMESE, old)];
+
+    const run = await runAction(stub, sweepInputs({ since: "90d" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.summary).toContain("| #301 |");
+    expect(run.summary).not.toContain("| #302 |");
+  });
+
+  it("honours `limit`, and counts what it left behind as `remaining`", async () => {
+    stub.issues = [
+      candidate(401, VIETNAMESE, "2026-01-03T00:00:00Z"),
+      candidate(402, VIETNAMESE, "2026-01-02T00:00:00Z"),
+      candidate(403, VIETNAMESE, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs({ limit: "2" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("2");
+    expect(run.outputs.remaining).toBe("1");
+    expect(run.summary).toContain("| #401 |");
+    expect(run.summary).toContain("| #402 |");
+    expect(run.summary).not.toContain("| #403 |");
+  });
+
+  it("skips a thread whose body already carries this duty's marker, at no cost", async () => {
+    stub.issues = [
+      candidate(
+        501,
+        `${VIETNAMESE}\n\n<!-- reeve:translate source=deadbeef -->`,
+        "2026-01-02T00:00:00Z",
+      ),
+      candidate(502, VIETNAMESE, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs());
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.outputs.skipped).toBe("1");
+    expect(run.outputs.remaining).toBe("0");
+    // The skip is free: only #502 was ever translated, so only #502 spent a
+    // model call.
+    expect(stub.asked).toHaveLength(1);
+    expect(run.summary).toContain("| #502 |");
+    expect(run.summary).not.toContain("| #501 |");
+  });
+
+  it("refuses `sweep` combined with `number`, before spending anything", async () => {
+    const run = await runAction(stub, { sweep: "true", number: "7" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("sweep: cannot be combined with `number`");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it(
+    "rehearses the loop on a dry run, publishing nothing but still reporting processed and " +
+      "remaining",
+    async () => {
+      stub.issues = [
+        candidate(601, VIETNAMESE, "2026-01-02T00:00:00Z"),
+        candidate(602, VIETNAMESE, "2026-01-01T00:00:00Z"),
+      ];
+
+      const run = await runAction(stub, sweepInputs({ "dry-run": "true" }));
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("2");
+      expect(run.outputs.remaining).toBe("0");
+      expect(run.summary).toContain("**Dry run** — nothing was published.");
+      // Nothing published: neither fabricated thread was ever `PATCH`ed.
+      expect(stub.bodies.size).toBe(0);
+    },
+  );
+});
+
 describe("the action contract", () => {
   /**
    * Every input `action.yml` declares, read straight out of it.
@@ -970,9 +1223,16 @@ describe("the action contract", () => {
       readFile(join(ROOT, "src", "duties", "translate", "main.ts"), "utf8"),
       readFile(join(ROOT, "src", "core", "inputs.ts"), "utf8"),
     ]);
-    return [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
-      ([, name]) => name ?? "",
-    );
+    // A set, not a list: `number` is read twice in `inputs.ts` — once to check
+    // it is not combined with `sweep`, again inside `threadNumber` — and that
+    // duplication is harmless plumbing rather than a second, different input.
+    return [
+      ...new Set(
+        [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
+          ([, name]) => name ?? "",
+        ),
+      ),
+    ];
   }
 
   it("reads every input it declares, under the name it declared", async () => {

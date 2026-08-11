@@ -35,7 +35,7 @@ function scripted(answers: Record<string, string>): Provider {
       const answer = answers[model];
       return Promise.resolve<Completion>(
         answer === undefined
-          ? { ok: false, model, reason: "no answer scripted" }
+          ? { ok: false, model, reason: "no answer scripted", kind: "protocol" }
           : { ok: true, model, content: answer, finishReason: "stop" },
       );
     },

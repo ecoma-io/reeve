@@ -22,7 +22,7 @@
  * this duty's designed failure mode anyway.
  */
 import { enclose } from "../../core/enclose.js";
-import type { Failure, Message, Provider } from "../../core/provider.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 
 /** What the cheap pass can conclude. Anything else is `keep`, which is not a value. */
@@ -40,6 +40,15 @@ export interface SiftRequest {
    * from the title alone — which is why it is worth writing.
    */
   readonly about: string;
+  /**
+   * This run's memory of capacity failures. Consulted the same as any other
+   * stage's — a cheap model already grounded for capacity is skipped rather
+   * than asked again — but note what this does *not* change: an `"auth"`
+   * failure here still ends the run red, exactly as loudly as anywhere else.
+   * Only capacity is the asymmetry this stage is built around; a broken key is
+   * not weather, and fails open nowhere.
+   */
+  readonly weather?: Weather;
 }
 
 export interface Sifted {
@@ -49,10 +58,14 @@ export interface Sifted {
 }
 
 export async function sift(request: SiftRequest): Promise<Sifted> {
-  const { provider, models } = request;
+  const { provider, models, weather } = request;
   if (models.length === 0) return { dropped: null, failures: [] };
 
-  const rotation = await rotateModels(models, (model) => provider.complete(model, prompt(request)));
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, prompt(request)),
+    weather,
+  );
   // Every cheap model failing is not a reason to skip the thread. It is a
   // reason to spend the expensive one, which is what the run was going to do
   // before this stage existed.

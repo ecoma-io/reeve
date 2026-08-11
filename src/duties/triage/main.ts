@@ -56,9 +56,17 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import { enforceLabels, narrow, owners, parseApply, type Refusal } from "../../core/enforce.js";
+import {
+  alreadyTaxonomized,
+  enforceLabels,
+  narrow,
+  owners,
+  parseApply,
+  type Refusal,
+} from "../../core/enforce.js";
 import {
   createEffects,
+  listOpenThreads,
   listRepositoryLabels,
   readStanding,
   type Effects,
@@ -72,10 +80,13 @@ import { createMemory, readStore } from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
 import {
   createProvider,
+  createWeather,
   parseModels,
   shown,
+  starved,
   type Names,
   type Provider,
+  type Weather,
 } from "../../core/provider.js";
 import { screen } from "../../core/screen.js";
 import { writeSummary } from "../../core/summary.js";
@@ -88,7 +99,7 @@ import {
 } from "../../core/warrant.js";
 
 import { sift } from "./spam.js";
-import { summarize, type Done, type Run } from "./summary.js";
+import { summarize, summarizeSweep, type Done, type Run, type SweptThread } from "./summary.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 
 /**
@@ -125,7 +136,8 @@ const RECALLED = 4;
 
 interface Settings {
   readonly token: string;
-  readonly number: number;
+  /** The thread to work on, or null in `sweep`. */
+  readonly number: number | null;
   readonly models: readonly string[];
   readonly modelNames: Names;
   /** The cheap roster. Empty turns the model-backed screen off, which is the default. */
@@ -142,6 +154,9 @@ interface Settings {
   readonly dryRun: boolean;
   readonly baseUrl: string;
   readonly apiKey: string;
+  readonly sweep: boolean;
+  readonly since: Date | null;
+  readonly limit: number;
 }
 
 function readSettings(): Settings {
@@ -233,18 +248,126 @@ async function resolveAuthority(
 /** What a run that touched nothing did. Also what every dry run reports. */
 const NOTHING_DONE: Done = { labels: [], commented: false, assigned: [], closed: false };
 
+/**
+ * A sweep's progress, mutated in place rather than assembled and returned.
+ *
+ * The reason is `AuthenticationFailure`: it can throw out of `decide` partway
+ * down the loop below, and "report what was already applied, then red" needs
+ * whatever `runSweep` had built so far to still be readable from `run`'s
+ * `finally` block after the `catch` has set the job failed. A value returned
+ * only on success cannot do that — an object mutated as the loop goes can,
+ * because the caller already holds the same reference.
+ */
+interface SweepAccumulator {
+  readonly results: SweptThread[];
+  skipped: number;
+  starvedRun: boolean;
+  candidates: number;
+  ungranted: string | null;
+}
+
+function newAccumulator(): SweepAccumulator {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+
+/**
+ * The whole backlog, one thread at a time, through the identical pipeline a
+ * single-thread run uses.
+ *
+ * Ungranted, capped labels-exist checking and per-thread deciding all happen
+ * exactly once each — the first two before the loop, because they are facts
+ * about the run rather than about any one thread, and the last one inside it,
+ * because that is `decide`'s whole job.
+ */
+async function runSweep(
+  acc: SweepAccumulator,
+  api: TrackerApi,
+  authority: Authority,
+  settings: Settings,
+  stages: Stages,
+  weather: Weather,
+): Promise<void> {
+  if (authority.warrant.unnamed("triage")) {
+    acc.ungranted = notGranted(authority.warrant).ungranted;
+    return;
+  }
+
+  if (!authority.implicit) {
+    checkLabelsExist(
+      authority.warrant,
+      (await listRepositoryLabels(api, context.repo)).map((label) => label.name),
+    );
+  }
+
+  const listed = await listOpenThreads(api, context.repo, settings.since);
+  // Triage sweeps issues only — a taxonomy of bug/docs/feature labels is a
+  // judgement about an issue, and the listing endpoint returns pull requests
+  // too, distinguishable only by this field.
+  const candidates = listed.filter((thread) => !thread.isPullRequest);
+  acc.candidates = candidates.length;
+
+  for (const thread of candidates) {
+    if (acc.results.length >= settings.limit) break;
+
+    // The idempotent skip: free, and counted separately from `processed` so a
+    // rerun over a mostly-triaged backlog reports honestly rather than looking
+    // like it did nothing.
+    if (alreadyTaxonomized(authority.warrant, thread.labels)) {
+      acc.skipped += 1;
+      continue;
+    }
+
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+
+    const at = { ...context.repo, number: thread.number };
+    const standing: Standing = {
+      title: thread.title,
+      body: thread.body,
+      labels: thread.labels,
+      closed: false,
+    };
+    const outcome = await decide(authority, standing, settings, stages, weather);
+    const done = settings.dryRun
+      ? NOTHING_DONE
+      : await act(createEffects(api, at), authority.warrant, outcome);
+    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+  }
+}
+
+/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
+function remainingOf(acc: SweepAccumulator): number {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+
+/** One sweep row's outcome, in the fewest words that are true. */
+function describeOutcome(outcome: Outcome, done: Done): string {
+  if (outcome.ungranted !== null) return "not granted";
+  if (outcome.screenedOut !== null) return `screened out — ${outcome.screenedOut.reason}`;
+  if (done.labels.length > 0) {
+    return `applied ${done.labels.map((name) => `\`${name}\``).join(", ")}`;
+  }
+  if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
+  return "no label";
+}
+
 export async function run(): Promise<void> {
   // Declared out here and written in `finally`, so a run that fails halfway
-  // still reports what it decided and what it spent getting there.
+  // still reports what it decided and what it spent getting there — including
+  // an `AuthenticationFailure` thrown partway down a sweep's loop, which
+  // leaves `bulk` holding every thread already processed before it threw.
   const meter = createMeter();
+  const weather = createWeather();
   let settings: Settings | null = null;
-  let outcome: Outcome | null = null;
-  let done: Done = NOTHING_DONE;
+  let single: { readonly number: number; readonly outcome: Outcome; readonly done: Done } | null =
+    null;
+  let bulk: SweepAccumulator | null = null;
 
   try {
     settings = readSettings();
     const api = getOctokit(settings.token);
-    const at = { ...context.repo, number: settings.number };
     const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
 
     const stages: Stages = {
@@ -259,43 +382,75 @@ export async function run(): Promise<void> {
     // is not that failure. `resolveAuthority` is what turns that absence into
     // the implicit warrant rather than an error.
     const read = await readWarrant(settings.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, settings.warrant, api, at);
+    const authority = await resolveAuthority(read, settings.warrant, api, context.repo);
 
-    // A written `capabilities:` block that does not name `triage` grants it
-    // nothing, and no verdict this run could reach changes that — so this sits
-    // here, as early as the answer is already certain, and before the thread,
-    // the taxonomy check, or a single model call spends anything on a decision
-    // that could never be applied. It cannot sit any earlier: `authority` is
-    // the first point `unnamed` has anything to ask.
-    if (authority.warrant.unnamed("triage")) {
-      outcome = notGranted(authority.warrant);
+    if (settings.sweep) {
+      bulk = newAccumulator();
+      await runSweep(bulk, api, authority, settings, stages, weather);
     } else {
-      const standing = await readStanding(api, at);
-      if (!authority.implicit) {
-        // Against the repository's own labels, so a taxonomy naming one that
-        // was renamed fails as the configuration problem it is, rather than
-        // arriving as a model that agreed with nothing. Skipped in implicit
-        // mode: the taxonomy IS the repository's own labels there, and
-        // checking it against itself would be a tautology.
-        checkLabelsExist(
-          authority.warrant,
-          (await listRepositoryLabels(api, at)).map((label) => label.name),
-        );
-      }
-      outcome = await decide(authority, standing, settings, stages);
-    }
+      const number = settings.number;
+      // `readShared` refuses `sweep` combined with `number`, but a bare
+      // `sweep: false` still leaves `number` nullable in the type — this is
+      // the one place that has to become certain of it.
+      if (number === null) throw new Error("number: required outside `sweep`.");
+      const at = { ...context.repo, number };
 
-    if (!settings.dryRun) {
-      done = await act(createEffects(api, at), authority.warrant, outcome);
+      // A written `capabilities:` block that does not name `triage` grants it
+      // nothing, and no verdict this run could reach changes that — so this
+      // sits here, as early as the answer is already certain, and before the
+      // thread, the taxonomy check, or a single model call spends anything on
+      // a decision that could never be applied.
+      let outcome: Outcome;
+      if (authority.warrant.unnamed("triage")) {
+        outcome = notGranted(authority.warrant);
+      } else {
+        const standing = await readStanding(api, at);
+        if (!authority.implicit) {
+          // Against the repository's own labels, so a taxonomy naming one
+          // that was renamed fails as the configuration problem it is, rather
+          // than arriving as a model that agreed with nothing. Skipped in
+          // implicit mode: the taxonomy IS the repository's own labels there,
+          // and checking it against itself would be a tautology.
+          checkLabelsExist(
+            authority.warrant,
+            (await listRepositoryLabels(api, at)).map((label) => label.name),
+          );
+        }
+        outcome = await decide(authority, standing, settings, stages, weather);
+      }
+
+      const done = settings.dryRun
+        ? NOTHING_DONE
+        : await act(createEffects(api, at), authority.warrant, outcome);
+      single = { number, outcome, done };
     }
-    report(outcome, done, settings.dryRun);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
-    // Nothing to report when the settings or the authority were the problem: no
+    // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
-    if (settings !== null && outcome !== null) {
-      await writeSummary(page(settings, outcome, done, meter.spent()));
+    if (settings !== null) {
+      const rosterStarved = starved(settings.models, weather);
+      if (rosterStarved) {
+        core.warning(
+          "Every model in `models` failed on capacity this run. " +
+            (settings.sweep
+              ? "The sweep delivered what it could before the roster ran dry, and " +
+                "stopped early — see `remaining`."
+              : "This run delivered what it could rather than failing red — weather, " +
+                "not a broken configuration."),
+        );
+      }
+
+      if (settings.sweep && bulk !== null) {
+        reportSweep(bulk, rosterStarved);
+        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+      } else if (!settings.sweep && single !== null) {
+        report(single.outcome, single.done, settings.dryRun, rosterStarved);
+        await writeSummary(
+          page(settings, single.number, single.outcome, single.done, meter.spent()),
+        );
+      }
     }
   }
 }
@@ -312,6 +467,7 @@ async function decide(
   standing: Standing,
   settings: Settings,
   stages: Stages,
+  weather: Weather,
 ): Promise<Outcome> {
   const warrant = authority.warrant;
   const body = standing.body.slice(0, settings.maxBodyChars);
@@ -368,6 +524,7 @@ async function decide(
     createLanguagePicker(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
     ),
   );
   const language = detection.language?.label ?? null;
@@ -383,6 +540,7 @@ async function decide(
     title: standing.title,
     body,
     about: settings.about,
+    weather,
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -414,6 +572,7 @@ async function decide(
     taxonomy: warrant.labels,
     language,
     recalled,
+    weather,
   });
   for (const failure of triaged.failures) {
     core.warning(`triage: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
@@ -597,7 +756,7 @@ function excerpt(answer: string): string {
  * be an empty string rather than an unset output on the run where everything
  * worked.
  */
-function report(outcome: Outcome, done: Done, dryRun: boolean): void {
+function report(outcome: Outcome, done: Done, dryRun: boolean, rosterStarved: boolean): void {
   core.setOutput("labels", JSON.stringify(outcome.applied));
   core.setOutput("proposed", JSON.stringify(outcome.verdict.labels));
   core.setOutput("confidence", outcome.verdict.confidence.toFixed(2));
@@ -611,11 +770,37 @@ function report(outcome: Outcome, done: Done, dryRun: boolean): void {
   // is a shape no real run produces, because a real run always reports all four
   // keys whether or not it did anything with them.
   core.setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
+  core.setOutput("starved", String(rosterStarved));
+  // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
+  // outputs, and a single-thread run answers all three honestly at zero rather
+  // than leaving a workflow that reads them on every run reading an empty
+  // string on this one.
+  core.setOutput("processed", "0");
+  core.setOutput("skipped", "0");
+  core.setOutput("remaining", "0");
 }
 
-function page(settings: Settings, outcome: Outcome, done: Done, spent: Run["spent"]): string {
+/**
+ * `processed`, `skipped` and `remaining` — a sweep's own outputs, distinct
+ * from every output above because none of those name one thread. `starved` is
+ * shared vocabulary between the two modes, so it keeps the same name here.
+ */
+function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
+  core.setOutput("processed", String(bulk.results.length));
+  core.setOutput("skipped", String(bulk.skipped));
+  core.setOutput("remaining", String(remainingOf(bulk)));
+  core.setOutput("starved", String(rosterStarved));
+}
+
+function page(
+  settings: Settings,
+  thread: number,
+  outcome: Outcome,
+  done: Done,
+  spent: Run["spent"],
+): string {
   return summarize({
-    thread: settings.number,
+    thread,
     dryRun: settings.dryRun,
     warrant: settings.warrant,
     language: outcome.language,
@@ -634,6 +819,21 @@ function page(settings: Settings, outcome: Outcome, done: Done, spent: Run["spen
     implicit: outcome.implicit,
     excludedLabels: outcome.excludedLabels,
     ungranted: outcome.ungranted,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames,
+  });
+}
+
+function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    results: bulk.results,
+    skipped: bulk.skipped,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    ungranted: bulk.ungranted,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames,

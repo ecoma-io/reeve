@@ -81,7 +81,7 @@ function answering(answers: Record<string, string>): Provider {
       const answer = answers[model];
       return Promise.resolve<Completion>(
         answer === undefined
-          ? { ok: false, model, reason: "not configured in this case" }
+          ? { ok: false, model, reason: "not configured in this case", kind: "protocol" }
           : { ok: true, model, content: answer, finishReason: "stop" },
       );
     }),

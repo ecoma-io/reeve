@@ -4,7 +4,7 @@ import type { Spend } from "../../core/meter.js";
 import type { Language } from "../../core/languages.js";
 
 import type { Posted } from "./publish.js";
-import { summarize, type Looked, type Run } from "./summary.js";
+import { summarize, summarizeSweep, type Looked, type Run, type SweepRun } from "./summary.js";
 
 const ENGLISH: Language = { code: "en", label: "English", scripts: ["Latin"] };
 const VIETNAMESE: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latin"] };
@@ -164,5 +164,77 @@ describe("the run summary", () => {
     const summary = subject({ spent: [spend({ model: "a | b" })] });
 
     expect(summary).toContain("| Drafting | a \\| b |");
+  });
+});
+
+function sweepSubject(overrides: Partial<SweepRun> = {}): string {
+  return summarizeSweep({
+    dryRun: false,
+    results: [{ number: 42, outcome: "published en" }],
+    skipped: 2,
+    remaining: 0,
+    starvedRun: false,
+    spent: [],
+    modelNames: new Map(),
+    judgeNames: new Map(),
+    ...overrides,
+  });
+}
+
+describe("the sweep summary", () => {
+  it("names the mode and reports the three counts every sweep answers with", () => {
+    const page = sweepSubject({ results: [], skipped: 5, remaining: 3 });
+
+    expect(page).toContain("## Reeve · translate — sweep");
+    expect(page).toContain("Processed 0, skipped 5 (already translated), 3 remaining.");
+  });
+
+  it("says a dry run rehearsed rather than published", () => {
+    expect(sweepSubject({ dryRun: true })).toContain("**Dry run** — nothing was published.");
+  });
+
+  it("tables one row per thread, with its outcome", () => {
+    const page = sweepSubject({
+      results: [
+        { number: 42, outcome: "published en, vi" },
+        { number: 43, outcome: "already translated" },
+      ],
+    });
+
+    expect(page).toContain("| #42 | published en, vi |");
+    expect(page).toContain("| #43 | already translated |");
+  });
+
+  it("says plainly when nothing was processed, rather than an empty table", () => {
+    expect(sweepSubject({ results: [] })).toContain("Nothing was processed this run.");
+  });
+
+  it("explains a starved roster as weather, not a failure", () => {
+    const page = sweepSubject({ starvedRun: true, remaining: 4 });
+
+    expect(page).toContain("ran out of capacity partway through");
+    expect(page).toContain("Weather, not a failure.");
+  });
+
+  it("says nothing about the roster when it was never starved", () => {
+    expect(sweepSubject({ starvedRun: false })).not.toContain("ran out of capacity");
+  });
+
+  it("bills drafting and judging as separate rows, as a single run does", () => {
+    const page = sweepSubject({
+      spent: [
+        spend({ purpose: "draft", model: "writer" }),
+        spend({ purpose: "judge", model: "seat-a" }),
+      ],
+      modelNames: new Map([["writer", "House model"]]),
+      judgeNames: new Map([["seat-a", "Referee"]]),
+    });
+
+    expect(page).toContain("| Drafting | House model |");
+    expect(page).toContain("| Judging | Referee |");
+  });
+
+  it("ends with exactly one newline, whatever the last section was", () => {
+    expect(sweepSubject()).toMatch(/[^\n]\n$/);
   });
 });

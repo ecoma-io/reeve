@@ -5,11 +5,8 @@ a time — and what it looks like when a free provider cannot finish it in one
 run.
 
 > [!IMPORTANT]
-> Reeve is on a `0.x` line. This page describes [Stage 2](../north-star.md#7-roadmap)
-> of [the roadmap](../north-star.md#7-roadmap) and is not built yet. Nothing on
-> this page runs today — see
-> [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here)
-> for what "normative but not yet built" means on these pages.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## What `sweep`, `since` and `limit` are
 
@@ -29,7 +26,8 @@ with:
 open thread this duty has not already handled." `since` bounds it by date, and
 `limit` bounds it by count — both exist for the same reason: a scheduled run
 has to end, and ending with an honest partial is the entire point of this
-page.
+page. `limit` defaults to `50` when left unset, modest enough to protect a
+free tier's own rate limit; the example above raises it deliberately.
 
 ## Why a sweep exists at all: weather
 
@@ -126,16 +124,19 @@ between runs, only deferred.
 
 Installing Reeve on a repository with three years of history does not mean
 committing to translate or sort three years of history. `since` bounds a
-sweep to threads opened or updated after a date, so the first sweep can be
-scoped to "everything from the day I installed this" and a backfill of
-everything older stays a deliberate, separate decision — run once, by hand,
-with `limit` set to whatever you are willing to spend finding out what it
-costs.
+sweep by **creation date**, never by when a thread was last touched — a
+sweep's own labelling or translating would otherwise push an update-date
+bound forward under it, quietly widening the backlog a supposedly-bounded
+run considers. So the first sweep can be scoped to "everything opened from
+the day I installed this" and a backfill of everything older stays a
+deliberate, separate decision — run once, by hand, with `limit` set to
+whatever you are willing to spend finding out what it costs.
 
 ## What this replaces
 
-Today, before this stage lands, working through an existing backlog means the
-[`number`](installation.md#a-backfill-or-one-thread-on-purpose) input, one
-thread at a time, from a `workflow_dispatch` you trigger by hand. `sweep`
-does not remove that path — a single thread on purpose is still exactly that
-— it adds the scheduled, unattended one next to it.
+Working through an existing backlog one thread at a time, from a
+`workflow_dispatch` you trigger by hand with the
+[`number`](installation.md#a-backfill-or-one-thread-on-purpose) input, still
+works exactly as before. `sweep` does not remove that path — a single thread
+on purpose is still exactly that — it adds the scheduled, unattended one next
+to it.

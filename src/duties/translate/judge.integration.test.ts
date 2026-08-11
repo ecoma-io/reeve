@@ -30,7 +30,12 @@ function scripted(answers: Record<string, string | Completion>): Provider {
     complete(model: string): Promise<Completion> {
       const answer = answers[model];
       if (answer === undefined) {
-        return Promise.resolve({ ok: false, model, reason: "no answer scripted" });
+        return Promise.resolve({
+          ok: false,
+          model,
+          reason: "no answer scripted",
+          kind: "protocol",
+        });
       }
       return Promise.resolve(
         typeof answer === "string"

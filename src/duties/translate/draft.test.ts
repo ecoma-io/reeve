@@ -50,7 +50,12 @@ function answering(answers: Record<string, string | Completion>): Provider {
     complete: vi.fn((model: string): Promise<Completion> => {
       const answer = answers[model];
       if (answer === undefined) {
-        return Promise.resolve({ ok: false, model, reason: "not configured in this case" });
+        return Promise.resolve({
+          ok: false,
+          model,
+          reason: "not configured in this case",
+          kind: "protocol",
+        });
       }
       return Promise.resolve(
         typeof answer === "string"
@@ -243,7 +248,7 @@ describe("translate", () => {
       // of the failure asks exactly the same sequence. The third draft is where
       // the rotation comes back around to the model that already failed.
       const provider = answering({
-        a: { ok: false, model: "a", reason: "quota exhausted" },
+        a: { ok: false, model: "a", reason: "quota exhausted", kind: "protocol" },
         b: "Second.",
       });
       await translate(request({ provider, models: ["a", "b"], drafts: 3 }));
@@ -256,19 +261,21 @@ describe("translate", () => {
       // A log that repeated `quota exhausted` once per draft would read as a
       // provider failing over and over, rather than as one model being dropped.
       const provider = answering({
-        a: { ok: false, model: "a", reason: "quota exhausted" },
+        a: { ok: false, model: "a", reason: "quota exhausted", kind: "protocol" },
         b: "Second.",
       });
       const result = await translate(request({ provider, models: ["a", "b"], drafts: 3 }));
 
-      expect(result.failures).toEqual([{ ok: false, model: "a", reason: "quota exhausted" }]);
+      expect(result.failures).toEqual([
+        { ok: false, model: "a", reason: "quota exhausted", kind: "protocol" },
+      ]);
       expect(result.attempts).toHaveLength(3);
     });
 
     it("stops the run once every model has failed, rather than asking nobody", async () => {
       const provider = answering({
-        a: { ok: false, model: "a", reason: "quota exhausted" },
-        b: { ok: false, model: "b", reason: "no such model" },
+        a: { ok: false, model: "a", reason: "quota exhausted", kind: "protocol" },
+        b: { ok: false, model: "b", reason: "no such model", kind: "protocol" },
       });
       const result = await translate(request({ provider, models: ["a", "b"], drafts: 5 }));
 

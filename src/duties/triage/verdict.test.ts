@@ -18,7 +18,12 @@ function answering(answers: Record<string, string>): Provider {
     complete: vi.fn((model: string): Promise<Completion> => {
       const answer = answers[model];
       if (answer === undefined) {
-        return Promise.resolve({ ok: false, model, reason: "not configured in this case" });
+        return Promise.resolve({
+          ok: false,
+          model,
+          reason: "not configured in this case",
+          kind: "protocol",
+        });
       }
       return Promise.resolve({ ok: true, model, content: answer, finishReason: "stop" });
     }),

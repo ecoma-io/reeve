@@ -239,3 +239,80 @@ function withheld(run: Run): string {
     `which \`${run.warrant}\` does not grant to this duty. The narrower of the two wins, always.`
   );
 }
+
+/**
+ * One thread a sweep processed, and what came of it.
+ *
+ * A sweep's page has no room for the per-thread detail `summarize` above
+ * writes — that report is already the size a maintainer will read for one
+ * thread, and a sweep touches many. What is kept is a single sentence per
+ * thread, which is enough to spot the one that needs the full report and to
+ * follow with `number` into single-thread mode for it.
+ */
+export interface SweptThread {
+  readonly number: number;
+  readonly outcome: string;
+}
+
+export interface SweepRun {
+  readonly dryRun: boolean;
+  readonly warrant: string;
+  readonly results: readonly SweptThread[];
+  /** Threads already carrying a taxonomy label — the idempotent skip. */
+  readonly skipped: number;
+  /** Candidates this run did not reach: the limit, or the roster running dry. */
+  readonly remaining: number;
+  /** Every model starved on capacity before `limit` was reached. */
+  readonly starvedRun: boolean;
+  readonly ungranted: string | null;
+  readonly spent: readonly Spend[];
+  readonly modelNames: Names;
+  readonly screenNames: Names;
+}
+
+/**
+ * A sweep's own page: a table instead of one verdict, because there is no
+ * single thread this report is about.
+ *
+ * `starvedRun` is reported as weather, in the same words `docs/usage/sweep.md`
+ * uses, because it is not a failure of this run — it is next week's sweep
+ * being told where to resume.
+ */
+export function summarizeSweep(run: SweepRun): string {
+  if (run.ungranted !== null) {
+    // Cost is still shown, empty, for the same reason `summarize` above shows
+    // it on every path: it is what tells a reader "nothing was asked" from a
+    // report that forgot to say.
+    return `${["## Reeve · triage — sweep", "", run.ungranted, "", cost(run.spent, () => "")].join("\n").trimEnd()}\n`;
+  }
+
+  const rows = run.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
+  const rendered = table(["Thread", "Outcome"], rows);
+
+  const parts = [
+    "## Reeve · triage — sweep",
+    "",
+    `${run.dryRun ? "**Dry run** — nothing was applied. " : ""}Processed ${String(run.results.length)}, ` +
+      `skipped ${String(run.skipped)} (already labelled), ${String(run.remaining)} remaining.`,
+    "",
+    rendered.length === 0 ? "Nothing was processed this run." : rendered,
+  ];
+
+  if (run.starvedRun) {
+    parts.push(
+      "",
+      "The roster ran out of capacity partway through — every model in `models` failed on " +
+        "capacity this run. What is above was delivered; the rest is `remaining`, and the next " +
+        "sweep picks up where this one stopped. Weather, not a failure.",
+    );
+  }
+
+  parts.push(
+    "",
+    cost(run.spent, (spend) =>
+      shown(spend.purpose === "screen" ? run.screenNames : run.modelNames, spend.model),
+    ),
+  );
+
+  return `${parts.join("\n").trimEnd()}\n`;
+}

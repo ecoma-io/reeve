@@ -135,6 +135,42 @@ inputs:
     required: false
     default: "false"
 
+  sweep:
+    description: >-
+      Work the backlog instead of the one thread this event named: every open
+      issue and pull request this duty has not already translated, newest
+      created first. Not an escalation of authority — a sweep decides how much
+      work a run looks for, never what it is allowed to do to a thread, so the
+      same guardrails bound it exactly as they bound a single-thread run.
+
+      Cannot be combined with `number` — set one or the other.
+    required: false
+    default: "false"
+
+  since:
+    description: >-
+      The oldest thread a sweep will consider, bounded by when it was opened —
+      never by when it was last touched, because this duty's own publishing
+      would otherwise push that bound forward under it. Empty for no bound, a
+      calendar date (`2026-01-01`), or a duration (`90d`). This is what "no
+      archaeology on threads before Reeve adoption" means: point it at the day
+      this duty started running here, and everything older stays a deliberate,
+      separate backfill rather than something a scheduled run stumbles into.
+    required: false
+    default: ""
+
+  limit:
+    description: >-
+      The most threads one sweep will actually process. A skip — a thread
+      already carrying this duty's marker — costs nothing and does not count
+      against it. Kept modest by default to protect a free tier's own rate
+      limit: a keyless provider caps requests by IP, and a run that tried the
+      whole backlog in one job would spend most of it rotating through 429s
+      instead of finishing a smaller batch for good. Raise it for a paid
+      provider or a deliberate backfill.
+    required: false
+    default: "50"
+
 outputs:
   source-language:
     description: >-
@@ -147,12 +183,38 @@ outputs:
 
   skipped:
     description: >-
-      JSON array of the language codes no model could translate this run. `[]`
-      on the run where everything worked, never unset — a language that failed
-      does not fail the job, so this is what a workflow branches on.
+      Outside `sweep`: JSON array of the language codes no model could
+      translate this run. `[]` on the run where everything worked, never
+      unset — a language that failed does not fail the job, so this is what a
+      workflow branches on. Under `sweep`: a count of threads already carrying
+      this duty's marker, left alone at no cost beyond the listing itself. The
+      two modes never run in the same job — `sweep` and `number` are mutually
+      exclusive — so the name answers whichever question this run actually
+      asked.
 
   replies-translated:
     description: How many replies got a translation. `0` when `translate-replies` is off.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a 429,
+      a 5xx, a timeout, or a network failure, on every one of them. Weather,
+      never a failure by itself: outside `sweep` this run still published
+      whatever it drafted before the roster ran dry, and under `sweep` see
+      `remaining` for what is left. Worth alerting on if a schedule keeps
+      producing it, because that is a quota worth raising rather than a run
+      worth retrying.
+
+  processed:
+    description: >-
+      How many threads a sweep actually processed this run — decided about,
+      whether or not anything was published. `0` outside `sweep`.
+
+  remaining:
+    description: >-
+      Candidates this sweep did not reach — past `limit`, or left behind when
+      the roster ran out of capacity. The next sweep starts here. `0` outside
+      `sweep`, and `0` when a sweep finished its whole backlog.
 
 runs:
   using: node24

@@ -25,7 +25,12 @@ function scripted(answers: Record<string, string | Completion>): Provider {
     complete(model: string): Promise<Completion> {
       const answer = answers[model];
       if (answer === undefined) {
-        return Promise.resolve({ ok: false, model, reason: "no answer scripted" });
+        return Promise.resolve({
+          ok: false,
+          model,
+          reason: "no answer scripted",
+          kind: "protocol",
+        });
       }
       return Promise.resolve(
         typeof answer === "string"
@@ -224,7 +229,12 @@ describe("translating a real issue body", () => {
 
     expect(result.attempts.map((attempt) => attempt.model)).toEqual(["model-b"]);
     expect(result.failures).toEqual([
-      { ok: false, model: "model-a", reason: "the answer was cut off before it finished" },
+      {
+        ok: false,
+        model: "model-a",
+        reason: "the answer was cut off before it finished",
+        kind: "protocol",
+      },
     ]);
   });
 

@@ -40,7 +40,7 @@ import { eld } from "eld/small";
 import { enclose } from "./enclose.js";
 import { findLanguage, type Language } from "./languages.js";
 import { segments } from "./markdown.js";
-import type { Message, Provider } from "./provider.js";
+import type { Message, Provider, Weather } from "./provider.js";
 import { rotateModels } from "./provider.js";
 import { containsScript } from "./script.js";
 
@@ -133,10 +133,13 @@ export async function detectLanguage(
 export function createLanguagePicker(
   provider: Provider,
   models: readonly string[],
+  weather?: Weather,
 ): LanguagePicker {
   return async (text, candidates) => {
-    const rotation = await rotateModels(models, (model) =>
-      provider.complete(model, question(text, candidates)),
+    const rotation = await rotateModels(
+      models,
+      (model) => provider.complete(model, question(text, candidates)),
+      weather,
     );
     if (!rotation.success) return null;
     const { content } = rotation.success;

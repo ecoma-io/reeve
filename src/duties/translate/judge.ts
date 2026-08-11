@@ -18,7 +18,7 @@
 import { enclose } from "../../core/enclose.js";
 import { judge as runPanel, type JudgeRequest, type Verdict } from "../../core/judge.js";
 import type { Language } from "../../core/languages.js";
-import type { Message, Provider } from "../../core/provider.js";
+import type { Message, Provider, Weather } from "../../core/provider.js";
 
 import type { Attempt } from "./draft.js";
 
@@ -37,10 +37,12 @@ export interface TranslationJudgeRequest {
    * comparison between drafts, so what they share cannot separate them.
    */
   readonly attempts: readonly Attempt[];
+  /** This run's memory of capacity failures — see `core/provider.ts`'s `Weather`. */
+  readonly weather?: Weather;
 }
 
 export async function judge(request: TranslationJudgeRequest): Promise<Verdict<Attempt>> {
-  const { provider, judges, source, to, attempts } = request;
+  const { provider, judges, source, to, attempts, weather } = request;
 
   const panel: JudgeRequest<Attempt> = {
     provider,
@@ -48,6 +50,7 @@ export async function judge(request: TranslationJudgeRequest): Promise<Verdict<A
     candidates: attempts,
     by: (attempt) => attempt.model,
     ballot: (shown) => ballot(source, to, shown),
+    ...(weather === undefined ? {} : { weather }),
   };
 
   return runPanel(panel);
