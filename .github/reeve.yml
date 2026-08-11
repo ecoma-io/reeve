@@ -13,12 +13,20 @@
 
 version: 1
 
-# Labels only, on both duties. `comment`, `assign` and `close` stay off until a
-# `dry-run` on this backlog says what the rate actually is — which is the advice
-# the docs give and it would be strange to take our own advice second.
+# Labels and body edits act; comments are granted and not yet taken. The
+# `comment` grants below are one half of a gate the duties close from both
+# sides: this file says what a duty MAY do, and the workflow's own `apply`
+# says whether this repository lets it yet. Both dogfood workflows leave
+# `apply` at `none`, so `duplicate` and `respond` decide and write their
+# verdicts to the job summary without touching a thread — the read that
+# decides, some weeks of backlog from now, whether posting is switched on.
+# `assign` and `close` stay off entirely, which is the advice the docs give
+# and it would be strange to take our own advice second.
 capabilities:
   triage: [label]
   translate: [edit-body]
+  duplicate: [comment]
+  respond: [comment]
 
 labels:
   - name: bug
