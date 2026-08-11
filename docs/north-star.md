@@ -32,7 +32,7 @@ checked in code, and state kept as plain files in the user's own repository.
 | ----------- | --------------------- | ------------------------------------------------------------------------------- |
 | `triage`    | ships                 | Sorts the backlog against a taxonomy the project wrote.                         |
 | `translate` | ships                 | Puts every issue and pull request in the languages the project reads.           |
-| `duplicate` | [Stage 5](#7-roadmap) | Finds the thread that already asked this — across the language it was asked in. |
+| `duplicate` | ships                 | Finds the thread that already asked this — across the language it was asked in. |
 | `respond`   | [Stage 5](#7-roadmap) | Gives a stranger a first, useful reply in the language they wrote to us in.     |
 
 ## 2. The end state
@@ -493,6 +493,19 @@ the loop by answering the stranger in their own words.
 translation to the project's working language, then the same lexical ranking
 already used within one language — so what used to hold this stage open is
 settled rather than outstanding.
+
+**Standing:** `duplicate` has landed — see
+[the duty's own page](usage/duties/duplicate.md). It ranks the open backlog
+against the thread in front of it with the same BM25 [memory](#9-settled-questions)
+retrieval already runs on, bridges the query through the pivot only when the
+corpus actually holds a candidate the thread's own language would not reach,
+and asks a judge to confirm or refuse the top candidates against the exact
+shortlist it was shown — an answer naming anything outside that shortlist is
+refused the same as one that failed to parse. Off in both halves by default:
+posting the one comment it may ever write needs `duplicate: [comment]` in the
+warrant **and** `apply: comment` on the workflow, because a wrong duplicate is
+a claim about somebody else's report, not a label one click undoes. `respond`
+is still open.
 
 **Done when:** a project can point at a thread that was found, matched and
 answered across a language boundary with no human reading both.

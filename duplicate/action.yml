@@ -1,0 +1,285 @@
+# The `duplicate` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/duplicate@v0.1`.
+name: Reeve - duplicate
+description: Check whether an issue already describes a problem the tracker has open, ranked by shared words and judged by a model against a shortlist it actually saw — never a number a thread merely claimed.
+author: Ecoma
+
+branding:
+  icon: copy
+  color: purple
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read the thread, list the corpus, and post the one
+      comment this duty may write. `GITHUB_TOKEN` is enough.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The issue to check. Defaults to the thread that triggered the workflow,
+      and is what a backfill sets to name an old one.
+
+      An event that carries no thread — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for issue `NaN`.
+    required: false
+    default: ""
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. The order is
+      preference and not last resort: the first one that answers is used, and a
+      model that fails is never asked again in the same run.
+
+      `id = Name` gives a model a display name, and everything a person reads
+      shows the name instead of the id. A model nobody named shows its id.
+    required: true
+
+  languages:
+    description: >-
+      The languages your contributors write in, comma or newline separated.
+      Detection narrows by script, then by profile, and only then asks a model —
+      so a list of two costs nothing on most threads.
+
+      The first language named is also the pivot: when the thread being
+      checked is written in another configured language and the corpus holds a
+      candidate in the pivot language, its title and body are translated into
+      the pivot once so ranking can reach that candidate too. A translation
+      that fails degrades to same-language matching rather than blocking the
+      run.
+
+      Ignored once `warrant`'s own `languages:` key is written — the file is
+      the whole answer from there, and the run says once which of the two it
+      read.
+    required: false
+    default: en, vi, zh
+
+  warrant:
+    description: >-
+      Where the permissions live. This duty is granted nothing by default —
+      unlike the rest of Reeve, there is no cheapest-reversible-action
+      fallback here, because a comment naming the wrong thread as a duplicate
+      is a claim posted in public about somebody else's report. Add
+      `duplicate: [comment]` to this file's `capabilities:` block to let it
+      post one. It may also carry a `languages:` key, which becomes the whole
+      answer for detection once it is written — see `languages` above.
+
+      Missing at this default path, there is no failure: the run still
+      decides and reports, at the same "nothing granted" authority a written
+      block that leaves this duty out would give it. Point this at a path of
+      your own instead, and a file missing there fails the run red, because
+      naming a file that is not there is a configuration mistake rather than
+      an absence. A file that exists but does not parse always fails red,
+      wherever it lives.
+    required: false
+    default: .github/reeve.yml
+
+  apply:
+    description: >-
+      What this run may do: `comment`, or `none` for a run that decides and
+      reports without touching the thread.
+
+      The narrower of this and the warrant file wins, always, and neither
+      half defaults to `comment` on its own — a repository opts a workflow
+      into posting only by setting both this **and** `duplicate: [comment]`
+      in the warrant file. That is deliberate friction: a comment naming the
+      wrong thread as a duplicate is a claim posted in public about somebody
+      else's report, so this is not the cheapest-reversible-action default
+      the rest of Reeve grants for free.
+    required: false
+    default: none
+
+  candidates:
+    description: >-
+      How many of the closest-ranked open threads reach the judge. Kept small
+      on purpose: this is what the model is shown and asked to pick from, not
+      a search results page, and a verdict naming anything outside this
+      shortlist is refused the same as an answer that failed to parse.
+    required: false
+    default: "5"
+
+  corpus-limit:
+    description: >-
+      How many open threads the ranking is run against, newest created first.
+      `none` is the default and means every open issue — this is the index a
+      maintainer configured, not a work budget, so it pages past GitHub's own
+      page size until this bound or `corpus-since` is satisfied or the open
+      list runs out.
+    required: false
+    default: none
+
+  corpus-since:
+    description: >-
+      The oldest thread the corpus considers, bounded by when it was opened.
+      Empty for no bound, a calendar date (`2026-01-01`), or a duration
+      (`90d`). Narrowing this is a cost control for a large, long-lived
+      tracker, not a correctness setting — a duplicate opened before the bound
+      simply cannot be found.
+    required: false
+    default: ""
+
+  max-body-chars:
+    description: >-
+      How much of a body is indexed and judged, for the thread being checked
+      and for every corpus candidate alike. A longer body has its tail left
+      behind and the job summary says so. `none` reads the whole thing.
+
+      Applied after a published block — a translation, most likely — is
+      stripped out of the body: see the note on that in
+      `docs/usage/duties/duplicate.md`. The budget is spent on what an author
+      wrote, never on a block Reeve itself appended.
+    required: false
+    default: "6000"
+
+  confidence:
+    description: >-
+      How sure the judge's verdict has to be before the comment is posted,
+      between 0 and 1. Under the floor, `duplicate-of` and `score` still
+      answer and the job summary still explains the verdict — nothing is
+      applied, which is how a maintainer tunes this against real threads
+      before letting it write anything.
+
+      Refused rather than clamped: `75` is a typo that would otherwise mean
+      `1`, and a duty that silently stopped commenting is worse than a red
+      run.
+    required: false
+    default: "0.75"
+
+  show-attribution:
+    description: >-
+      How much of the machinery the published comment names. `none` shows the
+      duplicate and why alone, `model` adds the model that reached the
+      verdict, and `detail` adds its confidence and the lexical score that put
+      the candidate in front of the judge.
+
+      `none` is the default because all of it — and the token count besides —
+      is already written to the job summary, which is read by the person who
+      configured the run rather than by everyone the thread notifies. Whatever
+      this is set to, the comment always says a model proposed this rather
+      than a maintainer — that floor is not configurable away.
+    required: false
+    default: none
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and change nothing. The
+      rehearsal takes the same path a real run does — the same ranking, the
+      same floor, the same warrant — so what it reports is what a real run
+      would do.
+    required: false
+    default: "false"
+
+  sweep:
+    description: >-
+      Check the backlog instead of the one thread this event named: every
+      open issue, newest created first, each ranked against the corpus of
+      every other open issue. Not an escalation of authority — a sweep
+      decides how much work a run looks for, never what it is allowed to do to
+      a thread, so the same warrant and the same `apply` bound it exactly as
+      they bound a single-thread run.
+
+      There is no idempotent skip here the way a sweep in another duty has
+      one: whether a thread is a duplicate is exactly the question every
+      thread in the walk is asked, so every candidate the walk reaches is
+      processed.
+
+      Cannot be combined with `number` — set one or the other.
+    required: false
+    default: "false"
+
+  since:
+    description: >-
+      The oldest issue a sweep will consider, bounded by when it was opened —
+      never by when it was last touched. Empty for no bound, a calendar date
+      (`2026-01-01`), or a duration (`90d`). This bounds which threads the
+      sweep checks, not the corpus each one is checked against — see
+      `corpus-since` for that.
+    required: false
+    default: ""
+
+  limit:
+    description: >-
+      The most issues one sweep will actually process. Kept modest by default
+      to protect a free tier's own rate limit: a keyless provider caps
+      requests by IP, and a run that tried the whole backlog in one job would
+      spend most of it rotating through 429s instead of finishing a smaller
+      batch for good. Raise it for a paid provider or a deliberate backfill.
+    required: false
+    default: "50"
+
+outputs:
+  duplicate-of:
+    description: >-
+      The issue number the verdict thinks this repeats, or empty. Reported
+      whether or not `apply` names `comment`, so a workflow can act on it —
+      close it, label it, anything — without granting this duty the ability to
+      touch the thread itself.
+
+  score:
+    description: >-
+      How sure the verdict was, to two decimal places. `0.00` when there was
+      no verdict. Distinct from the `confidence` input, which is the floor
+      this number is checked against before anything is applied.
+
+  language:
+    description: >-
+      The detected language of the thread, or empty — empty means none of the
+      configured languages wrote it, which is an answer rather than a failure.
+
+  commented:
+    description: >-
+      `true` when this run leaves its comment naming the suspected duplicate
+      standing — whether that meant posting it, replacing it, or finding an
+      earlier run's already said the same thing and touching nothing this
+      time. A workflow gating on this cares whether Reeve's comment exists
+      after the run, not whether bytes moved during it. `false` on every
+      other run, including one that found a duplicate under the confidence
+      floor or without `comment` granted — never unset.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a 429,
+      a 5xx, a timeout, or a network failure, on every one of them. Weather,
+      never a failure by itself: outside `sweep` this run still delivered
+      whatever verdict it reached before the roster ran dry, and under `sweep`
+      see `remaining` for what is left. Worth alerting on if a schedule keeps
+      producing it, because that is a quota worth raising rather than a run
+      worth retrying.
+
+  processed:
+    description: >-
+      How many issues a sweep actually processed this run — decided about,
+      whether or not anything was posted. `0` outside `sweep`.
+
+  remaining:
+    description: >-
+      Candidates this sweep did not reach — past `limit`, or left behind when
+      the roster ran out of capacity. The next sweep starts here. `0` outside
+      `sweep`, and `0` when a sweep finished its whole backlog.
+
+runs:
+  using: node24
+  main: dist/index.js
