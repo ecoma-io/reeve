@@ -130,6 +130,28 @@ absence of that block, whether because there is no file at all or because the
 file stops at a taxonomy, is itself a stated, narrow authority rather than an
 unstated wide one.
 
+**The warrant and an input answer different questions, and confusing them
+undoes the ladder.** The warrant is authority: what a duty is permitted to do
+_to the repository_ — which label, which comment, which close, which write.
+It is reviewed the way code is, because it grants power, and it is the one
+file [D2](#d2--authority-is-granted-written-and-bounded) makes the whole
+answer once a `capabilities:` block exists. An input on the workflow is not
+that. It is how a duty already holding its authority is asked to operate —
+how many threads a sweep considers, how long one request is allowed to run,
+which endpoint carries a model, how much of a body gets read before it is
+translated. None of those grant a duty anything it did not already have; they
+shape the *how* of work the warrant already permitted, and a maintainer
+narrows or loosens them the same way they would any other step input, in the
+workflow file, without a warrant review. This is why `endpoints`,
+`api-keys`, `request-timeout`, `temperature`, `max-body-chars` and `limit`
+live on the workflow rather than in `.github/reeve.yml`: none of them answer
+"what may Reeve touch," and putting an operational knob in the warrant would
+train a reviewer to read authority into a line that was never a permission.
+The test is not whether a setting sounds important — a timeout can break a
+run and a label cannot — it is whether turning it up changes what gets
+**written to the repository or said to somebody**. Only that question belongs
+in the warrant.
+
 ## 4. Where this sits
 
 Doctrine invented in a closed room is preference with better formatting. This
