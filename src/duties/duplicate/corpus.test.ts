@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TrackerApi } from "../../core/forge.js";
 import { markerFor } from "../../core/marker.js";
 import { authorText, listCorpus } from "./corpus.js";
+import { documentOf } from "./rank.js";
 
 const AT = { owner: "acme", repo: "widgets" };
 
@@ -176,6 +177,59 @@ describe("listCorpus", () => {
     const corpus = await listCorpus(api, AT, 999, null, null);
 
     expect(corpus[0]?.body).toBe("Login fails on Safari.");
+  });
+
+  it("truncates a candidate's body to `maxBodyChars`, the same bound the thread's own body reads", async () => {
+    const long = "x".repeat(200);
+    const api = stubOf([
+      { number: 1, title: "Long report", body: long, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+
+    const corpus = await listCorpus(api, AT, 999, null, null, 50);
+
+    expect(corpus[0]?.body).toBe("x".repeat(50));
+  });
+
+  it("truncates after stripping a published block, not before — the budget is spent on what an author wrote", async () => {
+    const translate = markerFor("translate");
+    const body = `${"x".repeat(200)}\n\n${translate.render("fp1")}\n\nTranslated text.`;
+    const api = stubOf([
+      { number: 1, title: "Long report", body, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+
+    const corpus = await listCorpus(api, AT, 999, null, null, 50);
+
+    expect(corpus[0]?.body).toBe("x".repeat(50));
+  });
+
+  it("reads the whole candidate body when `maxBodyChars` is null, the default", async () => {
+    const long = "x".repeat(200);
+    const api = stubOf([
+      { number: 1, title: "Long report", body: long, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+
+    const corpus = await listCorpus(api, AT, 999, null, null);
+
+    expect(corpus[0]?.body).toBe(long);
+  });
+
+  it("reaches the judge's own document truncated too — `rank.ts`'s `documentOf` reads straight off the corpus entry", async () => {
+    const long = "y".repeat(200);
+    const api = stubOf([
+      { number: 1, title: "Long report", body: long, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+
+    const corpus = await listCorpus(api, AT, 999, null, null, 50);
+
+    expect(documentOf(corpus[0]!)).toBe(`Long report\n\n${"y".repeat(50)}`);
+  });
+
+  it("lists the whole open corpus with `exclude` null — a sweep's shared listing", async () => {
+    const api = stubOf(page(3));
+
+    const corpus = await listCorpus(api, AT, null, null, null);
+
+    expect(corpus.map((entry) => entry.number)).toEqual([1, 2, 3]);
   });
 });
 

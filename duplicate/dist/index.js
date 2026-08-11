@@ -33561,7 +33561,7 @@ function authorText(body) {
   const match = ANY_MARKER.exec(body);
   return match === null ? body : authorHalf(body.slice(0, match.index));
 }
-async function listCorpus(api, at, exclude, limit, since) {
+async function listCorpus(api, at, exclude, limit, since, maxBodyChars = null) {
   const corpus = [];
   for (let page2 = 1; ; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
@@ -33581,10 +33581,11 @@ async function listCorpus(api, at, exclude, limit, since) {
         break;
       }
       if (entry.pull_request !== void 0 || entry.number === exclude) continue;
+      const authored = authorText(entry.body ?? "");
       corpus.push({
         number: entry.number,
         title: entry.title ?? "",
-        body: authorText(entry.body ?? ""),
+        body: maxBodyChars === null ? authored : authored.slice(0, maxBodyChars),
         createdAt
       });
       if (limit !== null && corpus.length >= limit) {
@@ -33608,6 +33609,9 @@ function proposalFingerprint(source, candidates) {
 function payloadFor(fp, duplicateOf) {
   return `${fp} duplicate-of=${String(duplicateOf)}`;
 }
+function isBot(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
 var COMMENT_PAGE = 100;
 async function findMarked(api, at) {
   const { data } = await api.rest.issues.listComments({
@@ -33617,15 +33621,21 @@ async function findMarked(api, at) {
     per_page: COMMENT_PAGE
   });
   for (const comment of data) {
-    const { fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null) return { id: comment.id, fingerprint: found };
+    if (!isBot(comment.user)) continue;
+    const { official, fingerprint: found } = marker.split(comment.body ?? "");
+    if (found !== null && official === "") return { id: comment.id, fingerprint: found };
   }
   return null;
 }
-async function postOrReplace(api, at, proposal, fp) {
+async function classify(api, at, proposal, fp) {
   const payload = payloadFor(fp, proposal.duplicateOf);
   const body = [marker.render(payload), render(proposal)].join("\n\n");
   const existing = await findMarked(api, at);
+  const disposition2 = existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
+  return { disposition: disposition2, body, existing };
+}
+async function postOrReplace(api, at, proposal, fp) {
+  const { disposition: disposition2, body, existing } = await classify(api, at, proposal, fp);
   if (existing === null) {
     await api.rest.issues.createComment({
       owner: at.owner,
@@ -33633,25 +33643,34 @@ async function postOrReplace(api, at, proposal, fp) {
       issue_number: at.number,
       body
     });
-    return "posted";
+    return disposition2;
   }
-  if (existing.fingerprint === payload) return "unchanged";
+  if (disposition2 === "unchanged") return disposition2;
   await api.rest.issues.updateComment({
     owner: at.owner,
     repo: at.repo,
     comment_id: existing.id,
     body
   });
-  return "replaced";
+  return disposition2;
+}
+async function rehearse(api, at, proposal, fp) {
+  return (await classify(api, at, proposal, fp)).disposition;
 }
 function render(proposal) {
   const lines = [
     `Possible duplicate of #${String(proposal.duplicateOf)}.`,
-    ...proposal.rationale.length > 0 ? ["", proposal.rationale] : [],
+    ...proposal.rationale.length > 0 ? ["", defang(proposal.rationale, proposal.duplicateOf)] : [],
     "",
     footer(proposal)
   ];
   return lines.join("\n");
+}
+function defang(text2, allowed) {
+  return text2.replace(
+    /#(\d+)/g,
+    (match, digits) => Number(digits) === allowed ? match : `\`${match}\``
+  );
 }
 function footer(proposal) {
   const parts = ["Proposed by a model, not decided by a maintainer \u2014 read it as a lead to check."];
@@ -33790,20 +33809,25 @@ function verdict(run2) {
         "",
         "The verdict was under the floor, so it is reported and not applied. `duplicate-of` and `score` still carry it."
       );
+      lines.push(...why(run2));
     } else {
-      lines.push("", disposition(run2));
+      lines.push("", disposition(run2, run2.duplicateOf));
+      if (run2.dryRun || run2.posted === null) lines.push(...why(run2));
     }
   }
   const gap = withheld(run2);
   if (gap.length > 0) lines.push("", gap);
   return lines.join("\n");
 }
-function disposition(run2) {
+function disposition(run2, duplicateOf) {
   if (run2.posted === null) {
     return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
   }
   const verb = run2.posted === "posted" ? run2.dryRun ? "Would have posted" : "Posted" : run2.posted === "replaced" ? run2.dryRun ? "Would have replaced its own previous comment with" : "Replaced its own previous comment with" : "Left its own previous comment unchanged \u2014 this run reached the same fingerprint as";
-  return `${verb} a comment naming #${String(run2.duplicateOf ?? 0)}.`;
+  return `${verb} a comment naming #${String(duplicateOf)}.`;
+}
+function why(run2) {
+  return run2.rationale !== null && run2.rationale.length > 0 ? ["", `> ${run2.rationale}`] : [];
 }
 function withheld(run2) {
   if (run2.withheld.length === 0) return "";
@@ -33964,7 +33988,6 @@ function readAttribution() {
   if (raw === "none" || raw === "model" || raw === "detail") return raw;
   throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
-var NOTHING_DONE = { commented: false };
 function newAccumulator() {
   return { results: [], starvedRun: false, candidates: 0, ungranted: null };
 }
@@ -33976,6 +33999,15 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
   const listed = await listOpenThreads(api, context2.repo, settings.since);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
+  const corpus = await listCorpus(
+    api,
+    context2.repo,
+    null,
+    settings.corpusLimit,
+    settings.corpusSince,
+    settings.maxBodyChars
+  );
+  const languageCache = /* @__PURE__ */ new Map();
   for (const thread of candidates) {
     if (acc.results.length >= settings.limit) break;
     if (starved(settings.models, weather)) {
@@ -33996,9 +34028,11 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
       standing,
       settings,
       stages,
-      weather
+      weather,
+      corpus,
+      languageCache
     );
-    const acted = settings.dryRun ? { done: NOTHING_DONE, posted: null } : await act(api, at, outcome);
+    const acted = await act(api, at, outcome, settings.dryRun);
     acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
   }
 }
@@ -34039,7 +34073,7 @@ async function run() {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context2.repo, number };
-      const outcome = authority.warrant.unnamed("duplicate") ? notGranted(authority.warrant) : await decide(
+      const outcome = denied ? notGranted(authority.warrant) : await decide(
         api,
         authority,
         number,
@@ -34048,7 +34082,7 @@ async function run() {
         stages,
         weather
       );
-      const acted = settings.dryRun ? { done: NOTHING_DONE, posted: null } : await act(api, at, outcome);
+      const acted = await act(api, at, outcome, settings.dryRun);
       single = { number, outcome, done: acted.done, posted: acted.posted };
     }
   } catch (error2) {
@@ -34073,7 +34107,7 @@ async function run() {
     }
   }
 }
-async function decide(api, authority, thread, standing, settings, stages, weather) {
+async function decide(api, authority, thread, standing, settings, stages, weather, corpusSource = null, languageCache = /* @__PURE__ */ new Map()) {
   const warrant = authority.warrant;
   const rawBody = authorText(standing.body);
   const body = settings.maxBodyChars === null ? rawBody : rawBody.slice(0, settings.maxBodyChars);
@@ -34103,6 +34137,7 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
     pivot: pivotInfo2,
     proposal: null,
     fingerprint: null,
+    rationale: null,
     ungranted: null
   });
   const detection = await detectLanguage(
@@ -34115,20 +34150,21 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
   info(
     detection.language === null ? "The author's language is none of the configured ones." : `Author language ${detection.language.code} (by ${detection.by}).`
   );
-  const corpus = await listCorpus(
+  const corpus = corpusSource === null ? await listCorpus(
     api,
     context2.repo,
     thread,
     settings.corpusLimit,
-    settings.corpusSince
-  );
+    settings.corpusSince,
+    settings.maxBodyChars
+  ) : corpusSource.filter((entry) => entry.number !== thread);
   const queries = [`${standing.title}
 ${body}`];
   let pivotUsed = false;
   let pivotNote = null;
   const pivotLanguage = settings.languages[0] ?? null;
   const threadLanguage = detection.language;
-  if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, threadLanguage, corpus)) {
+  if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache)) {
     const draft = await translateToPivot({
       provider: stages.pivot,
       models: settings.models,
@@ -34185,6 +34221,7 @@ ${draft.body}`);
     );
   }
   const lexicalScore = matched.score;
+  const rationale = sanitize(verdict2.rationale);
   const eligible = verdict2.confidence >= settings.confidence;
   if (!eligible) {
     info(
@@ -34200,7 +34237,7 @@ ${body}`,
     duplicateOf: verdict2.duplicateOf,
     confidence: verdict2.confidence,
     lexicalScore,
-    rationale: sanitize(verdict2.rationale),
+    rationale,
     model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
     attribution: settings.attribution
   } : null;
@@ -34218,13 +34255,20 @@ ${body}`,
     // Under the floor, `duplicate-of`/`score` still answer, but there is
     // nothing eligible to fingerprint against a write that will never happen.
     fingerprint: eligible ? fp : null,
+    rationale,
     ungranted: null
   };
 }
-async function crossLanguageCorpus(languages, threadLanguage, corpus) {
+async function crossLanguageCorpus(languages, pivotLanguage, corpus, cache) {
   for (const candidate of corpus) {
-    const detected = await detectLanguage(documentOf(candidate), languages);
-    if (detected.language !== null && detected.language.code !== threadLanguage.code) return true;
+    let detected;
+    if (cache.has(candidate.number)) {
+      detected = cache.get(candidate.number) ?? null;
+    } else {
+      detected = (await detectLanguage(documentOf(candidate), languages)).language;
+      cache.set(candidate.number, detected);
+    }
+    if (detected !== null && detected.code === pivotLanguage.code) return true;
   }
   return false;
 }
@@ -34241,15 +34285,20 @@ function notGranted(warrant) {
     pivot: { used: false, note: null },
     proposal: null,
     fingerprint: null,
+    rationale: null,
     ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
   };
 }
-async function act(api, at, outcome) {
+async function act(api, at, outcome, dryRun) {
   if (outcome.proposal === null || outcome.fingerprint === null) {
     return { done: { commented: false }, posted: null };
   }
   if (!outcome.permitted.includes("comment")) {
     return { done: { commented: false }, posted: null };
+  }
+  if (dryRun) {
+    const posted2 = await rehearse(api, at, outcome.proposal, outcome.fingerprint);
+    return { done: { commented: false }, posted: posted2 };
   }
   const posted = await postOrReplace(api, at, outcome.proposal, outcome.fingerprint);
   return { done: { commented: true }, posted };
@@ -34288,6 +34337,7 @@ function page(settings, thread, outcome, done, posted, spent) {
     note: outcome.note,
     permitted: outcome.permitted,
     withheld: outcome.withheld,
+    rationale: outcome.rationale,
     done,
     posted,
     spent,

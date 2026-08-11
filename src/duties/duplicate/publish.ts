@@ -112,6 +112,22 @@ function payloadFor(fp: string, duplicateOf: number): string {
   return `${fp} duplicate-of=${String(duplicateOf)}`;
 }
 
+/** Enough of a comment's author to tell whether it was Reeve's own bot that wrote it. */
+export interface Author {
+  readonly login?: string | null;
+  readonly type?: string | null;
+}
+
+/**
+ * Whether a comment's author is a bot — the same convention
+ * `triage/main.ts`'s `recordTrigger` reads a webhook sender by, mirrored here
+ * for a comment author: GitHub's own `type: "Bot"` when the API reports it,
+ * or a `[bot]`-suffixed login for the cases it does not.
+ */
+function isBot(author: Author | null | undefined): boolean {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
+
 /**
  * The part of an Octokit client this module needs to find and replace its own
  * comment — the comment pair `GitHubApi` already declares for editing a
@@ -128,7 +144,7 @@ export interface CommentApi {
         issue_number: number;
         per_page?: number;
         page?: number;
-      }): Promise<{ data: { id: number; body?: string | null }[] }>;
+      }): Promise<{ data: { id: number; body?: string | null; user?: Author | null }[] }>;
       createComment(params: {
         owner: string;
         repo: string;
@@ -169,6 +185,17 @@ export interface Marked {
  * `marker.split` is generic over any text carrying the marker, not
  * specifically a thread body — see its own doc comment — which is what makes
  * it reusable here on a standalone comment without a second implementation.
+ *
+ * **Two guards, not one, before a comment counts as this duty's own.** A
+ * comment's author has to be a bot, and the marker has to open the comment —
+ * `marker.split(body).official === ""`, nothing but whitespace in front of
+ * it. Without both, a human quoting this duty's own marker text back (to
+ * disagree with it, to report it, anything) or simply forging the tag inside
+ * their own comment would be read as a rerun target, and the next run would
+ * overwrite a stranger's comment believing it was replacing its own. Neither
+ * guard alone is enough: a bot's *other* comment could still carry the marker
+ * merely quoted, and a human's comment opening with the exact tag text is a
+ * forgery worth refusing regardless of who is credited with typing it.
  */
 export async function findMarked(api: CommentApi, at: Location): Promise<Marked | null> {
   const { data } = await api.rest.issues.listComments({
@@ -179,17 +206,45 @@ export async function findMarked(api: CommentApi, at: Location): Promise<Marked 
   });
 
   for (const comment of data) {
-    const { fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null) return { id: comment.id, fingerprint: found };
-    // A comment carrying no marker at all is somebody else's, or an older
-    // Reeve comment from before this scheme — neither is this duty's to
-    // touch, so the search keeps going rather than stopping here.
+    if (!isBot(comment.user)) continue;
+    const { official, fingerprint: found } = marker.split(comment.body ?? "");
+    if (found !== null && official === "") return { id: comment.id, fingerprint: found };
+    // No marker at all, a marker embedded mid-body, or a non-bot author is
+    // never this duty's to touch, so the search keeps going rather than
+    // stopping here.
   }
   return null;
 }
 
 /** What the write step did, for the summary and for the `commented` output. */
 export type Posted = "posted" | "replaced" | "unchanged";
+
+/** What a write would do, decided without writing anything — the read half `postOrReplace` and `rehearse` share. */
+interface Classification {
+  readonly disposition: Posted;
+  readonly body: string;
+  readonly existing: Marked | null;
+}
+
+/**
+ * Reads whatever `postOrReplace` would need to decide `posted`/`replaced`/
+ * `unchanged`, without writing anything — the same lookup either way, so a
+ * rehearsal under `dry-run` and a real run can never disagree about which of
+ * the three a given proposal would produce.
+ */
+async function classify(
+  api: CommentApi,
+  at: Location,
+  proposal: Proposal,
+  fp: string,
+): Promise<Classification> {
+  const payload = payloadFor(fp, proposal.duplicateOf);
+  const body = [marker.render(payload), render(proposal)].join("\n\n");
+  const existing = await findMarked(api, at);
+  const disposition: Posted =
+    existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
+  return { disposition, body, existing };
+}
 
 /**
  * Posts `proposal` under the marker, replacing this duty's own previous
@@ -204,9 +259,7 @@ export async function postOrReplace(
   proposal: Proposal,
   fp: string,
 ): Promise<Posted> {
-  const payload = payloadFor(fp, proposal.duplicateOf);
-  const body = [marker.render(payload), render(proposal)].join("\n\n");
-  const existing = await findMarked(api, at);
+  const { disposition, body, existing } = await classify(api, at, proposal, fp);
 
   if (existing === null) {
     await api.rest.issues.createComment({
@@ -215,10 +268,10 @@ export async function postOrReplace(
       issue_number: at.number,
       body,
     });
-    return "posted";
+    return disposition;
   }
 
-  if (existing.fingerprint === payload) return "unchanged";
+  if (disposition === "unchanged") return disposition;
 
   await api.rest.issues.updateComment({
     owner: at.owner,
@@ -226,7 +279,22 @@ export async function postOrReplace(
     comment_id: existing.id,
     body,
   });
-  return "replaced";
+  return disposition;
+}
+
+/**
+ * What `postOrReplace` would do to the thread, without doing it — `dry-run`'s
+ * rehearsal for this duty's one write. Shares `classify` with `postOrReplace`
+ * itself rather than reimplementing the lookup, so the disposition a dry run
+ * reports and the disposition a real run would reach can never drift apart.
+ */
+export async function rehearse(
+  api: CommentApi,
+  at: Location,
+  proposal: Proposal,
+  fp: string,
+): Promise<Posted> {
+  return (await classify(api, at, proposal, fp)).disposition;
 }
 
 /**
@@ -239,11 +307,32 @@ export async function postOrReplace(
 function render(proposal: Proposal): string {
   const lines = [
     `Possible duplicate of #${String(proposal.duplicateOf)}.`,
-    ...(proposal.rationale.length > 0 ? ["", proposal.rationale] : []),
+    ...(proposal.rationale.length > 0
+      ? ["", defang(proposal.rationale, proposal.duplicateOf)]
+      : []),
     "",
     footer(proposal),
   ];
   return lines.join("\n");
+}
+
+/**
+ * Fences every `#N` in `text` that is not `allowed` inside a code span,
+ * leaving only the headline's own target — `render`'s first line, above —
+ * live.
+ *
+ * The rationale is model prose, read from the judge's own free-text answer,
+ * not a value this run checked the way it checked `duplicateOf` against the
+ * shortlist. A number it mentions in passing ("similar to what #55 turned
+ * out to be") would otherwise autolink on GitHub the moment this comment
+ * posts, silently cross-referencing and notifying a thread this run never
+ * looked at. A code span is enough to stop that without hiding the text
+ * itself — GitHub does not autolink an issue reference inside one.
+ */
+function defang(text: string, allowed: number): string {
+  return text.replace(/#(\d+)/g, (match, digits: string) =>
+    Number(digits) === allowed ? match : `\`${match}\``,
+  );
 }
 
 /**

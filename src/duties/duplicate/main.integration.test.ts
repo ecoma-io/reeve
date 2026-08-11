@@ -97,6 +97,8 @@ interface ListedIssue {
 interface StoredComment {
   readonly id: number;
   body: string;
+  /** Bot by default — the same identity `GITHUB_TOKEN` posts under. A case names a human explicitly to exercise `findMarked`'s author check. */
+  readonly user?: { readonly login?: string; readonly type?: string };
 }
 
 /** Everything a request is answered from, and everything a case may change. */
@@ -258,6 +260,7 @@ async function route(
       (page === 1 ? stub.comments : []).map((comment) => ({
         id: comment.id,
         body: comment.body,
+        user: comment.user ?? { type: "Bot" },
       })),
     );
     return;
@@ -268,7 +271,7 @@ async function route(
     const body = payload.body ?? "";
     const id = stub.nextCommentId;
     stub.nextCommentId += 1;
-    stub.comments.push({ id, body });
+    stub.comments.push({ id, body, user: { type: "Bot" } });
     stub.effects.created.push(body);
     send(response, 201, { id, body });
     return;
@@ -644,6 +647,9 @@ describe("the action", () => {
     expect(run.outputs.score).toBe("0.90");
     expect(run.outputs.commented).toBe("false");
     expect(run.summary).toContain("— **dry run**, nothing was applied");
+    // M3: dry run is a real rehearsal — the disposition sentence names what
+    // would actually have happened, not a generic dry-run banner alone.
+    expect(run.summary).toContain("Would have posted a comment naming #7.");
   });
 
   it("reports a verdict under the floor without applying it", async () => {

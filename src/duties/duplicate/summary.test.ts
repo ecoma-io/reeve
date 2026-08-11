@@ -14,6 +14,7 @@ function run(over: Partial<Run> = {}): Run {
     duplicateOf: 12,
     confidence: 0.9,
     floor: 0.75,
+    rationale: null,
     lexicalScore: 4.2,
     rank: { corpusSize: 20, offered: 5 },
     pivot: { used: false, note: null },
@@ -89,6 +90,60 @@ describe("summarize", () => {
     expect(page).toContain("`duplicate-of` and `score` still carry it");
   });
 
+  it("shows the rationale for a verdict under the floor — a report-only run still owes why", () => {
+    const page = summarize(
+      run({
+        duplicateOf: 12,
+        confidence: 0.4,
+        floor: 0.75,
+        posted: null,
+        rationale: "Both describe the same login failure on Safari.",
+      }),
+    );
+
+    expect(page).toContain("> Both describe the same login failure on Safari.");
+  });
+
+  it("shows the rationale on a dry run that would have posted", () => {
+    const page = summarize(
+      run({
+        posted: "posted",
+        dryRun: true,
+        done: { commented: false },
+        rationale: "Both describe the same login failure on Safari.",
+      }),
+    );
+
+    expect(page).toContain("> Both describe the same login failure on Safari.");
+  });
+
+  it("shows the rationale when nothing was posted because `apply` did not grant `comment`", () => {
+    const page = summarize(
+      run({ posted: null, rationale: "Both describe the same login failure on Safari." }),
+    );
+
+    expect(page).toContain("> Both describe the same login failure on Safari.");
+  });
+
+  it("does not repeat the rationale on a real run that actually posted — the comment already carries it", () => {
+    const page = summarize(
+      run({
+        posted: "posted",
+        dryRun: false,
+        rationale: "Both describe the same login failure on Safari.",
+      }),
+    );
+
+    expect(page).not.toContain("Both describe the same login failure on Safari.");
+  });
+
+  it("says nothing extra when there is no rationale to show", () => {
+    const page = summarize(run({ posted: null, rationale: null }));
+
+    expect(page).not.toContain("Both describe the same login failure on Safari.");
+    expect(page.split("\n")).not.toContain("> null");
+  });
+
   it("says why there is no verdict when there is none", () => {
     expect(
       summarize(run({ note: "every model failed", duplicateOf: null, posted: null })),
@@ -102,9 +157,12 @@ describe("summarize", () => {
   });
 
   it("says a dry run would have posted", () => {
-    expect(summarize(run({ posted: "posted", dryRun: true }))).toContain(
-      "Would have posted a comment naming #12.",
-    );
+    // `done.commented` is false under a real dry run — see `main.ts`'s `act`
+    // — so the fixture matches what `act` would actually produce rather than
+    // an impossible dry-run-but-commented state.
+    expect(
+      summarize(run({ posted: "posted", dryRun: true, done: { commented: false } })),
+    ).toContain("Would have posted a comment naming #12.");
   });
 
   it("says its own previous comment was replaced", () => {

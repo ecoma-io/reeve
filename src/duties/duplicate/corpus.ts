@@ -75,22 +75,32 @@ export interface CorpusThread {
  *
  * `exclude` drops the thread being checked from its own corpus — it cannot be
  * a duplicate of itself, and BM25 would otherwise hand the judge a perfect
- * match every time. Pull requests are dropped the same way `listOpenThreads`
- * drops them: a duplicate check answers "does an issue already describe this",
- * and a pull request implementing something is not that.
+ * match every time. Null skips that filter entirely, which is what a sweep
+ * wants: it lists this corpus once, shared across every thread the walk
+ * checks, and excludes each thread's own number downstream instead — see
+ * `main.ts`'s `runSweep`. Pull requests are dropped the same way
+ * `listOpenThreads` drops them: a duplicate check answers "does an issue
+ * already describe this", and a pull request implementing something is not
+ * that.
  *
  * `limit` stops paging the moment the corpus holds that many threads, so a
  * generous `corpus-limit` on a large repository does not page further than it
  * has to. `since` stops paging the moment a page's oldest entry falls before
  * the bound — the same prefix property `listOpenThreads` relies on, because
  * both listings are sorted newest-created-first.
+ *
+ * `maxBodyChars` bounds a candidate's body the same way `main.ts`'s `decide`
+ * bounds the thread's own — applied after `authorText` strips any published
+ * block, so the budget is spent on what a candidate's author wrote, never on
+ * a block Reeve itself appended. Null reads the whole thing.
  */
 export async function listCorpus(
   api: TrackerApi,
   at: Pick<Location, "owner" | "repo">,
-  exclude: number,
+  exclude: number | null,
   limit: number | null,
   since: Date | null,
+  maxBodyChars: number | null = null,
 ): Promise<readonly CorpusThread[]> {
   const corpus: CorpusThread[] = [];
 
@@ -114,10 +124,11 @@ export async function listCorpus(
       }
       if (entry.pull_request !== undefined || entry.number === exclude) continue;
 
+      const authored = authorText(entry.body ?? "");
       corpus.push({
         number: entry.number,
         title: entry.title ?? "",
-        body: authorText(entry.body ?? ""),
+        body: maxBodyChars === null ? authored : authored.slice(0, maxBodyChars),
         createdAt,
       });
 

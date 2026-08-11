@@ -183,6 +183,13 @@ comment it lives in was posted by a bot" — this is what makes that rule work
 for a duplicate verdict specifically, rather than every reader having to
 learn a second way to find the number.
 
+**The rationale sentence is model prose, not a second source of truth.** It
+is free to mention other issue numbers while explaining its reasoning, so any
+`#N` it writes that is not the duplicate itself is fenced as `` `#N` `` before
+the comment is posted — GitHub never autolinks it, and a reader still sees
+the number without a stray cross-reference notification landing on some
+unrelated thread the model happened to name in passing.
+
 **This duty never closes a thread, on a reopened one or any other — which is
 exactly what makes it safe on `reopened` events.** A workflow that lists
 `reopened` alongside `opened`/`edited` gets a run that re-decides and, if

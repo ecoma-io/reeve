@@ -90,6 +90,7 @@ import { authorText, listCorpus, type CorpusThread } from "./corpus.js";
 import {
   postOrReplace,
   proposalFingerprint,
+  rehearse,
   type Attribution,
   type CommentApi,
   type Posted,
@@ -217,14 +218,19 @@ interface Outcome {
   /** The fingerprint `proposal` was computed against, alongside it. Null whenever `proposal` is. */
   readonly fingerprint: string | null;
   /**
+   * The verdict's own rationale, already sanitised — set whenever a
+   * duplicate was named, even one under the confidence floor. Null when
+   * there was no verdict at all. Carried separately from `proposal`, which is
+   * null under the floor, because a report-only run still owes a reader
+   * *why* — see `summary.ts`'s `verdict`.
+   */
+  readonly rationale: string | null;
+  /**
    * Why this duty was granted nothing, when a written `capabilities:` block
    * exists and simply does not name it. `null` on every other path.
    */
   readonly ungranted: string | null;
 }
-
-/** What a run that touched nothing did. Also what every dry run reports. */
-const NOTHING_DONE: Done = { commented: false };
 
 /**
  * A sweep's progress, mutated in place rather than assembled and returned —
@@ -273,6 +279,26 @@ async function runSweep(
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
 
+  // Listed once for the whole walk, not once per thread this sweep checks —
+  // every candidate here is ranked against the same corpus, and re-listing
+  // it per thread would multiply a sweep's own request cost by however many
+  // threads it processes. `decide` filters each thread's own number out of
+  // this shared listing as it is reached, rather than this call excluding
+  // it up front the way a single-thread run's own listing does.
+  const corpus = await listCorpus(
+    api,
+    context.repo,
+    null,
+    settings.corpusLimit,
+    settings.corpusSince,
+    settings.maxBodyChars,
+  );
+  // Detecting a candidate's language is free (script/profile only, no
+  // model), but still repeated for the same candidate on every thread the
+  // walk ranks it against unless memoised here, once, across the whole
+  // sweep — see `crossLanguageCorpus`.
+  const languageCache = new Map<number, Language | null>();
+
   for (const thread of candidates) {
     if (acc.results.length >= settings.limit) break;
     if (starved(settings.models, weather)) {
@@ -295,10 +321,10 @@ async function runSweep(
       settings,
       stages,
       weather,
+      corpus,
+      languageCache,
     );
-    const acted = settings.dryRun
-      ? { done: NOTHING_DONE, posted: null }
-      : await act(api, at, outcome);
+    const acted = await act(api, at, outcome, settings.dryRun);
     acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
   }
 }
@@ -364,8 +390,10 @@ export async function run(): Promise<void> {
       // A written `capabilities:` block that does not name `duplicate` grants
       // it nothing, and no verdict this run could reach changes that — so
       // this sits here, before the thread or a single model call spends
-      // anything on a decision that could never be applied.
-      const outcome = authority.warrant.unnamed("duplicate")
+      // anything on a decision that could never be applied. `denied` was
+      // already read above, to decide `languages` — reused rather than
+      // re-asked, the same fact either way.
+      const outcome = denied
         ? notGranted(authority.warrant)
         : await decide(
             api,
@@ -377,9 +405,7 @@ export async function run(): Promise<void> {
             weather,
           );
 
-      const acted = settings.dryRun
-        ? { done: NOTHING_DONE, posted: null }
-        : await act(api, at, outcome);
+      const acted = await act(api, at, outcome, settings.dryRun);
       single = { number, outcome, done: acted.done, posted: acted.posted };
     }
   } catch (error) {
@@ -428,6 +454,15 @@ async function decide(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  /**
+   * A corpus already listed for the whole walk — a sweep's own, shared
+   * across every thread it checks — or null for a single-thread run to list
+   * its own, excluding just this thread as it pages. See `listCorpus`'s own
+   * doc comment on `exclude`.
+   */
+  corpusSource: readonly CorpusThread[] | null = null,
+  /** A candidate's detected language, memoised by issue number across a sweep's whole walk. Fresh per call outside `sweep`, where it buys nothing. */
+  languageCache = new Map<number, Language | null>(),
 ): Promise<Outcome> {
   const warrant = authority.warrant;
   // Stripped the same way `corpus.ts` strips every candidate — see
@@ -472,6 +507,7 @@ async function decide(
     pivot: pivotInfo,
     proposal: null,
     fingerprint: null,
+    rationale: null,
     ungranted: null,
   });
 
@@ -488,13 +524,17 @@ async function decide(
       : `Author language ${detection.language.code} (by ${detection.by}).`,
   );
 
-  const corpus = await listCorpus(
-    api,
-    context.repo,
-    thread,
-    settings.corpusLimit,
-    settings.corpusSince,
-  );
+  const corpus =
+    corpusSource === null
+      ? await listCorpus(
+          api,
+          context.repo,
+          thread,
+          settings.corpusLimit,
+          settings.corpusSince,
+          settings.maxBodyChars,
+        )
+      : corpusSource.filter((entry) => entry.number !== thread);
 
   const queries = [`${standing.title}\n${body}`];
   let pivotUsed = false;
@@ -507,7 +547,7 @@ async function decide(
     threadLanguage !== null &&
     pivotLanguage !== null &&
     threadLanguage.code !== pivotLanguage.code &&
-    (await crossLanguageCorpus(settings.languages, threadLanguage, corpus))
+    (await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache))
   ) {
     const draft = await translateToPivot({
       provider: stages.pivot,
@@ -595,6 +635,12 @@ async function decide(
     );
   }
   const lexicalScore = matched.score;
+  // Sanitised once, used both by `proposal` below (only when eligible) and by
+  // `Outcome.rationale` (always, once a verdict named a candidate the
+  // shortlist actually offered) — a report-only run under the floor still
+  // owes a reader *why*, which `proposal` alone cannot answer since it is
+  // null there.
+  const rationale = sanitize(verdict.rationale);
 
   const eligible = verdict.confidence >= settings.confidence;
   if (!eligible) {
@@ -618,7 +664,7 @@ async function decide(
         duplicateOf: verdict.duplicateOf,
         confidence: verdict.confidence,
         lexicalScore,
-        rationale: sanitize(verdict.rationale),
+        rationale,
         model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
         attribution: settings.attribution,
       }
@@ -638,14 +684,20 @@ async function decide(
     // Under the floor, `duplicate-of`/`score` still answer, but there is
     // nothing eligible to fingerprint against a write that will never happen.
     fingerprint: eligible ? fp : null,
+    rationale,
     ungranted: null,
   };
 }
 
 /**
- * Whether at least one corpus candidate is written in a language the thread's
- * own text would not match — the fact that makes `translateToPivot` worth a
- * request.
+ * Whether at least one corpus candidate is written in the pivot language
+ * specifically — not merely in some language other than the thread's own —
+ * which is the fact `action.yml`'s own `languages` input promises triggers
+ * the bridge, and the fact that makes `translateToPivot` worth a request. A
+ * corpus that holds a candidate in a third configured language but none in
+ * the pivot would still fail to match after the bridge ran, so checking
+ * "not the thread's language" would spend a translation a same-language BM25
+ * pass could never have used anyway.
  *
  * Every check here is free: `detectLanguage` is called with no `pick`
  * argument, so it never reaches past script narrowing and the local
@@ -653,15 +705,27 @@ async function decide(
  * A candidate `detectLanguage` cannot place at all (`by: "none"`) proves
  * nothing either way and is skipped rather than counted as a match, the same
  * caution `detectLanguage`'s own callers use everywhere else.
+ *
+ * `cache` memoises a candidate's detected language by its issue number.
+ * Cheap on its own, but a sweep offers the same candidate to this function
+ * once per thread the walk checks it against, and without this the free
+ * detection above would repeat that many times over for no new answer.
  */
 async function crossLanguageCorpus(
   languages: readonly Language[],
-  threadLanguage: Language,
+  pivotLanguage: Language,
   corpus: readonly CorpusThread[],
+  cache: Map<number, Language | null>,
 ): Promise<boolean> {
   for (const candidate of corpus) {
-    const detected = await detectLanguage(documentOf(candidate), languages);
-    if (detected.language !== null && detected.language.code !== threadLanguage.code) return true;
+    let detected: Language | null;
+    if (cache.has(candidate.number)) {
+      detected = cache.get(candidate.number) ?? null;
+    } else {
+      detected = (await detectLanguage(documentOf(candidate), languages)).language;
+      cache.set(candidate.number, detected);
+    }
+    if (detected !== null && detected.code === pivotLanguage.code) return true;
   }
   return false;
 }
@@ -686,6 +750,7 @@ function notGranted(warrant: Warrant): Outcome {
     pivot: { used: false, note: null },
     proposal: null,
     fingerprint: null,
+    rationale: null,
     ungranted:
       `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block ` +
       "exists it is the whole answer, so add `duplicate: [comment]` to it (or remove the block to " +
@@ -711,17 +776,33 @@ function notGranted(warrant: Warrant): Outcome {
  * on a fresh thread or a reopened one alike. A future duty that adds a real
  * close path adds that check where the close call is made; this one stays
  * safe by never making the call at all, which is the stronger guarantee.
+ *
+ * **`dryRun` reads through `rehearse` rather than substituting a stand-in.**
+ * `done.commented` stays `false` either way — a dry run leaves nothing
+ * standing on the thread, and that output answers exactly that question, not
+ * what a real run would have left. `posted`, though, carries the disposition
+ * `rehearse` actually found — `postOrReplace`'s own read half, no writes —
+ * so `summary.ts`'s `disposition` can say the true "would have posted" /
+ * "would have replaced" / "unchanged" instead of a dead branch standing in
+ * for it. See `action.yml`'s `dry-run` input for the same distinction spelled
+ * out for a reader of the outputs.
  */
 async function act(
   api: Api,
   at: Location,
   outcome: Outcome,
+  dryRun: boolean,
 ): Promise<{ readonly done: Done; readonly posted: Posted | null }> {
   if (outcome.proposal === null || outcome.fingerprint === null) {
     return { done: { commented: false }, posted: null };
   }
   if (!outcome.permitted.includes("comment")) {
     return { done: { commented: false }, posted: null };
+  }
+
+  if (dryRun) {
+    const posted = await rehearse(api, at, outcome.proposal, outcome.fingerprint);
+    return { done: { commented: false }, posted };
   }
 
   const posted = await postOrReplace(api, at, outcome.proposal, outcome.fingerprint);
@@ -790,6 +871,7 @@ function page(
     note: outcome.note,
     permitted: outcome.permitted,
     withheld: outcome.withheld,
+    rationale: outcome.rationale,
     done,
     posted,
     spent,

@@ -188,7 +188,11 @@ inputs:
       Run the whole pipeline, write every output, and change nothing. The
       rehearsal takes the same path a real run does — the same ranking, the
       same floor, the same warrant — so what it reports is what a real run
-      would do.
+      would do. `commented` still reads `false` under a dry run regardless of
+      what that rehearsal found, since nothing was actually left standing on
+      the thread — read the job summary for what would have happened
+      instead, spelled out in prose rather than in a boolean a workflow could
+      branch on.
     required: false
     default: "false"
 
@@ -236,18 +240,22 @@ outputs:
       The issue number the verdict thinks this repeats, or empty. Reported
       whether or not `apply` names `comment`, so a workflow can act on it —
       close it, label it, anything — without granting this duty the ability to
-      touch the thread itself.
+      touch the thread itself. Unset on a `sweep` run — a sweep answers per
+      thread through its own summary table, not through this single-thread
+      output.
 
   score:
     description: >-
       How sure the verdict was, to two decimal places. `0.00` when there was
       no verdict. Distinct from the `confidence` input, which is the floor
-      this number is checked against before anything is applied.
+      this number is checked against before anything is applied. Unset on a
+      `sweep` run, the same as `duplicate-of`.
 
   language:
     description: >-
       The detected language of the thread, or empty — empty means none of the
       configured languages wrote it, which is an answer rather than a failure.
+      Unset on a `sweep` run, the same as `duplicate-of`.
 
   commented:
     description: >-
@@ -256,8 +264,11 @@ outputs:
       earlier run's already said the same thing and touching nothing this
       time. A workflow gating on this cares whether Reeve's comment exists
       after the run, not whether bytes moved during it. `false` on every
-      other run, including one that found a duplicate under the confidence
-      floor or without `comment` granted — never unset.
+      other single-thread run, including one that found a duplicate under the
+      confidence floor or without `comment` granted. Unset on a `sweep` run —
+      unlike the single-thread `false`, a sweep never touches this output at
+      all, so a workflow reading it after one gets a real unset rather than a
+      meaningful `false`.
 
   starved:
     description: >-

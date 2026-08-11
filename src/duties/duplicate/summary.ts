@@ -56,6 +56,14 @@ export interface Run {
   readonly duplicateOf: number | null;
   readonly confidence: number;
   readonly floor: number;
+  /**
+   * The verdict's own rationale, already sanitised — set whenever a
+   * duplicate was named, even one under the floor. Shown only on a
+   * report-only branch of `verdict` below: a run that actually posted a
+   * comment already carries this sentence on the thread itself, and a job
+   * summary repeating it there would be saying the same thing twice.
+   */
+  readonly rationale: string | null;
   /** The BM25 score that put the proposed candidate in front of the judge. 0 when there is no proposal. */
   readonly lexicalScore: number;
   readonly rank: RankInfo;
@@ -134,8 +142,14 @@ function verdict(run: Run): string {
         "The verdict was under the floor, so it is reported and not applied. " +
           "`duplicate-of` and `score` still carry it.",
       );
+      lines.push(...why(run));
     } else {
-      lines.push("", disposition(run));
+      lines.push("", disposition(run, run.duplicateOf));
+      // A dry run, or a real run `apply`/the warrant never let write —
+      // `posted === null` — never lands this rationale on the thread itself,
+      // so this is the only place a reader ever sees it. A run that actually
+      // posted skips this: the comment already carries the same sentence.
+      if (run.dryRun || run.posted === null) lines.push(...why(run));
     }
   }
 
@@ -145,8 +159,15 @@ function verdict(run: Run): string {
   return lines.join("\n");
 }
 
-/** What became of a proposal that cleared the confidence floor. */
-function disposition(run: Run): string {
+/**
+ * What became of a proposal that cleared the confidence floor.
+ *
+ * Only ever called from `verdict` inside its own `run.duplicateOf !== null`
+ * branch — `duplicateOf` is passed in already narrowed from there rather than
+ * read a second time off `run` inside this function, where TypeScript cannot
+ * see that same narrowing across the call.
+ */
+function disposition(run: Run, duplicateOf: number): string {
   if (run.posted === null) {
     return "Nothing was posted — `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
   }
@@ -162,7 +183,12 @@ function disposition(run: Run): string {
           : "Replaced its own previous comment with"
         : "Left its own previous comment unchanged — this run reached the same fingerprint as";
 
-  return `${verb} a comment naming #${String(run.duplicateOf ?? 0)}.`;
+  return `${verb} a comment naming #${String(duplicateOf)}.`;
+}
+
+/** The rationale line, when there is one to show — see `Run.rationale`'s own doc comment for when. */
+function why(run: Run): string[] {
+  return run.rationale !== null && run.rationale.length > 0 ? ["", `> ${run.rationale}`] : [];
 }
 
 /**

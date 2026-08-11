@@ -5,15 +5,23 @@ import {
   marker,
   postOrReplace,
   proposalFingerprint,
+  rehearse,
+  type Author,
   type CommentApi,
   type Proposal,
 } from "./publish.js";
 
 const AT = { owner: "acme", repo: "widgets", number: 42 };
 
+/** A comment authored by Reeve's own bot — the only kind `findMarked` will ever match. */
+const BOT: Author = { type: "Bot" };
+/** A comment authored by a person — never a candidate for replacement, whatever its body says. */
+const HUMAN: Author = { type: "User", login: "alice" };
+
 interface StoredComment {
   id: number;
   body: string;
+  user?: Author;
 }
 
 function stubOf(initial: readonly StoredComment[] = []): {
@@ -27,9 +35,13 @@ function stubOf(initial: readonly StoredComment[] = []): {
     rest: {
       issues: {
         listComments: () =>
-          Promise.resolve({ data: comments.map(({ id, body }) => ({ id, body })) }),
+          Promise.resolve({
+            data: comments.map(({ id, body, user }) => ({ id, body, user: user ?? null })),
+          }),
         createComment: (params) => {
-          comments.push({ id: nextId, body: params.body });
+          // Whatever this stub posts is Reeve's own — the same as a real
+          // token authenticated as the workflow's bot identity.
+          comments.push({ id: nextId, body: params.body, user: BOT });
           nextId += 1;
           return Promise.resolve({});
         },
@@ -91,15 +103,63 @@ describe("findMarked", () => {
 
   it("finds this duty's own marked comment and reads its fingerprint", async () => {
     const { api } = stubOf([
-      { id: 1, body: "unrelated" },
-      { id: 2, body: `${marker.render("abc123 duplicate-of=7")}\n\nPossible duplicate of #7.` },
+      { id: 1, body: "unrelated", user: HUMAN },
+      {
+        id: 2,
+        body: `${marker.render("abc123 duplicate-of=7")}\n\nPossible duplicate of #7.`,
+        user: BOT,
+      },
     ]);
 
     expect(await findMarked(api, AT)).toEqual({ id: 2, fingerprint: "abc123 duplicate-of=7" });
   });
 
   it("ignores another duty's marker", async () => {
-    const { api } = stubOf([{ id: 1, body: "<!-- reeve:translate source=abc123 -->\n\ntext" }]);
+    const { api } = stubOf([
+      { id: 1, body: "<!-- reeve:translate source=abc123 -->\n\ntext", user: BOT },
+    ]);
+
+    expect(await findMarked(api, AT)).toBeNull();
+  });
+
+  it("ignores a comment carrying the marker when its author is not a bot", async () => {
+    // A human forging the tag outright, or simply typing it, is never a
+    // rerun target — only Reeve's own bot identity ever authored the
+    // original.
+    const { api } = stubOf([
+      {
+        id: 1,
+        body: `${marker.render("abc123 duplicate-of=7")}\n\nPossible duplicate of #7.`,
+        user: HUMAN,
+      },
+    ]);
+
+    expect(await findMarked(api, AT)).toBeNull();
+  });
+
+  it('recognises a `[bot]`-suffixed login the same as `type: "Bot"`', async () => {
+    const { api } = stubOf([
+      {
+        id: 1,
+        body: `${marker.render("abc123 duplicate-of=7")}\n\nPossible duplicate of #7.`,
+        user: { login: "reeve-app[bot]" },
+      },
+    ]);
+
+    expect(await findMarked(api, AT)).toEqual({ id: 1, fingerprint: "abc123 duplicate-of=7" });
+  });
+
+  it("ignores a bot comment where the marker is quoted mid-body rather than opening it", async () => {
+    // A bot could in principle quote another comment's text — the marker has
+    // to sit at position 0, the exact shape `postOrReplace` itself always
+    // writes, not merely appear somewhere in the body.
+    const { api } = stubOf([
+      {
+        id: 1,
+        body: `Quoting the earlier note:\n\n${marker.render("abc123 duplicate-of=7")}`,
+        user: BOT,
+      },
+    ]);
 
     expect(await findMarked(api, AT)).toBeNull();
   });
@@ -163,6 +223,39 @@ describe("postOrReplace", () => {
     expect(comments[0]?.body).toBe("a maintainer's own comment");
   });
 
+  it("leaves a stranger's comment quoting the marker untouched and posts a fresh one instead", async () => {
+    // A human quoting Reeve's own comment back — to disagree with it, to
+    // report it, anything — carries the exact marker text without being
+    // this duty's own write. Overwriting it would destroy that person's
+    // comment on the next run.
+    const stray = `Someone else wrote:\n\n> ${marker.render("stale duplicate-of=3")}\n\nI disagree.`;
+    const { api, comments } = stubOf([{ id: 1, body: stray, user: HUMAN }]);
+
+    const result = await postOrReplace(api, AT, proposal(), "fp1");
+
+    expect(result).toBe("posted");
+    expect(comments).toHaveLength(2);
+    expect(comments[0]?.body).toBe(stray);
+    expect(comments[1]?.body).toContain(marker.render("fp1 duplicate-of=7"));
+  });
+
+  it("replaces a bot-authored comment whose marker opens the body, in place", async () => {
+    const { api, comments } = stubOf([
+      {
+        id: 5,
+        body: `${marker.render("stale duplicate-of=3")}\n\nPossible duplicate of #3.`,
+        user: BOT,
+      },
+    ]);
+
+    const result = await postOrReplace(api, AT, proposal({ duplicateOf: 7 }), "fp1");
+
+    expect(result).toBe("replaced");
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.id).toBe(5);
+    expect(comments[0]?.body).toContain("Possible duplicate of #7.");
+  });
+
   it("always includes the machine-attribution floor, even at attribution none", async () => {
     const { api, comments } = stubOf([]);
 
@@ -209,5 +302,78 @@ describe("postOrReplace", () => {
     await postOrReplace(api, AT, proposal({ attribution: "model", model: "A & <B>" }), "fp1");
 
     expect(comments[0]?.body).toContain("A &amp; &lt;B&gt;");
+  });
+
+  it("fences a bare issue reference in the rationale that is not the target, so GitHub does not autolink it", async () => {
+    const { api, comments } = stubOf([]);
+
+    await postOrReplace(
+      api,
+      AT,
+      proposal({ duplicateOf: 7, rationale: "Similar to what #55 turned out to be." }),
+      "fp1",
+    );
+
+    expect(comments[0]?.body).toContain("`#55`");
+    expect(comments[0]?.body).not.toMatch(/[^`]#55[^`]/);
+  });
+
+  it("leaves the target's own number live in the rationale, not fenced", async () => {
+    const { api, comments } = stubOf([]);
+
+    await postOrReplace(
+      api,
+      AT,
+      proposal({ duplicateOf: 7, rationale: "Both describe the same failure as #7." }),
+      "fp1",
+    );
+
+    expect(comments[0]?.body).toContain("Both describe the same failure as #7.");
+    expect(comments[0]?.body).not.toContain("`#7`");
+  });
+});
+
+describe("rehearse", () => {
+  it("reads the same disposition `postOrReplace` would reach, without writing anything", async () => {
+    const { api, comments } = stubOf([]);
+
+    const result = await rehearse(api, AT, proposal(), "fp1");
+
+    expect(result).toBe("posted");
+    expect(comments).toHaveLength(0);
+  });
+
+  it("reads `replaced` for a fingerprint that moved past this duty's own comment, without writing", async () => {
+    const { api, comments } = stubOf([
+      {
+        id: 5,
+        body: `${marker.render("stale duplicate-of=3")}\n\nPossible duplicate of #3.`,
+        user: BOT,
+      },
+    ]);
+
+    const result = await rehearse(api, AT, proposal({ duplicateOf: 7 }), "fp1");
+
+    expect(result).toBe("replaced");
+    expect(comments[0]?.body).toContain("Possible duplicate of #3."); // unchanged
+  });
+
+  it("reads `unchanged` when the fingerprint already matches, without writing", async () => {
+    const payload = "fp1 duplicate-of=7";
+    const { api, comments } = stubOf([
+      { id: 5, body: `${marker.render(payload)}\n\nPossible duplicate of #7.`, user: BOT },
+    ]);
+
+    const result = await rehearse(api, AT, proposal({ duplicateOf: 7 }), "fp1");
+
+    expect(result).toBe("unchanged");
+    expect(comments).toHaveLength(1);
+  });
+
+  it("never mistakes a stranger's comment quoting the marker for this duty's own", async () => {
+    const stray = `Someone else wrote:\n\n> ${marker.render("stale duplicate-of=3")}\n\nI disagree.`;
+    const { api } = stubOf([{ id: 1, body: stray, user: HUMAN }]);
+
+    expect(await rehearse(api, AT, proposal(), "fp1")).toBe("posted");
   });
 });
