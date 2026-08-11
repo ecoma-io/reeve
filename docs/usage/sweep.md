@@ -29,6 +29,16 @@ has to end, and ending with an honest partial is the entire point of this
 page. `limit` defaults to `50` when left unset, modest enough to protect a
 free tier's own rate limit; the example above raises it deliberately.
 
+`limit: none` removes the count bound entirely. Paging against the forge
+follows real demand — it keeps asking for more exactly as long as `limit` and
+`since` say there is more to ask for — so a backlog past the size of one page
+is not silently cut off partway through: a repository with several thousand
+open issues sees all of them considered, not just however many the first
+page happened to hold. `remaining` in the output always says, honestly, how
+much of what `limit` and `since` bounded was left unprocessed when the run
+ended — never a number that quietly stops moving once a page boundary is
+behind it.
+
 ## Why a sweep exists at all: weather
 
 [D12](../north-star.md#d12--capacity-is-weather-authority-is-configuration)
