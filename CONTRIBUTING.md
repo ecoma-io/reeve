@@ -136,12 +136,13 @@ a consumer writes `ecoma-io/reeve/translate@v1`: the action at the root refuses.
 The provider comes from **organisation** secrets, which a maintainer sets, and
 they are named on two tiers because they change on two different schedules:
 
-| Secret                     | Tier      | What it is                                          |
-| -------------------------- | --------- | --------------------------------------------------- |
-| `ECOMA_LLM_BASE_URL`       | provider  | The OpenAI-compatible endpoint the organisation has |
-| `ECOMA_LLM_API_KEY`        | provider  | Its key. Unset is a keyless endpoint, not a gap.    |
-| `ECOMA_REEVE_MODELS`       | this repo | Model ids, in preference order                      |
-| `ECOMA_REEVE_JUDGE_MODELS` | this repo | The judge panel                                     |
+| Secret                      | Tier      | What it is                                                |
+| --------------------------- | --------- | --------------------------------------------------------- |
+| `ECOMA_LLM_BASE_URL`        | provider  | The OpenAI-compatible endpoint the organisation has       |
+| `ECOMA_LLM_API_KEY`         | provider  | Its key. Unset is a keyless endpoint, not a gap.          |
+| `ECOMA_REEVE_MODELS`        | this repo | Model ids, in preference order                            |
+| `ECOMA_REEVE_JUDGE_MODELS`  | this repo | The judge panel                                           |
+| `ECOMA_REEVE_SCREEN_MODELS` | this repo | The cheap roster triage screens with. Unset turns it off. |
 
 Both lists are commas, and every id carries the name it is to be called by:
 

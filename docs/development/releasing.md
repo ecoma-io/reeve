@@ -139,10 +139,11 @@ nothing — a broken pin that cannot be unpublished, only superseded. release-pl
 will open a release pull request as soon as there are releasable commits on
 `main`; **leave it open** until Stage 0 has landed a real bundle.
 
-**The release workflow carries a `TODO(stage-0)`** at the archive step: the
-`cp -r dist action.yml …` line becomes a list including `translate/action.yml` and
-`triage/action.yml` as duties land. `tools/build.mjs` carries the matching one for
-entry points. Both are marked so neither is discovered by a consumer.
+**The archive step names every duty by hand.** The `cp -r translate triage …`
+line in the release workflow is what puts a duty's `action.yml` and its bundle
+into the release tree, and `tools/build.mjs` is the matching list of entry
+points. A duty added to one and not the other is a duty that ships broken, so
+adding both is a step in [the duty checklist](duties.md).
 
 ## Cutting a release
 

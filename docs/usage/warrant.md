@@ -191,20 +191,30 @@ Checked when the file is read, before any model call:
   actually be assigned is decided by the API at apply time; a non-assignable
   owner is a warning, not a failed run.
 
+**An issue cannot be assigned to a team.** That is GitHub's rule, not Reeve's:
+the assignees API takes users, and `@org/team` is not one. A team `owner` is
+still worth writing — it says who a label belongs to, and the run report says so
+— but a run with `assign` turned on warns about it once and carries on. It never
+fails the run over it, because who owns a label is documentation and refusing to
+label a thread over it would be the wrong trade.
+
 ## Memory
 
 Corrections a maintainer has already made, kept as newline-delimited JSON under
 `.reeve/`, and given to a duty as examples on the next similar thread.
 
-This is Stage 3 in [the roadmap](../north-star.md#6-roadmap) and has no page yet.
-Two things are already settled and worth knowing now:
+Reading ships. A duty ranks the store against the thread in front of it and puts
+the nearest few corrections in the prompt, lexically and for nothing — no
+provider, no extra request. The ranking is a seam: a similarity that crosses
+languages goes in behind the same interface, and that is Stage 3 in
+[the roadmap](../north-star.md#6-roadmap).
+
+**Writing does not ship yet.** Recording a correction is a commit, it needs
+`contents: write`, and it is opt-in for that reason. Until then the store is a
+directory you fill in yourself, one JSON object per line, or leave empty.
 
 **An empty store is the cold-start case, not an error.** Every duty works with no
-memory. It works better with one, and the store fills as a side effect of you
-correcting it.
-
-**Writing to it needs `contents: write`**, and it is opt-in for that reason. A
-duty with read-only contents still reads the store; it simply never adds to it.
+memory. It works better with one.
 
 ## A starting warrant
 

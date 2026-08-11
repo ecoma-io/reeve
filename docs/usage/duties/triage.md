@@ -56,15 +56,19 @@ it label anything.
 
 `action.yml` in the duty's directory is the contract. The ones worth a word:
 
-| Input           | Default              | Worth knowing                                                                                                             |
-| --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `models`        | _required_           | The model that produces the verdict. Order is preference.                                                                 |
-| `screen-models` | _empty_              | Cheap models for the first pass, which decides only whether an issue is worth the expensive one.                          |
-| `warrant`       | `.github/reeve.yml`  | The taxonomy and the capabilities. A file that does not parse is a failed run.                                            |
-| `apply`         | `label`              | What this run may do, comma separated. Narrowed by, never widening, the warrant.                                          |
-| `confidence`    | `0.75`               | Below this the verdict is reported and nothing is applied. [Measure](../../development/evaluation.md) before you move it. |
-| `corrections`   | `.reeve/corrections` | The memory store. Empty is the cold-start case and works.                                                                 |
-| `dry-run`       | `false`              | Whole pipeline, every output, nothing applied.                                                                            |
+| Input            | Default              | Worth knowing                                                                                                             |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `models`         | _required_           | The model that produces the verdict. Order is preference.                                                                 |
+| `screen-models`  | _empty_              | Cheap models for the first pass, which decides only whether an issue is worth the expensive one.                          |
+| `warrant`        | `.github/reeve.yml`  | The taxonomy and the capabilities. A file that does not parse is a failed run.                                            |
+| `apply`          | `label`              | What this run may do, comma separated. Narrowed by, never widening, the warrant.                                          |
+| `confidence`     | `0.75`               | Below this the verdict is reported and nothing is applied. [Measure](../../development/evaluation.md) before you move it. |
+| `corrections`    | `.reeve/corrections` | The memory store. Empty is the cold-start case and works.                                                                 |
+| `languages`      | `en, vi, zh`         | Which languages detection chooses between. The verdict is told the answer; the taxonomy is never translated.              |
+| `min-body-chars` | `40`                 | How much authored text is worth a model. `0` turns the length screen off.                                                 |
+| `max-body-chars` | `6000`               | How much of a long thread reaches the prompt. The tail is dropped.                                                        |
+| `about`          | _empty_              | What this repository is about, in one sentence. Used only by the spam screen.                                             |
+| `dry-run`        | `false`              | Whole pipeline, every output, nothing applied.                                                                            |
 
 **`screen-models` is the whole cost argument.** Spam, a blank body and an exact
 repeat are decided by a small model or by no model at all, and a backlog is mostly
@@ -75,6 +79,11 @@ those. Leave it empty and everything code did not decide goes straight to
 **`confidence` is a number you should measure rather than inherit.** What `0.75`
 means for your taxonomy is not what it means for anyone else's, because the labels
 are yours.
+
+**`about` is one sentence and it does real work.** The spam screen's hard case is
+not advertising — it is a real request, written by a real person, about somebody
+else's software. Nothing in a thread says which project it was meant for. This is
+what tells it.
 
 ## Outputs
 
@@ -111,25 +120,44 @@ issue ─► read ─► screen ─► recall ─► triage ─► verify ─►
                                      a nonce  model
 ```
 
-**Read.** Fetch the thread and parse the warrant. Detect the author language —
-free, in code, [see Languages](../languages.md). A thread that is already closed,
-or already labelled, is not skipped by default: re-triage is legitimate when a
-taxonomy changed or a backfill is running. What it must not do is fight a
-maintainer, and the apply stage is where that is enforced.
+**Read.** Fetch the thread and parse the warrant, in that order and before
+anything else — including before every label the warrant names is checked to
+exist in the repository, which is where a renamed label produces an error naming
+both rather than a verdict whose labels are all silently dropped later.
+
+A thread that is already closed, or already labelled, is not skipped by default:
+re-triage is legitimate when a taxonomy changed or a backfill is running. What it
+must not do is fight a maintainer, and the apply stage is where that is enforced.
 
 **Screen.** The stage that makes a large backlog affordable, and most issues stop
 here.
 
 Decided with no model at all, in code:
 
-- an empty or whitespace-only body;
+- a thread with no authored text to work from;
 - a body that is only an issue template with nothing filled in;
-- a body under a minimum useful length with no code, no link and no error text;
-- an exact or near-exact repeat of an existing issue by content hash.
+- a body under `min-body-chars` of authored text, with template scaffolding and
+  quoted code stripped before the count.
+
+**The title counts as authored text.** `Export produces an empty file for
+single-row tables` with no body at all is a report a maintainer labels in a
+second, and a screen that read only the body would drop a large share of a real
+tracker.
 
 Decided by `screen-models` when configured: spam and off-topic. Those need
 judgment a regex cannot supply, and the _cheapest_ judgment available — the
 decision is binary and the input is short.
+
+**The free screen runs before language detection**, which is a deliberate
+departure from the order drawn above: detection can cost a request, and there is
+nothing to detect the language of in a thread that is about to stop here anyway.
+
+**Not yet built: the exact repeat.** A code screen for a thread that repeats an
+existing issue by content hash needs a corpus of the issues already filed, and
+GitHub's search API cannot supply one — it stops at a thousand results and
+truncates hardest on exactly the backlogs where duplicates matter. It is left out
+rather than approximated. The verdict may still _report_ a duplicate, which is
+the `duplicate-of` output.
 
 **Recall.** Retrieve the maintainer corrections most similar to this thread and
 put them in the prompt as examples.
@@ -139,10 +167,22 @@ Labels are **org-subjective**: whether a slow query is `performance` or `bug` is
 decision your project made, and no general model can know it. A longer prompt does
 not fix that. Retrieval over decisions your maintainers already made does.
 
+What ships today is lexical retrieval — a BM25 ranking over the corrections in
+`corrections`, which needs no provider, costs nothing and adds no request to a
+run. It matches on words, so it finds the correction written in the same language
+as the thread.
+
 Cross-language retrieval is the part nothing else in this category has: a
 correction a maintainer made on an English report should inform the verdict on the
-Vietnamese one describing the same thing. That is Stage 3 in
+Vietnamese one describing the same thing. Lexical ranking cannot do that, and the
+retrieval seam is pluggable for exactly that reason — a similarity that crosses
+languages goes in behind the same interface. That is Stage 3 in
 [the roadmap](../../north-star.md#6-roadmap).
+
+**Nothing writes to the store yet.** Corrections are read; recording one is a
+commit, it needs `contents: write`, and it is opt-in for that reason. Until it
+ships, the store is a directory you fill in by hand or not at all — and an empty
+one is the cold start rather than an error.
 
 **Triage.** Ask for a verdict: labels from the taxonomy, a confidence, an optional
 duplicate reference, a rationale. Three properties are non-negotiable:
