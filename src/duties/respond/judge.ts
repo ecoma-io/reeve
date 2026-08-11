@@ -81,7 +81,7 @@ function ballot(title: string, body: string, shown: readonly Attempt[]): Message
         "3. It is written in the language the thread was written in.",
         "4. It reads as a maintainer would write it, not as a form letter.",
         "",
-        `Answer with the number of the best reply — a single digit from 1 to ${String(shown.length)}.`,
+        `Answer with the number of the best reply — an integer from 1 to ${String(shown.length)}.`,
         "Nothing else: no reasoning, no punctuation, no explanation.",
         "",
         material.rule,

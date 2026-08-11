@@ -444,7 +444,7 @@ describe("the action", () => {
     expect(posted).toContain("This reply was drafted by");
     expect(posted).toContain("not by a maintainer");
     expect(posted).toContain("<!-- reeve:respond source=");
-    expect(posted).toContain("Written in");
+    expect(posted).toContain("was written in");
     expect(run.outputs.responded).toBe("true");
     expect(run.outputs["respond-text"]).toBe(REPLY);
     expect((run.outputs.language ?? "").length).toBeGreaterThan(0);
@@ -563,6 +563,32 @@ describe("the action", () => {
 
     expect(run.code).toBe(0);
     expect(seenDecisions).toContain("Known double-submit issue");
+  });
+
+  it("bridges into the pivot language with the cheap roster, when one is configured", async () => {
+    await remember({ language: "en" });
+    stub.title = "Lỗi khi lưu hai lần liên tiếp";
+    stub.body = VIETNAMESE;
+    let pivotModel = "";
+    stub.answer = stageAnswer({
+      pivot: (ask) => {
+        pivotModel = ask.model;
+        return saying(
+          JSON.stringify({
+            title: "Crash when the save button is pressed twice quickly",
+            body: "It throws when double-clicked.",
+          }),
+        );
+      },
+    });
+
+    const run = await runAction(stub, { languages: "en, vi", "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    // A mechanical translation for recall does not need the roster a first
+    // reply is drafted with — same cost split triage's own bridge makes.
+    expect(pivotModel).toBe("cheap-model");
+    expect(pivotModel).not.toBe("stub-model");
   });
 
   it("never engages a thread the cheap screen classified as spam", async () => {

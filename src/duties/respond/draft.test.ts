@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Correction } from "../../core/memory.js";
-import type { Completion, Provider } from "../../core/provider.js";
+import { createWeather, type Completion, type Provider } from "../../core/provider.js";
 import type { Label } from "../../core/warrant.js";
 
 import { draft, parseAttempt, prompt, type DraftRequest } from "./draft.js";
@@ -126,6 +126,21 @@ describe("draft", () => {
     expect(vi.mocked(provider.complete).mock.calls.filter((call) => call[0] === "a")).toHaveLength(
       1,
     );
+  });
+
+  it("treats a model an earlier stage already grounded as exhausted from draft zero", async () => {
+    const provider = answering({ b: '{"text": "From b.", "confidence": 0.5}' });
+    const weather = createWeather();
+    weather.ground("a");
+
+    const drafted = await draft(request({ provider, models: ["a", "b"], drafts: 2, weather }));
+
+    // `a` was already grounded before this call started, so it is never asked
+    // here — not even once — and no failure for it is reported a second time.
+    // Both requested drafts fall to `b`, the only model left standing.
+    expect(vi.mocked(provider.complete).mock.calls.map((call) => call[0])).toEqual(["b", "b"]);
+    expect(drafted.failures).toEqual([]);
+    expect(drafted.attempts).toHaveLength(2);
   });
 
   it("stops asking once every model in the roster has failed", async () => {

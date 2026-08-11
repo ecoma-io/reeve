@@ -260,6 +260,28 @@ describe("judge", () => {
     });
   });
 
+  describe("two candidates from the same model", () => {
+    it("counts a vote for the exact attempt cast, not for every attempt sharing its model", async () => {
+      // `drafts` can ask for more independent attempts than there are models,
+      // so both candidates here answer to the same `by(candidate)` — "m" — the
+      // way two same-model drafts genuinely would. Rotation-aware: seat 0 sees
+      // [shared[0], shared[1]] and answers "2" (picks shared[1]); seat 1 sees
+      // [shared[1], shared[0]] and answers "1" (also picks shared[1]). A tally
+      // keyed on `by(candidate)` would fold both votes under "m" and credit
+      // them to whichever same-model candidate came first — the one nobody
+      // actually voted for.
+      const shared = [candidate("m"), candidate("m")];
+      const provider = answering({ x: "2", y: "1" });
+
+      const verdict = await judge(
+        request({ provider, judges: [["x"], ["y"]], candidates: shared }),
+      );
+
+      expect(verdict.winner).toBe(shared[1]);
+      expect(verdict.decidedBy).toBe("judges");
+    });
+  });
+
   describe("what each judge is shown", () => {
     it("rotates the candidates by seat, so the leader does not lead every ballot", async () => {
       const provider = answering({ x: "1", y: "1", z: "1" });

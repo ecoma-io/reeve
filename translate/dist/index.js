@@ -32851,6 +32851,9 @@ function createThread(api, at) {
     }
   };
 }
+function isBotAuthor(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
 var REPLY_PAGE = 100;
 async function listReplies(api, at) {
   const { data } = await api.rest.issues.listComments({
@@ -32865,7 +32868,7 @@ async function listReplies(api, at) {
       id: comment.id,
       body: comment.body ?? "",
       login,
-      isBot: comment.user?.type === "Bot" || login.endsWith("[bot]")
+      isBot: isBotAuthor(comment.user)
     };
   });
   return { replies, more: data.length === REPLY_PAGE };
@@ -33805,31 +33808,31 @@ async function judge(request2) {
       continue;
     }
     const shown2 = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown2, ballot2, by, weather);
+    const cast = await fill(provider, order, shown2, ballot2, weather);
     for (const failure of cast.failures) {
       spent.add(failure.model);
       failures.push(failure);
     }
     if (cast.vote === null) continue;
     spent.add(cast.vote.model);
-    votes.push(cast.vote);
-    tally.set(cast.vote.pick, (tally.get(cast.vote.pick) ?? 0) + 1);
+    votes.push({ model: cast.vote.model, pick: by(cast.vote.candidate) });
+    tally.set(cast.vote.candidate, (tally.get(cast.vote.candidate) ?? 0) + 1);
   }
   let elected = leader;
   for (const candidate of candidates) {
-    if ((tally.get(by(candidate)) ?? 0) > (tally.get(by(elected)) ?? 0)) elected = candidate;
+    if ((tally.get(candidate) ?? 0) > (tally.get(elected) ?? 0)) elected = candidate;
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
-async function fill(provider, order, shown2, ballot2, by, weather) {
+async function fill(provider, order, shown2, ballot2, weather) {
   const failures = [];
   for (const model of order) {
     if (weather?.grounded(model) === true) {
       failures.push(weatherFailure(model));
       continue;
     }
-    const counted = read(await provider.complete(model, ballot2(shown2)), shown2, by);
-    if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    const counted = read(await provider.complete(model, ballot2(shown2)), shown2);
+    if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);
   }
@@ -33850,7 +33853,7 @@ function rotated(candidates, start) {
   return [...candidates.slice(at), ...candidates.slice(0, at)];
 }
 var NUMBER = /\d+/g;
-function read(answer2, shown2, by) {
+function read(answer2, shown2) {
   if (!answer2.ok) return answer2;
   const named = [];
   for (const [digits] of answer2.content.matchAll(NUMBER)) {
@@ -33874,7 +33877,7 @@ function read(answer2, shown2, by) {
       reason: `named more than one candidate \u2014 ${excerpt2(answer2.content)}`
     };
   }
-  return { ok: true, pick: by(only) };
+  return { ok: true, candidate: only };
 }
 var EXCERPT_CHARS2 = 120;
 function excerpt2(text2) {

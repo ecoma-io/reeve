@@ -97,7 +97,7 @@ describe("judge", () => {
       });
 
       expect(instructions).toContain("3 draft first replies");
-      expect(instructions).toContain("a single digit from 1 to 3");
+      expect(instructions).toContain("an integer from 1 to 3");
     });
 
     it("asks for a number and nothing else", async () => {

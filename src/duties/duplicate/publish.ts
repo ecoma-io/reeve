@@ -33,7 +33,7 @@
  * translated, reworded by `show-attribution`, or simply absent. See
  * `payloadFor`.
  */
-import type { Location } from "../../core/forge.js";
+import { isBotAuthor, type Author, type Location } from "../../core/forge.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 
 /** This duty's marker: `<!-- reeve:duplicate source=<fingerprint> duplicate-of=<N> -->`. */
@@ -110,22 +110,6 @@ export function proposalFingerprint(source: string, candidates: readonly number[
  */
 function payloadFor(fp: string, duplicateOf: number): string {
   return `${fp} duplicate-of=${String(duplicateOf)}`;
-}
-
-/** Enough of a comment's author to tell whether it was Reeve's own bot that wrote it. */
-export interface Author {
-  readonly login?: string | null;
-  readonly type?: string | null;
-}
-
-/**
- * Whether a comment's author is a bot — the same convention
- * `triage/main.ts`'s `recordTrigger` reads a webhook sender by, mirrored here
- * for a comment author: GitHub's own `type: "Bot"` when the API reports it,
- * or a `[bot]`-suffixed login for the cases it does not.
- */
-function isBot(author: Author | null | undefined): boolean {
-  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
 }
 
 /**
@@ -238,7 +222,7 @@ export async function findMarked(api: CommentApi, at: Location): Promise<Search>
   });
 
   for (const comment of data) {
-    if (!isBot(comment.user)) continue;
+    if (!isBotAuthor(comment.user)) continue;
     const { official, fingerprint: found } = marker.split(comment.body ?? "");
     if (found !== null && official === "")
       return { marked: { id: comment.id, fingerprint: found }, uncertain: false };

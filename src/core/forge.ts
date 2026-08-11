@@ -98,20 +98,31 @@ export function createThread(api: GitHubApi, at: Location): Thread {
   };
 }
 
+/** Enough of an author to tell whether the account behind it is a bot. */
+export interface Author {
+  readonly login?: string | null;
+  readonly type?: string | null;
+}
+
+/**
+ * Whether an author is a bot account — the one convention every duty and
+ * every reader of a webhook payload uses to answer it: GitHub's own
+ * `type: "Bot"` when the API reports it, or a `[bot]`-suffixed login for the
+ * cases it does not — most visibly `github-actions[bot]` acting through a
+ * workflow's default token, which this project's own runs are one example
+ * of. Trusting `type` alone would read that account as human.
+ */
+export function isBotAuthor(author: Author | null | undefined): boolean {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
+
 /** A reply as a run found it: enough to decide about it, and to write it back. */
 export interface Reply {
   readonly id: number;
   readonly body: string;
   /** Who wrote it. Empty when GitHub answered a comment with no author on it. */
   readonly login: string;
-  /**
-   * Whether the author is a bot account. GitHub's own `type` field first, and
-   * a `[bot]` login suffix as well — the suffix is authoritative for the
-   * machine accounts GitHub's own API declines to type, most visibly a
-   * `github-actions[bot]` acting through a workflow's default token, which
-   * this project's own runs are one example of. Trusting `type` alone would
-   * read that account as human.
-   */
+  /** Whether the author is a bot account — see `isBotAuthor`. */
   readonly isBot: boolean;
 }
 
@@ -152,7 +163,7 @@ export async function listReplies(
       id: comment.id,
       body: comment.body ?? "",
       login,
-      isBot: comment.user?.type === "Bot" || login.endsWith("[bot]"),
+      isBot: isBotAuthor(comment.user),
     };
   });
   return { replies, more: data.length === REPLY_PAGE };
@@ -305,7 +316,7 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
       .map((label) => (typeof label === "string" ? label : (label.name ?? "")))
       .filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") },
+    author: { login, isBot: isBotAuthor(data.user) },
   };
 }
 

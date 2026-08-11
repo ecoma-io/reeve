@@ -77,7 +77,12 @@ export async function draft(request: DraftRequest): Promise<Draft> {
   const attempts: Attempt[] = [];
   const failures: Failure[] = [];
   const unreadable: string[] = [];
-  const exhausted = new Set<string>();
+  // Seeded from `weather`, so a model an earlier stage already grounded for
+  // capacity is treated as exhausted from draft zero rather than being asked
+  // once more here before this call catches up with what the run already
+  // knows — and rather than logging a second `draft:` warning for a model
+  // this run has already given up on. Mirrors `translate/draft.ts`.
+  const exhausted = new Set<string>(weather?.starved ?? []);
 
   for (let at = 0; at < drafts; at += 1) {
     const order = remaining(models, at, exhausted);

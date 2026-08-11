@@ -374,16 +374,24 @@ async function decide(
   const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
   // The same pivot bridge triage uses: the first configured language is this
   // project's pivot, and a store with corrections in other languages is worth
-  // bridging into it before recalling — see `core/pivot.ts`.
+  // bridging into it before recalling — see `core/pivot.ts`. The language
+  // mismatch check is `duplicate`'s own addition to this bridge: a thread
+  // already written in the pivot language has nothing to gain from being
+  // translated into itself, so that case spends no provider call here either.
   const pivotLanguage = settings.languages[0] ?? null;
   const worthBridging =
     language !== null &&
     pivotLanguage !== null &&
+    language.code !== pivotLanguage.code &&
     store.corrections.some((correction) => correction.language !== language.code);
   if (worthBridging) {
     const bridged = await translateToPivot({
       provider: stages.pivot,
-      models: settings.models,
+      // The cheap roster, same as triage's own bridge — a mechanical
+      // translation for recall does not need the roster a first reply is
+      // drafted with, and falls back to it only when `screen-models` was
+      // never configured.
+      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       title: standing.title,
       body,
       to: pivotLanguage,

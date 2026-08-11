@@ -32839,6 +32839,9 @@ function residue(text2) {
 }
 
 // src/core/forge.ts
+function isBotAuthor(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
 var REPLY_PAGE = 100;
 async function listReplies(api, at) {
   const { data } = await api.rest.issues.listComments({
@@ -32853,7 +32856,7 @@ async function listReplies(api, at) {
       id: comment.id,
       body: comment.body ?? "",
       login,
-      isBot: comment.user?.type === "Bot" || login.endsWith("[bot]")
+      isBot: isBotAuthor(comment.user)
     };
   });
   return { replies, more: data.length === REPLY_PAGE };
@@ -32874,7 +32877,7 @@ async function readStanding(api, at) {
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") }
+    author: { login, isBot: isBotAuthor(data.user) }
   };
 }
 var LABEL_PAGE = 100;
@@ -33575,8 +33578,8 @@ ${body}`);
 }
 function unwrapped(answer3) {
   const trimmed = answer3.trim();
-  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fence?.[1] ?? trimmed;
+  const fence2 = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return fence2?.[1] ?? trimmed;
 }
 function readAnswer(text2) {
   let raw;
@@ -33713,6 +33716,12 @@ function count(value) {
 function cell(text2) {
   return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
 }
+function fence(text2) {
+  const runs = text2.match(/`+/g) ?? [];
+  const longest = runs.reduce((max, run2) => Math.max(max, run2.length), 0);
+  const ticks = "`".repeat(Math.max(3, longest + 1));
+  return [ticks, text2, ticks];
+}
 function cost(spent, name) {
   const sum = total(spent);
   const rows = spent.map((spend) => [
@@ -33767,7 +33776,7 @@ async function draft(request2) {
   const attempts = [];
   const failures = [];
   const unreadable = [];
-  const exhausted2 = /* @__PURE__ */ new Set();
+  const exhausted2 = new Set(weather?.starved ?? []);
   for (let at = 0; at < drafts; at += 1) {
     const order = remaining(models, at, exhausted2);
     if (order.length === 0) break;
@@ -33939,31 +33948,31 @@ async function judge(request2) {
       continue;
     }
     const shown2 = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown2, ballot2, by, weather);
+    const cast = await fill(provider, order, shown2, ballot2, weather);
     for (const failure of cast.failures) {
       spent.add(failure.model);
       failures.push(failure);
     }
     if (cast.vote === null) continue;
     spent.add(cast.vote.model);
-    votes.push(cast.vote);
-    tally.set(cast.vote.pick, (tally.get(cast.vote.pick) ?? 0) + 1);
+    votes.push({ model: cast.vote.model, pick: by(cast.vote.candidate) });
+    tally.set(cast.vote.candidate, (tally.get(cast.vote.candidate) ?? 0) + 1);
   }
   let elected = leader;
   for (const candidate of candidates) {
-    if ((tally.get(by(candidate)) ?? 0) > (tally.get(by(elected)) ?? 0)) elected = candidate;
+    if ((tally.get(candidate) ?? 0) > (tally.get(elected) ?? 0)) elected = candidate;
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
-async function fill(provider, order, shown2, ballot2, by, weather) {
+async function fill(provider, order, shown2, ballot2, weather) {
   const failures = [];
   for (const model of order) {
     if (weather?.grounded(model) === true) {
       failures.push(weatherFailure(model));
       continue;
     }
-    const counted = read2(await provider.complete(model, ballot2(shown2)), shown2, by);
-    if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    const counted = read2(await provider.complete(model, ballot2(shown2)), shown2);
+    if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);
   }
@@ -33984,7 +33993,7 @@ function rotated(candidates, start) {
   return [...candidates.slice(at), ...candidates.slice(0, at)];
 }
 var NUMBER = /\d+/g;
-function read2(answer3, shown2, by) {
+function read2(answer3, shown2) {
   if (!answer3.ok) return answer3;
   const named = [];
   for (const [digits] of answer3.content.matchAll(NUMBER)) {
@@ -34008,7 +34017,7 @@ function read2(answer3, shown2, by) {
       reason: `named more than one candidate \u2014 ${excerpt2(answer3.content)}`
     };
   }
-  return { ok: true, pick: by(only) };
+  return { ok: true, candidate: only };
 }
 var EXCERPT_CHARS2 = 120;
 function excerpt2(text2) {
@@ -34055,7 +34064,7 @@ ${numbered}`
         "3. It is written in the language the thread was written in.",
         "4. It reads as a maintainer would write it, not as a form letter.",
         "",
-        `Answer with the number of the best reply \u2014 a single digit from 1 to ${String(shown2.length)}.`,
+        `Answer with the number of the best reply \u2014 an integer from 1 to ${String(shown2.length)}.`,
         "Nothing else: no reasoning, no punctuation, no explanation.",
         "",
         material.rule
@@ -34088,7 +34097,7 @@ function boundary() {
   ].join("\n");
 }
 function provenance(responded) {
-  const { decision, model, language } = responded;
+  const { decision, model } = responded;
   const parts = [`Drafted by \`${model}\`.`];
   if (decision !== null) {
     parts.push(
@@ -34099,7 +34108,6 @@ function provenance(responded) {
       parts.push(`Votes: ${votes}.`);
     }
   }
-  if (language !== null) parts.push(`Written in ${language}.`);
   return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
 }
 function footer(responded) {
@@ -34170,7 +34178,7 @@ function verdict(run2) {
     ["Outcome", cell(outcome(run2))]
   ];
   const parts = ["### Verdict", "", table(["Field", "Value"], rows)];
-  if (confidence < run2.floor) parts.push("", "```", responded.text, "```");
+  if (confidence < run2.floor) parts.push("", ...fence(responded.text));
   return parts.join("\n");
 }
 function decisionRows(decision) {
@@ -34358,11 +34366,15 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const queries = [{ text: `${standing.title}
 ${body}`, against: "own" }];
   const pivotLanguage = settings.languages[0] ?? null;
-  const worthBridging = language !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== language.code);
+  const worthBridging = language !== null && pivotLanguage !== null && language.code !== pivotLanguage.code && store.corrections.some((correction) => correction.language !== language.code);
   if (worthBridging) {
     const bridged = await translateToPivot({
       provider: stages.pivot,
-      models: settings.models,
+      // The cheap roster, same as triage's own bridge — a mechanical
+      // translation for recall does not need the roster a first reply is
+      // drafted with, and falls back to it only when `screen-models` was
+      // never configured.
+      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       title: standing.title,
       body,
       to: pivotLanguage,

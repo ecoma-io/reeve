@@ -32826,6 +32826,9 @@ var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
 
 // src/core/forge.ts
+function isBotAuthor(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
 async function readStanding(api, at) {
   const { data } = await api.rest.issues.get({
     owner: at.owner,
@@ -32842,7 +32845,7 @@ async function readStanding(api, at) {
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") }
+    author: { login, isBot: isBotAuthor(data.user) }
   };
 }
 var LABEL_PAGE = 100;
@@ -33611,9 +33614,6 @@ function proposalFingerprint(source, candidates) {
 function payloadFor(fp, duplicateOf) {
   return `${fp} duplicate-of=${String(duplicateOf)}`;
 }
-function isBot(author) {
-  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
-}
 var COMMENT_PAGE = 100;
 async function findMarked(api, at) {
   const { data } = await api.rest.issues.listComments({
@@ -33623,7 +33623,7 @@ async function findMarked(api, at) {
     per_page: COMMENT_PAGE
   });
   for (const comment of data) {
-    if (!isBot(comment.user)) continue;
+    if (!isBotAuthor(comment.user)) continue;
     const { official, fingerprint: found } = marker.split(comment.body ?? "");
     if (found !== null && official === "")
       return { marked: { id: comment.id, fingerprint: found }, uncertain: false };

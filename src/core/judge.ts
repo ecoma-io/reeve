@@ -98,9 +98,12 @@ export interface JudgeRequest<T> {
   /** The admitted candidates, best score first. */
   readonly candidates: readonly T[];
   /**
-   * The model that produced a candidate, which is what a vote names. Two
-   * candidates from the same model are indistinguishable to a tally, which is
-   * why drafting prefers a different model per draft.
+   * The model that produced a candidate, named for a vote's own attribution —
+   * `Vote.pick`, and nothing the tally below uses. Two candidates from the
+   * same model are the ordinary case once `drafts` can ask for more attempts
+   * than there are models to spread across, so the tally keys on each
+   * candidate's own identity rather than on this: a vote for the second of
+   * two same-model drafts is never folded into a vote for the first.
    */
   readonly by: (candidate: T) => string;
   /** The duty's ballot, given the candidates in the order this judge sees them. */
@@ -126,7 +129,12 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
 
   const votes: Vote[] = [];
   const failures: Failure[] = [];
-  const tally = new Map<string, number>();
+  // Keyed on each candidate's own identity — the object `draft` built for it,
+  // never a string derived from it — so two candidates from the same model
+  // are two entries here, not one. Keying on `by(candidate)` instead would
+  // fold a vote for the second of two same-model drafts into a vote for the
+  // first, silently losing it the moment `drafts` exceeds the roster.
+  const tally = new Map<T, number>();
   // Every model an earlier seat has finished with, whichever way it finished.
   // One set rather than two: "already voted" and "already failed" are different
   // reasons and the same instruction — do not ask this model again.
@@ -144,7 +152,7 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
     // every ballot. The order is this seat's alone, and the number its judge
     // answers with is read back through the same order.
     const shown = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown, ballot, by, weather);
+    const cast = await fill(provider, order, shown, ballot, weather);
 
     for (const failure of cast.failures) {
       spent.add(failure.model);
@@ -153,8 +161,8 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
     if (cast.vote === null) continue;
 
     spent.add(cast.vote.model);
-    votes.push(cast.vote);
-    tally.set(cast.vote.pick, (tally.get(cast.vote.pick) ?? 0) + 1);
+    votes.push({ model: cast.vote.model, pick: by(cast.vote.candidate) });
+    tally.set(cast.vote.candidate, (tally.get(cast.vote.candidate) ?? 0) + 1);
   }
 
   // Walked in score order and taken on strictly more, so an even split leaves
@@ -166,15 +174,21 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
   // back to.
   let elected: T = leader;
   for (const candidate of candidates) {
-    if ((tally.get(by(candidate)) ?? 0) > (tally.get(by(elected)) ?? 0)) elected = candidate;
+    if ((tally.get(candidate) ?? 0) > (tally.get(elected) ?? 0)) elected = candidate;
   }
 
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
 
-/** What one seat produced: at most one vote, and everything it rotated past. */
-interface Cast {
-  readonly vote: Vote | null;
+/**
+ * What one seat produced: at most one vote, and everything it rotated past.
+ *
+ * `candidate` rather than a string here — the tally in `judge` keys on this
+ * object's own identity, and a `pick` string is only ever derived from it at
+ * the point a public `Vote` is built, for attribution.
+ */
+interface Cast<T> {
+  readonly vote: { readonly model: string; readonly candidate: T } | null;
   readonly failures: readonly Failure[];
 }
 
@@ -193,9 +207,8 @@ async function fill<T>(
   order: readonly string[],
   shown: readonly T[],
   ballot: (shown: readonly T[]) => readonly Message[],
-  by: (candidate: T) => string,
   weather?: Weather,
-): Promise<Cast> {
+): Promise<Cast<T>> {
   const failures: Failure[] = [];
 
   for (const model of order) {
@@ -204,8 +217,8 @@ async function fill<T>(
       continue;
     }
 
-    const counted = read(await provider.complete(model, ballot(shown)), shown, by);
-    if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    const counted = read(await provider.complete(model, ballot(shown)), shown);
+    if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);
   }
@@ -259,11 +272,7 @@ const NUMBER = /\d+/g;
  * and there is no reading of "the model named two candidates" that is evidence
  * for either.
  */
-function read<T>(
-  answer: Completion,
-  shown: readonly T[],
-  by: (candidate: T) => string,
-): Failure | { ok: true; pick: string } {
+function read<T>(answer: Completion, shown: readonly T[]): Failure | { ok: true; candidate: T } {
   if (!answer.ok) return answer;
 
   // Resolved to the candidate as it is read, so a number outside the range is
@@ -294,7 +303,7 @@ function read<T>(
     };
   }
 
-  return { ok: true, pick: by(only) };
+  return { ok: true, candidate: only };
 }
 
 /** How much of an unusable answer reaches the log. */

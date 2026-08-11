@@ -103,9 +103,12 @@ describe("publication", () => {
     expect(rendered).not.toContain("Votes:");
   });
 
-  it("says which language the reply was written in", () => {
-    expect(body({ language: "Tiếng Việt" })).toContain("Written in Tiếng Việt.");
-    expect(body({ language: "Tiếng Việt" })).toContain("The thread was written in Tiếng Việt.");
+  it("says which language the reply was written in, once, in the footer", () => {
+    const rendered = body({ language: "Tiếng Việt" });
+    expect(rendered).toContain("The thread was written in Tiếng Việt.");
+    // The provenance line covers attribution — model, confidence, votes —
+    // and never the language: that would repeat what the footer already says.
+    expect(rendered).not.toContain("Written in Tiếng Việt.");
   });
 
   it("says English was used as a fallback when detection reached no answer", () => {

@@ -68,6 +68,7 @@ import {
 } from "../../core/enforce.js";
 import {
   createEffects,
+  isBotAuthor,
   listCorrectionFiles,
   listOpenThreads,
   listRepositoryLabels,
@@ -819,8 +820,7 @@ function recordTrigger(): RecordTrigger {
     return { eligible: false, reason: "" };
   }
 
-  const sender = payload.sender;
-  if (sender?.type === "Bot" || (sender?.login ?? "").endsWith("[bot]")) {
+  if (isBotAuthor(payload.sender)) {
     return { eligible: false, reason: "the label change came from a bot" };
   }
 

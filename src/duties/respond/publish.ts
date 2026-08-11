@@ -143,7 +143,7 @@ function boundary(): string {
  * wrote it is part of that notice.
  */
 function provenance(responded: Responded): string {
-  const { decision, model, language } = responded;
+  const { decision, model } = responded;
   const parts = [`Drafted by \`${model}\`.`];
 
   if (decision !== null) {
@@ -157,7 +157,9 @@ function provenance(responded: Responded): string {
       parts.push(`Votes: ${votes}.`);
     }
   }
-  if (language !== null) parts.push(`Written in ${language}.`);
+  // The language the thread was written in belongs to `footer`, not here —
+  // saying it twice in the same posted comment is the duplication this
+  // function used to carry.
 
   return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
 }

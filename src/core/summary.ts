@@ -81,6 +81,25 @@ export function cell(text: string): string {
 }
 
 /**
+ * A fenced code block wide enough to actually hold what is inside it.
+ *
+ * Three backticks is markdown's default fence, and this report is not the
+ * only place that ever quotes model output verbatim — but a draft that
+ * itself quotes a fenced code block (a maintainer asked "show me the diff",
+ * say) contains a run of three or more backticks of its own, and a fixed
+ * three-backtick fence around it would close early on the first one and spill
+ * the rest as loose, unfenced prose. The fence returned here is always one
+ * backtick longer than the longest run already inside `text`, so nothing in
+ * it can ever close it before the caller does.
+ */
+export function fence(text: string): readonly string[] {
+  const runs = text.match(/`+/g) ?? [];
+  const longest = runs.reduce((max, run) => Math.max(max, run.length), 0);
+  const ticks = "`".repeat(Math.max(3, longest + 1));
+  return [ticks, text, ticks];
+}
+
+/**
  * What the run spent, per stage and model, and what it adds up to.
  *
  * Here rather than in each duty because none of it is a duty's business: the

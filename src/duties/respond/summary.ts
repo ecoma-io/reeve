@@ -11,7 +11,7 @@
  */
 import type { Spend } from "../../core/meter.js";
 import { shown, type Names } from "../../core/provider.js";
-import { cell, cost, table } from "../../core/summary.js";
+import { cell, cost, fence, table } from "../../core/summary.js";
 import type { Capability } from "../../core/warrant.js";
 
 import type { Decision, Responded } from "./publish.js";
@@ -137,8 +137,9 @@ function verdict(run: Run): string {
   // sells: the draft is real work a maintainer is meant to read and judge,
   // not just a fact that one was written. `respond-text` carries the same
   // text for a workflow to route elsewhere; this is what makes it legible
-  // without leaving this page.
-  if (confidence < run.floor) parts.push("", "```", responded.text, "```");
+  // without leaving this page. `fence` rather than a bare ``` — a draft that
+  // itself quotes a fenced block would otherwise close this one early.
+  if (confidence < run.floor) parts.push("", ...fence(responded.text));
 
   return parts.join("\n");
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cell, count, table, writeSummary } from "./summary.js";
+import { cell, count, fence, table, writeSummary } from "./summary.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is what the runner actually gives an action: `GITHUB_STEP_SUMMARY`
@@ -109,5 +109,26 @@ describe("cell", () => {
 describe("count", () => {
   it("groups thousands, in one locale rather than the runner's", () => {
     expect(count(1234567)).toBe("1,234,567");
+  });
+});
+
+describe("fence", () => {
+  it("wraps plain text in a three-backtick fence", () => {
+    expect(fence("hello")).toEqual(["```", "hello", "```"]);
+  });
+
+  it("widens the fence past a triple-backtick run already inside the text", () => {
+    const text = "before\n```\ncode\n```\nafter";
+    const [open, body, close] = fence(text);
+    expect(open).toBe("````");
+    expect(close).toBe("````");
+    expect(body).toBe(text);
+  });
+
+  it("widens past whatever the longest run inside actually is, not just three", () => {
+    const text = "a `````` run of six";
+    const [open, , close] = fence(text);
+    expect(open).toBe("`".repeat(7));
+    expect(close).toBe("`".repeat(7));
   });
 });
