@@ -1,5 +1,7 @@
 # The warrant
 
+_Write and extend a warrant file for your repository. Prerequisites: [Installation](../getting-started/installation.md)._
+
 What Reeve is allowed to do to your repository, written down in your repository,
 and enforced against the file rather than against anything a model said.
 
@@ -9,7 +11,7 @@ and enforced against the file rather than against anything a model said.
 
 ## Where the warrant sits on the ladder
 
-[The ladder](../north-star.md#3-the-ladder) is climbed almost entirely inside
+[The ladder](../doctrine/north-star.md#3-the-ladder) is climbed almost entirely inside
 this file. Write nothing, and a duty runs at level 0 — the narrowest authority
 Reeve defines in code, built from the labels and the descriptions your
 repository already has, with nothing typed twice. Write `.github/reeve.yml`
@@ -24,12 +26,17 @@ the file's mere existence never was. That block — with `owner` and
 `exclusive_with` alongside it — is level 2 of the ladder, reviewed the same
 way, in the same file, for as long as you use Reeve.
 
-**Level 0 is [Stage 1](../north-star.md#7-roadmap), landed: an absent warrant
+**Level 0 is [Stage 1](../doctrine/north-star.md#7-roadmap), landed: an absent warrant
 is an implicit authority, not a failed run.** The corrected reading of the
-`capabilities:` block above is [Stage 3](../north-star.md#7-roadmap), also
+`capabilities:` block above is [Stage 3](../doctrine/north-star.md#7-roadmap), also
 landed: a duty left out of an already-written `capabilities:` block is
 granted nothing at all, not its old default — [the capabilities reference
 below](#capabilities) is where that is spelled out in full.
+
+The concept underneath this page — capabilities, the warrant, and the ladder
+as one model — is explained at a level above this page's how-to detail in
+[The authority model](../concepts/authority-model.md), for a reader who wants
+the shape before the syntax.
 
 ## Why this is a file and not a setting
 
@@ -115,16 +122,9 @@ labels:
     exclusive_with: [bug]
 ```
 
-### Label fields
-
-| Field            | Required | What it does                                                                                                     |
-| ---------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
-| `name`           | yes      | Must match a label that exists in the repository, exactly. Verified before anything is applied.                  |
-| `description`    | yes      | When this label applies. Written as a boundary, not as a synonym for the name.                                   |
-| `not`            | no       | When it does **not** apply, against the label it gets confused with most. The highest-value field on this page.  |
-| `examples`       | no       | Real titles from your own repository. Two or three; more is a corpus, and that is what [memory](#memory) is for. |
-| `owner`          | no       | Team or user assigned when this label is applied and the duty may assign.                                        |
-| `exclusive_with` | no       | Labels that may not be applied alongside this one. Enforced in code, never requested of the model.               |
+Every field's name, whether it is required, and what it does is
+[the warrant format reference](../reference/warrant-format.md#label-fields) —
+this page stays on why and how to write one; the schema itself lives there.
 
 `version` is currently `1`. It exists so a format change can be refused with a
 message naming the version, rather than parsed into something plausible and
@@ -163,25 +163,17 @@ Vietnamese. Say what the boundary _is_, not what it sounds like.
 ## Capabilities
 
 The second half of the warrant: not what the labels mean, but what a duty may do
-at all.
-
-| Capability  | What it permits                                                                                                                                    | Default            |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `label`     | Add a label from the taxonomy. Never remove one.                                                                                                   | on for `triage`    |
-| `edit-body` | Append Reeve's own block below its marker in a body.                                                                                               | on for `translate` |
-| `comment`   | Post a rationale as a new comment.                                                                                                                 | off                |
-| `close`     | Close as not planned, with a comment saying why.                                                                                                   | off                |
-| `assign`    | Assign the `owner` the taxonomy names for a label.                                                                                                 | off                |
-| `record`    | Commit the thread's current labels to the corrections store, on a labelled or unlabelled event from a human. Needs `contents: write` on the token. | off                |
-| `none`      | Run everything, write every output, change nothing.                                                                                                | —                  |
+at all. [The full table](../reference/warrant-format.md#capabilities) — what each
+capability permits and its default — is in the reference; this section is the
+behaviour around it.
 
 **A duty left out of the block entirely keeps its own default, for as long as
 no `capabilities:` block exists at all** — that is level 1 of
-[the ladder](../north-star.md#3-the-ladder), and a taxonomy-only warrant stays
+[the ladder](../doctrine/north-star.md#3-the-ladder), and a taxonomy-only warrant stays
 there for as long as that is all you want. Write a `capabilities:` block at
 all, though, and enumeration becomes total: a duty you left out of it is
 granted nothing, not its old default, because naming who may act is the whole
-answer once you start. **This is [Stage 3](../north-star.md#7-roadmap),
+answer once you start. **This is [Stage 3](../doctrine/north-star.md#7-roadmap),
 landed.** A duty left out of an already-written block runs, decides nothing,
 and says so in its own run report — write every duty you use into the block
 once one exists.
@@ -193,7 +185,7 @@ one click and is noise they already know how to filter. A wrong comment is
 addressed to a human who then has to answer it. A wrong close tells a reporter
 their report was not worth keeping open, and costs you a contributor.
 
-Turn the others on deliberately, one at a time, after a `dry-run` on your own
+Turn the others on deliberately, one at a time, after a [`dry-run`](dry-run.md) on your own
 backlog told you what the rate actually is.
 
 **`duplicate` has no default at all — not even the cheapest one.** Its own
@@ -201,7 +193,7 @@ backlog told you what the rate actually is.
 a comment naming a suspected duplicate needs `duplicate: [comment]` written
 here **and** `apply: comment` on the workflow; either alone still leaves the
 run reporting `duplicate-of` and `score` without touching the thread. See
-[the duty's own page](duties/duplicate.md) for why a claim about somebody
+[the duty's own page](../reference/duties/duplicate.md) for why a claim about somebody
 else's report did not earn the same free default a label did.
 
 **Neither does `respond`.** It is the top rung, and there is no cheap,
@@ -209,7 +201,7 @@ reversible version of "post a comment that reads as this project answering a
 stranger." So an absent warrant, or a written one that is simply silent about
 `respond`, grants it nothing — not `comment`, not anything — until
 `capabilities: { respond: [comment] }` names it explicitly. See [the
-`respond` duty](duties/respond.md#granting-it).
+`respond` duty](../reference/duties/respond.md#granting-it).
 
 **A duty also takes an `apply` input, and the narrower of the two wins.** The
 file and the workflow are both reviewable, they can disagree, and the fail-safe
@@ -217,7 +209,7 @@ direction is the intersection. A workflow can restrict what the file granted; it
 can never widen it.
 
 **`none` is not `dry-run`.** `none` is a permanent configuration for a repository
-that consumes the outputs itself and does its own applying. `dry-run` is a
+that consumes the outputs itself and does its own applying. [`dry-run`](dry-run.md) is a
 rehearsal. They differ in intent, and outputs let a workflow tell them apart.
 
 ## Languages
@@ -267,32 +259,10 @@ These are not defaults. There is no input, no file key and no flag:
 - **Writing code, opening a pull request, or running your tests.**
 
 The last one is a product boundary rather than a safety one, and it is argued in
-[the north star](../north-star.md#8-non-goals).
+[the north star](../doctrine/north-star.md#8-non-goals).
 
-## Validation
-
-Checked when the file is read, before any model call:
-
-- **The file parses and `version` is supported.**
-- **Every `name` is unique.**
-- **Every `name` exists as a label in the repository.** A taxonomy naming a label
-  that was renamed produces an error naming both — rather than a verdict whose
-  labels are all silently dropped later, which looks exactly like a model that
-  never agreed with anything.
-- **Every `exclusive_with` entry names a label in this same file.**
-- **Every capability named is one a duty defines.** A misspelling is refused, not
-  dropped: this list is the only thing standing between a verdict and your issue
-  tracker, and a silently ignored `lablel` is worse than a failed run.
-- **`owner`, if present, is a syntactically valid handle.** Whether it can
-  actually be assigned is decided by the API at apply time; a non-assignable
-  owner is a warning, not a failed run.
-
-**An issue cannot be assigned to a team.** That is GitHub's rule, not Reeve's:
-the assignees API takes users, and `@org/team` is not one. A team `owner` is
-still worth writing — it says who a label belongs to, and the run report says so
-— but a run with `assign` turned on warns about it once and carries on. It never
-fails the run over it, because who owns a label is documentation and refusing to
-label a thread over it would be the wrong trade.
+Every rule the parser itself enforces — before a model is even asked — is
+[the warrant format reference's validation list](../reference/warrant-format.md#validation).
 
 ## Memory
 
@@ -344,7 +314,7 @@ jobs:
           apply: label, record
 ```
 
-See [the triage duty](duties/triage.md#memory) for the full shape of this.
+See [the triage duty](../reference/duties/triage.md#memory) for the full shape of this.
 
 **The pivot language is what makes the store cross-language.** The first
 language `triage` resolves — from `languages:` here, or from the `languages`
@@ -354,7 +324,7 @@ thread in yet another language translates the query into the pivot too, and
 the two renderings meet there. A correction already in the pivot language, or
 a store that only ever sees one language, spends no extra request on any of
 this — the bridge is only built when there is a language gap for it to cross.
-This is [Stage 4](../north-star.md#7-roadmap), landed.
+This is [Stage 4](../doctrine/north-star.md#7-roadmap), landed.
 
 **An empty store is the cold-start case, not an error.** Every duty works with no
 memory. It works better with one.
@@ -396,3 +366,8 @@ labels:
     not: A report that is merely short. If the steps are there, this is not it.
     exclusive_with: [bug]
 ```
+
+---
+
+**Related:** [The authority model](../concepts/authority-model.md) · [The warrant format reference](../reference/warrant-format.md) · [Dry run](dry-run.md)
+**Next:** [Languages](languages.md) — configure who Reeve writes to, on top of what it may do

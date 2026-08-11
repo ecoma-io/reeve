@@ -1,5 +1,7 @@
 # Languages
 
+_Configure which languages Reeve recognizes and how detection works in practice. Prerequisites: [Installation](../getting-started/installation.md)._
+
 Who wrote in what, who reads in what, and how Reeve works out the first without
 spending anything.
 
@@ -22,7 +24,7 @@ assume contributors write in your language — they do not — or answer a stran
 in a language they did not write in.
 
 The design behind this is in
-[the language layer](../development/language.md). This page is how you configure
+[the language layer](../concepts/language-layer.md). This page is how you configure
 it.
 
 ## `languages`
@@ -58,7 +60,7 @@ ranks it.
 
 ### Where this lives: the input, or the warrant
 
-The `languages` input above is [level 0 or level 1](../north-star.md#3-the-ladder)
+The `languages` input above is [level 0 or level 1](../doctrine/north-star.md#3-the-ladder)
 of the ladder — nothing written down beyond the workflow itself, and it works
 exactly as this page describes for as long as that is all you configure.
 
@@ -94,7 +96,7 @@ network, still nothing spent.
 between the survivors. Never to answer an open question.
 
 Detection is code, and steps 1–3 are free. That is not an optimisation; it is
-[doctrine](../north-star.md#d1--no-duty-is-english-only). A language layer that
+[doctrine](../doctrine/north-star.md#d1--no-duty-is-english-only). A language layer that
 cost a model call per thread would be the first thing turned off on a large
 repository, and every duty above it would go back to being English-first.
 
@@ -152,7 +154,7 @@ the text it has. `translate` produces every configured language.
 
 A triage verdict must be as good in Vietnamese as in English. That is not a hope:
 the headline accuracy number for any duty is **the worst language, not the
-average** ([D11](../north-star.md#d11--every-duty-ships-with-an-evaluation)), so a
+average** ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)), so a
 duty that quietly degrades outside English fails its own gate.
 
 ## Configuring for a project with one maintainer language
@@ -185,5 +187,10 @@ Honest gaps, tracked rather than papered over:
 - **Many maintainers, many project languages** — the project language is
   currently one value.
 
-Both are in [the north star](../north-star.md#10-open-questions). Neither has a
+Both are in [the north star](../doctrine/north-star.md#10-open-questions). Neither has a
 workaround worth documenting as though it were a design.
+
+---
+
+**Related:** [The warrant](warrant.md) · [The language layer](../concepts/language-layer.md) · [Dry run](dry-run.md)
+**Next:** [The sweep](sweep.md) — run the same duties against a whole backlog instead of one thread
