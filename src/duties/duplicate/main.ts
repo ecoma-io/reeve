@@ -312,6 +312,11 @@ async function runSweep(
       body: thread.body,
       labels: thread.labels,
       closed: false,
+      // The sweep listing this candidate came from does not carry who opened
+      // it — only `readStanding`'s single-thread fetch does — and nothing in
+      // `duplicate`'s own decision reads it: ranking a candidate against the
+      // thread in hand never turns on who either one's author is.
+      author: { login: "", isBot: false },
     };
     const outcome = await decide(
       api,

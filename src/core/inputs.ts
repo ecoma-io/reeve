@@ -197,6 +197,12 @@ export function counted(name: string, raw: string): number {
  * leaving the duty unnamed in the warrant already means. So `0` is refused
  * here, on either input, and `none` is the only spelling of "no bound" — a
  * word a stray keystroke does not produce.
+ *
+ * Not `whole` with a sentinel bolted on either: `whole` has no way to say
+ * "there is no ceiling" — every number it accepts is one, and the sentinel
+ * has to come from outside the range it measures. `none`, refused nowhere
+ * near the numbers, is that sentinel: a `max-body-chars: 0` is a maintainer
+ * who meant `none` and typed the wrong kind of zero.
  */
 export function bounded(name: string, raw: string): number | null {
   const trimmed = raw.trim();
@@ -224,33 +230,6 @@ export function fraction(name: string, raw: string): number {
   const value = Number(raw.trim());
   if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
-  }
-  return value;
-}
-
-/**
- * A whole number of 1 or more, or no bound at all.
- *
- * `whole` has no way to say "there is no ceiling" — every number it accepts is
- * one, and the sentinel for "off" has to come from outside the range it
- * measures. Zero cannot be that sentinel here: `0` is legitimate for a floor,
- * where it is the scale's own vanishing point (`min-body-chars: 0` means
- * "accept anything", a real setting `counted` already gives a meaning), but a
- * ceiling has no vanishing point — there is no number of characters that
- * means "unlimited" the way there is a count that means "nothing required".
- * So a ceiling spells "no bound" as the word `none`, refused nowhere near the
- * numbers, and `0` is refused here rather than silently meaning either "no
- * bound" (surprising) or "truncate to nothing" (worse): a `max-body-chars: 0`
- * is a maintainer who meant `none` and typed the wrong kind of zero.
- */
-export function bounded(name: string, raw: string): number | null {
-  if (raw.trim().toLowerCase() === "none") return null;
-
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(
-      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
-    );
   }
   return value;
 }

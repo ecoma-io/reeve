@@ -32936,20 +32936,21 @@ function whole(name, raw) {
   }
   return value;
 }
+function bounded(name, raw) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
 function fraction(name, raw) {
   const value = Number(raw.trim());
   if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
-  }
-  return value;
-}
-function bounded(name, raw) {
-  if (raw.trim().toLowerCase() === "none") return null;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(
-      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
-    );
   }
   return value;
 }
@@ -33136,7 +33137,8 @@ var STAGE = {
   judge: "Judging",
   screen: "Screening",
   triage: "Triage",
-  pivot: "Pivot translation"
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();

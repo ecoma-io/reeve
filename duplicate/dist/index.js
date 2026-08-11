@@ -32832,6 +32832,7 @@ async function readStanding(api, at) {
     repo: at.repo,
     issue_number: at.number
   });
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -32840,7 +32841,8 @@ async function readStanding(api, at) {
     // read rather than one being assumed and the other becoming an empty list
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-    closed: data.state === "closed"
+    closed: data.state === "closed",
+    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") }
   };
 }
 var LABEL_PAGE = 100;
@@ -34041,7 +34043,12 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
       title: thread.title,
       body: thread.body,
       labels: thread.labels,
-      closed: false
+      closed: false,
+      // The sweep listing this candidate came from does not carry who opened
+      // it — only `readStanding`'s single-thread fetch does — and nothing in
+      // `duplicate`'s own decision reads it: ranking a candidate against the
+      // thread in hand never turns on who either one's author is.
+      author: { login: "", isBot: false }
     };
     const outcome = await decide(
       api,

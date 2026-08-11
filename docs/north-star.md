@@ -28,12 +28,12 @@ deterministic scoring, a language layer that knows who wrote in what and who
 reads in what, a sanitiser that assumes the thread is hostile, an allowlist
 checked in code, and state kept as plain files in the user's own repository.
 
-| Duty        | Status                | Does                                                                            |
-| ----------- | --------------------- | ------------------------------------------------------------------------------- |
-| `triage`    | ships                 | Sorts the backlog against a taxonomy the project wrote.                         |
-| `translate` | ships                 | Puts every issue and pull request in the languages the project reads.           |
-| `duplicate` | ships                 | Finds the thread that already asked this — across the language it was asked in. |
-| `respond`   | ships                 | Gives a stranger a first, useful reply in the language they wrote to us in.     |
+| Duty        | Status | Does                                                                            |
+| ----------- | ------ | ------------------------------------------------------------------------------- |
+| `triage`    | ships  | Sorts the backlog against a taxonomy the project wrote.                         |
+| `translate` | ships  | Puts every issue and pull request in the languages the project reads.           |
+| `duplicate` | ships  | Finds the thread that already asked this — across the language it was asked in. |
+| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.     |
 
 ## 2. The end state
 

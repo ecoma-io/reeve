@@ -299,21 +299,21 @@ describe("bounded", () => {
     expect(bounded("corpus-limit", "500")).toBe(500);
   });
 
-  it("reads `none` as no bound at all", () => {
-    expect(bounded("corpus-limit", "none")).toBeNull();
-  });
-
-  it("reads `none` case-insensitively and past surrounding space", () => {
-    expect(bounded("corpus-limit", "  None\n")).toBeNull();
+  it.each([
+    ["none", "none"],
+    ["upper case", "NONE"],
+    ["surrounding space", "  none\n"],
+  ])("reads %s as no bound at all", (_case, raw) => {
+    expect(bounded("corpus-limit", raw)).toBeNull();
   });
 
   it.each([
-    ["an empty input", ""],
-    ["zero — the only spelling of unbounded here is `none`", "0"],
+    ["an empty input, which `Number` reads as zero", ""],
+    ["zero, the wrong kind of vanishing point for a ceiling", "0"],
     ["a negative count", "-1"],
     ["a fraction", "1.5"],
     ["a value with a unit", "500 issues"],
-  ])("refuses %s", (_case, raw) => {
+  ])("refuses %s, naming `none` as the way to say unlimited", (_case, raw) => {
     expect(() => bounded("corpus-limit", raw)).toThrow(
       `corpus-limit: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
     );
@@ -344,32 +344,6 @@ describe("fraction", () => {
   ])("refuses %s", (_case, raw) => {
     expect(() => fraction("confidence", raw)).toThrow(
       /confidence: expected a number between 0 and 1/,
-    );
-  });
-});
-
-describe("bounded", () => {
-  it("reads a ceiling", () => {
-    expect(bounded("max-body-chars", "6000")).toBe(6000);
-  });
-
-  it.each([
-    ["none", "none"],
-    ["upper case", "NONE"],
-    ["surrounding space", "  none\n"],
-  ])("reads %s as no bound at all", (_case, raw) => {
-    expect(bounded("max-body-chars", raw)).toBeNull();
-  });
-
-  it.each([
-    ["an empty input, which `Number` reads as zero", ""],
-    ["zero, the wrong kind of vanishing point for a ceiling", "0"],
-    ["a negative bound", "-1"],
-    ["a fraction", "1.5"],
-    ["a value with a unit", "6000 chars"],
-  ])("refuses %s, naming `none` as the way to say unlimited", (_case, raw) => {
-    expect(() => bounded("max-body-chars", raw)).toThrow(
-      `max-body-chars: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
     );
   });
 });

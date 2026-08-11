@@ -33006,9 +33006,10 @@ function whole(name, raw) {
   return value;
 }
 function bounded(name, raw) {
-  if (raw.trim().toLowerCase() === "none") return null;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
     throw new Error(
       `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
     );

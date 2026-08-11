@@ -31,12 +31,12 @@ repository, not before.
 
 ## The duties
 
-| Duty                                | Does                                                                              |
-| ------------------------------------ | --------------------------------------------------------------------------------- |
-| [`triage`](duties/triage.md)         | Sorts incoming work against a taxonomy you wrote, in the language it arrived in.  |
-| [`translate`](duties/translate.md)   | Puts every thread in front of every reader, without rewriting anyone.             |
-| [`duplicate`](duties/duplicate.md)   | Finds the thread that already asked this — across the language it was asked in.  |
-| [`respond`](duties/respond.md)       | Drafts one first reply to a new issue, in the language it arrived in, then stops. |
+| Duty                               | Does                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------- |
+| [`triage`](duties/triage.md)       | Sorts incoming work against a taxonomy you wrote, in the language it arrived in.  |
+| [`translate`](duties/translate.md) | Puts every thread in front of every reader, without rewriting anyone.             |
+| [`duplicate`](duties/duplicate.md) | Finds the thread that already asked this — across the language it was asked in.   |
+| [`respond`](duties/respond.md)     | Drafts one first reply to a new issue, in the language it arrived in, then stops. |
 
 ## The shape of every duty
 
