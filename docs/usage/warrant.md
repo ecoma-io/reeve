@@ -296,6 +296,40 @@ No checkout happens for this — the commit goes through the Contents API — an
 a token without the scope fails the run the way any other authentication
 problem does, plainly.
 
+**`record` needs naming in both halves — this file and the workflow's
+`apply`.** [The narrower of the two wins](#capabilities) for `record` exactly
+as it does for `label` or `comment`, and granting it here alone is not
+enough: `apply` defaults to `label`, so a labelled event on a run whose file
+grants `record` but whose workflow does not name it re-triages the thread
+instead of recording it, and a `core.notice` on that run says so. Both halves
+need to agree:
+
+```yaml
+capabilities:
+  triage: [label, record]
+```
+
+```yaml
+on:
+  issues:
+    types: [labeled, unlabeled]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ecoma-io/reeve/triage@v0.1
+        with:
+          number: ${{ github.event.issue.number }}
+          apply: label, record
+```
+
+See [the triage duty](duties/triage.md#memory) for the full shape of this.
+
 **The pivot language is what makes the store cross-language.** The first
 language `triage` resolves — from `languages:` here, or from the `languages`
 input — is the pivot. A correction recorded in another language is also

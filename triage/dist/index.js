@@ -34309,10 +34309,13 @@ async function run() {
           );
         }
         const trigger = recordTrigger();
-        const { permitted } = narrow(
-          authority2.warrant.granted("triage", DEFAULT_CAPABILITIES),
-          settings.apply
-        );
+        const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+        const { permitted } = narrow(grantedCapabilities, settings.apply);
+        if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
+          notice(
+            `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
+          );
+        }
         if (trigger.eligible && permitted.includes("record")) {
           recordOutcome = await recordCorrection(
             api,

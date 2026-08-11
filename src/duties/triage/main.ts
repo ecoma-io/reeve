@@ -445,10 +445,29 @@ export async function run(): Promise<void> {
         // or the capability simply not granted, is today's behaviour: a
         // verdict, not a recording.
         const trigger = recordTrigger();
-        const { permitted } = narrow(
-          authority.warrant.granted("triage", DEFAULT_CAPABILITIES),
-          settings.apply,
-        );
+        const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
+        const { permitted } = narrow(grantedCapabilities, settings.apply);
+
+        // The asymmetric half of the same double-gate: `withheld` (used inside
+        // `decide` below) only ever names what `apply` asked for and the file
+        // refused, because that is the direction a run takes without saying so
+        // otherwise. This is the other direction — the file grants `record`,
+        // `apply` simply never names it, `apply` defaults to `label` alone — and
+        // without this notice a maintainer who granted `record` in the file and
+        // stopped there gets a silent full re-triage on every label change
+        // instead of the recording they configured, with nothing in the log
+        // explaining why.
+        if (
+          trigger.eligible &&
+          grantedCapabilities.includes("record") &&
+          !permitted.includes("record")
+        ) {
+          core.notice(
+            `\`${authority.warrant.path}\` grants \`record\`, but \`apply\` does not name it, ` +
+              "so this labelled/unlabelled event was triaged instead of recorded. The narrower " +
+              "of the two wins — add `record` to `apply` as well to record it instead.",
+          );
+        }
 
         if (trigger.eligible && permitted.includes("record")) {
           recordOutcome = await recordCorrection(

@@ -200,6 +200,44 @@ rendering. No checkout happens for any of this; the commit goes through
 GitHub's Contents API. See [the warrant's capability
 table](../warrant.md#capabilities) for what grants it.
 
+**`record` needs naming in both halves — the file and the workflow.** The
+narrower of `reeve.yml`'s `capabilities:` block and the workflow's `apply`
+input wins, always, and that rule applies to `record` exactly as it applies
+to `label` or `comment`. Granting `record` in the file alone is not enough:
+`apply` defaults to `label`, and a run triggered on a labelled event with
+`record` left out of `apply` re-triages the thread instead of recording it —
+silently, because nothing about that is a misconfiguration `checkLabelsExist`
+or the warrant reader could catch. A trigger this duty would otherwise have
+recorded, doing an ordinary verdict instead because `apply` did not name
+`record`, is logged as a notice for exactly this reason. The workflow needs
+both the trigger and the grant:
+
+```yaml
+on:
+  issues:
+    types: [labeled, unlabeled]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ecoma-io/reeve/triage@v0.1
+        with:
+          number: ${{ github.event.issue.number }}
+          apply: label, record
+```
+
+and the file's own half, alongside whatever else `triage` is granted:
+
+```yaml
+capabilities:
+  triage: [label, record]
+```
+
 **Triage.** Ask for a verdict: labels from the taxonomy, a confidence, an optional
 duplicate reference, a rationale. Three properties are non-negotiable:
 

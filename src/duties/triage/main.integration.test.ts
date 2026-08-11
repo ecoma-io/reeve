@@ -1159,6 +1159,32 @@ describe("record", () => {
     expect(stub.asked.length).toBeGreaterThan(0);
   });
 
+  it("notices and triages instead of recording when the file grants `record` but `apply` does not name it", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // No `stub.labels` set here, unlike the recording tests above: the thread
+    // starts with nothing on it, so the ordinary verdict this run falls
+    // through to is free to apply `bug` rather than refusing it as already
+    // there — matching the bot-actor test just above, which falls through to
+    // the same pipeline for the same reason.
+    const event = await labelEvent();
+
+    // The opposite asymmetry from the test above: the file grants `record`,
+    // and the workflow leaves `apply` at its default of `label` alone — the
+    // exact configuration a maintainer following the docs but forgetting the
+    // second half would end up with.
+    const run = await runAction(stub, { corrections: CORRECTIONS }, { GITHUB_EVENT_PATH: event });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    expect(run.log).toContain(
+      `\`${warrantPath}\` grants \`record\`, but \`apply\` does not name it, ` +
+        "so this labelled/unlabelled event was triaged instead of recorded.",
+    );
+    // Fell through to the ordinary pipeline, which did triage the thread.
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
   it("fails red, plainly, when the token cannot write — the permission error it is", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     stub.contentsForbidden = true;
