@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { mapProse, segments, type Segment } from "./markdown.js";
+import { chunks, isCodeOnly, mapProse, segments, type Segment } from "./markdown.js";
 
 /** The kinds in order, which is what most cases are actually asserting. */
 function shape(markdown: string): SegmentKindWithText[] {
@@ -194,5 +194,67 @@ describe("mapProse", () => {
     });
 
     expect(seen).toEqual(["one ", " two"]);
+  });
+});
+
+describe("chunks", () => {
+  it("returns the whole text as one chunk when it fits", () => {
+    expect(chunks("short body", 100)).toEqual(["short body"]);
+  });
+
+  it("splits at a segment boundary once the budget is crossed", () => {
+    // Plain prose is one segment end to end, however long — `segments()` only
+    // breaks on a fence or a code span, so a boundary needs one of those to
+    // land on.
+    const text = "a".repeat(10) + "`x`" + "b".repeat(10);
+
+    expect(chunks(text, 12)).toEqual(["a".repeat(10), "`x`", "b".repeat(10)]);
+  });
+
+  it("never splits a fenced block across two chunks", () => {
+    // The fence is 20 characters on its own, over the 10-character budget —
+    // the budget loses, because cutting a fence in two is the one thing this
+    // function may never do.
+    const fence = "```\nvery long code\n```";
+    const text = `before\n${fence}\nafter`;
+
+    const result = chunks(text, 10);
+
+    expect(result.some((chunk) => chunk.includes("```") && !chunk.includes(fence))).toBe(false);
+    expect(result.join("")).toBe(text);
+  });
+
+  it("reassembles to the input exactly, whatever the budget", () => {
+    const text = "one\n\n```\ncode here\n```\n\ntwo\n\nthree `x` four";
+
+    for (const maxChars of [1, 5, 10, 1000]) {
+      expect(chunks(text, maxChars).join("")).toBe(text);
+    }
+  });
+
+  it("returns one empty chunk for empty input, never zero chunks", () => {
+    expect(chunks("", 100)).toEqual([""]);
+  });
+});
+
+describe("isCodeOnly", () => {
+  it("is false for a chunk with any prose in it", () => {
+    expect(isCodeOnly("some words\n```\ncode\n```")).toBe(false);
+  });
+
+  it("is true for a chunk that is nothing but a fenced block", () => {
+    expect(isCodeOnly("```\nconst a = 1;\n```")).toBe(true);
+  });
+
+  it("is true for a chunk that is fences and whitespace, with no prose between them", () => {
+    expect(isCodeOnly("```\na\n```\n\n```\nb\n```\n")).toBe(true);
+  });
+
+  it("is true for an inline code span with no other prose around it", () => {
+    expect(isCodeOnly("`a`")).toBe(true);
+  });
+
+  it("is true for an empty chunk, vacuously", () => {
+    expect(isCodeOnly("")).toBe(true);
   });
 });

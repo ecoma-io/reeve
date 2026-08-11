@@ -42,6 +42,57 @@ export function segments(markdown: string): Segment[] {
 }
 
 /**
+ * Splits Markdown into pieces no fence is ever split across, each `maxChars`
+ * or smaller wherever a boundary between segments allows it.
+ *
+ * Built on `segments()`, which already never splits a fence or a code span —
+ * this only decides where a chunk boundary falls between whole segments,
+ * greedily filling one chunk before starting the next. A single fence bigger
+ * than `maxChars` is not a bug to work around: it becomes a chunk of its own,
+ * over budget, because cutting a fence in two is the one thing a caller of
+ * this function is asking never to happen.
+ *
+ * Concatenating the result in order reproduces the input byte for byte, same
+ * as `segments()` itself — a caller chunking a body for translation and
+ * reassembling the answers is relying on exactly that.
+ */
+export function chunks(markdown: string, maxChars: number): readonly string[] {
+  const out: string[] = [];
+  let current = "";
+
+  for (const segment of segments(markdown)) {
+    if (current.length > 0 && current.length + segment.text.length > maxChars) {
+      out.push(current);
+      current = "";
+    }
+    current += segment.text;
+  }
+  if (current.length > 0) out.push(current);
+
+  // A markdown document is never zero chunks — an empty document is one empty
+  // chunk, so a caller mapping over the result always has at least one to
+  // translate rather than a language silently doing nothing.
+  return out.length > 0 ? out : [markdown];
+}
+
+/**
+ * Whether a chunk is entirely fenced blocks and inline code spans — nothing
+ * in it for a model to translate.
+ *
+ * `chunks()` can hand back a chunk that is one whole fence, whenever a code
+ * block on its own reaches `maxChars`, or several fences with nothing but
+ * whitespace between them. Asking a model to translate one is a request
+ * spent on an answer already known: whatever comes back, the code inside it
+ * has to be reproduced unchanged, so the honest and cheaper move is to reuse
+ * the chunk verbatim and never place the request at all.
+ */
+export function isCodeOnly(chunk: string): boolean {
+  return segments(chunk).every(
+    (segment) => segment.kind !== "prose" || segment.text.trim().length === 0,
+  );
+}
+
+/**
  * Rewrites the prose and leaves every byte of code alone.
  *
  * The one operation both consumers of this module actually perform, kept here

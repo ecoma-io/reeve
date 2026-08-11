@@ -21,6 +21,7 @@ function spend(overrides: Partial<Spend> = {}): Spend {
   return {
     purpose: "draft",
     model: "a",
+    endpoint: null,
     requests: 1,
     failed: 0,
     unreported: 0,

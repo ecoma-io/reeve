@@ -75,7 +75,7 @@ description.
 | `warrant`           | `.github/reeve.yml` | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at the default path is not a failure — see [The warrant](../warrant.md).            |
 | `drafts`            | `1`                 | Attempts per language, scored deterministically, best published. The quality lever that costs calls instead of money.                                                     |
 | `judge-models`      | _empty_             | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.                                                                  |
-| `max-body-chars`    | `6000`              | Bounds what is **read from the thread**, not what the model answers, or `none` for no bound at all. Measured against the author's half only.                              |
+| `max-body-chars`    | `6000`              | Bounds what is **read from the thread**, not what the model answers, or `none` for no bound at all. Measured against the author's half only. See below.                   |
 | `translate-replies` | `false`             | Off because the ceiling is real. See below.                                                                                                                               |
 | `show-attribution`  | `none`              | How much of the machinery the published block names. See below.                                                                                                           |
 | `dry-run`           | `false`             | Whole pipeline, every output, nothing written.                                                                                                                            |
@@ -87,6 +87,23 @@ fingerprint is over the part that was actually read. `none` turns the bound off
 entirely, reading the whole body every time; `0` is refused rather than read as
 that, because it is a typo for it that is also a legitimate ceiling elsewhere in
 this project.
+
+Whatever `max-body-chars` reads, it is never sent to a model in one piece.
+The body is split into chunks a few thousand characters wide before drafting
+starts, each translated in its own draft-and-judge pass, one at a time. A
+fenced code block is never split across two chunks — a chunk that would cut
+one in half is grown past the budget instead — and a chunk that is entirely
+code is reused verbatim rather than spent on an answer already known: the
+code inside it would have to come back unchanged regardless of what a model
+said. This is what makes `max-body-chars: none` affordable at all: without
+chunking, an unbounded body would be one request of unbounded size instead of
+several ordinary ones. **One chunk failing skips the whole language**,
+exactly as [the table below](#failure-and-what-it-looks-like) already
+describes for a language no model could translate — a translation missing
+its middle paragraph is worse than no translation this run, and the next run
+tries again in full. The fingerprint is over the source text, never over
+where the chunk boundaries happened to fall, so the same body always
+fingerprints the same way regardless of `max-body-chars`.
 
 ### `judge-models` has two levels, and they mean opposite things
 
