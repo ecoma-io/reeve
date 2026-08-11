@@ -3,7 +3,8 @@
 A run went red, went green and did nothing, or did something you did not expect.
 
 > [!IMPORTANT]
-> Reeve is before `v1`. This page is the contract Stage 0 ships against.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## First: green and red mean specific things
 

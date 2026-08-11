@@ -5,7 +5,8 @@ thread carries both, in its own body, with the author's words kept byte-for-byte
 and marked as the version the project answers for.
 
 > [!IMPORTANT]
-> Reeve is before `v1`. This page is the contract Stage 0 ships against.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../../development/releasing.md#what-0x-and-10-mean-here).
 
 ## Why the body, and not a comment
 
@@ -45,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: ecoma-io/reeve/translate@v1
+      - uses: ecoma-io/reeve/translate@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -203,7 +204,7 @@ where everything worked, never an unset output:
 
 ```yaml
 - id: translate
-  uses: ecoma-io/reeve/translate@v1
+  uses: ecoma-io/reeve/translate@v0.1
   with:
     models: gpt-5-mini
 

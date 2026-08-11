@@ -1,7 +1,7 @@
 /**
  * The root action's entry point.
  *
- * It has one job and it is a refusal: `uses: ecoma-io/reeve@v1` is not how
+ * It has one job and it is a refusal: `uses: ecoma-io/reeve@v0.1` is not how
  * Reeve is used, and a run that cannot do a job must say so rather than exit
  * green having done nothing. The message it fails with is built in
  * `refusal.ts`, which is where the reasoning lives.

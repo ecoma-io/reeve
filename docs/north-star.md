@@ -28,12 +28,12 @@ deterministic scoring, a language layer that knows who wrote in what and who
 reads in what, a sanitiser that assumes the thread is hostile, an allowlist
 checked in code, and state kept as plain files in the user's own repository.
 
-| Duty        | Status  | Does                                                                            |
-| ----------- | ------- | ------------------------------------------------------------------------------- |
-| `triage`    | Stage 0 | Sorts the backlog against a taxonomy the project wrote.                         |
-| `translate` | Stage 0 | Puts every issue and pull request in the languages the project reads.           |
-| `duplicate` | Stage 4 | Finds the thread that already asked this — across the language it was asked in. |
-| `respond`   | Stage 4 | Gives a stranger a first, useful reply in the language they wrote to us in.     |
+| Duty        | Status                | Does                                                                            |
+| ----------- | --------------------- | ------------------------------------------------------------------------------- |
+| `triage`    | ships                 | Sorts the backlog against a taxonomy the project wrote.                         |
+| `translate` | ships                 | Puts every issue and pull request in the languages the project reads.           |
+| `duplicate` | [Stage 4](#6-roadmap) | Finds the thread that already asked this — across the language it was asked in. |
+| `respond`   | [Stage 4](#6-roadmap) | Gives a stranger a first, useful reply in the language they wrote to us in.     |
 
 ## 2. The end state
 
@@ -232,8 +232,8 @@ GitHub resolves actions in subdirectories, so consolidation does not cost
 callers their ergonomics:
 
 ```yaml
-- uses: ecoma-io/reeve/translate@v1
-- uses: ecoma-io/reeve/triage@v1
+- uses: ecoma-io/reeve/translate@v0.1
+- uses: ecoma-io/reeve/triage@v0.1
 ```
 
 One repository, one core, one version line — and no duty carrying inputs that
@@ -246,35 +246,62 @@ for users in [`usage/`](usage/README.md).
 ## 6. Roadmap
 
 Stages, not dates. Each one names the thing that has to be true before the next
-begins.
+begins, and each says what of it already stands — because a roadmap that only
+lists what is missing is one nobody can check.
 
-### Stage 0 — One core, two duties
+**The version number is read off this list.** `0.x` is every release before the
+list is finished: usable, dogfooded, and free to break its own input surface
+between minors. `1.0` is the release where every stage below is done and every
+number this document promises has been published. It is not a maturity feeling
+and not a marketing moment — it is a state this file can be checked against.
+[Releasing](development/releasing.md) has what that means for a pin.
 
-`translate` and `triage` running off one core rather than two codebases, at
-parity with what each does today.
+### Stage 0 — One core, two duties · **landed**
 
-**Done when:** both duties share provider, sanitiser, allowlist and state
-layers, and `v1` is published.
+`translate` and `triage` running off one core rather than two codebases.
 
-### Stage 1 — The language layer
+**Was done when:** both duties share the provider, the sanitiser, the allowlist
+and the state layer. They do: one client with model rotation, one nonce
+boundary, one warrant reader, one summary. Each ships from its own directory
+with its own `action.yml`, and this repository runs both on its own threads.
+
+### Stage 1 — The language layer, and the number that proves it
 
 Language stops being something `translate` does and becomes something the core
 knows: the language the author wrote in, the language the project works in, the
 languages its maintainers read. Every duty receives all three and is judged on
 whether its decision survives the author not writing in English.
 
-**Done when:** `triage` is measurably no worse on a non-English tracker than an
-English one, and the number is published.
+**Standing:** detection is the core's, it runs on the prose residue, it is free
+before it is paid for, and `unknown` is a real answer rather than a default. A
+verdict is told what it is reading, and the taxonomy is never translated.
 
-### Stage 2 — The warrant
+**Missing:** the three roles as core state — today a duty is handed one
+`languages` input and infers the rest. And the evaluation: there is no fixture
+set and no harness in this repository, so every accuracy claim on these pages is
+currently unbacked.
+
+**Done when:** `triage`'s worst-language number is published, and anyone can
+reproduce it from this repository.
+
+### Stage 2 — The warrant is the whole answer
 
 One `.github/reeve.yml` declaring which duties are enabled and what each may do.
 Today's per-duty inputs collapse into it; workflow YAML stops being where
 authority is expressed. Where the platform has its own allowlist vocabulary,
 Reeve emits to it rather than around it.
 
+**Standing:** the file is parsed, the taxonomy is an allowlist checked in code
+against the parsed file, capabilities are granted per duty, and the narrower of
+the file and the workflow wins. `triage` takes its authority from nowhere else.
+
+**Missing:** `translate` does not read the file at all. The languages belong in
+it and are not there. And a duty the file does not name still runs on its own
+defaults, where D2 says an unnamed duty does not run — the code and the doctrine
+disagree, and the doctrine is right.
+
 **Done when:** a maintainer can answer "what may this thing do to my repo?" by
-reading one file, and D2's check reads that file.
+reading one file, and no duty takes authority from workflow YAML.
 
 ### Stage 3 — Memory
 
@@ -283,7 +310,16 @@ from files committed to the repository. An empty store works on the first run
 and works better on the hundredth. Corrections are stored in the language they
 were made in and retrieved across languages.
 
-**Done when:** memory is a core service, not one duty's feature.
+**Standing:** retrieval is a core service rather than one duty's feature, ranks
+lexically for nothing, and an empty store is the cold start rather than an
+error.
+
+**Missing:** nothing writes to the store — recording a correction is a commit
+and needs `contents: write`. And the retrieval is lexical, so it matches within
+one language, which is the half that makes memory worth having here.
+
+**Done when:** a correction a maintainer made on an English thread changes the
+verdict on the Vietnamese one describing the same thing.
 
 ### Stage 4 — The duties only a multilingual project needs
 
@@ -291,6 +327,10 @@ were made in and retrieved across languages.
 an issue in Vietnamese is the one already answered in English is something no
 competitor can do, because they match within a language. `respond` closes the
 loop by answering the stranger in their own words.
+
+Blocked on open question 1 in [the language layer](development/language.md#open)
+— cross-language comparison needs a common representation, and which one is not
+yet decided.
 
 **Done when:** a project can point at a thread that was found, matched and
 answered without any human reading either language.
@@ -302,7 +342,16 @@ already exists under the same warrant, with the same idempotency — because the
 repositories that need this most are the ones with four thousand open issues,
 none of which will ever fire an `opened` event again.
 
+A ceiling per sweep is part of the stage rather than a later refinement: four
+thousand issues is four thousand requests unless something says otherwise, and
+discovering that in a bill is not a supported experience.
+
 **Done when:** a backfill over a large tracker is routine and affordable.
+
+### Then `1.0`
+
+Every stage above done, the numbers published, and the input surface frozen
+under semver's promise. Nothing else is waiting on it.
 
 ## 7. Non-goals
 
@@ -343,12 +392,24 @@ The warrant is Reeve's configuration; where an established allowlist exists,
 Reeve emits to it. Adding one more incompatible format would cost real work and
 win nothing.
 
-### 8.3 — Where does evaluation live? In the organisation's existing harnesses.
+### 8.3 — Where does evaluation live? In this repository.
 
-[`touchstone`][touchstone] and [`heuristic`][heuristic] exist to prove agent
-behaviour against paired baselines. D11 reuses them. Duplicating an evaluation
-harness inside this repository is the failure mode where measurement becomes
-self-graded.
+The fixtures and the harness are committed here, under the `eval` commit scope,
+and neither ships in the bundle a consumer downloads.
+
+This reverses an earlier answer, and the argument that moved it is worth
+keeping. Evaluation that lives in another repository is updated on a different
+schedule than the duty it measures, and the gap between the two is invisible: a
+prompt changes here, the fixture set does not, and the number keeps being
+published as though it still meant something. Reeve also has to stand on its
+own — a measurement that depends on a repository this one does not contain is a
+measurement a contributor cannot run and a reader cannot reproduce.
+
+The self-grading risk that argued for keeping it elsewhere is real and is
+answered differently: the fixtures are real threads from public repositories
+with their URLs kept, the expected answer is the one a maintainer actually gave,
+and the results are committed so a change to a prompt shows up as a diff rather
+than as a claim in a pull request description.
 
 ## 9. Open questions
 
@@ -369,5 +430,3 @@ guessing now would be worse than deciding later with evidence.
    duties that are currently independent.
 
 [gh-aw]: https://github.github.com/gh-aw/
-[touchstone]: https://github.com/ecoma-io/touchstone
-[heuristic]: https://github.com/ecoma-io/heuristic

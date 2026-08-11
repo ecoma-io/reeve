@@ -28,10 +28,11 @@
 </p>
 
 > [!IMPORTANT]
-> **Reeve is being assembled, not announced.** It is before `v1`: the doctrine
-> and the shape are settled — in [`docs/north-star.md`](docs/north-star.md) —
-> and the code is landing behind them, stage by stage. Nothing here is
-> production advice yet.
+> **Reeve is being assembled, not announced.** It is on a `0.x` line: two
+> duties ship and are dogfooded on this repository, and the rest of
+> [the roadmap](docs/north-star.md#6-roadmap) is still open. `1.0` is the
+> release where all of it is done — until then an input can still be renamed on
+> a minor, and the release notes will say so.
 
 ## Why this exists
 
@@ -66,7 +67,7 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
-      - uses: ecoma-io/reeve/triage@v1
+      - uses: ecoma-io/reeve/triage@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -74,7 +75,7 @@ jobs:
   translate:
     runs-on: ubuntu-latest
     steps:
-      - uses: ecoma-io/reeve/translate@v1
+      - uses: ecoma-io/reeve/translate@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -101,8 +102,8 @@ repository — and differ only in what they decide.
 
 | Duty        | Status  | What it does                                                                                                                                                                                                                                         |
 | ----------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `triage`    | Stage 0 | Sorts a backlog against the taxonomy you wrote. The easy majority is decided by code for nothing, and only what survives that reaches a model. It applies labels you defined and nothing else — as well in Vietnamese as in English, or it is a bug. |
-| `translate` | Stage 0 | Your contributors write in their language; your maintainers read in theirs. Every issue and pull request carries both, in its own body, with the author's words kept byte-for-byte and marked as the version that counts.                            |
+| `triage`    | ships   | Sorts a backlog against the taxonomy you wrote. The easy majority is decided by code for nothing, and only what survives that reaches a model. It applies labels you defined and nothing else — as well in Vietnamese as in English, or it is a bug. |
+| `translate` | ships   | Your contributors write in their language; your maintainers read in theirs. Every issue and pull request carries both, in its own body, with the author's words kept byte-for-byte and marked as the version that counts.                            |
 | `duplicate` | Stage 4 | Finds the thread that already reported this — **across the language it was reported in**. Nothing else in this category does that, because everything else matches within one language.                                                              |
 | `respond`   | Stage 4 | Gives a stranger a first, useful reply in the language they wrote to you in: what is missing, where it was already answered, which part of the docs applies.                                                                                         |
 

@@ -7,7 +7,7 @@ is.
 ## What "publish" means here
 
 There is no package registry in the picture. A consumer writes
-`uses: ecoma-io/reeve/triage@v1` and GitHub resolves that straight to a git ref
+`uses: ecoma-io/reeve/triage@v0.1` and GitHub resolves that straight to a git ref
 in this repository.
 
 So publishing is exactly two things:
@@ -36,6 +36,25 @@ remembering what `feat:` does to the second digit.
 
 `bump-minor-pre-major` sends breaking changes to the minor digit below `1.0.0`,
 which is what keeps Reeve out of a premature `1.0`.
+
+## What `0.x` and `1.0` mean here
+
+Not a feeling about maturity. The two numbers are read off
+[the roadmap](../north-star.md#6-roadmap), and that is the whole rule:
+
+- **`0.x` — every release while a stage is still open.** Usable, dogfooded on
+  this repository, and free to break its own input surface between minors. An
+  input can be renamed, collapsed into the warrant, or removed, and the release
+  notes say so. Anyone pinned to `v0.1` keeps the surface they installed against
+  and moves when they choose to.
+- **`1.0` — every stage done and every number published.** From there the input
+  surface is under semver's promise and a rename costs a major.
+
+This is why `1.0` is not something to reach for early. Stage 2 alone collapses
+per-duty inputs into the warrant, which is a breaking change to every workflow
+in the wild; doing that under a `1.x` promise would mean `2.0` almost
+immediately, and a major version that means "we changed our minds" teaches
+consumers that majors are noise.
 
 ## Floating tags, and why `v0` must not exist
 
@@ -129,15 +148,14 @@ GitHub's Marketplace reads the repository root
 Consumers get one version line and one core; the cost is that individual duties
 are not separately listed. That trade was made deliberately.
 
-## Before `v1`
+## While the roadmap is open
 
-Reeve is pre-release, and two things follow that a contributor will run into:
-
-**A release must not be cut before a duty's `dist/` exists.** A `v0.1.0` tag whose
-tree has no duty bundle would make `uses: ecoma-io/reeve/triage@v0.1.0` resolve to
-nothing — a broken pin that cannot be unpublished, only superseded. release-please
-will open a release pull request as soon as there are releasable commits on
-`main`; **leave it open** until Stage 0 has landed a real bundle.
+**A release must not be cut before every duty's `dist/` exists in the tree being
+tagged.** A tag whose tree has no bundle for a duty makes
+`uses: ecoma-io/reeve/triage@v0.1.0` resolve to nothing — a broken pin that
+cannot be unpublished, only superseded. This held the first release pull request
+open until both duties had landed; it is a standing check on the release rather
+than a phase that has passed, because it applies again to every duty added.
 
 **The archive step names every duty by hand.** The `cp -r translate triage …`
 line in the release workflow is what puts a duty's `action.yml` and its bundle

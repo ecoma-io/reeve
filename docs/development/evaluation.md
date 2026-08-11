@@ -85,21 +85,22 @@ that plainly is more useful than a BLEU score nobody can act on.
 
 ## Where it lives
 
-Two words, and the distinction is worth keeping:
+In this repository, under `eval/`, in two halves worth keeping apart:
 
-- **`touchstone`** — the fixture set. Real threads, in several languages, with the
-  answer a maintainer would have given. Committed.
-- **`heuristic`** — the harness that runs a duty over the fixtures and produces
-  the numbers.
+- **The fixtures** — `eval/fixtures/<duty>/`. Real threads, in several
+  languages, each with the answer a maintainer would have given. Committed.
+- **The harness** — `eval/`, run as `pnpm eval <duty>`. It runs a duty over the
+  fixtures and produces the numbers.
 
-Both are in this repository, under the `eval` commit scope. Neither ships in the
-bundle a consumer runs: they are development tooling, and putting them in `dist`
-would make every consumer download the fixture set.
+Both are under the `eval` commit scope. Neither ships in the bundle a consumer
+runs: they are development tooling, and putting them in `dist` would make every
+consumer download the fixture set.
 
 This is [settled](../north-star.md#8-settled-questions) — it was previously an
-open question whether evaluation belonged in a separate repository. It does not.
-A fixture set that lives elsewhere gets updated on a different schedule than the
-duty it measures, and then it measures the wrong thing.
+open question whether evaluation belonged in a repository of its own. It does
+not. **Reeve stands on its own**, and a fixture set that lives elsewhere gets
+updated on a different schedule than the duty it measures, at which point it
+measures the wrong thing.
 
 ## Building a fixture set
 
@@ -126,18 +127,18 @@ find a regression, and small enough that a contributor will actually run it.
 
 ## Running it
 
-`heuristic` needs a provider, which means it needs a key or a keyless endpoint,
+`pnpm eval` needs a provider, which means it needs a key or a keyless endpoint,
 which means **it does not run in CI on a pull request.** A fork's PR has no
 secrets, and a required check that cannot pass on a fork is a check that closes
 the project to contributors.
 
 So:
 
-| When                          | What runs                                                        |
-| ----------------------------- | ---------------------------------------------------------------- |
-| Every pull request            | Unit and integration tests, against fakes. No provider, no cost. |
-| Deliberately, by a maintainer | `heuristic` against a real provider, with the numbers recorded.  |
-| Before a duty's release       | `heuristic`, and the numbers go in the release notes.            |
+| When                          | What runs                                                              |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| Every pull request            | Unit and integration tests, against fakes. No provider, no cost.       |
+| Deliberately, by a maintainer | `pnpm eval <duty>` against a real provider, with the numbers recorded. |
+| Before a duty's release       | `pnpm eval <duty>`, and the numbers go in the release notes.           |
 
 The numbers are committed alongside the fixture set, so a change to a prompt shows
 up as a diff in the results rather than as a claim in a pull request description.

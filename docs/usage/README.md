@@ -4,10 +4,13 @@ For someone installing Reeve on a repository they maintain. If you are changing
 Reeve itself, [`../development/`](../development/) is the other half.
 
 > [!IMPORTANT]
-> **Reeve is before `v1`.** These pages are the contract Stage 0 ships against,
-> written before the code that meets them has landed in this repository. They
-> are normative: a duty that behaves differently from what is written here is a
-> bug in the duty, not a stale page. Nothing here is production advice yet.
+> **Reeve is on a `0.x` line.** These pages are normative: a duty that behaves
+> differently from what is written here is a bug in the duty, not a stale page.
+> But the surface they describe is not frozen — an input can be renamed or
+> collapsed into the warrant on any minor, and the release notes will say so.
+> That settles at `1.0`, which arrives when
+> [the roadmap](../north-star.md#6-roadmap) is finished — see
+> [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## Start here
 
@@ -38,8 +41,8 @@ Read this once and the individual pages get shorter.
 subdirectory, so a workflow names the duty it wants:
 
 ```yaml
-- uses: ecoma-io/reeve/triage@v1
-- uses: ecoma-io/reeve/translate@v1
+- uses: ecoma-io/reeve/triage@v0.1
+- uses: ecoma-io/reeve/translate@v0.1
 ```
 
 One version line covers all of them. They share a core — the provider client and
