@@ -33,6 +33,7 @@ function spend(over: Partial<Spend> = {}): Spend {
   return {
     purpose: "duplicate",
     model: "big",
+    endpoint: null,
     requests: 1,
     failed: 0,
     prompt: 900,

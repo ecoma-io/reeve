@@ -62,13 +62,23 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import { bounded, fraction, parseSince, readShared, whole } from "../../core/inputs.js";
+import {
+  bounded,
+  fraction,
+  parseSince,
+  readShared,
+  resolveEndpoints,
+  whole,
+  type ApiKeySpec,
+  type EndpointSpec,
+} from "../../core/inputs.js";
 import type { Language } from "../../core/languages.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createProvider,
+  createRoutedProvider,
   createWeather,
+  settleAuth,
   shown,
   starved,
   type Names,
@@ -147,7 +157,12 @@ interface Settings {
   readonly apiKey: string;
   readonly sweep: boolean;
   readonly since: Date | null;
-  readonly limit: number;
+  /** `null` is no ceiling at all — see `bounded`'s doc comment for the sentinel rule. */
+  readonly limit: number | null;
+  readonly endpoints: readonly EndpointSpec[];
+  readonly apiKeys: readonly ApiKeySpec[];
+  readonly requestTimeoutMs: number;
+  readonly temperature: number | undefined;
 }
 
 /**
@@ -300,7 +315,7 @@ async function runSweep(
   const languageCache = new Map<number, Language | null>();
 
   for (const thread of candidates) {
-    if (acc.results.length >= settings.limit) break;
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
     if (starved(settings.models, weather)) {
       acc.starvedRun = true;
       break;
@@ -359,7 +374,11 @@ function describeOutcome(outcome: Outcome, done: Done): string {
 
 export async function run(): Promise<void> {
   const meter = createMeter();
-  const weather = createWeather();
+  // Reassigned once `readSettings` has answered, inside the `try` below —
+  // `endpoints` is not known until then. Left at its empty-alias default if
+  // reading the settings themselves is what fails, which is fine: nothing
+  // below that point ever runs.
+  let weather = createWeather();
   let settings: Settings | null = null;
   let single: {
     readonly number: number;
@@ -371,8 +390,9 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)));
     const api = getOctokit(base.token);
-    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
+    const provider = createRoutedProvider(resolveEndpoints(base));
 
     const stages: Stages = {
       detect: metered(provider, meter, "detect"),
@@ -423,6 +443,12 @@ export async function run(): Promise<void> {
       const acted = await act(api, at, outcome, settings.dryRun);
       single = { number, outcome, done: acted.done, posted: acted.posted };
     }
+
+    // Deferred half of the multi-endpoint amendment to D12: a single-endpoint
+    // run never reaches this with anything to say — `reckon` already threw
+    // the moment its one endpoint answered unauthenticated. Only fires once
+    // every endpoint configured turned out to be misconfigured the same way.
+    settleAuth(weather);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
@@ -544,7 +570,7 @@ async function decide(
     // The title when there is no body — a one-line issue is a real issue.
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather),
+    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
   );
   const language = detection.language?.label ?? null;
   core.info(
@@ -585,6 +611,7 @@ async function decide(
       body,
       to: pivotLanguage,
       weather,
+      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
     });
     for (const failure of pivot.failures) {
       core.warning(`match: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
@@ -616,6 +643,7 @@ async function decide(
     language,
     candidates: ranked.map((entry) => entry.candidate),
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of judged.failures) {
     core.warning(`duplicate: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
