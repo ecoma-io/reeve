@@ -9,6 +9,7 @@ import {
   implicitWarrant,
   parseWarrant,
   readWarrant,
+  resolveLanguages,
   type Warrant,
 } from "./warrant.js";
 
@@ -284,6 +285,82 @@ describe("capabilities", () => {
     const source = "version: 1\ncapabilities: {}\n";
     expect(warrant(source).unnamed("triage")).toBe(true);
     expect(warrant(source).granted("triage", ["label"])).toEqual([]);
+  });
+});
+
+describe("languages", () => {
+  it("is null when the key was never written", () => {
+    // `null` is not the same fact as an empty list — this is what lets
+    // `resolveLanguages` tell "the file is silent" from "the file already
+    // answered".
+    expect(warrant(MINIMAL).languages).toBeNull();
+  });
+
+  it("reads a bare code the same way the input's grammar does", () => {
+    const source = `${MINIMAL}languages:\n  - en\n  - vi\n`;
+    expect(warrant(source).languages).toEqual([
+      { code: "en", label: "English", scripts: ["Latn"] },
+      { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] },
+    ]);
+  });
+
+  it("reads a spelled-out `code:Label:Script` entry the same way the input does", () => {
+    const source = `${MINIMAL}languages:\n  - "zh-Hans:简体中文:Han"\n`;
+    expect(warrant(source).languages).toEqual([
+      { code: "zh-Hans", label: "简体中文", scripts: ["Han"] },
+    ]);
+  });
+
+  it("refuses a `languages` key that is not a list", () => {
+    const source = `${MINIMAL}languages: en\n`;
+    expect(() => warrant(source)).toThrow(/`languages` as the text `en`, expected a list/);
+  });
+
+  it("refuses an entry that is not text", () => {
+    const source = `${MINIMAL}languages:\n  - 3\n`;
+    expect(() => warrant(source)).toThrow(/entry 1 is `3`, expected text/);
+  });
+
+  it("refuses an empty list, the same way an empty input is refused", () => {
+    // A maintainer who wrote the key at all meant something by it — an empty
+    // list is not read as "leave this to the input".
+    const source = `${MINIMAL}languages: []\n`;
+    expect(() => warrant(source)).toThrow(/no entries/);
+  });
+
+  it("refuses a bare code the runtime knows no language by, the same as the input", () => {
+    const source = `${MINIMAL}languages:\n  - qqq\n`;
+    expect(() => warrant(source)).toThrow(/`qqq` is not a language code/);
+  });
+});
+
+describe("resolveLanguages", () => {
+  it("lets the warrant's own key win outright, with a notice naming both sources", () => {
+    const source = `${MINIMAL}languages:\n  - en\n`;
+    const resolution = resolveLanguages(warrant(source), "vi, zh");
+
+    expect(resolution.languages).toEqual([{ code: "en", label: "English", scripts: ["Latn"] }]);
+    expect(resolution.notice).toContain(`\`${PATH}\`'s \`languages:\` key`);
+    expect(resolution.notice).toContain("not the `languages` input");
+  });
+
+  it("falls back to the input when the warrant never mentions the key", () => {
+    const resolution = resolveLanguages(warrant(MINIMAL), "en, vi");
+
+    expect(resolution.languages).toEqual([
+      { code: "en", label: "English", scripts: ["Latn"] },
+      { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] },
+    ]);
+    expect(resolution.notice).toBeNull();
+  });
+
+  it("refuses a run where neither source names a language, naming both", () => {
+    expect(() => resolveLanguages(warrant(MINIMAL), "  ")).toThrow(
+      new RegExp(
+        `Write \`languages:\` in the warrant \\(\`${PATH.replace(/\./g, "\\.")}\`\\).*` +
+          "or set the `languages` input",
+      ),
+    );
   });
 });
 

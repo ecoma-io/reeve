@@ -46,6 +46,10 @@ import { readFile } from "node:fs/promises";
 
 import { parse, YAMLParseError } from "yaml";
 
+import type { Location, TrackerApi } from "./forge.js";
+import { listRepositoryLabels } from "./forge.js";
+import { parseLanguages, type Language } from "./languages.js";
+
 /** What a duty may do to a thread. The closed set; a name outside it is refused. */
 export type Capability = "label" | "edit-body" | "comment" | "close" | "assign";
 
@@ -94,6 +98,18 @@ export interface Warrant {
   readonly path: string;
   /** The taxonomy, in the order it was written. That order reaches the prompt. */
   readonly labels: readonly Label[];
+  /**
+   * The `languages:` key, or `null` when the file never answered the question
+   * at all.
+   *
+   * `null` is deliberately not the same thing as an empty list — an empty
+   * `languages:` is refused by `parseLanguages` the same way an empty
+   * `languages` input already is, because a maintainer who wrote the key at
+   * all meant something by it. `null` is what lets `resolveLanguages` below
+   * tell "this file is silent" from "this file already answered", before it
+   * has any reason to look at the `languages` input.
+   */
+  readonly languages: readonly Language[] | null;
   /**
    * What this duty was granted.
    *
@@ -196,6 +212,7 @@ export function parseWarrant(path: string, source: string): Warrant {
   }
 
   const labels = readLabels(path, document.labels);
+  const languages = readLanguages(path, document.languages);
   const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
@@ -217,6 +234,7 @@ export function parseWarrant(path: string, source: string): Warrant {
   return {
     path,
     labels,
+    languages,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
@@ -285,6 +303,11 @@ export interface Implicit {
  * every duty already reaches for when a warrant is silent about it, and here
  * is the whole reason this function does not need to know a single duty's
  * name to build the narrowest authority for all of them.
+ *
+ * `languages` is always `null` here, for the same reason `not`, `examples`
+ * and `owner` are never recovered on a label: a repository's labels cannot
+ * honestly be read as a reader-language list, and an implicit warrant only
+ * ever states what it can derive without guessing.
  */
 export function implicitWarrant(
   path: string,
@@ -315,12 +338,95 @@ export function implicitWarrant(
     warrant: {
       path,
       labels,
+      languages: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name),
     },
     excluded,
   };
+}
+
+/**
+ * What `readWarrant` returned, turned into the warrant a run actually acts
+ * under.
+ *
+ * Shared by every duty rather than reimplemented per `main.ts`, because the
+ * question it answers — "was there a file, or is this the narrowest authority
+ * this build assumes in its place" — is the same question for all of them,
+ * and the answer has to stay one function so it cannot drift between duties
+ * that read it differently.
+ */
+export interface Authority {
+  readonly warrant: Warrant;
+  /** True when there was no warrant file, and this ran at the narrowest authority instead. */
+  readonly implicit: boolean;
+  /** Repository labels the implicit warrant left out for carrying no description. */
+  readonly excludedLabels: readonly string[];
+}
+
+/**
+ * The real warrant when there was one to read, or the implicit one built from
+ * this repository's own labels when there was not.
+ *
+ * The single point where "absent at the default path" turns from a fact
+ * about a file into a fact about what a duty may do — everything past this
+ * function treats `Authority.warrant` as *the* warrant, written or not.
+ */
+export async function resolveAuthority(
+  read: Warrant | null,
+  path: string,
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+): Promise<Authority> {
+  if (read !== null) return { warrant: read, implicit: false, excludedLabels: [] };
+
+  const repositoryLabels = await listRepositoryLabels(api, at);
+  const built = implicitWarrant(path, repositoryLabels);
+  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
+
+/** What resolving `languages` against the warrant and the input decided. */
+export interface LanguagesResolution {
+  readonly languages: readonly Language[];
+  /**
+   * Set only when the warrant's key won, so a run can say once why the
+   * `languages` input was never consulted — a maintainer staring at an input
+   * that looks configured and a run that plainly ignored it deserves the one
+   * sentence that explains it, not a warning storm.
+   */
+  readonly notice: string | null;
+}
+
+/**
+ * Which of the two sources answers "what to translate into" or "what a
+ * contributor writes in" this run.
+ *
+ * The warrant wins outright when it has an opinion: once `languages:` is
+ * written there, the `languages` input is not a fallback to blend with it, it
+ * is not consulted at all — the file is the whole answer, the same way a
+ * `capabilities:` block is. Only when the file is silent about it — no key,
+ * or no warrant at all, which `implicitWarrant` always leaves silent — does
+ * the input get asked, exactly as it always has.
+ */
+export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesResolution {
+  if (warrant.languages !== null) {
+    return {
+      languages: warrant.languages,
+      notice:
+        `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` ` +
+        "input — the file is the whole answer once that key is written.",
+    };
+  }
+
+  if (rawInput.trim().length === 0) {
+    throw new Error(
+      "languages: no language is configured. Write `languages:` in the warrant " +
+        `(\`${warrant.path}\`), or set the \`languages\` input.`,
+    );
+  }
+
+  return { languages: parseLanguages(rawInput), notice: null };
 }
 
 /** The document, or a parse error that says where in the file it is. */
@@ -400,6 +506,35 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
   }
 
   return labels;
+}
+
+/**
+ * The `languages:` key: the reader languages, as a YAML list.
+ *
+ * Absent entirely, this is `null` — the file never turned its mind to the
+ * question, and `resolveLanguages` reads that as leaving the `languages`
+ * input to answer it instead, exactly as it does today. Present, every entry
+ * is fed to `parseLanguages` unchanged: this is the identical bare-code and
+ * `code:Label:Script` grammar the input already accepts, joined into the same
+ * newline-delimited shape that grammar was written for, rather than a second
+ * parser for a second surface that happens to say the same thing.
+ */
+function readLanguages(path: string, raw: unknown): readonly Language[] | null {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
+  }
+
+  const entries = raw.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`,
+      );
+    }
+    return entry;
+  });
+
+  return parseLanguages(entries.join("\n"));
 }
 
 /** Whether the block existed at all, and what it named if it did. */
