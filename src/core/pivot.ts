@@ -22,7 +22,13 @@
  */
 import { enclose } from "./enclose.js";
 import type { Language } from "./languages.js";
-import { rotateModels, type Message, type Provider, type Weather } from "./provider.js";
+import {
+  rotateModels,
+  type Completion,
+  type Message,
+  type Provider,
+  type Weather,
+} from "./provider.js";
 import { sanitize } from "./sanitize.js";
 
 /** A title and body, translated. */
@@ -53,9 +59,10 @@ export interface PivotRequest {
 export async function translateToPivot(request: PivotRequest): Promise<PivotDraft | null> {
   const { provider, models, title, body, to, weather } = request;
 
+  const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, prompt(title, body, to)),
+    (model) => answer(provider, model, messages),
     weather,
   );
   if (!rotation.success) return null;
@@ -64,6 +71,32 @@ export async function translateToPivot(request: PivotRequest): Promise<PivotDraf
   if (draft === null) return null;
 
   return { title: sanitize(draft.title), body: sanitize(draft.body) };
+}
+
+/**
+ * One completion, with a truncated rendering reported as the failure it is —
+ * the same rule `draft.ts` follows for the same reason. `finish_reason:
+ * length` means the model ran out of room before the JSON closed, which
+ * reads as unparseable rather than merely short, and rotation's next model
+ * may have more room to give it. Left unchecked, that failure would look
+ * identical to an ordinary unreadable answer — this is what tells the two
+ * apart in the one place that can still do something about it.
+ */
+async function answer(
+  provider: Provider,
+  model: string,
+  messages: readonly Message[],
+): Promise<Completion> {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the rendering was cut off before it finished",
+    };
+  }
+  return completion;
 }
 
 /**

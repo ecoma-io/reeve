@@ -621,6 +621,29 @@ describe("readContentsFile", () => {
 
     await expect(readContentsFile(api, AT, ".reeve/corrections")).resolves.toBeNull();
   });
+
+  it("throws, rather than reading it as a cold start, for a shard too large for the API to inline", async () => {
+    // GitHub's own shape for a file over 1 MB: present, with a real `sha`,
+    // but `content: ""` and `encoding: "none"` instead of the base64 body —
+    // reading that as `null` would look exactly like the shard never
+    // existed, and `writeCorrection` would append a duplicate beside history
+    // it could not see.
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: {
+          content: "",
+          encoding: "none",
+          sha: "big-sha",
+          path: ".reeve/corrections/2026-08.ndjson",
+        },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(readContentsFile(api, AT, ".reeve/corrections/2026-08.ndjson")).rejects.toThrow(
+      /\.reeve\/corrections\/2026-08\.ndjson.*1 MB/s,
+    );
+  });
 });
 
 describe("writeContentsFile", () => {

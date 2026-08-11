@@ -47,8 +47,9 @@ export interface Run {
   readonly done: Done;
   /**
    * How large the store was, how much of it reached the prompt, and how many
-   * of those arrived through the pivot bridge rather than the thread's own
-   * language.
+   * of those were recorded in a language other than the thread's own. That
+   * last count reads a correction's stored `language`, not which query
+   * reached it — it is not a claim that the pivot bridge was what found it.
    */
   readonly memory: {
     readonly size: number;
@@ -128,7 +129,7 @@ export function summarizeRecord(run: RecordRun): string {
     `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was committed" : ""}.`,
     "",
     run.recorded
-      ? `Recorded to \`${run.corrections}\` as ` +
+      ? `${run.dryRun ? "Would have recorded" : "Recorded"} to \`${run.corrections}\` as ` +
         (run.decided.length > 0
           ? run.decided.map((name) => `\`${name}\``).join(", ")
           : "no labels") +
@@ -137,7 +138,12 @@ export function summarizeRecord(run: RecordRun): string {
   ];
 
   if (run.pivot) {
-    parts.push("", "A pivot-language rendering was translated and stored alongside it.");
+    parts.push(
+      "",
+      run.dryRun
+        ? "A pivot-language rendering was translated and would have been stored alongside it."
+        : "A pivot-language rendering was translated and stored alongside it.",
+    );
   } else if (run.pivotNote !== null) {
     parts.push("", run.pivotNote);
   }
@@ -213,7 +219,7 @@ function verdict(run: Run): string {
       `Author language: ${language}. ` +
       `Memory: ${String(run.memory.recalled)} of ${String(run.memory.size)} correction${run.memory.size === 1 ? "" : "s"} reached the prompt` +
       (run.memory.pivotRecalled > 0
-        ? `, ${String(run.memory.pivotRecalled)} of ${run.memory.pivotRecalled === 1 ? "it" : "them"} found across languages.`
+        ? `, ${String(run.memory.pivotRecalled)} of them recorded in a language other than the thread's.`
         : "."),
   );
 

@@ -52,6 +52,8 @@
  * bundle against a stub API, which is what a runner does — see
  * `main.integration.test.ts`.
  */
+import { isAbsolute, relative } from "node:path";
+
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
@@ -232,6 +234,12 @@ interface Outcome {
   readonly withheld: readonly Capability[];
   /** Why there is no verdict, when there is none. */
   readonly note: string | null;
+  /**
+   * How large the store was, how much of it reached the prompt, and how many
+   * of those were recorded in a language other than the thread's own. That
+   * last count reads a correction's stored `language`, not which query
+   * reached it — it is not a claim that the pivot bridge was what found it.
+   */
   readonly memory: {
     readonly size: number;
     readonly recalled: number;
@@ -469,6 +477,16 @@ export async function run(): Promise<void> {
           );
         }
 
+        // The other silent branch of the same gate: `record` is fully
+        // granted — the file names it, `apply` names it — and this event
+        // still does not qualify (a bot's label change, a re-triage, an
+        // event other than `labeled`/`unlabeled`). A maintainer who set this
+        // up and sees a triage instead of a recording deserves the reason,
+        // and every other run of this duty has no use for it.
+        if (!trigger.eligible && permitted.includes("record")) {
+          core.info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
+        }
+
         if (trigger.eligible && permitted.includes("record")) {
           recordOutcome = await recordCorrection(
             api,
@@ -657,7 +675,10 @@ async function decide(
       weather,
     });
     if (draft !== null) {
-      queries.push({ text: `${draft.title}\n${draft.body}`, against: "pivot" });
+      queries.push({
+        text: `${draft.title}\n${draft.body}`,
+        against: { pivot: pivotLanguage.code },
+      });
     } else {
       core.info(
         "Cross-language recall could not translate this thread into the pivot language this run " +
@@ -677,7 +698,9 @@ async function decide(
   core.info(
     `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) ` +
       `from \`${settings.corrections}\`` +
-      (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them found across languages.` : "."),
+      (pivotRecalled > 0
+        ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.`
+        : "."),
   );
 
   const triaged = await triage({
@@ -763,7 +786,12 @@ async function decide(
  */
 interface RecordTrigger {
   readonly eligible: boolean;
-  /** Said in the log on the branches that matter; empty on the one that fires. */
+  /**
+   * Why this event does not trigger `record`; empty on the one that fires.
+   * Logged only when it is the reason `record` was granted but did not fire
+   * this run — every other path (an ordinary triage run, a sweep, a `push`)
+   * has no use for it and stays silent.
+   */
   readonly reason: string;
 }
 
@@ -918,6 +946,14 @@ async function recordCorrection(
 }
 
 /**
+ * How many times a record write may retry after losing a race on a shard's
+ * `sha` — the read-modify-write sequence run again from the top, not just the
+ * final write, because a concurrent commit can have changed which shard holds
+ * this thread as easily as it changed one shard's contents.
+ */
+const WRITE_ATTEMPTS = 3;
+
+/**
  * Commits `correction` to the store at `path` — replacing the line for this
  * thread wherever it already lives, appending a fresh one when it does not.
  *
@@ -927,8 +963,38 @@ async function recordCorrection(
  * because there is no index to consult instead. `contents: write` is what
  * this needs on the token, and its absence is left to fail the way any other
  * authentication problem does: loud, and uncaught.
+ *
+ * Two record runs racing the same shard is the one failure this retries: the
+ * Contents API answers a stale `sha` with a conflict, and re-reading before
+ * trying again is the whole fix, because the second run's write was computed
+ * against a version of the file that no longer exists. Every other failure —
+ * a missing scope, a network error, anything that is not that specific
+ * conflict — propagates on the first attempt, the same as it always did.
  */
 async function writeCorrection(
+  contentsApi: ContentsApi,
+  at: Location,
+  path: string,
+  correction: Correction,
+): Promise<void> {
+  const relativePath = repoRelativePath(path);
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await attemptWrite(contentsApi, at, relativePath, correction);
+      return;
+    } catch (error) {
+      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error)) throw error;
+      core.info(
+        `Recording #${String(correction.thread)} lost a race on the store — another commit ` +
+          `landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`,
+      );
+    }
+  }
+}
+
+/** One read-modify-write pass, the unit `writeCorrection` retries whole on a conflict. */
+async function attemptWrite(
   contentsApi: ContentsApi,
   at: Location,
   path: string,
@@ -979,6 +1045,48 @@ async function writeCorrection(
     text,
     commitMessage(correction),
     existing?.sha ?? null,
+  );
+}
+
+/**
+ * Whether `error` is the Contents API's way of saying this write's `sha` is
+ * already stale — a 409 always means that, and a 422 means it only when the
+ * message names the `sha` field, the same distinction GitHub itself draws
+ * between "this ref changed under you" and "this request is simply malformed".
+ */
+function isShaConflict(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 409) return true;
+  if (status !== 422) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("sha");
+}
+
+/**
+ * `path`, guaranteed repo-relative before it reaches the Contents API.
+ *
+ * Recall reads the store straight off disk, where an absolute path resolves
+ * the same as a relative one — but record sends this path to the Contents
+ * API, which only understands one relative to the repository root. A
+ * workflow built with `${{ github.workspace }}` produces exactly this
+ * absolute-but-still-inside-the-checkout shape, so that one case is stripped
+ * back to relative rather than refused; any other absolute path names
+ * somewhere the API cannot express at all, and is rejected rather than
+ * half-handled.
+ */
+function repoRelativePath(path: string): string {
+  if (!isAbsolute(path)) return path;
+
+  const workspace = process.env.GITHUB_WORKSPACE;
+  if (workspace !== undefined && workspace.length > 0) {
+    const stripped = relative(workspace, path);
+    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
+  }
+
+  throw new Error(
+    `\`corrections\` (\`${path}\`) is an absolute path record cannot use — the Contents API only ` +
+      "understands a path relative to the repository root. Use a repo-relative path, or one " +
+      "under `GITHUB_WORKSPACE` if the workflow built it from `${{ github.workspace }}`.",
   );
 }
 

@@ -27071,6 +27071,9 @@ var require_dist2 = __commonJS({
   }
 });
 
+// src/duties/triage/main.ts
+import { isAbsolute, relative } from "node:path";
+
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 import * as os from "os";
 
@@ -32787,9 +32790,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer, code) {
+function spells(answer2, code) {
   const escaped = code.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer2);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -32921,10 +32924,13 @@ async function readContentsFile(api, at, path) {
   }
   if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
   const file = data;
-  if (typeof file.content !== "string" || file.encoding !== "base64" || typeof file.sha !== "string") {
-    return null;
+  if (typeof file.sha !== "string") return null;
+  if (typeof file.content === "string" && file.encoding === "base64") {
+    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
   }
-  return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
+  throw new Error(
+    `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
+  );
 }
 async function writeContentsFile(api, at, path, text2, message, sha) {
   await api.rest.repos.createOrUpdateFileContents({
@@ -33398,10 +33404,10 @@ import { join } from "node:path";
 var EXCERPT = 500;
 function createMemory(corrections, similarity = lexical) {
   const ownDocuments = corrections.map(searchable);
-  const pivotDocuments = corrections.map(searchablePivot);
   function ranked(text2, against) {
     if (corrections.length === 0) return /* @__PURE__ */ new Map();
-    const scores = similarity(text2, against === "own" ? ownDocuments : pivotDocuments);
+    const documents = against === "own" ? ownDocuments : corrections.map((correction) => searchablePivot(correction, against.pivot));
+    const scores = similarity(text2, documents);
     const scored = /* @__PURE__ */ new Map();
     scores.forEach((score, index) => {
       if (score > 0) scored.set(index, score);
@@ -33438,8 +33444,10 @@ function compareAt(left, right) {
 function searchable(correction) {
   return [correction.title, correction.excerpt, correction.note ?? ""].join("\n");
 }
-function searchablePivot(correction) {
-  if (correction.pivot === null) return searchable(correction);
+function searchablePivot(correction, target) {
+  if (correction.pivot?.language !== target) {
+    return searchable(correction);
+  }
   return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
 }
 var K1 = 1.2;
@@ -33558,6 +33566,7 @@ function readPivot(raw) {
   const record = raw;
   if (typeof record.language !== "string" || record.language.length === 0) return null;
   if (typeof record.title !== "string" || typeof record.excerpt !== "string") return null;
+  if (record.title.trim().length === 0) return null;
   return { language: record.language, title: record.title, excerpt: record.excerpt };
 }
 function formatCorrection(correction) {
@@ -33683,15 +33692,28 @@ function defangReferences(prose) {
 // src/core/pivot.ts
 async function translateToPivot(request2) {
   const { provider, models, title, body, to, weather } = request2;
+  const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, prompt(title, body, to)),
+    (model) => answer(provider, model, messages),
     weather
   );
   if (!rotation.success) return null;
   const draft = readAnswer(unwrapped(rotation.success.content));
   if (draft === null) return null;
   return { title: sanitize(draft.title), body: sanitize(draft.body) };
+}
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the rendering was cut off before it finished"
+    };
+  }
+  return completion;
 }
 function prompt(title, body, to) {
   const enclosed = enclose("untrusted-thread", `${title}
@@ -33713,8 +33735,8 @@ ${body}`);
     { role: "user", content: enclosed.block }
   ];
 }
-function unwrapped(answer) {
-  const trimmed = answer.trim();
+function unwrapped(answer2) {
+  const trimmed = answer2.trim();
   const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence?.[1] ?? trimmed;
 }
@@ -33863,8 +33885,8 @@ async function sift(request2) {
   if (!rotation.success) return { dropped: null, failures: rotation.failures };
   return { dropped: read(rotation.success.content), failures: rotation.failures };
 }
-function read(answer) {
-  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer);
+function read(answer2) {
+  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
   if (said("spam") === said("off-topic")) return null;
   if (said("spam")) {
     return { reason: "spam", note: "the cheap pass read it as spam" };
@@ -33926,10 +33948,13 @@ function summarizeRecord(run2) {
     "",
     `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was committed" : ""}.`,
     "",
-    run2.recorded ? `Recorded to \`${run2.corrections}\` as ` + (run2.decided.length > 0 ? run2.decided.map((name) => `\`${name}\``).join(", ") : "no labels") + `${run2.language !== null ? `, in ${run2.language}` : ", in an unidentified language"}.` : "Nothing was recorded."
+    run2.recorded ? `${run2.dryRun ? "Would have recorded" : "Recorded"} to \`${run2.corrections}\` as ` + (run2.decided.length > 0 ? run2.decided.map((name) => `\`${name}\``).join(", ") : "no labels") + `${run2.language !== null ? `, in ${run2.language}` : ", in an unidentified language"}.` : "Nothing was recorded."
   ];
   if (run2.pivot) {
-    parts.push("", "A pivot-language rendering was translated and stored alongside it.");
+    parts.push(
+      "",
+      run2.dryRun ? "A pivot-language rendering was translated and would have been stored alongside it." : "A pivot-language rendering was translated and stored alongside it."
+    );
   } else if (run2.pivotNote !== null) {
     parts.push("", run2.pivotNote);
   }
@@ -33980,7 +34005,7 @@ function verdict(run2) {
   lines.push(
     run2.applied.length === 0 ? "No label was applied." : `Applied ${run2.applied.map((name) => `\`${name}\``).join(", ")}.`,
     "",
-    `Confidence ${run2.confidence.toFixed(2)} against a floor of ${run2.floor.toFixed(2)}. Author language: ${language}. Memory: ${String(run2.memory.recalled)} of ${String(run2.memory.size)} correction${run2.memory.size === 1 ? "" : "s"} reached the prompt` + (run2.memory.pivotRecalled > 0 ? `, ${String(run2.memory.pivotRecalled)} of ${run2.memory.pivotRecalled === 1 ? "it" : "them"} found across languages.` : ".")
+    `Confidence ${run2.confidence.toFixed(2)} against a floor of ${run2.floor.toFixed(2)}. Author language: ${language}. Memory: ${String(run2.memory.recalled)} of ${String(run2.memory.size)} correction${run2.memory.size === 1 ? "" : "s"} reached the prompt` + (run2.memory.pivotRecalled > 0 ? `, ${String(run2.memory.pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
   );
   if (run2.confidence < run2.floor && run2.proposed.length > 0) {
     lines.push(
@@ -34084,10 +34109,10 @@ async function triage(request2) {
     unreadable: verdict2 === null ? rotation.success.content : null
   };
 }
-function parseVerdict(answer) {
+function parseVerdict(answer2) {
   let parsed;
   try {
-    parsed = JSON.parse(unwrapped2(answer));
+    parsed = JSON.parse(unwrapped2(answer2));
   } catch {
     return null;
   }
@@ -34114,10 +34139,10 @@ function parseVerdict(answer) {
     rationale: rationale.trim()
   };
 }
-function unwrapped2(answer) {
-  const parts = segments(answer.trim());
+function unwrapped2(answer2) {
+  const parts = segments(answer2.trim());
   const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
   const lines = only.text.split("\n");
   return lines.slice(1, -1).join("\n");
 }
@@ -34316,6 +34341,9 @@ async function run() {
             `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
           );
         }
+        if (!trigger.eligible && permitted.includes("record")) {
+          info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
+        }
         if (trigger.eligible && permitted.includes("record")) {
           recordOutcome = await recordCorrection(
             api,
@@ -34451,8 +34479,11 @@ ${body}`, against: "own" }];
       weather
     });
     if (draft !== null) {
-      queries.push({ text: `${draft.title}
-${draft.body}`, against: "pivot" });
+      queries.push({
+        text: `${draft.title}
+${draft.body}`,
+        against: { pivot: pivotLanguage.code }
+      });
     } else {
       info(
         "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
@@ -34464,7 +34495,7 @@ ${draft.body}`, against: "pivot" });
     (correction) => correction.language !== null && correction.language !== threadLanguage.code
   ).length;
   info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them found across languages.` : ".")
+    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
   );
   const triaged = await triage({
     provider: stages.triage,
@@ -34607,7 +34638,22 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     pivotNote
   };
 }
+var WRITE_ATTEMPTS = 3;
 async function writeCorrection(contentsApi, at, path, correction) {
+  const relativePath = repoRelativePath(path);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await attemptWrite(contentsApi, at, relativePath, correction);
+      return;
+    } catch (error2) {
+      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error2)) throw error2;
+      info(
+        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`
+      );
+    }
+  }
+}
+async function attemptWrite(contentsApi, at, path, correction) {
   const files = await listCorrectionFiles(contentsApi, at, path);
   for (const file of files) {
     const read2 = await readContentsFile(contentsApi, at, file.path);
@@ -34645,6 +34691,24 @@ ${formatCorrection(correction)}
     text2,
     commitMessage(correction),
     existing?.sha ?? null
+  );
+}
+function isShaConflict(error2) {
+  const status = error2?.status;
+  if (status === 409) return true;
+  if (status !== 422) return false;
+  const message = error2 instanceof Error ? error2.message : String(error2);
+  return message.toLowerCase().includes("sha");
+}
+function repoRelativePath(path) {
+  if (!isAbsolute(path)) return path;
+  const workspace = process.env.GITHUB_WORKSPACE;
+  if (workspace !== void 0 && workspace.length > 0) {
+    const stripped = relative(workspace, path);
+    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
+  }
+  throw new Error(
+    `\`corrections\` (\`${path}\`) is an absolute path record cannot use \u2014 the Contents API only understands a path relative to the repository root. Use a repo-relative path, or one under \`GITHUB_WORKSPACE\` if the workflow built it from \`\${{ github.workspace }}\`.`
   );
 }
 function monthShard() {
@@ -34722,8 +34786,8 @@ function comment(outcome, done) {
   );
   return parts.join("\n");
 }
-function excerpt2(answer) {
-  const flat = answer.replace(/\s+/g, " ").trim();
+function excerpt2(answer2) {
+  const flat = answer2.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
 function report(outcome, done, dryRun, rosterStarved) {

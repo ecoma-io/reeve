@@ -132,6 +132,14 @@ interface State {
    * only token this duty's own docs describe, simulated without a real one.
    */
   contentsForbidden: boolean;
+  /**
+   * How many of the next `createOrUpdateFileContents` calls answer a stale-
+   * `sha` conflict (409) before falling through to the ordinary write — the
+   * race two concurrent `record` runs can lose against the same shard.
+   * Decremented on every PUT, conflicting or not, so a case sets it once to
+   * the exact number of failed attempts it wants before success.
+   */
+  contentsConflictsRemaining: number;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -177,6 +185,7 @@ async function startStub(): Promise<Stub> {
     contentsFiles: new Map(),
     contentsWrites: [],
     contentsForbidden: false,
+    contentsConflictsRemaining: 0,
   };
 
   const server = createServer((request, response) => {
@@ -345,6 +354,12 @@ async function route(
   if (method === "PUT" && contents) {
     if (stub.contentsForbidden) {
       send(response, 403, { message: "Resource not accessible by integration" });
+      return;
+    }
+
+    if (stub.contentsConflictsRemaining > 0) {
+      stub.contentsConflictsRemaining -= 1;
+      send(response, 409, { message: "sha does not match the file's current sha" });
       return;
     }
 
@@ -1087,6 +1102,11 @@ describe("record", () => {
     // The ordinary pipeline ran instead — a label change from a bot is still a
     // thread worth triaging, just not a correction worth learning from.
     expect(stub.effects.applied).toEqual(["bug"]);
+    // `record` was fully granted — file and `apply` both name it — and still
+    // did not fire, which is exactly the case a maintainer needs the reason
+    // for: nothing else in this run's log would tell them it was the sender.
+    expect(run.log).toContain("`record` is granted, but did not fire this run");
+    expect(run.log).toContain("the label change came from a bot");
   });
 
   it("replaces the prior entry for this thread rather than duplicating it", async () => {
@@ -1198,6 +1218,84 @@ describe("record", () => {
 
     expect(run.code).not.toBe(0);
     expect(run.log).toContain("Resource not accessible by integration");
+  });
+
+  it("retries a write that lost a race on the shard's `sha`, and still records", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    // One concurrent commit landed between this run's read and its write —
+    // the first PUT sees a stale `sha` and conflicts; the retry re-reads and
+    // succeeds.
+    stub.contentsConflictsRemaining = 1;
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    expect(run.log).toContain("Retrying");
+    const shard = stub.contentsFiles.get(shardPath());
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written).toMatchObject({ thread: 42 });
+  });
+
+  it("gives up and fails red after exhausting its retries against a shard that never stops conflicting", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    // More conflicts than the bounded retry allows: the write never gets a
+    // turn to succeed, and this has to fail loudly rather than pretend it
+    // recorded something it did not.
+    stub.contentsConflictsRemaining = 10;
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+  });
+
+  it("accepts an absolute `corrections` path built under `GITHUB_WORKSPACE`, writing it repo-relative", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+    const workspace = "/home/runner/work/reeve/reeve";
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: `${workspace}/${CORRECTIONS}` },
+      { GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: workspace },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // Written at the repo-relative path — the Contents API was never asked
+    // about the workspace prefix at all.
+    expect(stub.contentsFiles.get(shardPath())).toBeDefined();
+  });
+
+  it("fails red on an absolute `corrections` path the workspace prefix cannot explain", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: "/etc/reeve/corrections" },
+      { GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: "/home/runner/work/reeve/reeve" },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("is an absolute path record cannot use");
+    expect(stub.contentsWrites).toEqual([]);
   });
 
   it("records without a pivot rendering when the pivot roster starves, and says why", async () => {
@@ -1336,7 +1434,7 @@ describe("cross-language recall", () => {
     expect(run.code).toBe(0);
     const triaging = stub.asked.find((ask) => !ask.system.includes("Translate the title and body"));
     expect(triaging?.user).toContain("Dark mode setting is lost between sessions");
-    expect(run.summary).toContain("found across languages");
+    expect(run.summary).toContain("recorded in a language other than the thread's");
   });
 
   it(

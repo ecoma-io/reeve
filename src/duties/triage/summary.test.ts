@@ -147,9 +147,15 @@ describe("summarize", () => {
     );
   });
 
-  it("reports how many of the recalled corrections crossed a language", () => {
+  it("reports how many of the recalled corrections were recorded in another language", () => {
     expect(summarize(run({ memory: { size: 12, recalled: 3, pivotRecalled: 2 } }))).toContain(
-      "2 of them found across languages",
+      "2 of them recorded in a language other than the thread's",
+    );
+  });
+
+  it("never says '1 of it' — the singular reads exactly like every other count", () => {
+    expect(summarize(run({ memory: { size: 12, recalled: 3, pivotRecalled: 1 } }))).toContain(
+      "1 of them recorded in a language other than the thread's",
     );
   });
 
@@ -335,6 +341,19 @@ describe("summarizeRecord", () => {
     expect(summarizeRecord(recordRun({ pivot: true }))).toContain(
       "A pivot-language rendering was translated and stored alongside it.",
     );
+  });
+
+  it("says 'would have', not 'was', under a dry run — nothing was actually committed", () => {
+    const page = summarizeRecord(recordRun({ dryRun: true, pivot: true }));
+
+    expect(page).toContain("Would have recorded to `.reeve/corrections` as `bug`, in English.");
+    expect(page).toContain(
+      "A pivot-language rendering was translated and would have been stored alongside it.",
+    );
+    // The banner already says nothing was committed — the body must not
+    // contradict it by claiming something was recorded or stored anyway.
+    expect(page).not.toContain("Recorded to `.reeve/corrections`");
+    expect(page).not.toContain("was translated and stored alongside it.");
   });
 
   it("says why a pivot rendering is missing, when one was attempted and was not produced", () => {

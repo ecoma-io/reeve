@@ -227,8 +227,38 @@ describe("recallAcrossQueries", () => {
 
     expect(memory.recall("dark mode toggle reload", 3)).toEqual([]);
     expect(
-      memory.recallAcrossQueries([{ text: "dark mode toggle reload", against: "pivot" }], 3),
+      memory.recallAcrossQueries(
+        [{ text: "dark mode toggle reload", against: { pivot: "en" } }],
+        3,
+      ),
     ).toEqual([bridged]);
+  });
+
+  it("does not rank a rendering in a language the query is not asking for", () => {
+    // The rendering below is in English, left over from before this project's
+    // configured first language moved to French. A French-pivot query has to
+    // miss it — matching on whatever the two languages happen to share by
+    // accident is worse than missing it outright, because it looks like a
+    // real bridge and is not one.
+    const stale = correction({
+      thread: 33,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: {
+        language: "en",
+        title: "The dark mode toggle",
+        excerpt: "does not persist after a page reload",
+      },
+    });
+    const memory = createMemory([stale]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "the dark mode toggle does not persist", against: { pivot: "fr" } }],
+        3,
+      ),
+    ).toEqual([]);
   });
 
   it("keeps a correction once when two queries both reach it, at its best score", () => {
@@ -243,7 +273,7 @@ describe("recallAcrossQueries", () => {
     const recalled = memory.recallAcrossQueries(
       [
         { text: "export empty file", against: "own" },
-        { text: "export empty file", against: "pivot" },
+        { text: "export empty file", against: { pivot: "en" } },
       ],
       3,
     );
@@ -265,7 +295,7 @@ describe("recallAcrossQueries", () => {
     const memory = createMemory([unrendered]);
 
     expect(
-      memory.recallAcrossQueries([{ text: "export empty file", against: "pivot" }], 3),
+      memory.recallAcrossQueries([{ text: "export empty file", against: { pivot: "en" } }], 3),
     ).toEqual([unrendered]);
   });
 });
@@ -313,6 +343,7 @@ describe("parseCorrection", () => {
     ["missing the language", '{"title":"x","excerpt":"y"}'],
     ["missing the title", '{"language":"en","excerpt":"y"}'],
     ["an empty language", '{"language":"","title":"x","excerpt":"y"}'],
+    ["a whitespace-only title", '{"language":"en","title":"   ","excerpt":"y"}'],
   ])("reads a %s pivot value as null rather than trusting it", (_label, pivot) => {
     const parsed = parseCorrection(`{"thread":7,"decided":["bug"],"pivot":${pivot}}`);
 

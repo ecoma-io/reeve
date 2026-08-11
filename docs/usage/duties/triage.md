@@ -228,6 +228,10 @@ jobs:
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           number: ${{ github.event.issue.number }}
+          # `models` and `api-key` are required on every run, `record` included —
+          # same values as [the minimum example](#minimum) above.
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          models: gpt-5-mini
           apply: label, record
 ```
 

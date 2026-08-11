@@ -523,7 +523,27 @@ export async function listCorrectionFiles(
     .map((entry) => ({ path: entry.path, sha: entry.sha }));
 }
 
-/** One shard's text and current sha, read through the API rather than the filesystem. */
+/**
+ * One shard's text and current sha, read through the API rather than the
+ * filesystem.
+ *
+ * `null` means exactly one thing: nothing is there yet, the cold start
+ * `writeCorrection` is entitled to treat as "append a fresh shard". A 404
+ * from `getContent` is that. A response shaped like a directory listing —
+ * an array, checked below — is that too, the same shape mismatch
+ * `listCorrectionFiles` already treats as "no shards".
+ *
+ * **A file that exists is never folded into that same `null`,** even when
+ * this function cannot read its text. GitHub answers a file over the 1 MB
+ * the Contents API can inline with `content: "", encoding: "none"` rather
+ * than a body byte for byte — still a file, with a real `sha`, simply not
+ * one this call can decode. Reading that as "not there yet" is the failure
+ * this distinction exists to prevent: `writeCorrection` would append a
+ * second entry beside one it could not see, or overwrite a shard's history
+ * with a fresh one under the same name — silent store corruption, not a
+ * cold start. So a present file this call cannot decode throws instead,
+ * naming the path and the likely cause, which is worth failing a run over.
+ */
 export async function readContentsFile(
   api: ContentsApi,
   at: Pick<Location, "owner" | "repo">,
@@ -539,14 +559,20 @@ export async function readContentsFile(
   if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
 
   const file = data as { content?: unknown; encoding?: unknown; sha?: unknown };
-  if (
-    typeof file.content !== "string" ||
-    file.encoding !== "base64" ||
-    typeof file.sha !== "string"
-  ) {
-    return null;
+  // No `sha` at all is not a recognisable file entry — the shape mismatch a
+  // directory or a genuinely unexpected response already reads as "nothing
+  // here", same as the array case above.
+  if (typeof file.sha !== "string") return null;
+
+  if (typeof file.content === "string" && file.encoding === "base64") {
+    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
   }
-  return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
+
+  throw new Error(
+    `\`${path}\` could not be read as text — the Contents API answered without base64 content, ` +
+      "which is what it sends for a file over the 1 MB that endpoint can inline. Split the " +
+      "corrections store into smaller shards.",
+  );
 }
 
 /**

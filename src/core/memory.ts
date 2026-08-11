@@ -106,15 +106,26 @@ export type Similarity = (query: string, documents: readonly string[]) => readon
  * rendering of the store it should be ranked against.
  *
  * `"own"` is a correction's own title and excerpt, in whatever language it
- * was recorded in. `"pivot"` is its pivot-language rendering when it has one,
- * falling back to its own text when it does not — which is correct either
- * way: a correction already recorded in the pivot language needed no
- * translating to be there, and one with no rendering yet simply cannot be
- * reached by this query, the same as if it had never been asked.
+ * was recorded in. `{ pivot: code }` is its rendering in the pivot language
+ * named by `code`, falling back to its own text in two cases that read as
+ * the same document for the same reason: a correction with no rendering at
+ * all simply cannot be reached by this query, the same as if it had never
+ * been asked, and neither can one whose rendering is in a *different* pivot
+ * language than `code` names.
+ *
+ * **The language travels with the query rather than being assumed from the
+ * store, and that is the whole point of carrying it at all.** A project
+ * that changes its configured first language part-way through a store's
+ * life leaves old renderings behind in the language it used to pivot
+ * through — a Vietnamese correction rendered into English before the switch
+ * to French. Ranking that English text against a French-pivot query on
+ * whatever tokens the two languages happen to share is not a bridge, it is
+ * noise with a plausible-looking score, and worse than the query simply
+ * missing the correction the way it would miss any other unrelated one.
  */
 export interface WeightedQuery {
   readonly text: string;
-  readonly against: "own" | "pivot";
+  readonly against: "own" | { readonly pivot: string };
 }
 
 export interface Memory {
@@ -150,12 +161,19 @@ export function createMemory(
   // Assembled once. The store is read at the start of a run and asked at most
   // once per thread, but a backfill loops, and re-tokenising the whole store
   // per thread is the kind of cost nobody notices until the store is large.
+  // The pivot side cannot be precomputed the same way: which document a
+  // correction contributes depends on the pivot language a query names, not
+  // on the store alone, so it is built fresh per query instead — cheap,
+  // because a run asks at most a couple of these.
   const ownDocuments = corrections.map(searchable);
-  const pivotDocuments = corrections.map(searchablePivot);
 
-  function ranked(text: string, against: "own" | "pivot"): Map<number, number> {
+  function ranked(text: string, against: WeightedQuery["against"]): Map<number, number> {
     if (corrections.length === 0) return new Map();
-    const scores = similarity(text, against === "own" ? ownDocuments : pivotDocuments);
+    const documents =
+      against === "own"
+        ? ownDocuments
+        : corrections.map((correction) => searchablePivot(correction, against.pivot));
+    const scores = similarity(text, documents);
     const scored = new Map<number, number>();
     scores.forEach((score, index) => {
       if (score > 0) scored.set(index, score);
@@ -218,12 +236,18 @@ function searchable(correction: Correction): string {
 }
 
 /**
- * The same idea, in the pivot-language rendering — or the correction's own
- * text when it has none, which is the right document for both readings of
- * `pivot: null` described on `Correction`.
+ * The same idea, in the rendering for `target` — or the correction's own
+ * text when there is no rendering at all, or when the rendering that exists
+ * is in a different pivot language than `target`. Both are the right
+ * document for the same reason `Correction.pivot`'s doc comment gives for
+ * `null`: a query cannot be bridged by a rendering that is not there, or
+ * is not in the language it is asking for, and reads exactly as if it had
+ * never been asked.
  */
-function searchablePivot(correction: Correction): string {
-  if (correction.pivot === null) return searchable(correction);
+function searchablePivot(correction: Correction, target: string): string {
+  if (correction.pivot?.language !== target) {
+    return searchable(correction);
+  }
   return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
 }
 
@@ -461,6 +485,12 @@ function strings(raw: unknown): readonly string[] | null {
  * including a store line written before this field existed, which has no
  * `pivot` key at all and reads exactly the same as one written with
  * `pivot: null`.
+ *
+ * A blank or whitespace-only title fails the whole pivot the same way
+ * `pivot.ts`'s `readAnswer` refuses one at record time — it is the shape an
+ * injected answer produces, not an ordinary translation. The excerpt is not
+ * held to the same rule: an empty pivot body is what a genuinely empty thread
+ * body translates to, and that is meaningful rather than suspicious.
  */
 function readPivot(raw: unknown): Correction["pivot"] {
   if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
@@ -469,6 +499,7 @@ function readPivot(raw: unknown): Correction["pivot"] {
   const record = raw as Record<string, unknown>;
   if (typeof record.language !== "string" || record.language.length === 0) return null;
   if (typeof record.title !== "string" || typeof record.excerpt !== "string") return null;
+  if (record.title.trim().length === 0) return null;
   return { language: record.language, title: record.title, excerpt: record.excerpt };
 }
 
