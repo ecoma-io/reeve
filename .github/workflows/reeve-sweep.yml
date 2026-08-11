@@ -1,0 +1,131 @@
+name: Reeve sweep
+
+# The scheduled counterpart to the two event-triggered workflows beside this
+# one. Those fire on one thread as it arrives; this one comes back on a
+# schedule for whatever the event never fired on — backlog from before this
+# repository ran Reeve, and anything a keyless provider's rate limit left
+# stranded mid-run. `sweep.md` covers the whole mechanism; this file is one
+# concrete configuration of it, dogfooded here the same way the per-thread
+# workflows are: `uses: ./triage` and `uses: ./translate` point at the
+# working tree rather than a tag, so a change to either duty is exercised on
+# the pull request that makes it.
+#
+# `since` is deliberately left unset. This repository's own backlog is small
+# enough that a weekly sweep can simply reconsider everything still open, and
+# a bound-by-creation-date `since` is a decision worth making on purpose on a
+# repository where the backlog is not — see `since` in `sweep.md` for why it
+# exists at all. `limit` stays modest for the same reason the per-thread
+# workflows keep a generous timeout instead of a generous roster: a free
+# tier's own rate limit is the actual ceiling here, and a small `limit` means
+# a run that hits it still finishes for good rather than spending its whole
+# job rotating through 429s.
+
+on:
+  schedule:
+    # Once a week, well clear of the hour the per-thread workflows are
+    # busiest at. A keyless provider earns a gentler cron than a daily one.
+    - cron: "0 4 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  triage:
+    name: Sweep — triage
+    runs-on: ubuntu-latest
+    # A sweep processes many threads in one job, not one, so it is given
+    # proportionally more room than the per-thread triage workflow's ten
+    # minutes — enough for `limit` threads' worth of verdicts plus whatever
+    # rotation the weather demands, without inviting an unbounded runner
+    # bill if a provider hangs rather than failing outright.
+    timeout-minutes: 30
+    # Least-privilege per duty rather than one shared block at the top of the
+    # file: a sweep job has no single issue or pull request in its event
+    # payload to scope a `concurrency` group or an `if` condition against the
+    # way the per-thread workflows do, so permissions are the one narrowing
+    # left available, and each duty only gets what its own capabilities use.
+    permissions:
+      contents: read
+      issues: write
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was swept."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+        run: |
+          # The trailing newline is load-bearing: `read` drops a final line that
+          # has none, and that line is the last screen model.
+          printf '%s,%s\n' "$MODELS" "$SCREEN_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        uses: ./triage
+        with:
+          sweep: true
+          limit: "20"
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          # Empty when the endpoint is keyless, which is a supported
+          # configuration rather than a missing secret.
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          about: >-
+            Reeve is a GitHub Action that reads issues and pull requests with a
+            language model and acts on them under a warrant committed to the
+            repository — translating threads and applying labels from a taxonomy
+            the maintainers wrote.
+
+  translate:
+    name: Sweep — translate
+    runs-on: ubuntu-latest
+    # Detection plus drafts plus judging, per thread, times `limit` threads —
+    # the same generous allowance the per-thread translate workflow gives a
+    # single thread, extended for a batch rather than raised further, because
+    # a starved roster ends the sweep early rather than hanging.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was swept."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+        run: |
+          # The trailing newline is load-bearing: `read` drops a final line
+          # that has none, and that line is the last judge seat.
+          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        uses: ./translate
+        with:
+          sweep: true
+          limit: "20"
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          # Empty when the endpoint is keyless, which is a supported
+          # configuration rather than a missing secret.
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+          drafts: "2"
