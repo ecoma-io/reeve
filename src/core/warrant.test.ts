@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { checkLabelsExist, parseWarrant, type Warrant } from "./warrant.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// Nothing is mocked. The YAML parser is a library, not a collaborator, and
-// every assertion here is about what this module does with what it returns.
+import {
+  checkLabelsExist,
+  implicitWarrant,
+  parseWarrant,
+  readWarrant,
+  type Warrant,
+} from "./warrant.js";
+
+// Nothing is mocked, in the tests that read a file the ordinary way. The YAML
+// parser is a library, not a collaborator, and every assertion here is about
+// what this module does with what it returns. `readWarrant`'s own suite is
+// the exception: absence is a filesystem fact, and a fake one would be a fact
+// about a mock rather than about ENOENT.
 
 const PATH = ".github/reeve.yml";
 
@@ -236,8 +249,41 @@ describe("capabilities", () => {
     );
   });
 
-  it("says nothing about a duty the file never mentions", () => {
-    expect(warrant(FULL).granted("close-stale", ["comment"])).toEqual(["comment"]);
+  it("grants nothing to a duty a written block does not name, not even the fallback", () => {
+    // Once a maintainer has written `capabilities:`, it is taken as the whole
+    // roster of who may act. A name it forgot is refused everything, not
+    // handed the default it would have kept had the block never existed.
+    expect(warrant(FULL).granted("close-stale", ["comment"])).toEqual([]);
+  });
+
+  it("grants a duty its own default when the file has no capabilities block at all", () => {
+    // A taxonomy-only file is a legitimate configuration and must keep
+    // working exactly as it did before this distinction existed.
+    expect(warrant(MINIMAL).granted("close-stale", ["comment"])).toEqual(["comment"]);
+  });
+
+  it("does not mark a duty unnamed when there is no capabilities block at all", () => {
+    expect(warrant(MINIMAL).unnamed("triage")).toBe(false);
+  });
+
+  it("marks a duty unnamed when a written block exists and does not mention it", () => {
+    expect(warrant(FULL).unnamed("close-stale")).toBe(true);
+  });
+
+  it("does not mark a duty unnamed when the block names it, even as `none`", () => {
+    // `[none]` is a decision about the duty, not silence about it — `unnamed`
+    // has to tell those two "nothing" apart even though `granted` cannot.
+    const source = "version: 1\ncapabilities:\n  triage: [none]\n";
+    expect(warrant(source).unnamed("triage")).toBe(false);
+    expect(warrant(source).granted("triage", ["label"])).toEqual([]);
+  });
+
+  it("marks every duty unnamed when the block is written but empty", () => {
+    // `capabilities: {}` is a block that exists and answers nothing — the
+    // question was asked, and every duty is refused for want of an answer.
+    const source = "version: 1\ncapabilities: {}\n";
+    expect(warrant(source).unnamed("triage")).toBe(true);
+    expect(warrant(source).granted("triage", ["label"])).toEqual([]);
   });
 });
 
@@ -270,5 +316,112 @@ describe("checkLabelsExist", () => {
 
   it("passes an empty taxonomy, which claims nothing", () => {
     expect(checking("version: 1\n", [])).not.toThrow();
+  });
+});
+
+describe("readWarrant", () => {
+  let scratch: string;
+
+  beforeEach(async () => {
+    scratch = await mkdtemp(join(tmpdir(), "reeve-warrant-"));
+  });
+
+  afterEach(async () => {
+    await rm(scratch, { recursive: true, force: true });
+  });
+
+  it("runs at the narrowest authority when the default path is simply absent", async () => {
+    // Deleting the warrant still withdraws everything a written one would
+    // have granted — the implicit authority is narrower than any file grants
+    // — so this is `null`, not an error.
+    const path = join(scratch, "reeve.yml");
+    await expect(readWarrant(path, { defaultPath: path })).resolves.toBeNull();
+  });
+
+  it("fails red when a path a consumer chose is the one that is missing", async () => {
+    // They named a file that is not there, which is a configuration mistake
+    // rather than a silence the default path gets the benefit of.
+    const path = join(scratch, "reeve.yml");
+    await expect(
+      readWarrant(path, { defaultPath: join(scratch, "elsewhere.yml") }),
+    ).rejects.toThrow(/this run has no authority/);
+  });
+
+  it("fails red on a read error that is not simple absence, even at the default path", async () => {
+    // A directory where a file was expected cannot have been "not read yet" —
+    // it was read, and it was not a warrant — so the default path earns it no
+    // special treatment.
+    const path = join(scratch, "reeve.yml");
+    await mkdir(path);
+    await expect(readWarrant(path, { defaultPath: path })).rejects.toThrow(
+      /this run has no authority/,
+    );
+  });
+
+  it("reads and parses a warrant that exists at the default path", async () => {
+    const path = join(scratch, "reeve.yml");
+    await writeFile(path, MINIMAL);
+    const found = await readWarrant(path, { defaultPath: path });
+    expect(found?.labels.map((label) => label.name)).toEqual(["bug"]);
+  });
+
+  it("still fails on a warrant that exists at the default path but does not parse", async () => {
+    // Absence cannot be misread; a file that is there and wrong still can be.
+    const path = join(scratch, "reeve.yml");
+    await writeFile(path, "version: 2\nlabels: []\n");
+    await expect(readWarrant(path, { defaultPath: path })).rejects.toThrow(/declares version `2`/);
+  });
+});
+
+describe("implicitWarrant", () => {
+  it("builds a taxonomy from the repository's own label descriptions", () => {
+    const { warrant, excluded } = implicitWarrant(PATH, [
+      { name: "bug", description: "Something broke." },
+      { name: "docs", description: "The documentation is wrong." },
+    ]);
+
+    expect(warrant.labels).toEqual([
+      {
+        name: "bug",
+        description: "Something broke.",
+        not: null,
+        examples: [],
+        owner: null,
+        exclusiveWith: [],
+      },
+      {
+        name: "docs",
+        description: "The documentation is wrong.",
+        not: null,
+        examples: [],
+        owner: null,
+        exclusiveWith: [],
+      },
+    ]);
+    expect(excluded).toEqual([]);
+  });
+
+  it("excludes a label with no description on GitHub, and reports which ones", () => {
+    // A name alone gives a model nothing to match a thread against honestly.
+    const { warrant, excluded } = implicitWarrant(PATH, [
+      { name: "bug", description: "Something broke." },
+      { name: "triage", description: null },
+      { name: "blank", description: "   " },
+    ]);
+
+    expect(warrant.labels.map((label) => label.name)).toEqual(["bug"]);
+    expect(excluded).toEqual(["triage", "blank"]);
+  });
+
+  it("grants a duty its own fallback, since no capabilities block was ever written", () => {
+    const { warrant } = implicitWarrant(PATH, []);
+    expect(warrant.granted("triage", ["label"])).toEqual(["label"]);
+    expect(warrant.unnamed("triage")).toBe(false);
+  });
+
+  it("finds a label by its exact name, the same as a written warrant would", () => {
+    const { warrant } = implicitWarrant(PATH, [{ name: "bug", description: "Something broke." }]);
+    expect(warrant.labelNamed("bug")?.description).toBe("Something broke.");
+    expect(warrant.labelNamed("missing")).toBeUndefined();
   });
 });

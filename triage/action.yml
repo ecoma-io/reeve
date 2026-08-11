@@ -94,9 +94,14 @@ inputs:
       cover — and every effect is checked against the parsed file rather than
       against the model's account of what it was allowed to do.
 
-      A file that cannot be read fails the run red. Deleting it is the supported
-      way to withdraw what Reeve may do, and a run that read the absence as "no
-      restrictions" would make deletion the widest setting available.
+      Missing at this default path, there is no failure: the run acts at the
+      narrowest authority this duty knows — labelling only, from this
+      repository's own label descriptions, leaving out any label GitHub has no
+      description for and saying so in the job summary. Point this at a path of
+      your own instead, and a file missing there fails the run red, because
+      naming a file that is not there is a configuration mistake rather than an
+      absence. A file that exists but does not parse always fails red, wherever
+      it lives — write one to move past the narrowest authority on your terms.
     required: false
     default: .github/reeve.yml
 

@@ -27,6 +27,9 @@ function run(over: Partial<Run> = {}): Run {
     done: { labels: ["bug"], commented: false, assigned: [], closed: false },
     memory: { size: 0, recalled: 0 },
     note: null,
+    implicit: false,
+    excludedLabels: [],
+    ungranted: null,
     spent: [],
     modelNames: new Map(),
     screenNames: new Map(),
@@ -214,5 +217,47 @@ describe("summarize", () => {
 
   it("ends with exactly one newline, whatever the last section was", () => {
     expect(summarize(run())).toMatch(/[^\n]\n$/);
+  });
+
+  it("says it ran at the narrowest authority when there was no warrant to read", () => {
+    const page = summarize(run({ implicit: true, warrant: ".github/reeve.yml" }));
+
+    expect(page).toContain(
+      "No `.github/reeve.yml` — ran at the narrowest authority: labels only, from this " +
+        "repository's own label descriptions.",
+    );
+  });
+
+  it("names the labels the implicit taxonomy left out for carrying no description", () => {
+    const page = summarize(run({ implicit: true, excludedLabels: ["question", "help wanted"] }));
+
+    expect(page).toContain(
+      "`question`, `help wanted` — these labels have no description on GitHub, so they " +
+        "were not offered to the model — add a description there, or write a taxonomy in " +
+        "`.github/reeve.yml`.",
+    );
+  });
+
+  it("says nothing about an implicit authority when a warrant was actually read", () => {
+    expect(summarize(run({ implicit: false }))).not.toContain("narrowest authority");
+  });
+
+  it("says why nothing was even attempted when a written block did not name this duty", () => {
+    const page = summarize(
+      run({
+        ungranted:
+          "`.github/reeve.yml`'s `capabilities:` block does not name `triage`; once that " +
+          "block exists it is the whole answer, so add `triage: [label]` to it (or remove " +
+          "the block to return to defaults).",
+        proposed: [],
+        applied: [],
+        permitted: [],
+      }),
+    );
+
+    expect(page).toContain("does not name `triage`");
+    expect(page).toContain("No expensive model was asked anything. This is a real answer");
+    // No table of refusals — nothing was ever proposed for one to hold.
+    expect(page).not.toContain("### What the verdict proposed");
   });
 });

@@ -6,11 +6,18 @@
  * duty — and the only judgement made here is the order they run in and what a
  * failure at each step means for the run:
  *
- *   1. **Read.** Parse the warrant, fetch the thread, and check that every name
- *      the taxonomy claims is a label this repository actually has. All three
- *      are red on failure, and all three happen before a single request: a
- *      taxonomy naming a renamed label would otherwise look exactly like a
- *      model that agreed with nothing.
+ *   1. **Read.** Parse the warrant — or, when it is simply absent at the
+ *      default path, build the implicit one from this repository's own label
+ *      descriptions — fetch the thread, and check that every name an explicit
+ *      taxonomy claims is a label this repository actually has. A file that
+ *      does not parse and a thread that cannot be read are both red, and both
+ *      happen before a single request: a taxonomy naming a renamed label would
+ *      otherwise look exactly like a model that agreed with nothing.
+ *   1a. **Stop, for a block that said nothing about this duty.** A written
+ *      `capabilities:` block that does not name `triage` grants it nothing,
+ *      deliberately, and no verdict downstream can change that — so the run
+ *      stops here, before the thread is even fetched, and says why. See the
+ *      short-circuit below `readWarrant` for the full argument.
  *   2. **Screen, for nothing.** An empty body, a blank form, four words with no
  *      evidence in them. Most of a backlog stops here and it costs no requests.
  *   3. **Language.** Script, then profile, then — only if those did not decide —
@@ -33,10 +40,12 @@
  * first are the ones that read length rather than meaning.
  *
  * **The failure mode of this duty is doing nothing.** Every model failing, a
- * verdict that does not parse, a verdict under the floor and a thread that was
- * screened out are all green runs that applied nothing and said why. Only a
- * warrant that does not parse and a thread that cannot be read are `setFailed`,
- * because both mean the run has no authority to act under.
+ * verdict that does not parse, a verdict under the floor, a thread that was
+ * screened out and a `capabilities:` block that does not name this duty are all
+ * green runs that applied nothing and said why. Only a warrant that does not
+ * parse — an absent file at a path a consumer chose is one of these, an absent
+ * file at the default is not — and a thread that cannot be read are
+ * `setFailed`, because both mean the run has no authority to act under.
  *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
@@ -53,7 +62,9 @@ import {
   listRepositoryLabels,
   readStanding,
   type Effects,
+  type Location,
   type Standing,
+  type TrackerApi,
 } from "../../core/forge.js";
 import { counted, fraction, readShared, whole } from "../../core/inputs.js";
 import { parseLanguages, type Language } from "../../core/languages.js";
@@ -70,6 +81,7 @@ import { screen } from "../../core/screen.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
+  implicitWarrant,
   readWarrant,
   type Capability,
   type Warrant,
@@ -87,6 +99,18 @@ import { NOTHING, triage, type Verdict } from "./verdict.js";
  * only this duty knows what its cheapest reversible action is.
  */
 const DEFAULT_CAPABILITIES: readonly Capability[] = ["label"];
+
+/**
+ * `warrant`'s own default in `action.yml`, repeated here rather than read back
+ * out of it.
+ *
+ * `readWarrant` has to be told which path is the default so it can tell a
+ * consumer's silence from a consumer's choice — see `ReadOptions` — and this
+ * is the one value in that comparison this file is actually responsible for.
+ * A workflow that renamed `.github/reeve.yml` to somewhere else set `warrant`
+ * to say so, which is exactly the case this constant is not meant to catch.
+ */
+const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 /**
  * How many corrections reach the prompt.
@@ -165,6 +189,45 @@ interface Outcome {
   /** Why there is no verdict, when there is none. */
   readonly note: string | null;
   readonly memory: { readonly size: number; readonly recalled: number };
+  /** True when there was no warrant file, and this ran at the narrowest authority instead. */
+  readonly implicit: boolean;
+  /** Repository labels the implicit warrant left out for carrying no description. */
+  readonly excludedLabels: readonly string[];
+  /**
+   * Why this duty was granted nothing, when a written `capabilities:` block
+   * exists and simply does not name it. `null` on every other path, including
+   * the ordinary "nothing was applied" a low-confidence or refused verdict
+   * produces — this is specifically the reason nothing was ever attempted.
+   */
+  readonly ungranted: string | null;
+}
+
+/** What `readWarrant` returned, turned into the warrant this run actually acts under. */
+interface Authority {
+  readonly warrant: Warrant;
+  readonly implicit: boolean;
+  readonly excludedLabels: readonly string[];
+}
+
+/**
+ * The real warrant when there was one to read, or the implicit one built from
+ * this repository's own labels when there was not.
+ *
+ * The single point where "absent at the default path" turns from a fact about
+ * a file into a fact about what this duty may do — everything past this
+ * function treats `Authority.warrant` as *the* warrant, written or not.
+ */
+async function resolveAuthority(
+  read: Warrant | null,
+  path: string,
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+): Promise<Authority> {
+  if (read !== null) return { warrant: read, implicit: false, excludedLabels: [] };
+
+  const repositoryLabels = await listRepositoryLabels(api, at);
+  const built = implicitWarrant(path, repositoryLabels);
+  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
 
 /** What a run that touched nothing did. Also what every dry run reports. */
@@ -191,17 +254,39 @@ export async function run(): Promise<void> {
     };
 
     // The authority first, and before anything is spent. A file that does not
-    // parse is a run with no allowlist, and the fail-safe direction is to stop.
-    const warrant = await readWarrant(settings.warrant);
-    const standing = await readStanding(api, at);
-    // Against the repository's own labels, so a taxonomy naming one that was
-    // renamed fails as the configuration problem it is, rather than arriving as
-    // a model that agreed with nothing.
-    checkLabelsExist(warrant, await listRepositoryLabels(api, at));
+    // parse is a run with no allowlist, and the fail-safe direction is to stop
+    // — but a file that is simply not there, at the path nobody moved it from,
+    // is not that failure. `resolveAuthority` is what turns that absence into
+    // the implicit warrant rather than an error.
+    const read = await readWarrant(settings.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
+    const authority = await resolveAuthority(read, settings.warrant, api, at);
 
-    outcome = await decide(warrant, standing, settings, stages);
+    // A written `capabilities:` block that does not name `triage` grants it
+    // nothing, and no verdict this run could reach changes that — so this sits
+    // here, as early as the answer is already certain, and before the thread,
+    // the taxonomy check, or a single model call spends anything on a decision
+    // that could never be applied. It cannot sit any earlier: `authority` is
+    // the first point `unnamed` has anything to ask.
+    if (authority.warrant.unnamed("triage")) {
+      outcome = notGranted(authority.warrant);
+    } else {
+      const standing = await readStanding(api, at);
+      if (!authority.implicit) {
+        // Against the repository's own labels, so a taxonomy naming one that
+        // was renamed fails as the configuration problem it is, rather than
+        // arriving as a model that agreed with nothing. Skipped in implicit
+        // mode: the taxonomy IS the repository's own labels there, and
+        // checking it against itself would be a tautology.
+        checkLabelsExist(
+          authority.warrant,
+          (await listRepositoryLabels(api, at)).map((label) => label.name),
+        );
+      }
+      outcome = await decide(authority, standing, settings, stages);
+    }
+
     if (!settings.dryRun) {
-      done = await act(createEffects(api, at), warrant, outcome);
+      done = await act(createEffects(api, at), authority.warrant, outcome);
     }
     report(outcome, done, settings.dryRun);
   } catch (error) {
@@ -223,11 +308,12 @@ export async function run(): Promise<void> {
  * pipeline would be rehearsing a run nobody is going to have.
  */
 async function decide(
-  warrant: Warrant,
+  authority: Authority,
   standing: Standing,
   settings: Settings,
   stages: Stages,
 ): Promise<Outcome> {
+  const warrant = authority.warrant;
   const body = standing.body.slice(0, settings.maxBodyChars);
   if (standing.body.length > settings.maxBodyChars) {
     // Said, because a truncated body is a verdict reached on less than the
@@ -260,6 +346,9 @@ async function decide(
     withheld,
     note: null,
     memory: { size: 0, recalled: 0 },
+    implicit: authority.implicit,
+    excludedLabels: authority.excludedLabels,
+    ungranted: null,
   });
 
   const free = screen({ title: standing.title, body, minimum: settings.minBodyChars });
@@ -355,6 +444,9 @@ async function decide(
     withheld,
     note,
     memory: { size: memory.size, recalled: recalled.length },
+    implicit: authority.implicit,
+    excludedLabels: authority.excludedLabels,
+    ungranted: null,
   } as const;
 
   // The floor before the taxonomy, so a verdict nobody trusts is not also
@@ -381,6 +473,35 @@ async function decide(
     // may do and a rehearsal rehearses the same narrowing a real run has.
     applied: permitted.includes("label") ? decision.applied : [],
     refused: decision.refused,
+  };
+}
+
+/**
+ * The outcome of a run this duty was never going to be allowed to act on.
+ *
+ * Green, not red — enumerating who may act is a maintainer's decision, and a
+ * name the enumeration left out is a decision too, just not one that grants
+ * anything. Nothing here is a verdict a model reached, which is the entire
+ * point: this is reached instead of `decide`, not by it, so it costs nothing
+ * to produce.
+ */
+function notGranted(warrant: Warrant): Outcome {
+  return {
+    language: null,
+    screenedOut: null,
+    verdict: NOTHING,
+    applied: [],
+    refused: [],
+    permitted: [],
+    withheld: [],
+    note: null,
+    memory: { size: 0, recalled: 0 },
+    implicit: false,
+    excludedLabels: [],
+    ungranted:
+      `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block ` +
+      "exists it is the whole answer, so add `triage: [label]` to it (or remove the block to " +
+      "return to defaults).",
   };
 }
 
@@ -510,6 +631,9 @@ function page(settings: Settings, outcome: Outcome, done: Done, spent: Run["spen
     done,
     memory: outcome.memory,
     note: outcome.note,
+    implicit: outcome.implicit,
+    excludedLabels: outcome.excludedLabels,
+    ungranted: outcome.ungranted,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames,

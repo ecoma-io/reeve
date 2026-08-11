@@ -24,6 +24,23 @@
  * later; a misspelled label that silently granted everything is the last bug
  * this action ships. Both are errors here, named, with the offending text
  * quoted back.
+ *
+ * **Absence at the default path is not the same failure.** A warrant that
+ * does not parse said something and got it wrong — a version it invented, a
+ * label with no description, a value nothing in this format can hold — and
+ * that is a failure to be corrected, not read around. A file that is not
+ * there said nothing at all: it cannot have been misread, because it was
+ * never read. Deleting `.github/reeve.yml` is the supported way to withdraw
+ * every permission the file had granted, and if that withdrawal read as "no
+ * restrictions" it would make deletion the widest setting this action has —
+ * the opposite of what withdrawing an authority should do. So an absent file
+ * at the path nobody moved it from runs at the narrowest authority this
+ * build knows, which is not the claim "no restrictions" at all: it is the
+ * opposite one, the most restrictions, arrived at automatically rather than
+ * written by a maintainer. A path a consumer did choose, and pointed at
+ * nothing, is a different fact — they named a file that is not there, which
+ * is a configuration mistake rather than an absence — and it fails exactly as
+ * a warrant that does not parse does.
  */
 import { readFile } from "node:fs/promises";
 
@@ -78,31 +95,78 @@ export interface Warrant {
   /** The taxonomy, in the order it was written. That order reaches the prompt. */
   readonly labels: readonly Label[];
   /**
-   * What this duty was granted, or `fallback` when the file says nothing about
-   * it.
+   * What this duty was granted.
+   *
+   * Three shapes, not two. No `capabilities:` block at all means the file
+   * never turned its mind to the question, so the duty keeps `fallback` — its
+   * own idea of the least it should be trusted with, which is what a consumer
+   * who has only written a taxonomy expects, unchanged from before this block
+   * existed. A block that exists and does name `duty` means exactly what it
+   * lists, including the empty list `[none]` spells deliberately. A block
+   * that exists and does *not* name `duty` is the shape new here: once a
+   * maintainer has written the block, it is taken as the complete roster of
+   * who may act, so a name missing from it is refused everything rather than
+   * handed the default it would have had before the block was written —
+   * enumerating who may act is a decision, and a duty the enumeration forgot
+   * is not the same thing as a duty nobody had decided about. See `unnamed`,
+   * which is how a caller tells that shape apart from an explicit `[none]`
+   * before either reaches this method.
    *
    * The default belongs to the duty rather than to this module: only `triage`
-   * knows that its cheapest reversible action is a label. An absent
-   * `capabilities:` block therefore means "the defaults", which is what a
-   * consumer who has only written a taxonomy expects — and an explicit
-   * `triage: [none]` means nothing at all, which is a different statement and
-   * is kept different.
+   * knows that its cheapest reversible action is a label.
    */
   granted(duty: string, fallback: readonly Capability[]): readonly Capability[];
+  /**
+   * True when the file wrote a `capabilities:` block and that block does not
+   * mention `duty` by name.
+   *
+   * Distinct from an absent block, which leaves the duty its own default, and
+   * distinct from the duty being named `[none]`, which is a decision about it
+   * rather than silence about it — `granted` alone cannot tell those two
+   * "nothing" apart, because both return the same empty list. This is the
+   * call that can, and it exists so a duty can stop before spending an
+   * expensive model call on a verdict that could never be applied: once the
+   * block exists and does not name it, no verdict changes the answer.
+   */
+  unnamed(duty: string): boolean;
   /** The entry for a name, or undefined. Case-sensitive, as GitHub applies them. */
   labelNamed(name: string): Label | undefined;
 }
 
-export async function readWarrant(path: string): Promise<Warrant> {
+/**
+ * Where `readWarrant` is told the action's own default lives, so it can tell
+ * a consumer's silence from a consumer's choice.
+ *
+ * This module does not know `.github/reeve.yml` on its own — `action.yml`
+ * owns that default, and the duty's `main.ts` is what reads it — so the
+ * comparison has to be handed in rather than hard-coded here. `readWarrant`
+ * only ever needs to know whether `path` is *the* default, not what the
+ * default is for its own sake.
+ */
+export interface ReadOptions {
+  readonly defaultPath: string;
+}
+
+/**
+ * The file, parsed — or `null` when it was absent at the path nobody chose to
+ * move it from, which is not a failure. See the top of this module for why
+ * that one case reads differently from every other read failure.
+ */
+export async function readWarrant(path: string, options: ReadOptions): Promise<Warrant | null> {
   let source: string;
   try {
     source = await readFile(path, "utf8");
   } catch (error) {
+    if (path === options.defaultPath && isNotFound(error)) return null;
+
     const reason = error instanceof Error ? error.message : String(error);
     // Named as a missing authority rather than as a missing file, because that
     // is what it means. Deleting the warrant is the supported way to withdraw
     // what Reeve may do, and a run that read the absence as "no restrictions"
-    // would make deletion the widest setting available.
+    // would make deletion the widest setting available. This still applies in
+    // full to a path a consumer chose themselves: naming a file that is not
+    // there is a configuration mistake, not the silence the default path gets
+    // the benefit of.
     throw new Error(
       `warrant: \`${path}\` could not be read, so this run has no authority — ${reason}. ` +
         "Write one, or point `warrant` at where yours lives.",
@@ -110,6 +174,13 @@ export async function readWarrant(path: string): Promise<Warrant> {
     );
   }
   return parseWarrant(path, source);
+}
+
+/** Whether a `readFile` failure means "not there" rather than something else worth failing over. */
+function isNotFound(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
 }
 
 export function parseWarrant(path: string, source: string): Warrant {
@@ -125,7 +196,7 @@ export function parseWarrant(path: string, source: string): Warrant {
   }
 
   const labels = readLabels(path, document.labels);
-  const capabilities = readCapabilities(path, document.capabilities);
+  const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
   // than being resolved against a partly-built map.
@@ -146,7 +217,8 @@ export function parseWarrant(path: string, source: string): Warrant {
   return {
     path,
     labels,
-    granted: (duty, fallback) => capabilities.get(duty) ?? fallback,
+    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
   };
 }
@@ -177,6 +249,78 @@ export function checkLabelsExist(warrant: Warrant, existing: readonly string[]):
       `this repository does not have — ${missing.map((name) => `\`${name}\``).join(", ")}. ` +
       "Create them, or correct the taxonomy.",
   );
+}
+
+/** What `implicitWarrant` reads from each label. Any hosting platform's own shape satisfies it. */
+export interface RepositoryLabel {
+  readonly name: string;
+  /** What the maintainers wrote for it, or `null` when they wrote nothing. */
+  readonly description: string | null;
+}
+
+/** What building the implicit warrant produced, and what it left out along the way. */
+export interface Implicit {
+  readonly warrant: Warrant;
+  /**
+   * Labels this repository has that carry no description on GitHub, and so
+   * were left out of the taxonomy this call built. A name alone gives a model
+   * nothing to match a thread against honestly, and offering one anyway would
+   * be pretending a taxonomy exists where only a label does.
+   */
+  readonly excluded: readonly string[];
+}
+
+/**
+ * The warrant a repository runs under when it has written none.
+ *
+ * Built rather than read, from exactly the labels this repository already
+ * has and exactly the descriptions its maintainers already wrote for them —
+ * a taxonomy that existed the whole time without anybody calling it one. It
+ * is deliberately thin: `not`, `examples`, `owner` and `exclusive_with` are
+ * things only a written warrant can say, because none of them can be
+ * recovered honestly from a label alone.
+ *
+ * No `capabilities:` block was ever written, because there is no file, so
+ * `granted` hands back whatever `fallback` the caller offers — which is what
+ * every duty already reaches for when a warrant is silent about it, and here
+ * is the whole reason this function does not need to know a single duty's
+ * name to build the narrowest authority for all of them.
+ */
+export function implicitWarrant(
+  path: string,
+  repositoryLabels: readonly RepositoryLabel[],
+): Implicit {
+  const labels: Label[] = [];
+  const excluded: string[] = [];
+
+  for (const label of repositoryLabels) {
+    const description = label.description?.trim() ?? "";
+    if (description.length === 0) {
+      excluded.push(label.name);
+      continue;
+    }
+    labels.push({
+      name: label.name,
+      description,
+      not: null,
+      examples: [],
+      owner: null,
+      exclusiveWith: [],
+    });
+  }
+
+  const byName = new Map(labels.map((label) => [label.name, label]));
+
+  return {
+    warrant: {
+      path,
+      labels,
+      granted: (_duty, fallback) => fallback,
+      unnamed: () => false,
+      labelNamed: (name) => byName.get(name),
+    },
+    excluded,
+  };
 }
 
 /** The document, or a parse error that says where in the file it is. */
@@ -258,6 +402,19 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
   return labels;
 }
 
+/** Whether the block existed at all, and what it named if it did. */
+interface Capabilities {
+  /**
+   * True the moment `capabilities:` is present in the file, even as an empty
+   * mapping — `declared` is about whether the question was asked, not about
+   * how it was answered. `granted`'s fallback behaviour, and `unnamed`'s
+   * whole existence, both turn on this rather than on whether any duty in
+   * particular was named.
+   */
+  readonly declared: boolean;
+  readonly granted: ReadonlyMap<string, readonly Capability[]>;
+}
+
 /**
  * The capability block: which duty may do what.
  *
@@ -265,9 +422,9 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
  * an empty list is the shape a half-finished edit leaves behind, and reading it
  * as "grant nothing" would make a mistake indistinguishable from a decision.
  */
-function readCapabilities(path: string, raw: unknown): ReadonlyMap<string, readonly Capability[]> {
+function readCapabilities(path: string, raw: unknown): Capabilities {
   const granted = new Map<string, readonly Capability[]>();
-  if (raw === undefined || raw === null) return granted;
+  if (raw === undefined || raw === null) return { declared: false, granted };
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
       `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, ` +
@@ -304,7 +461,7 @@ function readCapabilities(path: string, raw: unknown): ReadonlyMap<string, reado
     granted.set(duty, permitted);
   }
 
-  return granted;
+  return { declared: true, granted };
 }
 
 /** A required or optional string field, trimmed. Absent optional fields are empty. */
