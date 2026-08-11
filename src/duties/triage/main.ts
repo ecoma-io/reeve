@@ -70,12 +70,11 @@ import {
   listRepositoryLabels,
   readStanding,
   type Effects,
-  type Location,
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
 import { counted, fraction, readShared, whole } from "../../core/inputs.js";
-import { parseLanguages, type Language } from "../../core/languages.js";
+import { type Language } from "../../core/languages.js";
 import { createMemory, readStore } from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
 import {
@@ -92,8 +91,10 @@ import { screen } from "../../core/screen.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
-  implicitWarrant,
   readWarrant,
+  resolveAuthority,
+  resolveLanguages,
+  type Authority,
   type Capability,
   type Warrant,
 } from "../../core/warrant.js";
@@ -159,7 +160,13 @@ interface Settings {
   readonly limit: number;
 }
 
-function readSettings(): Settings {
+/**
+ * Everything but `languages`, which cannot be read here: whether the warrant
+ * or the input answers it is a question only `resolveAuthority`'s result can
+ * settle, and that read is async while every other input here is not. `run`
+ * completes the object once the warrant has been read.
+ */
+function readSettings(): Omit<Settings, "languages"> {
   const shared = readShared();
   const cheap = parseModels(core.getInput("screen-models"));
 
@@ -167,7 +174,6 @@ function readSettings(): Settings {
     ...shared,
     screenModels: cheap.models,
     screenNames: cheap.names,
-    languages: parseLanguages(core.getInput("languages", { required: true })),
     warrant: core.getInput("warrant", { required: true }),
     apply: parseApply(core.getInput("apply", { required: true })),
     confidence: fraction("confidence", core.getInput("confidence")),
@@ -215,34 +221,6 @@ interface Outcome {
    * produces — this is specifically the reason nothing was ever attempted.
    */
   readonly ungranted: string | null;
-}
-
-/** What `readWarrant` returned, turned into the warrant this run actually acts under. */
-interface Authority {
-  readonly warrant: Warrant;
-  readonly implicit: boolean;
-  readonly excludedLabels: readonly string[];
-}
-
-/**
- * The real warrant when there was one to read, or the implicit one built from
- * this repository's own labels when there was not.
- *
- * The single point where "absent at the default path" turns from a fact about
- * a file into a fact about what this duty may do — everything past this
- * function treats `Authority.warrant` as *the* warrant, written or not.
- */
-async function resolveAuthority(
-  read: Warrant | null,
-  path: string,
-  api: TrackerApi,
-  at: Pick<Location, "owner" | "repo">,
-): Promise<Authority> {
-  if (read !== null) return { warrant: read, implicit: false, excludedLabels: [] };
-
-  const repositoryLabels = await listRepositoryLabels(api, at);
-  const built = implicitWarrant(path, repositoryLabels);
-  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
 
 /** What a run that touched nothing did. Also what every dry run reports. */
@@ -366,9 +344,9 @@ export async function run(): Promise<void> {
   let bulk: SweepAccumulator | null = null;
 
   try {
-    settings = readSettings();
-    const api = getOctokit(settings.token);
-    const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
+    const base = readSettings();
+    const api = getOctokit(base.token);
+    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
 
     const stages: Stages = {
       detect: metered(provider, meter, "detect"),
@@ -381,8 +359,22 @@ export async function run(): Promise<void> {
     // — but a file that is simply not there, at the path nobody moved it from,
     // is not that failure. `resolveAuthority` is what turns that absence into
     // the implicit warrant rather than an error.
-    const read = await readWarrant(settings.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, settings.warrant, api, context.repo);
+    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
+    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+
+    // Only now, because whether the warrant or the input answers this is the
+    // authority's to decide — and once it does, `languages` is complete and
+    // `settings` can become the object every stage below already expects.
+    // Except when the same authority already denied this duty outright — that
+    // run is promised a green no-op, and red-failing it over a `languages`
+    // nobody configured would fail it over configuration it was never going
+    // to use.
+    const denied = authority.warrant.unnamed("triage");
+    const resolution = denied
+      ? null
+      : resolveLanguages(authority.warrant, core.getInput("languages"));
+    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
 
     if (settings.sweep) {
       bulk = newAccumulator();

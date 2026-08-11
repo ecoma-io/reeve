@@ -26,11 +26,10 @@ way, in the same file, for as long as you use Reeve.
 
 **Level 0 is [Stage 1](../north-star.md#7-roadmap), landed: an absent warrant
 is an implicit authority, not a failed run.** The corrected reading of the
-`capabilities:` block above is [Stage 3](../north-star.md#7-roadmap) work,
-not yet built. Until Stage 3, a duty left out of an already-written
-`capabilities:` block still quietly keeps its own default rather than being
-granted nothing — [the capabilities reference below](#capabilities) says
-where that gap is today.
+`capabilities:` block above is [Stage 3](../north-star.md#7-roadmap), also
+landed: a duty left out of an already-written `capabilities:` block is
+granted nothing at all, not its old default — [the capabilities reference
+below](#capabilities) is where that is spelled out in full.
 
 ## Why this is a file and not a setting
 
@@ -77,6 +76,14 @@ version: 1
 capabilities:
   triage: [label]
   translate: [edit-body]
+
+# What to translate into. Optional — leave it out and the `languages` input
+# on each duty answers this instead, exactly as it always has. Written here,
+# it is the whole answer: the input is ignored, and the run says so once.
+languages:
+  - en
+  - vi
+  - zh
 
 labels:
   - name: bug
@@ -170,12 +177,12 @@ at all.
 no `capabilities:` block exists at all** — that is level 1 of
 [the ladder](../north-star.md#3-the-ladder), and a taxonomy-only warrant stays
 there for as long as that is all you want. Write a `capabilities:` block at
-all, though, and enumeration is meant to become total: a duty you left out of
-it is granted nothing, not its old default, because naming who may act is
-supposed to be the whole answer once you start. **This is
-[Stage 3](../north-star.md#7-roadmap) work, not yet built.** Today, a duty
-left out of an already-written block still quietly keeps its default — write
-every duty you use into the block once one exists, and do not lean on the gap.
+all, though, and enumeration becomes total: a duty you left out of it is
+granted nothing, not its old default, because naming who may act is the whole
+answer once you start. **This is [Stage 3](../north-star.md#7-roadmap),
+landed.** A duty left out of an already-written block runs, decides nothing,
+and says so in its own run report — write every duty you use into the block
+once one exists.
 
 **The default is the capability whose failure is cheapest, and nothing else.**
 Labels-only for triage is not caution for its own sake — it is where the projects
@@ -195,6 +202,39 @@ can never widen it.
 **`none` is not `dry-run`.** `none` is a permanent configuration for a repository
 that consumes the outputs itself and does its own applying. `dry-run` is a
 rehearsal. They differ in intent, and outputs let a workflow tell them apart.
+
+## Languages
+
+`languages:` is optional, and it moves one more thing off the workflow and
+into the file that is reviewed like code:
+
+```yaml
+languages:
+  - en
+  - vi
+  - "zh-Hans:简体中文:Hans"
+```
+
+The grammar is the same one the `languages` input has always used — a bare
+code, or a spelled-out `code:Label:Script` with `+` between scripts for a
+language written in several — because this is the same list read from a
+different place, not a second format to learn. One YAML element is one entry,
+so a label with a comma in it needs no special care here, where the input's
+one-line form would read that comma as a separator. See
+[Languages](languages.md) for the full grammar and how detection uses it.
+
+**Written here, it is the whole answer.** Once `languages:` exists in the
+warrant, the `languages` input on `translate` and `triage` is not consulted
+at all — not blended with it, not a fallback for anything it left out — and
+the run says so once, naming both the file and the input, rather than
+silently picking one. Leave the key out and nothing changes: the input
+answers the question exactly as it always has. Writing the key with nothing
+under it is refused rather than read as leaving it out — an unfinished edit
+should fail loudly, not quietly hand the answer back to the input.
+
+An implicit warrant — no file at the default path — carries no languages of
+its own, for the same reason it carries no capabilities of its own: there is
+nothing written down to read. The input answers the question there too.
 
 ## What no capability can ever turn on
 

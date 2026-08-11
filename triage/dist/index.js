@@ -27580,6 +27580,9 @@ function error(message, properties = {}) {
 function warning(message, properties = {}) {
   issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+function notice(message, properties = {}) {
+  issueCommand("notice", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
 function info(message) {
   process.stdout.write(message + os4.EOL);
 }
@@ -32346,7 +32349,7 @@ function parseList(raw) {
 
 // src/core/languages.ts
 function parseLanguages(raw) {
-  const entries = parseList(raw);
+  const entries = typeof raw === "string" ? parseList(raw) : raw;
   if (entries.length === 0) {
     throw new Error("languages: no entries. Expected at least one language code.");
   }
@@ -32818,6 +32821,98 @@ function residue(text2) {
 // src/core/warrant.ts
 var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
+
+// src/core/forge.ts
+async function readStanding(api, at) {
+  const { data } = await api.rest.issues.get({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number
+  });
+  return {
+    title: data.title ?? "",
+    body: data.body ?? "",
+    // The REST API returns a label as an object, and as a bare string when the
+    // request asked for it that way. Both shapes are documented, so both are
+    // read rather than one being assumed and the other becoming an empty list
+    // that silently makes every guardrail think the thread is unlabelled.
+    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+    closed: data.state === "closed"
+  };
+}
+var LABEL_PAGE = 100;
+var LABEL_PAGES = 10;
+async function listRepositoryLabels(api, at) {
+  const labels = [];
+  for (let page2 = 1; page2 <= LABEL_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listLabelsForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      per_page: LABEL_PAGE,
+      page: page2
+    });
+    labels.push(
+      ...data.map((label) => ({ name: label.name, description: label.description ?? null }))
+    );
+    if (data.length < LABEL_PAGE) break;
+  }
+  return labels;
+}
+var SWEEP_PAGE = 100;
+var SWEEP_PAGES = 10;
+async function listOpenThreads(api, at, since) {
+  const listed = [];
+  for (let page2 = 1; page2 <= SWEEP_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      sort: "created",
+      direction: "desc",
+      per_page: SWEEP_PAGE,
+      page: page2
+    });
+    let stop = false;
+    for (const entry of data) {
+      const createdAt = new Date(entry.created_at);
+      if (since !== null && createdAt < since) {
+        stop = true;
+        break;
+      }
+      listed.push({
+        number: entry.number,
+        title: entry.title ?? "",
+        body: entry.body ?? "",
+        labels: (entry.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+        createdAt,
+        isPullRequest: entry.pull_request !== void 0
+      });
+    }
+    if (stop || data.length < SWEEP_PAGE) break;
+  }
+  return listed;
+}
+function createEffects(api, at) {
+  const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
+  return {
+    async addLabels(names) {
+      if (names.length === 0) return;
+      await api.rest.issues.addLabels({ ...issue2, labels: [...names] });
+    },
+    async comment(body) {
+      await api.rest.issues.createComment({ ...issue2, body });
+    },
+    async assign(users) {
+      if (users.length === 0) return;
+      await api.rest.issues.addAssignees({ ...issue2, assignees: [...users] });
+    },
+    async closeAsNotPlanned() {
+      await api.rest.issues.update({ ...issue2, state: "closed", state_reason: "not_planned" });
+    }
+  };
+}
+
+// src/core/warrant.ts
 var CAPABILITIES = [
   "label",
   "edit-body",
@@ -32853,6 +32948,7 @@ function parseWarrant(path, source) {
     );
   }
   const labels = readLabels(path, document2.labels);
+  const languages = readLanguages(path, document2.languages);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -32868,6 +32964,7 @@ function parseWarrant(path, source) {
   return {
     path,
     labels,
+    languages,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -32904,12 +33001,33 @@ function implicitWarrant(path, repositoryLabels) {
     warrant: {
       path,
       labels,
+      languages: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
     },
     excluded
   };
+}
+async function resolveAuthority(read2, path, api, at) {
+  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
+  const repositoryLabels = await listRepositoryLabels(api, at);
+  const built = implicitWarrant(path, repositoryLabels);
+  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
+function resolveLanguages(warrant, rawInput) {
+  if (warrant.languages !== null) {
+    return {
+      languages: warrant.languages,
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
+    };
+  }
+  if (rawInput.trim().length === 0) {
+    throw new Error(
+      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
+    );
+  }
+  return { languages: parseLanguages(rawInput), notice: null };
 }
 function load(path, source) {
   let document2;
@@ -32962,6 +33080,31 @@ function readLabels(path, raw) {
     });
   }
   return labels;
+}
+function readLanguages(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+    );
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
+  }
+  const entries = raw.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
+      );
+    }
+    if (entry.trim().length === 0) {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
+      );
+    }
+    return entry.trim();
+  });
+  return parseLanguages(entries);
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33118,96 +33261,6 @@ function owners(warrant, applied) {
     if (!into.includes(handle)) into.push(handle);
   }
   return { users, teams };
-}
-
-// src/core/forge.ts
-async function readStanding(api, at) {
-  const { data } = await api.rest.issues.get({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number
-  });
-  return {
-    title: data.title ?? "",
-    body: data.body ?? "",
-    // The REST API returns a label as an object, and as a bare string when the
-    // request asked for it that way. Both shapes are documented, so both are
-    // read rather than one being assumed and the other becoming an empty list
-    // that silently makes every guardrail think the thread is unlabelled.
-    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-    closed: data.state === "closed"
-  };
-}
-var LABEL_PAGE = 100;
-var LABEL_PAGES = 10;
-async function listRepositoryLabels(api, at) {
-  const labels = [];
-  for (let page2 = 1; page2 <= LABEL_PAGES; page2 += 1) {
-    const { data } = await api.rest.issues.listLabelsForRepo({
-      owner: at.owner,
-      repo: at.repo,
-      per_page: LABEL_PAGE,
-      page: page2
-    });
-    labels.push(
-      ...data.map((label) => ({ name: label.name, description: label.description ?? null }))
-    );
-    if (data.length < LABEL_PAGE) break;
-  }
-  return labels;
-}
-var SWEEP_PAGE = 100;
-var SWEEP_PAGES = 10;
-async function listOpenThreads(api, at, since) {
-  const listed = [];
-  for (let page2 = 1; page2 <= SWEEP_PAGES; page2 += 1) {
-    const { data } = await api.rest.issues.listForRepo({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      sort: "created",
-      direction: "desc",
-      per_page: SWEEP_PAGE,
-      page: page2
-    });
-    let stop = false;
-    for (const entry of data) {
-      const createdAt = new Date(entry.created_at);
-      if (since !== null && createdAt < since) {
-        stop = true;
-        break;
-      }
-      listed.push({
-        number: entry.number,
-        title: entry.title ?? "",
-        body: entry.body ?? "",
-        labels: (entry.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-        createdAt,
-        isPullRequest: entry.pull_request !== void 0
-      });
-    }
-    if (stop || data.length < SWEEP_PAGE) break;
-  }
-  return listed;
-}
-function createEffects(api, at) {
-  const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
-  return {
-    async addLabels(names) {
-      if (names.length === 0) return;
-      await api.rest.issues.addLabels({ ...issue2, labels: [...names] });
-    },
-    async comment(body) {
-      await api.rest.issues.createComment({ ...issue2, body });
-    },
-    async assign(users) {
-      if (users.length === 0) return;
-      await api.rest.issues.addAssignees({ ...issue2, assignees: [...users] });
-    },
-    async closeAsNotPlanned() {
-      await api.rest.issues.update({ ...issue2, state: "closed", state_reason: "not_planned" });
-    }
-  };
 }
 
 // src/core/inputs.ts
@@ -33928,7 +33981,6 @@ function readSettings() {
     ...shared,
     screenModels: cheap.models,
     screenNames: cheap.names,
-    languages: parseLanguages(getInput("languages", { required: true })),
     warrant: getInput("warrant", { required: true }),
     apply: parseApply(getInput("apply", { required: true })),
     confidence: fraction("confidence", getInput("confidence")),
@@ -33937,12 +33989,6 @@ function readSettings() {
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
     maxBodyChars: whole("max-body-chars", getInput("max-body-chars"))
   };
-}
-async function resolveAuthority(read2, path, api, at) {
-  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
-  const repositoryLabels = await listRepositoryLabels(api, at);
-  const built = implicitWarrant(path, repositoryLabels);
-  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 function newAccumulator() {
@@ -34003,16 +34049,20 @@ async function run() {
   let single = null;
   let bulk = null;
   try {
-    settings = readSettings();
-    const api = getOctokit(settings.token);
-    const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
+    const base = readSettings();
+    const api = getOctokit(base.token);
+    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
     const stages = {
       detect: metered(provider, meter, "detect"),
       screen: metered(provider, meter, "screen"),
       triage: metered(provider, meter, "triage")
     };
-    const read2 = await readWarrant(settings.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority2 = await resolveAuthority(read2, settings.warrant, api, context2.repo);
+    const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
+    const authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
+    const denied = authority2.warrant.unnamed("triage");
+    const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
+    if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
+    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority2, settings, stages, weather);

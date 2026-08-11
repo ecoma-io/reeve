@@ -71,8 +71,30 @@ inputs:
 
       This says nothing about what an author may write in. The language the
       thread was written in is detected and left out of its own translation.
+
+      Ignored once `warrant`'s own `languages:` key is written — the file is
+      the whole answer from there, and the run says once which of the two it
+      read.
     required: false
     default: en, vi, zh
+
+  warrant:
+    description: >-
+      Where the permissions live. `edit-body` is this duty's whole capability,
+      granted by default — and once a `capabilities:` block is written in this
+      file, the enumeration is total: leaving `translate` out of it grants this
+      duty nothing, and the run says so rather than guessing. It may also carry
+      a `languages:` key, which becomes the whole answer for what to translate
+      into once it is written — see `languages` above.
+
+      Missing at this default path, there is no failure: the run keeps its
+      defaults, exactly as if the file had granted them explicitly. Point this
+      at a path of your own instead, and a file missing there fails the run
+      red, because naming a file that is not there is a configuration mistake
+      rather than an absence. A file that exists but does not parse always
+      fails red, wherever it lives.
+    required: false
+    default: .github/reeve.yml
 
   drafts:
     description: >-

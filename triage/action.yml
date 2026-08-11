@@ -84,6 +84,10 @@ inputs:
 
       The verdict prompt is told what it is reading rather than left to infer
       it, which is the whole reason this is configured here.
+
+      Ignored once `warrant`'s own `languages:` key is written — the file is
+      the whole answer from there, and the run says once which of the two it
+      read.
     required: false
     default: en, vi, zh
 
@@ -92,7 +96,9 @@ inputs:
       Where the taxonomy and the permissions live. Every label this duty may
       apply is named in this file, in your own words, with the cases it does not
       cover — and every effect is checked against the parsed file rather than
-      against the model's account of what it was allowed to do.
+      against the model's account of what it was allowed to do. It may also
+      carry a `languages:` key, which becomes the whole answer for detection
+      once it is written — see `languages` above.
 
       Missing at this default path, there is no failure: the run acts at the
       narrowest authority this duty knows — labelling only, from this

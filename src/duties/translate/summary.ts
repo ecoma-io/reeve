@@ -41,14 +41,62 @@ export interface Run {
   /** What to call a drafting model, and what to call a judge seat. */
   readonly modelNames: Names;
   readonly judgeNames: Names;
+  /** Where the warrant was read from, named in the two notes below. */
+  readonly warrant: string;
+  /** True when no warrant file existed and this ran on its own defaults. */
+  readonly implicit: boolean;
+  /**
+   * Why nothing was translated, when a written `capabilities:` block simply
+   * does not name this duty. `null` on every ordinary run, including one that
+   * translated nothing for a reason of its own.
+   */
+  readonly ungranted: string | null;
+}
+
+/**
+ * The one sentence an implicit warrant earns here.
+ *
+ * Deliberately not triage's "narrowest authority... labels only" sentence —
+ * that is about a taxonomy built from label descriptions, and translate has
+ * no taxonomy to narrow. What is true for translate is smaller: there was no
+ * file, so nothing changed from what `edit-body` and the `languages` input
+ * already gave it.
+ */
+function authority(run: Run): string {
+  return (
+    `No \`${run.warrant}\` — this duty found no warrant file, and ran on its own ` +
+    "defaults (`edit-body`, and whatever `languages` was configured)."
+  );
 }
 
 export function summarize(run: Run): string {
+  if (run.ungranted !== null) {
+    const parts = [
+      `## Reeve · translate`,
+      "",
+      `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was written" : ""}.`,
+      "",
+      run.ungranted,
+      "",
+      "No model was asked anything. This is a real answer rather than a failure.",
+      "",
+      // The same three-part report every other run writes — `cost` renders an
+      // empty spend as the explicit "every decision was made by code" line,
+      // which is this page's whole story, and the sweep's ungranted page
+      // already says it this way.
+      cost(run.spent, (spend) =>
+        shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model),
+      ),
+    ];
+    return `${parts.join("\n").trimEnd()}\n`;
+  }
+
   const parts = [
     `## Reeve · translate`,
     "",
     `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was written" : ""}.`,
     "",
+    ...(run.implicit ? [authority(run), ""] : []),
     translations(run.looked),
     "",
     cost(run.spent, (spend) =>
@@ -142,6 +190,14 @@ export interface SweepRun {
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly judgeNames: Names;
+  /** Where the warrant was read from — named only in the `ungranted` message below. */
+  readonly warrant: string;
+  /**
+   * Why the sweep never looked at the backlog at all, when a written
+   * `capabilities:` block does not name this duty. Checked once, before the
+   * listing — see `runSweep`.
+   */
+  readonly ungranted: string | null;
 }
 
 /**
@@ -153,6 +209,17 @@ export interface SweepRun {
  * being told where to resume.
  */
 export function summarizeSweep(run: SweepRun): string {
+  if (run.ungranted !== null) {
+    const parts = [
+      "## Reeve · translate — sweep",
+      "",
+      run.ungranted,
+      "",
+      cost(run.spent, () => ""),
+    ];
+    return `${parts.join("\n").trimEnd()}\n`;
+  }
+
   const rows = run.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
   const rendered = table(["Thread", "Outcome"], rows);
 

@@ -52,12 +52,18 @@ export interface Language {
  * accepted as a separator because one-line configuration is common, and a
  * quoting syntax would be a parser nobody asked for.
  *
+ * A caller holding entries that are already split — the warrant's `languages:`
+ * key, where YAML made one list element one entry — passes them as an array,
+ * and no separator is looked for inside them at all: a comma in a spelled-out
+ * label stays part of the label there, where this one-line grammar would have
+ * read it as two entries.
+ *
  * @throws Error naming the offending entry. Every problem here is a typo in a
  * workflow file, and a run that continues past one silently translates into a
  * language the author did not ask for.
  */
-export function parseLanguages(raw: string): Language[] {
-  const entries = parseList(raw);
+export function parseLanguages(raw: string | readonly string[]): Language[] {
+  const entries = typeof raw === "string" ? parseList(raw) : raw;
 
   if (entries.length === 0) {
     throw new Error("languages: no entries. Expected at least one language code.");

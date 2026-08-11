@@ -56,6 +56,20 @@ entirely when your candidates already separate, and it is how a draft that came
 back in the language it was supposed to leave gets thrown out before anything
 ranks it.
 
+### Where this lives: the input, or the warrant
+
+The `languages` input above is [level 0 or level 1](../north-star.md#3-the-ladder)
+of the ladder — nothing written down beyond the workflow itself, and it works
+exactly as this page describes for as long as that is all you configure.
+
+[The warrant](warrant.md) can carry the same list under its own `languages:`
+key instead, using the identical grammar — bare codes, or `code:Label:Script`
+spelled out. **Once that key is written, it is the whole answer:** the
+`languages` input is not consulted at all, and the run says so once, naming
+both places, rather than quietly picking one. Leave the key out of the file
+and nothing changes — the input answers the question exactly as it always
+has, whether or not a warrant exists at all.
+
 ## How detection works, and what it costs
 
 Four steps, and most threads stop at the second.
