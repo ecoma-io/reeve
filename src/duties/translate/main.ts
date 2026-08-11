@@ -6,23 +6,34 @@
  * with every other duty — and the only judgement made here is the order they run
  * in and what a failure at each step means for the run:
  *
- *   1. Read the thread, and keep only the author's half of the body — anything
+ *   1. Read the warrant — or, missing one at the default path, build the
+ *      implicit warrant the same way triage does. `languages` comes from
+ *      whichever of the warrant's own `languages:` key and the `languages`
+ *      input answers it, the file winning outright when it has an opinion.
+ *   1a. A written `capabilities:` block that does not name `translate` is
+ *      checked here, once, before a single thread is read — sweep or not,
+ *      exactly as triage's own enumeration is total. Nothing below this line
+ *      runs; the summary says why, and the run is green.
+ *   2. Read the thread, and keep only the author's half of the body — anything
  *      below the marker is this duty's own output, not a source.
- *   2. Stop when there is nothing to translate — an empty body, or text with no
+ *   3. Stop when there is nothing to translate — an empty body, or text with no
  *      prose in it at all — and stop when the fingerprint of that half and the
  *      target languages matches what is already published. This is what makes an
  *      edit-triggered rerun free, and it is what stops the loop that writing into
  *      the body creates.
- *   3. Truncate to `max-body-chars`, and remember that the block has to say so.
- *   4. Detect the source language — script, then profile, then a model, and
+ *   4. Truncate to `max-body-chars`, and remember that the block has to say so.
+ *   5. Detect the source language — script, then profile, then a model, and
  *      `null` is a real answer meaning none of the configured languages wrote
  *      it.
- *   5. Translate into every configured language except the one it came from.
- *   6. Let the panel pick between the drafts the score admitted.
- *   7. Append the translations to the body, under the marker.
- *   8. When `translate-replies` is on, do all of the above again per reply.
+ *   6. Translate into every configured language except the one it came from.
+ *   7. Let the panel pick between the drafts the score admitted.
+ *   8. Append the translations to the body, under the marker — unless the
+ *      warrant's `capabilities:` block was written without granting
+ *      `edit-body`, in which case every step up to here still ran and only
+ *      the write is withheld.
+ *   9. When `translate-replies` is on, do all of the above again per reply.
  *
- * **Steps 1–7 are one function, run once per text.** A reply has an author, a
+ * **Steps 2–8 are one function, run once per text.** A reply has an author, a
  * body, and a reader who needs it in their language, so it gets the same
  * treatment rather than a cheaper one — including its own fingerprint, which is
  * what keeps a hundred-reply backfill from re-spending anything on the
@@ -54,7 +65,7 @@ import {
   type Thread,
 } from "../../core/forge.js";
 import { readShared, whole } from "../../core/inputs.js";
-import { parseLanguages, type Language } from "../../core/languages.js";
+import { type Language } from "../../core/languages.js";
 import {
   createProvider,
   createWeather,
@@ -68,6 +79,14 @@ import {
 import { assemble, publish } from "../../core/publish.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { writeSummary } from "../../core/summary.js";
+import {
+  readWarrant,
+  resolveAuthority,
+  resolveLanguages,
+  type Authority,
+  type Capability,
+  type Warrant,
+} from "../../core/warrant.js";
 
 import { translate } from "./draft.js";
 import { judge } from "./judge.js";
@@ -81,6 +100,22 @@ import {
   type Translated,
 } from "./publish.js";
 
+/**
+ * What this duty may do when the warrant says nothing about it.
+ *
+ * `edit-body` and nothing else — it is the only thing this duty has ever
+ * done, and the default belongs here rather than in the warrant reader
+ * because only this duty knows that editing the body is the whole of its
+ * work.
+ */
+const DEFAULT_CAPABILITIES: readonly Capability[] = ["edit-body"];
+
+/**
+ * `warrant`'s own default in `action.yml`, repeated here rather than read
+ * back out of it — see triage's identical constant for why.
+ */
+const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+
 interface Settings {
   readonly token: string;
   /** The thread to work on, or null in `sweep`. */
@@ -89,6 +124,9 @@ interface Settings {
   /** What to call each of them, keyed by model id. */
   readonly modelNames: Names;
   readonly languages: readonly Language[];
+  readonly warrant: string;
+  /** What the warrant grants this duty. Checked once per run, not per text. */
+  readonly permitted: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   /** What to call each seat, keyed by every model that seat may be filled by. */
   readonly judgeNames: Names;
@@ -112,14 +150,18 @@ interface Settings {
  * this duty's own, and every problem it throws on is a typo in a workflow file:
  * a run that continued past one would translate into a language nobody asked for
  * or spend a provider's budget on a number that was never a number.
+ *
+ * `languages` and `permitted` are missing from what this returns. Both need
+ * the warrant, and reading the warrant is async while every other input here
+ * is not — `run` completes the object once `resolveAuthority` has answered.
  */
-function readSettings(): Settings {
+function readSettings(): Omit<Settings, "languages" | "permitted"> {
   const shared = readShared();
   const panel = parseSeats(core.getInput("judge-models"));
 
   return {
     ...shared,
-    languages: parseLanguages(core.getInput("languages", { required: true })),
+    warrant: core.getInput("warrant", { required: true }),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
@@ -407,6 +449,21 @@ async function translateText(
     return { what, from: detection.language, posted, skipped, note: null, published: false };
   }
 
+  // Guarded here and nowhere earlier: detection, drafting and judging all ran
+  // and all spent whatever they were going to spend, exactly as they would
+  // under an `apply: none` narrowing in triage — a capability the warrant
+  // withheld is a reason not to write, not a reason not to have decided.
+  if (!settings.permitted.includes("edit-body")) {
+    if (posted.length > 0) {
+      core.warning(
+        `${what}: \`${settings.warrant}\` does not grant \`edit-body\` to translate, so ` +
+          `${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} ` +
+          `drafted this run ${posted.length === 1 ? "was" : "were"} not published.`,
+      );
+    }
+    return { what, from: detection.language, posted: [], skipped, note: null, published: false };
+  }
+
   const outcome = await publish(thread, marker, publication(translated));
   core.info(
     outcome.action === "none"
@@ -480,6 +537,13 @@ interface ThreadResult {
   readonly looked: readonly Looked[];
   readonly translated: Report;
   readonly replies: number;
+  /**
+   * Why this duty was granted nothing, when a written `capabilities:` block
+   * simply does not name it — `null` on every path that reached `decide`'s
+   * translate equivalent at all, including one that translated nothing for
+   * an ordinary reason.
+   */
+  readonly ungranted: string | null;
 }
 
 async function processThread(
@@ -505,7 +569,23 @@ async function processThread(
     ? await translateReplies(api, at, settings, stages, looked, weather)
     : 0;
 
-  return { looked, translated, replies };
+  return { looked, translated, replies, ungranted: null };
+}
+
+/**
+ * The outcome of a run this duty was never going to be allowed to act on.
+ *
+ * Green, not red — enumerating who may act is a maintainer's decision, and a
+ * name the enumeration left out is a decision too, just not one that grants
+ * anything. Nothing here reached `translateText`, which is the entire point:
+ * this is reached instead of it, not by it, so it costs nothing to produce.
+ */
+function notGranted(warrant: Warrant): string {
+  return (
+    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`translate\`; once that block ` +
+    "exists it is the whole answer, so add `translate: [edit-body]` to it (or remove the block " +
+    "to return to defaults)."
+  );
 }
 
 /**
@@ -521,10 +601,12 @@ interface SweepAccumulator {
   skipped: number;
   starvedRun: boolean;
   candidates: number;
+  /** Set once, before the listing, when the warrant never named this duty at all. */
+  ungranted: string | null;
 }
 
 function newAccumulator(): SweepAccumulator {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0 };
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
 }
 
 /** Candidates neither processed nor skipped — what a next sweep still has to look at. */
@@ -567,10 +649,19 @@ function describeOutcome(result: ThreadResult): string {
 async function runSweep(
   acc: SweepAccumulator,
   api: ReturnType<typeof getOctokit>,
+  authority: Authority,
   settings: Settings,
   stages: Stages,
   weather: Weather,
 ): Promise<void> {
+  // Once, before the listing — exactly as triage's sweep — because the warrant
+  // is checked once per run, not once per thread, and a listing this duty was
+  // never going to act on is a request worth not making at all.
+  if (authority.warrant.unnamed("translate")) {
+    acc.ungranted = notGranted(authority.warrant);
+    return;
+  }
+
   const listed = await listOpenThreads(api, context.repo, settings.since);
   acc.candidates = listed.length;
 
@@ -607,13 +698,14 @@ export async function run(): Promise<void> {
   const meter = createMeter();
   const weather = createWeather();
   let settings: Settings | null = null;
+  let authority: Authority | null = null;
   let single: { readonly number: number; readonly result: ThreadResult } | null = null;
   let bulk: SweepAccumulator | null = null;
 
   try {
-    settings = readSettings();
-    const api = getOctokit(settings.token);
-    const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
+    const base = readSettings();
+    const api = getOctokit(base.token);
+    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
 
     const stages: Stages = {
       detect: metered(provider, meter, "detect"),
@@ -621,9 +713,24 @@ export async function run(): Promise<void> {
       judge: metered(provider, meter, "judge"),
     };
 
+    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
+    authority = await resolveAuthority(read, base.warrant, api, context.repo);
+
+    // Only now, for the same reason triage waits: whether the warrant or the
+    // input answers `languages` is the authority's to decide, and only once it
+    // has can `settings` become the object every stage below already expects.
+    const resolution = resolveLanguages(authority.warrant, core.getInput("languages"));
+    if (resolution.notice !== null) core.notice(resolution.notice);
+
+    settings = {
+      ...base,
+      languages: resolution.languages,
+      permitted: authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
+    };
+
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, settings, stages, weather);
+      await runSweep(bulk, api, authority, settings, stages, weather);
     } else {
       const number = settings.number;
       // `readShared` refuses `sweep` combined with `number`, but a bare
@@ -631,8 +738,30 @@ export async function run(): Promise<void> {
       // the one place that has to become certain of it.
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context.repo, number };
-      const body = await createThread(api, at).read();
-      const result = await processThread(api, at, body, settings, stages, weather);
+
+      // The same once-before-anything-else short-circuit as `runSweep`'s,
+      // reached here instead for the single thread this run named — a thread
+      // this duty was never going to be allowed to touch is not worth a
+      // request to read it.
+      let result: ThreadResult;
+      if (authority.warrant.unnamed("translate")) {
+        result = {
+          looked: [],
+          translated: {
+            what: `#${String(number)}`,
+            from: null,
+            posted: [],
+            skipped: [],
+            note: null,
+            published: false,
+          },
+          replies: 0,
+          ungranted: notGranted(authority.warrant),
+        };
+      } else {
+        const body = await createThread(api, at).read();
+        result = await processThread(api, at, body, settings, stages, weather);
+      }
       single = { number, result };
     }
   } catch (error) {
@@ -640,7 +769,7 @@ export async function run(): Promise<void> {
   } finally {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
-    if (settings !== null) {
+    if (settings !== null && authority !== null) {
       const rosterStarved = starved(settings.models, weather);
       if (rosterStarved) {
         core.warning(
@@ -658,7 +787,7 @@ export async function run(): Promise<void> {
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved);
-        await writeSummary(page(settings, single.number, single.result.looked, meter.spent()));
+        await writeSummary(page(settings, authority, single.number, single.result, meter.spent()));
       }
     }
   }
@@ -709,17 +838,21 @@ function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
 
 function page(
   settings: Settings,
+  authority: Authority,
   thread: number,
-  looked: readonly Looked[],
+  result: ThreadResult,
   spent: Run["spent"],
 ): string {
   return summarize({
     thread,
     dryRun: settings.dryRun,
-    looked,
+    looked: result.looked,
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,
+    warrant: settings.warrant,
+    implicit: authority.implicit,
+    ungranted: result.ungranted,
   });
 }
 
@@ -733,6 +866,8 @@ function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,
+    warrant: settings.warrant,
+    ungranted: bulk.ungranted,
   });
 }
 

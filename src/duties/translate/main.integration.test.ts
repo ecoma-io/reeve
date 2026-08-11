@@ -64,6 +64,14 @@ const STRUCTURED_ENGLISH = [
   "Details: https://example.com/docs.",
 ].join("\n");
 
+/**
+ * A warrant in the shape a maintainer writes one, granting `translate`
+ * exactly `edit-body` and nothing else — the same capability the implicit
+ * warrant hands it by default, so a case not otherwise concerned with the
+ * warrant sees the same behaviour whichever of the two it ran under.
+ */
+const WARRANT = ["version: 1", "capabilities:", "  translate: [edit-body]"].join("\n");
+
 beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
   // case driving the committed bundle would be driving whatever was committed
@@ -260,6 +268,16 @@ async function route(
     return;
   }
 
+  // This duty has no taxonomy of its own, so the only reason it ever asks for
+  // the repository's labels at all is to build the implicit warrant when no
+  // file exists — and that warrant's `granted` hands back this duty's own
+  // default regardless of what the labels say, so an empty list is the whole
+  // stub this suite ever needs here.
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/labels$/.test(path)) {
+    send(response, 200, []);
+    return;
+  }
+
   // A sweep's listing. `page` is honoured so a case could exercise pagination
   // directly, but every case in this suite fits on page one — pagination and
   // the `since` cutoff are exercised in isolation, against `listOpenThreads`
@@ -362,7 +380,7 @@ interface Run {
  * which the runner supplies and this file never sees. A case names only what it
  * changes.
  */
-function baseInputs(stub: Stub): Record<string, string> {
+function baseInputs(stub: Stub, warrant: string): Record<string, string> {
   return {
     "github-token": "stub-token",
     number: "42",
@@ -373,6 +391,7 @@ function baseInputs(stub: Stub): Record<string, string> {
     // the scripts below are read off the runtime's own CLDR data inside the
     // bundle, which is the only place the built artifact's ICU is exercised.
     languages: "en, vi",
+    warrant,
     drafts: "1",
     "judge-models": "",
     "max-body-chars": "6000",
@@ -385,12 +404,23 @@ function baseInputs(stub: Stub): Record<string, string> {
   };
 }
 
+/** The warrant a case runs against, written where the run can read it. */
+let scratch: string;
+let warrantPath: string;
+
+/**
+ * `cwd` defaults to this repository's own root, where the default warrant
+ * path resolves to the real `.github/reeve.yml` sitting there. A case about
+ * the *absence* of that file needs a working directory with no such file in
+ * it, which is what the `scratch` directory this suite already makes per
+ * case is for.
+ */
 async function runAction(
   stub: Stub,
   inputs: Record<string, string> = {},
   extra: NodeJS.ProcessEnv = {},
+  cwd: string = ROOT,
 ): Promise<Run> {
-  const scratch = await mkdtemp(join(tmpdir(), "reeve-"));
   const outputFile = join(scratch, "outputs");
   const summaryFile = join(scratch, "summary.md");
   await writeFile(outputFile, "");
@@ -405,12 +435,12 @@ async function runAction(
     GITHUB_EVENT_NAME: "issues",
     ...extra,
   };
-  for (const [name, value] of Object.entries({ ...baseInputs(stub), ...inputs })) {
+  for (const [name, value] of Object.entries({ ...baseInputs(stub, warrantPath), ...inputs })) {
     env[`INPUT_${name.toUpperCase()}`] = value;
   }
 
   const child = spawn(process.execPath, [BUNDLE], {
-    cwd: ROOT,
+    cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -423,7 +453,6 @@ async function runAction(
 
   const outputs = readOutputs(await readFile(outputFile, "utf8"));
   const summary = await readFile(summaryFile, "utf8");
-  await rm(scratch, { recursive: true, force: true });
   return { code, log, outputs, summary };
 }
 
@@ -451,10 +480,14 @@ beforeEach(async () => {
   stub = await startStub();
   stub.body = VIETNAMESE;
   stub.answer = translating({ en: ENGLISH });
+  scratch = await mkdtemp(join(tmpdir(), "reeve-translate-"));
+  warrantPath = join(scratch, "reeve.yml");
+  await writeFile(warrantPath, WARRANT);
 });
 
 afterEach(async () => {
   await stub.close();
+  await rm(scratch, { recursive: true, force: true });
 });
 
 describe("the action", () => {
@@ -1193,6 +1226,109 @@ describe("the sweep", () => {
       expect(stub.bodies.size).toBe(0);
     },
   );
+});
+
+describe("the warrant", () => {
+  it("reads languages from the warrant's own key, ignoring the input entirely", async () => {
+    // The stub only ever answers a request for English — so if the input's
+    // `zh` were consulted at all, the thread's Vietnamese body would have
+    // nothing to be translated into and this would end with no translation.
+    // The warrant's `en, vi` is the only reason it exists.
+    await writeFile(
+      warrantPath,
+      [
+        "version: 1",
+        "capabilities:",
+        "  translate: [edit-body]",
+        "languages:",
+        "  - en",
+        "  - vi",
+      ].join("\n"),
+    );
+
+    const run = await runAction(stub, { languages: "zh" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(run.log).toContain(
+      `languages: read from \`${warrantPath}\`'s \`languages:\` key, not the \`languages\` input`,
+    );
+  });
+
+  it("falls back to the languages input when the warrant never mentions the key", async () => {
+    // `WARRANT` above carries a `capabilities:` block and no `languages:` key —
+    // the ordinary shape a maintainer who has never heard of this feature
+    // still runs under, and the input answers exactly as it always has.
+    const run = await runAction(stub, { languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(run.log).not.toContain("read from");
+  });
+
+  it("fails red when neither the warrant nor the input names any language", async () => {
+    const run = await runAction(stub, { languages: "" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("languages: no language is configured");
+    expect(run.log).toContain(`Write \`languages:\` in the warrant (\`${warrantPath}\`)`);
+    expect(run.log).toContain("or set the `languages` input");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("grants translate nothing, spends no model call, and says why, when a written block does not name it", async () => {
+    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).toHaveLength(0);
+    expect(stub.body).toBe(VIETNAMESE);
+    expect(run.outputs.translated).toBe(JSON.stringify([]));
+    expect(run.summary).toContain(
+      `\`${warrantPath}\`'s \`capabilities:\` block does not name \`translate\`; once that block ` +
+        "exists it is the whole answer, so add `translate: [edit-body]` to it (or remove the " +
+        "block to return to defaults).",
+    );
+    expect(run.summary).toContain("No model was asked anything. This is a real answer");
+  });
+
+  it("grants translate nothing in a sweep too, checked once before the listing", async () => {
+    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+    stub.issues = [{ number: 701, body: VIETNAMESE, createdAt: "2026-01-01T00:00:00Z" }];
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).toHaveLength(0);
+    expect(run.outputs.processed).toBe("0");
+    expect(run.summary).toContain("does not name `translate`");
+    // No listing request was ever made — the short-circuit is before it.
+    expect(stub.bodies.size).toBe(0);
+  });
+});
+
+describe("zero config", () => {
+  /**
+   * `.github/reeve.yml`, exactly as `warrant`'s own default names it and
+   * exactly as `main.ts`'s `DEFAULT_WARRANT_PATH` names it. Passed as an
+   * input rather than left to `action.yml`'s default, because this file never
+   * goes through a runner that would supply it — but the value has to be the
+   * same string, or the run would see it as a path a consumer chose and fail
+   * loudly on it instead of running at the narrowest authority.
+   */
+  const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+
+  it("keeps its defaults — edit-body, and languages from the input — when no warrant exists", async () => {
+    const run = await runAction(stub, { warrant: DEFAULT_WARRANT_PATH }, {}, scratch);
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain(ENGLISH);
+    expect(run.summary).toContain(
+      `No \`${DEFAULT_WARRANT_PATH}\` — this duty found no warrant file, and ran on its own ` +
+        "defaults (`edit-body`, and whatever `languages` was configured).",
+    );
+  });
 });
 
 describe("the action contract", () => {

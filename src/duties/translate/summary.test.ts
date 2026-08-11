@@ -38,6 +38,9 @@ function subject(overrides: Partial<Run> = {}): string {
     spent: [],
     modelNames: new Map(),
     judgeNames: new Map(),
+    warrant: ".github/reeve.yml",
+    implicit: false,
+    ungranted: null,
     ...overrides,
   });
 }
@@ -165,6 +168,34 @@ describe("the run summary", () => {
 
     expect(summary).toContain("| Drafting | a \\| b |");
   });
+
+  it("says it ran on its own defaults when there was no warrant to read", () => {
+    const summary = subject({ implicit: true, warrant: ".github/reeve.yml" });
+
+    expect(summary).toContain(
+      "No `.github/reeve.yml` — this duty found no warrant file, and ran on its own " +
+        "defaults (`edit-body`, and whatever `languages` was configured).",
+    );
+  });
+
+  it("says nothing about an implicit warrant when one was actually read", () => {
+    expect(subject({ implicit: false })).not.toContain("found no warrant file");
+  });
+
+  it("says why nothing was even attempted when a written block did not name this duty", () => {
+    const summary = subject({
+      ungranted:
+        "`.github/reeve.yml`'s `capabilities:` block does not name `translate`; once that " +
+        "block exists it is the whole answer, so add `translate: [edit-body]` to it (or " +
+        "remove the block to return to defaults).",
+      looked: [],
+    });
+
+    expect(summary).toContain("does not name `translate`");
+    expect(summary).toContain("No model was asked anything. This is a real answer");
+    // No table of translations — nothing was ever attempted for one to hold.
+    expect(summary).not.toContain("### Translations");
+  });
 });
 
 function sweepSubject(overrides: Partial<SweepRun> = {}): string {
@@ -177,6 +208,8 @@ function sweepSubject(overrides: Partial<SweepRun> = {}): string {
     spent: [],
     modelNames: new Map(),
     judgeNames: new Map(),
+    warrant: ".github/reeve.yml",
+    ungranted: null,
     ...overrides,
   });
 }
@@ -236,5 +269,19 @@ describe("the sweep summary", () => {
 
   it("ends with exactly one newline, whatever the last section was", () => {
     expect(sweepSubject()).toMatch(/[^\n]\n$/);
+  });
+
+  it("reports why nothing was even attempted when a written block did not name this duty", () => {
+    const page = sweepSubject({
+      ungranted:
+        "`.github/reeve.yml`'s `capabilities:` block does not name `translate`; once that " +
+        "block exists it is the whole answer, so add `translate: [edit-body]` to it (or " +
+        "remove the block to return to defaults).",
+    });
+
+    expect(page).toContain("## Reeve · translate — sweep");
+    expect(page).toContain("does not name `translate`");
+    // No table of results — nothing was ever attempted for one to hold.
+    expect(page).not.toContain("| Thread | Outcome |");
   });
 });
