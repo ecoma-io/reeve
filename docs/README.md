@@ -10,11 +10,11 @@ file and what it will do to their repository. Somebody changing Reeve wants to
 know why the code is shaped the way it is and which parts they are not allowed
 to move.
 
-| Where                                   | Who it is for                                                                      |
-| --------------------------------------- | ---------------------------------------------------------------------------------- |
-| [`doctrine/north-star.md`](doctrine/north-star.md)        | Everyone. What Reeve is for, the doctrine, the roadmap, and what it will never be. |
-| [`usage/`](usage/README.md)             | People installing and running Reeve on their own project.                          |
-| [`development/`](development/README.md) | People changing Reeve: architecture, boundaries, evaluation, threat model.         |
+| Where                                              | Who it is for                                                                      |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [`doctrine/north-star.md`](doctrine/north-star.md) | Everyone. What Reeve is for, the doctrine, the roadmap, and what it will never be. |
+| [`usage/`](usage/README.md)                        | People installing and running Reeve on their own project.                          |
+| [`development/`](development/README.md)            | People changing Reeve: architecture, boundaries, evaluation, threat model.         |
 
 [`doctrine/north-star.md`](doctrine/north-star.md) comes first, and not as a courtesy. It is the
 document the others answer to — a change that contradicts it is not merged until

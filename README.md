@@ -153,19 +153,19 @@ deterministically cost calls instead of money.
 
 ## Documentation
 
-| Document                                         | For                                                                      |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| [North star](docs/doctrine/north-star.md)                 | What Reeve is for, the doctrine, the roadmap, and what it will never be. |
-| [Installation](docs/getting-started/installation.md)       | Adding a duty to a workflow — triggers, permissions, versions.           |
-| [The warrant](docs/guides/warrant.md)             | Writing down what Reeve is allowed to do to your repository.             |
-| [Languages](docs/guides/languages.md)             | Who writes in what, who reads in what, and what detection costs.         |
-| [The sweep](docs/guides/sweep.md)                 | Working a whole backlog on a schedule instead of one thread at a time.   |
-| [Cost](docs/guides/cost.md)                       | What a backlog costs before you point it at one — including at zero.     |
-| [Troubleshooting](docs/guides/troubleshooting.md) | A run went red, or went green and did nothing.                           |
-| [Architecture](docs/development/architecture.md) | The pipeline, the boundaries, and how to change it.                      |
-| [Threat model](docs/development/security.md)     | What holds when the model does what the attacker asked.                  |
-| [Contributing](CONTRIBUTING.md)                  | How to work on it.                                                       |
-| [Reporting a vulnerability](SECURITY.md)         | The private channel. Never a public issue.                               |
+| Document                                             | For                                                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| [North star](docs/doctrine/north-star.md)            | What Reeve is for, the doctrine, the roadmap, and what it will never be. |
+| [Installation](docs/getting-started/installation.md) | Adding a duty to a workflow — triggers, permissions, versions.           |
+| [The warrant](docs/guides/warrant.md)                | Writing down what Reeve is allowed to do to your repository.             |
+| [Languages](docs/guides/languages.md)                | Who writes in what, who reads in what, and what detection costs.         |
+| [The sweep](docs/guides/sweep.md)                    | Working a whole backlog on a schedule instead of one thread at a time.   |
+| [Cost](docs/guides/cost.md)                          | What a backlog costs before you point it at one — including at zero.     |
+| [Troubleshooting](docs/guides/troubleshooting.md)    | A run went red, or went green and did nothing.                           |
+| [Architecture](docs/development/architecture.md)     | The pipeline, the boundaries, and how to change it.                      |
+| [Threat model](docs/development/security.md)         | What holds when the model does what the attacker asked.                  |
+| [Contributing](CONTRIBUTING.md)                      | How to work on it.                                                       |
+| [Reporting a vulnerability](SECURITY.md)             | The private channel. Never a public issue.                               |
 
 [`docs/`](docs/) is the full index, split by audience.
 
