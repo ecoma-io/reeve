@@ -115,3 +115,71 @@ function translations(looked: readonly Looked[]): string {
         : ` Source language — ${detected.join("; ")}.`),
   ].join("\n");
 }
+
+/**
+ * One thread a sweep processed, and what came of it.
+ *
+ * A sweep's page has no room for `translations`' per-language detail — that
+ * table is already the size a maintainer will read for one thread, and a
+ * sweep touches many. What is kept is a single sentence per thread, enough to
+ * spot the one that needs the full report and follow with `number` into
+ * single-thread mode for it.
+ */
+export interface SweptThread {
+  readonly number: number;
+  readonly outcome: string;
+}
+
+export interface SweepRun {
+  readonly dryRun: boolean;
+  readonly results: readonly SweptThread[];
+  /** Threads already carrying this duty's marker — the idempotent skip. */
+  readonly skipped: number;
+  /** Candidates this run did not reach: the limit, or the roster running dry. */
+  readonly remaining: number;
+  /** Every model starved on capacity before `limit` was reached. */
+  readonly starvedRun: boolean;
+  readonly spent: readonly Spend[];
+  readonly modelNames: Names;
+  readonly judgeNames: Names;
+}
+
+/**
+ * A sweep's own page: a table instead of a per-language breakdown, because
+ * there is no single thread this report is about.
+ *
+ * `starvedRun` is reported as weather, in the same words `docs/usage/sweep.md`
+ * uses, because it is not a failure of this run — it is next week's sweep
+ * being told where to resume.
+ */
+export function summarizeSweep(run: SweepRun): string {
+  const rows = run.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
+  const rendered = table(["Thread", "Outcome"], rows);
+
+  const parts = [
+    "## Reeve · translate — sweep",
+    "",
+    `${run.dryRun ? "**Dry run** — nothing was published. " : ""}Processed ${String(run.results.length)}, ` +
+      `skipped ${String(run.skipped)} (already translated), ${String(run.remaining)} remaining.`,
+    "",
+    rendered.length === 0 ? "Nothing was processed this run." : rendered,
+  ];
+
+  if (run.starvedRun) {
+    parts.push(
+      "",
+      "The roster ran out of capacity partway through — every model in `models` failed on " +
+        "capacity this run. What is above was delivered; the rest is `remaining`, and the next " +
+        "sweep picks up where this one stopped. Weather, not a failure.",
+    );
+  }
+
+  parts.push(
+    "",
+    cost(run.spent, (spend) =>
+      shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model),
+    ),
+  );
+
+  return `${parts.join("\n").trimEnd()}\n`;
+}

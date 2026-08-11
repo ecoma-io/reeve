@@ -32,7 +32,7 @@
 import { enclose } from "../../core/enclose.js";
 import type { Language } from "../../core/languages.js";
 import { segments } from "../../core/markdown.js";
-import type { Completion, Failure, Message, Provider } from "../../core/provider.js";
+import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
 import type { Score } from "../../core/score.js";
@@ -83,23 +83,38 @@ export interface TranslateRequest {
   readonly languages: readonly Language[];
   /** How many answers to ask for. Fewer are produced when the models run out. */
   readonly drafts: number;
+  /**
+   * This run's memory of capacity failures, seeded here and updated as drafts
+   * are attempted — so a model already grounded by an earlier thread's draft,
+   * or by this thread's own first draft, starts every later draft off the
+   * list rather than being asked again to fail the same way.
+   */
+  readonly weather?: Weather;
 }
 
 export async function translate(request: TranslateRequest): Promise<Translation> {
-  const { provider, models, source, from, to, languages, drafts } = request;
+  const { provider, models, source, from, to, languages, drafts, weather } = request;
   const messages = prompt(source, from, to);
 
   const attempts: Attempt[] = [];
   const refused: Attempt[] = [];
   const failures: Failure[] = [];
-  const exhausted = new Set<string>();
+  // Seeded from `weather`, so a model an earlier thread already grounded for
+  // capacity is treated as exhausted from draft zero rather than being asked
+  // once more here before this call catches up with what the run already
+  // knows.
+  const exhausted = new Set<string>(weather?.starved ?? []);
 
   for (let draft = 0; draft < drafts; draft += 1) {
     const order = remaining(models, draft, exhausted);
     // Every model has failed. Asking for the next draft would be asking nobody.
     if (order.length === 0) break;
 
-    const rotation = await rotateModels(order, (model) => answer(provider, model, messages));
+    const rotation = await rotateModels(
+      order,
+      (model) => answer(provider, model, messages),
+      weather,
+    );
     for (const failure of rotation.failures) {
       exhausted.add(failure.model);
       failures.push(failure);
@@ -161,7 +176,12 @@ async function answer(
 ): Promise<Completion> {
   const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
-    return { ok: false, model, reason: "the answer was cut off before it finished" };
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished",
+    };
   }
   return completion;
 }

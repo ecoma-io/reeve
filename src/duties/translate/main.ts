@@ -46,15 +46,24 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage, residue } from "../../core/detect.js";
-import { createReply, createThread, listReplies, type Thread } from "../../core/forge.js";
+import {
+  createReply,
+  createThread,
+  listOpenThreads,
+  listReplies,
+  type Thread,
+} from "../../core/forge.js";
 import { readShared, whole } from "../../core/inputs.js";
 import { parseLanguages, type Language } from "../../core/languages.js";
 import {
   createProvider,
+  createWeather,
   parseSeats,
   shown,
+  starved,
   type Names,
   type Provider,
+  type Weather,
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
 import { createMeter, metered } from "../../core/meter.js";
@@ -62,7 +71,7 @@ import { writeSummary } from "../../core/summary.js";
 
 import { translate } from "./draft.js";
 import { judge } from "./judge.js";
-import { summarize, type Looked } from "./summary.js";
+import { summarize, summarizeSweep, type Looked, type Run, type SweptThread } from "./summary.js";
 import {
   marker,
   publication,
@@ -74,7 +83,8 @@ import {
 
 interface Settings {
   readonly token: string;
-  readonly number: number;
+  /** The thread to work on, or null in `sweep`. */
+  readonly number: number | null;
   readonly models: readonly string[];
   /** What to call each of them, keyed by model id. */
   readonly modelNames: Names;
@@ -89,6 +99,9 @@ interface Settings {
   readonly dryRun: boolean;
   readonly baseUrl: string;
   readonly apiKey: string;
+  readonly sweep: boolean;
+  readonly since: Date | null;
+  readonly limit: number;
 }
 
 /**
@@ -186,6 +199,7 @@ async function translateInto(
   stages: Stages,
   from: Language | null,
   source: string,
+  weather: Weather,
 ): Promise<Posted | null> {
   const drafted = await translate({
     provider: stages.draft,
@@ -195,6 +209,7 @@ async function translateInto(
     to,
     languages: settings.languages,
     drafts: settings.drafts,
+    weather,
   });
 
   // Named as the workflow named them, everywhere a person reads them. A
@@ -218,6 +233,7 @@ async function translateInto(
     source,
     to,
     attempts: drafted.attempts,
+    weather,
   });
 
   const seat = (id: string): string => shown(settings.judgeNames, id);
@@ -288,6 +304,7 @@ async function translateText(
   thread: Thread,
   settings: Settings,
   stages: Stages,
+  weather: Weather,
 ): Promise<Report> {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
@@ -333,7 +350,7 @@ async function translateText(
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models),
+    createLanguagePicker(stages.detect, settings.models, weather),
   );
   core.info(
     detection.language === null
@@ -344,7 +361,14 @@ async function translateText(
   const posted: Posted[] = [];
   const skipped: Language[] = [];
   for (const to of targets(settings.languages, detection.language)) {
-    const translated = await translateInto(to, settings, stages, detection.language, source);
+    const translated = await translateInto(
+      to,
+      settings,
+      stages,
+      detection.language,
+      source,
+      weather,
+    );
     if (translated === null) {
       core.warning(`${what} ${to.code}: no model produced a translation this run.`);
       skipped.push(to);
@@ -417,6 +441,7 @@ async function translateReplies(
   settings: Settings,
   stages: Stages,
   looked: Looked[],
+  weather: Weather,
 ): Promise<number> {
   const { replies, more } = await listReplies(api, at);
   if (more) {
@@ -434,6 +459,7 @@ async function translateReplies(
       createReply(api, at, reply),
       settings,
       stages,
+      weather,
     );
     looked.push(translated);
     if (translated.published) published += 1;
@@ -441,18 +467,152 @@ async function translateReplies(
   return published;
 }
 
+/**
+ * Steps 1–8 for one thread, from a body already in hand.
+ *
+ * The single call both modes route every thread through — `run` for the one
+ * thread an event named, `runSweep` for however many `limit` allows — so a
+ * change to what translating one thread involves cannot land in one mode and
+ * not the other. Takes the body rather than fetching it, so a sweep spends no
+ * second request on a thread its own listing already read.
+ */
+interface ThreadResult {
+  readonly looked: readonly Looked[];
+  readonly translated: Report;
+  readonly replies: number;
+}
+
+async function processThread(
+  api: ReturnType<typeof getOctokit>,
+  at: { owner: string; repo: string; number: number },
+  body: string,
+  settings: Settings,
+  stages: Stages,
+  weather: Weather,
+): Promise<ThreadResult> {
+  const thread = createThread(api, at);
+  const translated = await translateText(
+    `#${String(at.number)}`,
+    body,
+    thread,
+    settings,
+    stages,
+    weather,
+  );
+  const looked: Looked[] = [translated];
+
+  const replies = settings.replies
+    ? await translateReplies(api, at, settings, stages, looked, weather)
+    : 0;
+
+  return { looked, translated, replies };
+}
+
+/**
+ * A sweep's progress, mutated in place rather than assembled and returned.
+ *
+ * The reason is the same as triage's: nothing here throws an
+ * `AuthenticationFailure` past this point that a `finally` block still needs
+ * to report from, but `runSweep` can stop early on capacity starvation, and
+ * `run`'s `finally` reports whatever was built up to that point either way.
+ */
+interface SweepAccumulator {
+  readonly results: SweptThread[];
+  skipped: number;
+  starvedRun: boolean;
+  candidates: number;
+}
+
+function newAccumulator(): SweepAccumulator {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0 };
+}
+
+/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
+function remainingOf(acc: SweepAccumulator): number {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+
+/** One sweep row's outcome, in the fewest words that are true. */
+function describeOutcome(result: ThreadResult): string {
+  if (result.translated.note !== null) return result.translated.note;
+
+  const parts: string[] = [];
+  if (result.translated.posted.length > 0) {
+    parts.push(`published ${result.translated.posted.map((entry) => entry.to.code).join(", ")}`);
+  }
+  if (result.translated.skipped.length > 0) {
+    parts.push(`skipped ${result.translated.skipped.map((language) => language.code).join(", ")}`);
+  }
+  // Both empty means every configured language was also the source language —
+  // a single-language configuration reading its own thread, which has nothing
+  // left to translate into and nothing wrong with it either.
+  if (parts.length === 0) parts.push("no target languages");
+  if (result.replies > 0) {
+    parts.push(`${String(result.replies)} repl${result.replies === 1 ? "y" : "ies"} translated`);
+  }
+
+  return parts.join("; ");
+}
+
+/**
+ * The whole backlog, one thread at a time, through the identical pipeline a
+ * single-thread run uses.
+ *
+ * Translate sweeps issues and pull requests both — a contributor reading a
+ * thread in their own language does not care which kind it is, and the
+ * listing endpoint already returns both. Triage is the duty that has to tell
+ * them apart, because a label taxonomy is a judgement about an issue; a
+ * translation is not.
+ */
+async function runSweep(
+  acc: SweepAccumulator,
+  api: ReturnType<typeof getOctokit>,
+  settings: Settings,
+  stages: Stages,
+  weather: Weather,
+): Promise<void> {
+  const listed = await listOpenThreads(api, context.repo, settings.since);
+  acc.candidates = listed.length;
+
+  for (const thread of listed) {
+    if (acc.results.length >= settings.limit) break;
+
+    // The idempotent skip: a body already carrying this duty's marker has been
+    // translated at least once before, whatever the exact language set was
+    // that run — the same "already decided about" reading `alreadyTaxonomized`
+    // gives triage's skip, and free for the same reason: nothing here calls
+    // the tracker or a model, only `marker.split` on text the listing already
+    // fetched.
+    if (marker.split(thread.body).fingerprint !== null) {
+      acc.skipped += 1;
+      continue;
+    }
+
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+
+    const at = { ...context.repo, number: thread.number };
+    const result = await processThread(api, at, thread.body, settings, stages, weather);
+    acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
+  }
+}
+
 export async function run(): Promise<void> {
   // Declared out here, and written in `finally`, so a run that fails halfway
-  // still reports what it did and what it spent. A crash on the third of twelve
-  // replies is exactly the run somebody wants the bill for.
-  const looked: Looked[] = [];
+  // still reports what it did and what it spent — including a sweep stopped
+  // early by capacity starvation, which leaves `bulk` holding every thread
+  // already processed before the loop broke.
   const meter = createMeter();
+  const weather = createWeather();
   let settings: Settings | null = null;
+  let single: { readonly number: number; readonly result: ThreadResult } | null = null;
+  let bulk: SweepAccumulator | null = null;
 
   try {
     settings = readSettings();
     const api = getOctokit(settings.token);
-    const at = { ...context.repo, number: settings.number };
     const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
 
     const stages: Stages = {
@@ -461,35 +621,45 @@ export async function run(): Promise<void> {
       judge: metered(provider, meter, "judge"),
     };
 
-    const thread = createThread(api, at);
-    const body = await thread.read();
-    const translated = await translateText(`#${String(at.number)}`, body, thread, settings, stages);
-    looked.push(translated);
-
-    // Even when the body needed nothing. A new comment on an already-translated
-    // thread is the ordinary case for this feature: the body's fingerprint still
-    // matches, and the reply is the only thing that changed.
-    const replies = settings.replies
-      ? await translateReplies(api, at, settings, stages, looked)
-      : 0;
-
-    report(translated, replies);
+    if (settings.sweep) {
+      bulk = newAccumulator();
+      await runSweep(bulk, api, settings, stages, weather);
+    } else {
+      const number = settings.number;
+      // `readShared` refuses `sweep` combined with `number`, but a bare
+      // `sweep: false` still leaves `number` nullable in the type — this is
+      // the one place that has to become certain of it.
+      if (number === null) throw new Error("number: required outside `sweep`.");
+      const at = { ...context.repo, number };
+      const body = await createThread(api, at).read();
+      const result = await processThread(api, at, body, settings, stages, weather);
+      single = { number, result };
+    }
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
-      await writeSummary(
-        summarize({
-          thread: settings.number,
-          dryRun: settings.dryRun,
-          looked,
-          spent: meter.spent(),
-          modelNames: settings.modelNames,
-          judgeNames: settings.judgeNames,
-        }),
-      );
+      const roosterStarved = starved(settings.models, weather);
+      if (roosterStarved) {
+        core.warning(
+          "Every model in `models` failed on capacity this run. " +
+            (settings.sweep
+              ? "The sweep delivered what it could before the roster ran dry, and " +
+                "stopped early — see `remaining`."
+              : "This run delivered what it could rather than failing red — weather, " +
+                "not a broken configuration."),
+        );
+      }
+
+      if (settings.sweep && bulk !== null) {
+        reportSweep(bulk, roosterStarved);
+        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+      } else if (!settings.sweep && single !== null) {
+        report(single.result.translated, single.result.replies, roosterStarved);
+        await writeSummary(page(settings, single.number, single.result.looked, meter.spent()));
+      }
     }
   }
 }
@@ -505,11 +675,65 @@ export async function run(): Promise<void> {
  * — so replies report the one thing that is answerable across all of them: how
  * many got a translation written.
  */
-function report(translated: Report, replies: number): void {
+function report(translated: Report, replies: number, roosterStarved: boolean): void {
   core.setOutput("source-language", translated.from?.code ?? "");
   core.setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   core.setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   core.setOutput("replies-translated", String(replies));
+  core.setOutput("starved", String(roosterStarved));
+  // `0`, not unset: `processed`/`remaining` are a sweep's own outputs, and a
+  // single-thread run answers both honestly at zero rather than leaving a
+  // workflow that reads them on every run reading an empty string on this one.
+  // `skipped` is not repeated here — this mode already gave it its own meaning
+  // two lines up.
+  core.setOutput("processed", "0");
+  core.setOutput("remaining", "0");
+}
+
+/**
+ * `processed`, `skipped` and `remaining` — a sweep's own outputs.
+ *
+ * `skipped` means something different here than it does in `report` above: a
+ * count of threads rather than a JSON array of language codes. The two never
+ * run in the same job — `sweep` and `number` are mutually exclusive at
+ * `readShared` — so the name is free to mean whichever thing this mode
+ * actually has, and `action.yml` documents both readings under it rather than
+ * inventing a second output nobody would think to look for.
+ */
+function reportSweep(bulk: SweepAccumulator, roosterStarved: boolean): void {
+  core.setOutput("processed", String(bulk.results.length));
+  core.setOutput("skipped", String(bulk.skipped));
+  core.setOutput("remaining", String(remainingOf(bulk)));
+  core.setOutput("starved", String(roosterStarved));
+}
+
+function page(
+  settings: Settings,
+  thread: number,
+  looked: readonly Looked[],
+  spent: Run["spent"],
+): string {
+  return summarize({
+    thread,
+    dryRun: settings.dryRun,
+    looked,
+    spent,
+    modelNames: settings.modelNames,
+    judgeNames: settings.judgeNames,
+  });
+}
+
+function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    results: bulk.results,
+    skipped: bulk.skipped,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    spent,
+    modelNames: settings.modelNames,
+    judgeNames: settings.judgeNames,
+  });
 }
 
 await run();
