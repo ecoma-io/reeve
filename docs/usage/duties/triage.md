@@ -60,19 +60,19 @@ it label anything.
 
 `action.yml` in the duty's directory is the contract. The ones worth a word:
 
-| Input            | Default              | Worth knowing                                                                                                             |
-| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `models`         | _required_           | The model that produces the verdict. Order is preference.                                                                 |
-| `screen-models`  | _empty_              | Cheap models for the first pass, which decides only whether an issue is worth the expensive one.                          |
-| `warrant`        | `.github/reeve.yml`  | The taxonomy and the capabilities. A file that does not parse is a failed run.                                            |
-| `apply`          | `label`              | What this run may do, comma separated. Narrowed by, never widening, the warrant.                                          |
-| `confidence`     | `0.75`               | Below this the verdict is reported and nothing is applied. [Measure](../../development/evaluation.md) before you move it. |
-| `corrections`    | `.reeve/corrections` | The memory store. Empty is the cold-start case and works.                                                                 |
-| `languages`      | `en, vi, zh`         | Which languages detection chooses between. The verdict is told the answer; the taxonomy is never translated.              |
-| `min-body-chars` | `40`                 | How much authored text is worth a model. `0` turns the length screen off.                                                 |
-| `max-body-chars` | `6000`               | How much of a long thread reaches the prompt. The tail is dropped.                                                        |
-| `about`          | _empty_              | What this repository is about, in one sentence. Used only by the spam screen.                                             |
-| `dry-run`        | `false`              | Whole pipeline, every output, nothing applied.                                                                            |
+| Input            | Default              | Worth knowing                                                                                                                                                            |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `models`         | _required_           | The model that produces the verdict. Order is preference.                                                                                                                |
+| `screen-models`  | _empty_              | Cheap models for the first pass, which decides only whether an issue is worth the expensive one.                                                                         |
+| `warrant`        | `.github/reeve.yml`  | The taxonomy and the capabilities. A file that does not parse is a failed run.                                                                                           |
+| `apply`          | `label`              | What this run may do, comma separated. Narrowed by, never widening, the warrant.                                                                                         |
+| `confidence`     | `0.75`               | Below this the verdict is reported and nothing is applied. [Measure](../../development/evaluation.md) before you move it.                                                |
+| `corrections`    | `.reeve/corrections` | The memory store. Empty is the cold-start case and works.                                                                                                                |
+| `languages`      | `en, vi, zh`         | Which languages detection chooses between. The verdict is told the answer; the taxonomy is never translated. Ignored once the warrant's own `languages:` key is written. |
+| `min-body-chars` | `40`                 | How much authored text is worth a model. `0` turns the length screen off.                                                                                                |
+| `max-body-chars` | `6000`               | How much of a long thread reaches the prompt. The tail is dropped.                                                                                                       |
+| `about`          | _empty_              | What this repository is about, in one sentence. Used only by the spam screen.                                                                                            |
+| `dry-run`        | `false`              | Whole pipeline, every output, nothing applied.                                                                                                                           |
 
 **`screen-models` is the whole cost argument.** Spam, a blank body and an exact
 repeat are decided by a small model or by no model at all, and a backlog is mostly

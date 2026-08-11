@@ -92,8 +92,9 @@ act. Nothing about authority moves until a maintainer says so explicitly,
 which is the next rung, not this one.
 
 **Level 2 — tuning authority.** Per-duty `capabilities:`, a label's `owner:`,
-its `exclusive_with:`, and — once [Stage 3](#7-roadmap) lands — `languages:`,
-all move into the warrant, reviewed the same way the taxonomy is. **The
+its `exclusive_with:`, and — since [Stage 3](#7-roadmap) landed —
+`languages:`, all move into the warrant, reviewed the same way the taxonomy
+is. **The
 `capabilities:` block is where enumeration starts, and once it exists it is
 total:** a duty the block does not name is granted nothing at all — not its
 old default, not a smaller version of it. It runs, decides nothing, and says
@@ -423,7 +424,7 @@ own labelling or translating cannot push its own bound forward under it; and
 runs both duties on a weekly schedule against this repository's own backlog,
 the same dogfooding the per-thread workflows already did for Stage 0.
 
-### Stage 3 — The warrant is the whole answer
+### Stage 3 — The warrant is the whole answer · **landed**
 
 One `.github/reeve.yml` declaring the taxonomy and, once a maintainer writes a
 `capabilities:` block, what each duty may do. Per [the
@@ -432,32 +433,27 @@ ladder](#3-the-ladder) and the corrected
 principle attaches to that block, not to the file's mere existence: a
 taxonomy-only warrant leaves every duty on its own default, and a
 `capabilities:` block, once written, grants a duty left out of it nothing at
-all. Today's per-duty inputs collapse into the file, `translate` starts
-reading it, and `languages:` moves in alongside the taxonomy — landing as a
-breaking change on a `0.x` minor, per
+all. `translate` now reads the file exactly as `triage` always has, and
+`languages:` moved in alongside the taxonomy — landing as a breaking change on
+a `0.x` minor, per
 [what that means here](development/releasing.md#what-0x-and-10-mean-here).
 
 **Standing:** the file is parsed, the taxonomy is an allowlist checked in code
 against the parsed file, capabilities are granted per duty, and the narrower
-of the file and the workflow wins. `triage` already takes its authority from
-nowhere else, and detection — the free script-narrowing and profile steps
-that resolve an author's language before any duty asks for it — already
-stands as core state ([the language layer](development/language.md)).
-
-**Missing:** `translate` does not read the file at all. The three language
-roles belong in it and are not there — today a duty is handed one `languages`
-input and infers the rest. And today, a duty left out of an already-existing
-`capabilities:` block still runs on its own quiet default rather than being
-granted nothing, where the corrected D2 says it should be granted nothing at
-all — the code and the doctrine disagree, and the doctrine is right. A
-taxonomy-only warrant with no `capabilities:` block is not affected by this
-gap; it already behaves correctly, because an absent block already falls back
-to each duty's own default.
-
-**Done when:** a maintainer can answer "what may this thing do to my repo?" by
-reading one file: a taxonomy alone leaves every duty on its default, a
-`capabilities:` block is the total and only source of what runs once it
-exists, and no duty takes authority from workflow YAML.
+of the file and the workflow wins. Both duties take their authority from
+nowhere else. Once a `capabilities:` block is written, enumeration is total —
+a duty the block does not name is granted nothing at all, not its old
+default, and says so in its own run report rather than guessing at a reason;
+a taxonomy-only warrant, or no warrant at all, leaves every duty on its own
+default exactly as [the ladder](#3-the-ladder) describes, which is the gap
+this stage closed. `languages:`, once written in the file, is the whole
+answer for what `translate` produces and what `triage` detects against; the
+per-duty `languages` input still answers the question when the file stays
+silent on it, and a run says once, by name, which of the two it read.
+Detection itself — the free script-narrowing and profile steps that resolve
+an author's language before any duty asks for it — was already core state
+before this stage and did not have to change
+([the language layer](development/language.md)).
 
 ### Stage 4 — Memory, both directions
 

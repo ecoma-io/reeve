@@ -68,16 +68,17 @@ For pull requests, use `pull_request_target` and read
 be free to drift from it. These are the ones worth a word beyond their
 description.
 
-| Input               | Default      | Worth knowing                                                                                                         |
-| ------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `models`            | _required_   | Order is preference, not last resort. Put the model you actually want first. `id = Name` names one. See below.        |
-| `languages`         | `en, vi, zh` | What to translate **into**. Says nothing about what an author may write in. See [Languages](../languages.md).         |
-| `drafts`            | `1`          | Attempts per language, scored deterministically, best published. The quality lever that costs calls instead of money. |
-| `judge-models`      | _empty_      | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.              |
-| `max-body-chars`    | `6000`       | Bounds what is **read from the thread**, not what the model answers. Measured against the author's half only.         |
-| `translate-replies` | `false`      | Off because the ceiling is real. See below.                                                                           |
-| `show-attribution`  | `none`       | How much of the machinery the published block names. See below.                                                       |
-| `dry-run`           | `false`      | Whole pipeline, every output, nothing written.                                                                        |
+| Input               | Default             | Worth knowing                                                                                                                                                             |
+| ------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `models`            | _required_          | Order is preference, not last resort. Put the model you actually want first. `id = Name` names one. See below.                                                            |
+| `languages`         | `en, vi, zh`        | What to translate **into**. Says nothing about what an author may write in. Ignored once the warrant's own `languages:` key is written. See [Languages](../languages.md). |
+| `warrant`           | `.github/reeve.yml` | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at the default path is not a failure — see [The warrant](../warrant.md).            |
+| `drafts`            | `1`                 | Attempts per language, scored deterministically, best published. The quality lever that costs calls instead of money.                                                     |
+| `judge-models`      | _empty_             | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.                                                                  |
+| `max-body-chars`    | `6000`              | Bounds what is **read from the thread**, not what the model answers. Measured against the author's half only.                                                             |
+| `translate-replies` | `false`             | Off because the ceiling is real. See below.                                                                                                                               |
+| `show-attribution`  | `none`              | How much of the machinery the published block names. See below.                                                                                                           |
+| `dry-run`           | `false`             | Whole pipeline, every output, nothing written.                                                                                                                            |
 
 **`max-body-chars`** deserves the extra sentence: when the body is longer, the
 tail is left behind and the published block says so rather than pretending it
