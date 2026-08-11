@@ -32928,10 +32928,19 @@ async function readContentsFile(api, at, path) {
   if (typeof file.content === "string" && file.encoding === "base64") {
     return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
   }
-  throw new Error(
-    `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
-  );
+  throw new UnreadableContentsFile(path);
 }
+var UnreadableContentsFile = class extends Error {
+  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
+  path;
+  constructor(path) {
+    super(
+      `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
+    );
+    this.name = "UnreadableContentsFile";
+    this.path = path;
+  }
+};
 async function writeContentsFile(api, at, path, text2, message, sha) {
   await api.rest.repos.createOrUpdateFileContents({
     owner: at.owner,
@@ -33445,10 +33454,13 @@ function searchable(correction) {
   return [correction.title, correction.excerpt, correction.note ?? ""].join("\n");
 }
 function searchablePivot(correction, target) {
-  if (correction.pivot?.language !== target) {
+  if (correction.pivot?.language === target) {
+    return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
+  }
+  if (correction.language === target) {
     return searchable(correction);
   }
-  return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
+  return "";
 }
 var K1 = 1.2;
 var B = 0.75;
@@ -34341,7 +34353,7 @@ async function run() {
             `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
           );
         }
-        if (!trigger.eligible && permitted.includes("record")) {
+        if (trigger.reason !== "" && permitted.includes("record")) {
           info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
         }
         if (trigger.eligible && permitted.includes("record")) {
@@ -34551,18 +34563,10 @@ ${draft.body}`,
 }
 function recordTrigger() {
   const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") {
-    return {
-      eligible: false,
-      reason: `the triggering event was \`${eventName.length > 0 ? eventName : "unknown"}\`, not \`issues\``
-    };
-  }
+  if (eventName !== "issues") return { eligible: false, reason: "" };
   const payload = context2.payload;
   if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return {
-      eligible: false,
-      reason: `the \`issues\` action was \`${String(payload.action)}\`, not \`labeled\` or \`unlabeled\``
-    };
+    return { eligible: false, reason: "" };
   }
   const sender = payload.sender;
   if (sender?.type === "Bot" || (sender?.login ?? "").endsWith("[bot]")) {
@@ -34655,8 +34659,19 @@ async function writeCorrection(contentsApi, at, path, correction) {
 }
 async function attemptWrite(contentsApi, at, path, correction) {
   const files = await listCorrectionFiles(contentsApi, at, path);
+  const unreadable = [];
   for (const file of files) {
-    const read2 = await readContentsFile(contentsApi, at, file.path);
+    let read2;
+    try {
+      read2 = await readContentsFile(contentsApi, at, file.path);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${file.path}\` could not be read, so it was skipped rather than failing the whole write \u2014 the search continued through the rest of the store. Split the corrections store into smaller shards.`
+      );
+      unreadable.push(file.path);
+      continue;
+    }
     if (read2 === null) continue;
     const lines = read2.text.split("\n");
     const index = lines.findIndex((line) => {
@@ -34677,6 +34692,11 @@ async function attemptWrite(contentsApi, at, path, correction) {
       );
       return;
     }
+  }
+  if (unreadable.length > 0) {
+    throw new Error(
+      `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
+    );
   }
   const shard = `${path.replace(/\/+$/, "")}/${monthShard()}.ndjson`;
   const existing = await readContentsFile(contentsApi, at, shard);

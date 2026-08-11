@@ -261,6 +261,80 @@ describe("recallAcrossQueries", () => {
     ).toEqual([]);
   });
 
+  it("stays unreachable through its own text even when that text lexically matches the query", () => {
+    // The trap the earlier fallback fell into: this correction's *own* text
+    // happens to be written in English, and the query below is its exact
+    // words — a perfect lexical match, if own text were ever consulted here.
+    // But the correction was recorded in English, not French, and its only
+    // rendering is Spanish — neither is the French this query names, so it
+    // has to come back empty rather than matching on the coincidence.
+    const staleOwnText = correction({
+      thread: 34,
+      title: "The dark mode toggle",
+      excerpt: "does not persist after reload",
+      language: "en",
+      pivot: {
+        language: "es",
+        title: "El interruptor de modo oscuro",
+        excerpt: "no persiste después de recargar",
+      },
+    });
+    const memory = createMemory([staleOwnText]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "the dark mode toggle does not persist after reload", against: { pivot: "fr" } }],
+        3,
+      ),
+    ).toEqual([]);
+  });
+
+  it("matches on its own text when it was recorded in the pivot query's target language", () => {
+    // No rendering at all, but this correction's own `language` already IS
+    // the language the query is asking for — recorded before a pivot switch,
+    // say. That is a legitimate lexical match, not the noise case 3 exists
+    // to keep out.
+    const recordedInTarget = correction({
+      thread: 35,
+      title: "Le bouton du mode sombre",
+      excerpt: "ne persiste pas après le rechargement",
+      language: "fr",
+      pivot: null,
+    });
+    const memory = createMemory([recordedInTarget]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "le bouton du mode sombre ne persiste pas", against: { pivot: "fr" } }],
+        3,
+      ),
+    ).toEqual([recordedInTarget]);
+  });
+
+  it("a pivot-null correction in a foreign language is unreachable via a pivot query, only via its own", () => {
+    const foreignNoPivot = correction({
+      thread: 36,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: null,
+    });
+    const memory = createMemory([foreignNoPivot]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "Nút chuyển chế độ tối không lưu lại", against: { pivot: "en" } }],
+        3,
+      ),
+    ).toEqual([]);
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "Nút chuyển chế độ tối không lưu lại", against: "own" }],
+        3,
+      ),
+    ).toEqual([foreignNoPivot]);
+  });
+
   it("keeps a correction once when two queries both reach it, at its best score", () => {
     const bridged = correction({
       thread: 31,

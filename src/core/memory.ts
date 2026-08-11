@@ -106,22 +106,29 @@ export type Similarity = (query: string, documents: readonly string[]) => readon
  * rendering of the store it should be ranked against.
  *
  * `"own"` is a correction's own title and excerpt, in whatever language it
- * was recorded in. `{ pivot: code }` is its rendering in the pivot language
- * named by `code`, falling back to its own text in two cases that read as
- * the same document for the same reason: a correction with no rendering at
- * all simply cannot be reached by this query, the same as if it had never
- * been asked, and neither can one whose rendering is in a *different* pivot
- * language than `code` names.
+ * was recorded in. `{ pivot: code }` picks, per correction, whichever of
+ * three documents is actually written in `code` — the only ones a query in
+ * `code` can honestly match:
+ *
+ *   1. a pivot rendering in `code` — the bridge itself, when it exists;
+ *   2. failing that, the correction's own text, when the correction was
+ *      *recorded* in `code` — nothing lost in translation, because there was
+ *      nothing to translate: this is the case a correction recorded before a
+ *      pivot-language switch still legitimately matches a query in the new
+ *      pivot language, on its own words rather than a rendering it never got;
+ *   3. failing both, an empty document — this correction is written in
+ *      neither the language the query names nor any rendering of it, and
+ *      ranking it anyway on whatever tokens happen to be shared is not a
+ *      bridge, it is noise with a plausible-looking score.
  *
  * **The language travels with the query rather than being assumed from the
- * store, and that is the whole point of carrying it at all.** A project
- * that changes its configured first language part-way through a store's
- * life leaves old renderings behind in the language it used to pivot
- * through — a Vietnamese correction rendered into English before the switch
- * to French. Ranking that English text against a French-pivot query on
- * whatever tokens the two languages happen to share is not a bridge, it is
- * noise with a plausible-looking score, and worse than the query simply
- * missing the correction the way it would miss any other unrelated one.
+ * store, and that is the whole point of carrying it at all.** A project that
+ * changes its configured first language part-way through a store's life
+ * leaves old renderings behind in the language it used to pivot through — a
+ * Vietnamese correction rendered into English before the switch to French. A
+ * French-pivot query has no business matching that English text just because
+ * both happen to share a few tokens with the French query — case 3 above is
+ * exactly what keeps that from happening.
  */
 export interface WeightedQuery {
   readonly text: string;
@@ -236,19 +243,23 @@ function searchable(correction: Correction): string {
 }
 
 /**
- * The same idea, in the rendering for `target` — or the correction's own
- * text when there is no rendering at all, or when the rendering that exists
- * is in a different pivot language than `target`. Both are the right
- * document for the same reason `Correction.pivot`'s doc comment gives for
- * `null`: a query cannot be bridged by a rendering that is not there, or
- * is not in the language it is asking for, and reads exactly as if it had
- * never been asked.
+ * The one document, of three candidates, that is actually written in
+ * `target` — see `WeightedQuery`'s doc comment for the full three-way rule
+ * this implements. In order: the pivot rendering, when it is in `target`;
+ * failing that, the correction's own text, when the correction was recorded
+ * in `target`; failing both, an empty string, so `similarity` scores it `0`
+ * and this query can never surface it — not "falls back to its own text
+ * regardless of language", which is exactly the false-match noise this rule
+ * exists to keep out.
  */
 function searchablePivot(correction: Correction, target: string): string {
-  if (correction.pivot?.language !== target) {
+  if (correction.pivot?.language === target) {
+    return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
+  }
+  if (correction.language === target) {
     return searchable(correction);
   }
-  return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
+  return "";
 }
 
 /**

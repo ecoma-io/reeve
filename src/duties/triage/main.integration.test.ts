@@ -122,9 +122,12 @@ interface State {
   /**
    * The repository's committed files, as `record` sees them through the
    * Contents API — keyed by repo-relative path, with a sha the stub mints
-   * fresh on every write, the same way GitHub does.
+   * fresh on every write, the same way GitHub does. `oversized: true` answers
+   * GET the way GitHub does for a file over the 1 MB the endpoint can inline
+   * — `content: "", encoding: "none"` instead of the base64 body — so a case
+   * can simulate a shard `readContentsFile` cannot decode.
    */
-  readonly contentsFiles: Map<string, { content: string; sha: string }>;
+  readonly contentsFiles: Map<string, { content: string; sha: string; oversized?: boolean }>;
   /** Every commit `record` made, in order — what a maintainer would see in the log. */
   readonly contentsWrites: { path: string; message: string; content: string }[];
   /**
@@ -136,8 +139,9 @@ interface State {
    * How many of the next `createOrUpdateFileContents` calls answer a stale-
    * `sha` conflict (409) before falling through to the ordinary write — the
    * race two concurrent `record` runs can lose against the same shard.
-   * Decremented on every PUT, conflicting or not, so a case sets it once to
-   * the exact number of failed attempts it wants before success.
+   * Decremented only on a conflicting PUT — the ordinary write that follows
+   * once this reaches zero does not touch it — so a case sets it once to the
+   * exact number of failed attempts it wants before success.
    */
   contentsConflictsRemaining: number;
 }
@@ -320,13 +324,19 @@ async function route(
     const at = decodeURIComponent(contents[1] ?? "");
     const file = stub.contentsFiles.get(at);
     if (file !== undefined) {
-      send(response, 200, {
-        name: at.split("/").pop(),
-        path: at,
-        sha: file.sha,
-        content: Buffer.from(file.content, "utf8").toString("base64"),
-        encoding: "base64",
-      });
+      send(
+        response,
+        200,
+        file.oversized === true
+          ? { name: at.split("/").pop(), path: at, sha: file.sha, content: "", encoding: "none" }
+          : {
+              name: at.split("/").pop(),
+              path: at,
+              sha: file.sha,
+              content: Buffer.from(file.content, "utf8").toString("base64"),
+              encoding: "base64",
+            },
+      );
       return;
     }
 
@@ -1158,6 +1168,76 @@ describe("record", () => {
     expect(lines.find((line) => line.thread === 99)?.title).toBe("Someone else's thread");
   });
 
+  it("replaces the prior entry in a healthy shard past an oversized sibling, warning rather than failing", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const previous = JSON.stringify({
+      thread: 42,
+      at: "2026-07-01T00:00:00Z",
+      title: "Old title",
+      excerpt: "old excerpt",
+      language: "en",
+      proposed: [],
+      decided: ["docs"],
+      by: "ana",
+      note: null,
+      pivot: null,
+    });
+    // A sibling shard the Contents API cannot inline — over the 1 MB it can
+    // return as base64 — sitting alongside the healthy one. Seeded first, so
+    // the search reaches it before it reaches the healthy shard below: it
+    // must not brick a write to a thread that is findable elsewhere in the
+    // store, past this one.
+    const oversizedPath = `${CORRECTIONS}/2026-01.ndjson`;
+    stub.contentsFiles.set(oversizedPath, { content: "", sha: "sha-big", oversized: true });
+    stub.contentsFiles.set(shardPath(), { content: `${previous}\n`, sha: "sha-seed" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    const shard = stub.contentsFiles.get(shardPath());
+    const lines = (shard?.content.trim().split("\n") ?? []).map(
+      (line) => JSON.parse(line) as { thread: number; decided: string[] },
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ thread: 42, decided: ["bug"] });
+    // The oversized sibling was never touched — it is still exactly what it
+    // was seeded as.
+    expect(stub.contentsFiles.get(oversizedPath)?.content).toBe("");
+    expect(run.log).toContain("::warning::corrections:");
+    expect(run.log).toContain(`\`${oversizedPath}\``);
+    expect(run.log).toContain("Split the corrections store into smaller shards.");
+  });
+
+  it("fails red, naming the unreadable shard, when the thread cannot be found anywhere readable", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // No healthy shard at all — the only file in the store is one this run
+    // cannot decode, so it can neither find #42 there nor prove it is absent.
+    const oversizedPath = `${CORRECTIONS}/2026-01.ndjson`;
+    stub.contentsFiles.set(oversizedPath, { content: "", sha: "sha-big", oversized: true });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("#42");
+    expect(run.log).toContain(`\`${oversizedPath}\``);
+    expect(run.log).toContain("could not be read at all");
+    // Nothing was appended anywhere — refusing to write beats guessing.
+    expect(stub.contentsWrites).toEqual([]);
+  });
+
   it("does not record when the capability is not granted, even though the workflow asked for it", async () => {
     // `warrantPath` still carries the plain `WARRANT` — `triage: [label]`, no
     // `record` — from this suite's own `beforeEach`.
@@ -1379,6 +1459,10 @@ describe("record", () => {
     expect(run.outputs.recorded).toBe("false");
     expect(stub.contentsWrites).toEqual([]);
     expect(stub.effects.applied).toEqual(["bug"]);
+    // `opened` was never going to record, on any workflow — that leg of a
+    // workflow granting `record` alongside other triggers is not
+    // misconfigured, and logging over it on every such run would be noise.
+    expect(run.log).not.toContain("did not fire this run");
   });
 
   it("falls back to an ordinary verdict on any event besides `issues`", async () => {

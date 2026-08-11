@@ -12,6 +12,7 @@ import {
   readContentsFile,
   readStanding,
   writeContentsFile,
+  UnreadableContentsFile,
   type ContentsApi,
   type GitHubApi,
   type TrackerApi,
@@ -643,6 +644,23 @@ describe("readContentsFile", () => {
     await expect(readContentsFile(api, AT, ".reeve/corrections/2026-08.ndjson")).rejects.toThrow(
       /\.reeve\/corrections\/2026-08\.ndjson.*1 MB/s,
     );
+  });
+
+  it("throws its own error class, naming the path, so a caller can skip past it by kind", async () => {
+    // `writeCorrection` catches exactly this class to skip an oversized shard
+    // rather than failing the whole write — a generic `Error` would leave it
+    // no way to tell this apart from a network failure or a missing scope.
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: { content: "", encoding: "none", sha: "big-sha", path: "shard.ndjson" },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(readContentsFile(api, AT, "shard.ndjson")).rejects.toMatchObject({
+      constructor: UnreadableContentsFile,
+      path: "shard.ndjson",
+    });
   });
 });
 

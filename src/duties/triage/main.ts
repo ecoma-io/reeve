@@ -74,6 +74,7 @@ import {
   readContentsFile,
   readStanding,
   writeContentsFile,
+  UnreadableContentsFile,
   type ContentsApi,
   type Effects,
   type Location,
@@ -477,13 +478,14 @@ export async function run(): Promise<void> {
           );
         }
 
-        // The other silent branch of the same gate: `record` is fully
-        // granted — the file names it, `apply` names it — and this event
-        // still does not qualify (a bot's label change, a re-triage, an
-        // event other than `labeled`/`unlabeled`). A maintainer who set this
-        // up and sees a triage instead of a recording deserves the reason,
-        // and every other run of this duty has no use for it.
-        if (!trigger.eligible && permitted.includes("record")) {
+        // The other silent branch of the same gate — but only for the one
+        // ineligible case worth a maintainer's attention: `record` is fully
+        // granted, the event was the labelled/unlabelled kind it fires on,
+        // and it still did not run because the sender was refused (a bot).
+        // A workflow that also runs on `opened` or a `push` is not
+        // misconfigured on those legs — `trigger.reason` is empty for both,
+        // deliberately, so this stays silent there.
+        if (trigger.reason !== "" && permitted.includes("record")) {
           core.info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
         }
 
@@ -775,8 +777,8 @@ async function decide(
 }
 
 /**
- * Whether the event that triggered this run is one `record` fires on, and why
- * not when it is not.
+ * Whether the event that triggered this run is one `record` fires on, and —
+ * for the one case worth saying anything about — why not.
  *
  * `labeled`/`unlabeled` on `issues`, from a human. Not `opened`, not
  * `edited`, not a re-triage — `record` never re-triages, it takes a label
@@ -787,32 +789,28 @@ async function decide(
 interface RecordTrigger {
   readonly eligible: boolean;
   /**
-   * Why this event does not trigger `record`; empty on the one that fires.
-   * Logged only when it is the reason `record` was granted but did not fire
-   * this run — every other path (an ordinary triage run, a sweep, a `push`)
-   * has no use for it and stays silent.
+   * Why the sender disqualified an otherwise-eligible event — empty on every
+   * other path, including the one that fires and the two that were never
+   * going to: the wrong event entirely, or an `issues` action besides
+   * `labeled`/`unlabeled`. Those two are not worth a maintainer's attention
+   * — a workflow granting `record` that also runs on `opened` or a `push` is
+   * not misconfigured, that leg was simply never going to record — so only
+   * this one case, a human-shaped label event that turned out to come from a
+   * bot, is the reason anything gets logged over.
    */
   readonly reason: string;
 }
 
 function recordTrigger(): RecordTrigger {
   const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") {
-    return {
-      eligible: false,
-      reason: `the triggering event was \`${eventName.length > 0 ? eventName : "unknown"}\`, not \`issues\``,
-    };
-  }
+  if (eventName !== "issues") return { eligible: false, reason: "" };
 
   const payload = context.payload as {
     action?: string;
     sender?: { login?: string; type?: string };
   };
   if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return {
-      eligible: false,
-      reason: `the \`issues\` action was \`${String(payload.action)}\`, not \`labeled\` or \`unlabeled\``,
-    };
+    return { eligible: false, reason: "" };
   }
 
   const sender = payload.sender;
@@ -993,7 +991,19 @@ async function writeCorrection(
   }
 }
 
-/** One read-modify-write pass, the unit `writeCorrection` retries whole on a conflict. */
+/**
+ * One read-modify-write pass, the unit `writeCorrection` retries whole on a
+ * conflict.
+ *
+ * A shard too large for the Contents API to inline (`UnreadableContentsFile`)
+ * does not fail the write outright — it is skipped, warned about by name, and
+ * the search continues through the rest of the store, so one oversized shard
+ * does not brick every recording from now on. What it does refuse is
+ * appending: if the thread's existing entry, if it has one, might be sitting
+ * in exactly the shard this run could not read, appending a fresh line
+ * elsewhere cannot be told apart from silently duplicating it — so that path
+ * throws instead, naming the shard that made the answer unknowable.
+ */
 async function attemptWrite(
   contentsApi: ContentsApi,
   at: Location,
@@ -1001,9 +1011,22 @@ async function attemptWrite(
   correction: Correction,
 ): Promise<void> {
   const files = await listCorrectionFiles(contentsApi, at, path);
+  const unreadable: string[] = [];
 
   for (const file of files) {
-    const read = await readContentsFile(contentsApi, at, file.path);
+    let read: { readonly text: string; readonly sha: string } | null;
+    try {
+      read = await readContentsFile(contentsApi, at, file.path);
+    } catch (error) {
+      if (!(error instanceof UnreadableContentsFile)) throw error;
+      core.warning(
+        `corrections: \`${file.path}\` could not be read, so it was skipped rather than ` +
+          "failing the whole write — the search continued through the rest of the store. " +
+          "Split the corrections store into smaller shards.",
+      );
+      unreadable.push(file.path);
+      continue;
+    }
     if (read === null) continue;
 
     const lines = read.text.split("\n");
@@ -1025,6 +1048,16 @@ async function attemptWrite(
       );
       return;
     }
+  }
+
+  if (unreadable.length > 0) {
+    throw new Error(
+      `#${String(correction.thread)} was not found in any shard this run could read, and ` +
+        `${unreadable.map((shard) => `\`${shard}\``).join(", ")} could not be read at all. ` +
+        "Appending a fresh entry cannot rule out duplicating one already sitting in the shard " +
+        "this run could not see, so nothing was written — split the corrections store into " +
+        "smaller shards.",
+    );
   }
 
   // Not found in any existing shard: append to this month's, the same

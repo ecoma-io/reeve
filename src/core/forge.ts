@@ -568,11 +568,31 @@ export async function readContentsFile(
     return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
   }
 
-  throw new Error(
-    `\`${path}\` could not be read as text — the Contents API answered without base64 content, ` +
-      "which is what it sends for a file over the 1 MB that endpoint can inline. Split the " +
-      "corrections store into smaller shards.",
-  );
+  throw new UnreadableContentsFile(path);
+}
+
+/**
+ * A file the Contents API answered but `readContentsFile` could not decode as
+ * text — a shard over the 1 MB that endpoint can inline, almost always. Its
+ * own class, the same reason `AuthenticationFailure` has one: a caller that
+ * wants to treat this specific failure differently from a network error or a
+ * missing scope — `writeCorrection` skips past it and keeps searching rather
+ * than failing the whole write over one oversized shard — needs to catch it
+ * by name rather than by parsing a message.
+ */
+export class UnreadableContentsFile extends Error {
+  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
+  readonly path: string;
+
+  constructor(path: string) {
+    super(
+      `\`${path}\` could not be read as text — the Contents API answered without base64 content, ` +
+        "which is what it sends for a file over the 1 MB that endpoint can inline. Split the " +
+        "corrections store into smaller shards.",
+    );
+    this.name = "UnreadableContentsFile";
+    this.path = path;
+  }
 }
 
 /**
