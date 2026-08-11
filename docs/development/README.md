@@ -3,7 +3,7 @@
 _Portal for people changing Reeve. Prerequisites: [North star](../doctrine/north-star.md)._
 
 For people changing Reeve. If you are installing it,
-[Getting started](../getting-started/README.md) is the directory you want.
+[Getting started](../getting-started/installation.md) is the directory you want.
 For the concepts behind this repository's design — the boundary, the
 authority model, the language layer — see [`../concepts/`](../concepts/).
 For the full input/output contract of a duty, see [`../reference/`](../reference/).

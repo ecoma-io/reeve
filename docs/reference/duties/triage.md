@@ -136,7 +136,7 @@ simply more expensive. [Cost](../../guides/cost.md) has the arithmetic.
 
 **`confidence` is a number you should measure rather than inherit.** What
 `0.75` means for your taxonomy is not what it means for anyone else's,
-because the labels are yours. [Measure it](../development/evaluation.md)
+because the labels are yours. [Measure it](../../development/evaluation.md)
 before you move it.
 
 **`record` needs naming in both halves — the file and the workflow.** The

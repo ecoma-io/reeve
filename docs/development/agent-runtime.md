@@ -141,41 +141,110 @@ by staying inside the platform duties already run on, which is also why
 is no path from a warrant-checked effect to an arbitrary shell on the
 runner.
 
+## The authority sketch
+
+**This is a sketch — the final spelling is decided when this stage lands,
+not by this page.** What it fixes now is the shape: capabilities granted by
+name, and a floor of things no grant can reach.
+
+```yaml
+authority:
+  capabilities:
+    - issues.read
+    - issues.search
+    - issues.label
+    - issues.comment
+    - translate
+    - duplicate
+  forbidden:
+    - issues.close
+    - issues.delete
+    - code.write
+    - pull_request.merge
+```
+
+**Again: a sketch, not a schema.** Key names, nesting, and how this relates
+to today's `capabilities:` block are all decided when the work lands, in a
+reviewed change.
+
+The `forbidden:` list is a deliberate new polarity, and it is worth being
+explicit that today's warrant has nothing like it. Today's `capabilities:`
+block is an allowlist alone — what is absent is simply not granted. A floor
+is stronger: it is a list no future warrant edit may silently cross, so
+that widening authority is always a loud diff against a line that says
+_forbidden_, never a quiet addition to a list of grants. `code.write` lives
+there, permanently — see [Doctrine reconciliation](#doctrine-reconciliation).
+
+## The `.reeve/` governance tree
+
+None of this exists yet. When Agent Mode lands, its governance is a
+directory in the consumer's repository — version-controlled, reviewed in
+pull requests, deleted with `rm`, exactly the discipline the warrant
+already follows:
+
+```
+.reeve/
+├── authority.yaml
+├── constitution.md
+├── policies/
+├── duties/
+└── memory/
+```
+
+**`authority.yaml`** is the one file checked in code — the authority sketch
+above is a sketch of it. It is the only file in this tree that grants
+anything.
+
+**`constitution.md`** is prose the agent reads for judgement — what this
+project considers a good first reply, what tone it keeps, what it never
+does. Input to reasoning, never a grant of permission.
+
+**`policies/`** holds the same kind of prose, split by concern, for
+projects whose constitution outgrows one file.
+
+**`duties/`** holds per-duty doctrine — the project's own rulings about how
+a duty should decide, the way the warrant's `not:` fields already carry
+rulings about labels.
+
+**`memory/`** is the files [State](architecture.md#state) already
+describes, relocated under the same roof.
+
+A change to Reeve's authority therefore goes through the normal pull
+request review, like every other file in the repository.
+
 ## Doctrine reconciliation
 
 Four places where Agent Mode's shape and existing doctrine could be read as
-being in tension. Each is settled here, not left open.
+being in tension. Each is a ruling, settled here, not an open question.
 
-**Reconciling [D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded)
-with a loop that "decides what to do."** D2 governs effects, not reasoning.
-An agent may reason about anything it observes; it may never treat its own
-reasoning as a grant. The Authority Kernel is D2 restated for a
-multi-step run instead of a single decision, and it is checked in the same
-code path — there is no separate, agent-flavoured enforcement stage that
-could drift from the one duties already use.
+**One authority file, still.** North-star's "one configuration file, ever"
+discipline survives as "one _authority_ file." Of the `.reeve/` tree, only
+`authority.yaml` is checked in code; `constitution.md`, `policies/` and
+`memory/` are inputs to reasoning, not grants of permission, so the
+discipline's point — a maintainer can read the whole of what Reeve may do
+in one place — holds. And the sequencing is itself governed: the `.reeve/`
+tree lands only after the north star moves first, in its own commit, per
+[the north star's own amendment rule](../doctrine/north-star.md).
 
-**Reconciling [D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible)
-with a loop that could otherwise retry or replan silently.** A verify
-failure stops the loop and reports red or a loud warning, the same as a
-duty's unparseable answer does today — it is never treated as a cue to
-try a different plan without a human seeing that the first one failed.
-Retrying inside a loop only ever means "the next scheduled run," never "the
-same job, quietly, with a different plan."
+**[Open question §10.4](../doctrine/north-star.md#10-open-questions)
+answered.** "One run, many duties?" is answered by the agent runtime: an
+agent-mode run may invoke several duties' capabilities inside one
+observe–reason–plan–act cycle. An explicit-mode run remains one duty per
+invocation, unchanged.
 
-**Reconciling [D8](../doctrine/north-star.md#d8--every-thread-is-hostile)
-with an Observe stage that reads more of the repository than one thread at
-a time.** Reading more does not mean trusting more. Every zone Observe
-reads is exactly as untrusted as it is when a single duty reads it, framed
-as data the same way, contained by the same code path rather than by an
-instruction in a prompt — D8 does not have a "reasonable exception" for
-volume.
+**"Not a workflow engine" holds.** The maintainer still writes no DSL.
+Agent Mode composes duties that are shipped and reviewed as code — there is
+no user-defined step graph, no conditional branching authored by the
+maintainer, no orchestration language. What the maintainer writes is what
+they already write: a warrant that grants, and a workflow line that invokes.
 
-**Reconciling [Reeve does not write code](../doctrine/north-star.md#9-settled-questions)
-with an Act stage capable of executing a plan.** The settled answer does not
-change: Reeve does not write code, in either mode. Agent Mode's Act stage
-executes effects a duty already has a name for; it does not gain a new
-category of effect by being agentic, and `code.write` is not a capability
-this design leaves room to add later — see Non-goals.
+**[Settled question §9.1](../doctrine/north-star.md#9-settled-questions)
+stands, unconditionally.** "Never writes code" remains settled in both
+modes. Agent Mode's Act stage executes effects a duty already has a name
+for; it does not gain a new category of effect by being agentic, and
+`code.write` sits permanently on the forbidden floor in
+[the authority sketch](#the-authority-sketch) — not a default that could be
+widened, a floor that cannot.
 
 ## Non-goals
 
@@ -197,6 +266,21 @@ fingerprint already lets a duty recognise.
 Agent Mode nothing continues to get exactly what Explicit mode already
 grants it — the change this direction describes is about sequencing what a
 warrant already allows, never about allowing more.
+
+## Compatibility
+
+2.x is an architectural superset of 1.x. Every 1.x workflow keeps working
+unmodified, no capability becomes agent-only, and Explicit mode is not
+deprecated by Agent Mode's existence — this document commits to that in
+writing, ahead of any code that could be tempted to renegotiate it.
+
+## What "landing" will mean
+
+This page is direction, not doctrine, so it can change — and it will be
+revised as the stage actually lands, in the pull requests that land it.
+User-facing documentation for Agent Mode appears only once there is a real
+workflow to run: no installation page, no reference page, and no guide will
+describe it before a repository can actually invoke it.
 
 ---
 

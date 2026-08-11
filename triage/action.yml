@@ -124,7 +124,7 @@ inputs:
       `record` needs naming here as well as in the file: a labelled or
       unlabelled event only records when both halves grant it, and with the
       default of `label` alone a labelled event re-triages instead — see
-      `docs/usage/duties/triage.md`.
+      `docs/reference/duties/triage.md`.
     required: false
     default: label
 

@@ -347,7 +347,7 @@ export interface SweepRun {
  * A sweep's own page: a table instead of one verdict, because there is no
  * single thread this report is about.
  *
- * `starvedRun` is reported as weather, in the same words `docs/usage/sweep.md`
+ * `starvedRun` is reported as weather, in the same words `docs/guides/sweep.md`
  * uses, because it is not a failure of this run — it is next week's sweep
  * being told where to resume.
  */

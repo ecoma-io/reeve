@@ -90,7 +90,7 @@ one is _consumers already running code whose provenance never arrived_.
 
 **Everything lives in one workflow, and that is forced rather than preferred.**
 release-please tags with `GITHUB_TOKEN`, and GitHub does not start a workflow from
-an event that token caused ([platform limits §1](platform-limits.md#1-a-github_token-write-does-not-trigger-a-workflow)).
+an event that token caused ([platform limits §1](../reference/platform-limits.md#1-a-github_token-write-does-not-trigger-a-workflow)).
 A separate `on: push: tags:` workflow would never run. So everything downstream is
 gated on the action's own `release_created` output instead.
 
@@ -144,7 +144,7 @@ the listing on its own.
 
 **Only the root `action.yml` gets a listing.** Duties live in subdirectories, and
 GitHub's Marketplace reads the repository root
-([platform limits §10](platform-limits.md#10-an-action-can-live-in-a-subdirectory-the-marketplace-only-sees-the-root)).
+([platform limits §10](../reference/platform-limits.md#10-an-action-can-live-in-a-subdirectory-the-marketplace-only-sees-the-root)).
 Consumers get one version line and one core; the cost is that individual duties
 are not separately listed. That trade was made deliberately.
 

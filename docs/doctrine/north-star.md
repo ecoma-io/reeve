@@ -361,7 +361,7 @@ mean nothing to it.
 
 Architecture is documented for contributors in
 [`development/`](../development/README.md); the configuration surface is documented
-for users in [`usage/`](../usage/README.md).
+for users in [the documentation index](../README.md).
 
 ## 7. Roadmap
 
@@ -495,7 +495,7 @@ already used within one language — so what used to hold this stage open is
 settled rather than outstanding.
 
 **Standing:** `duplicate` has landed — see
-[the duty's own page](../usage/duties/duplicate.md). It ranks the open backlog
+[the duty's own page](../reference/duties/duplicate.md). It ranks the open backlog
 against the thread in front of it with the same BM25 [memory](#9-settled-questions)
 retrieval already runs on, bridges the query through the pivot only when the
 corpus actually holds a candidate the thread's own language would not reach,
@@ -505,7 +505,7 @@ refused the same as one that failed to parse. Off in both halves by default:
 posting the one comment it may ever write needs `duplicate: [comment]` in the
 warrant **and** `apply: comment` on the workflow, because a wrong duplicate is
 a claim about somebody else's report, not a label one click undoes. `respond`
-has landed too — see [the duty's own page](../usage/duties/respond.md). It
+has landed too — see [the duty's own page](../reference/duties/respond.md). It
 writes the first reply itself, once, in the thread's own language, and never
 speaks over a human or its own earlier marker; `DEFAULT_CAPABILITIES` for it
 is empty, so nothing short of an explicit `respond: [comment]` in the warrant

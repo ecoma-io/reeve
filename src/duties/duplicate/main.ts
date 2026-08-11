@@ -807,7 +807,7 @@ function notGranted(warrant: Warrant): Outcome {
  * though `Api`'s `issues.update` could carry `state: "closed"` and `close` is
  * a name `CAPABILITIES` and `parseApply` both already accept.** `close`
  * exists in the warrant's vocabulary because `triage` mirrors it there, not
- * because this duty ever closes anything — see `docs/usage/duties/
+ * because this duty ever closes anything — see `docs/reference/duties/
  * duplicate.md`'s "never closes a thread" section. That means the guard a
  * duty which *does* close needs — refusing to re-close a thread a human just
  * reopened, so a maintainer's `reopened` is never fought — has nothing to

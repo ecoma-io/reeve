@@ -1,7 +1,7 @@
 # What Reeve is allowed to do to this repository — including to its own issues.
 #
 # This is a consumer's file, not part of the product: the format is documented
-# in `docs/usage/warrant.md`, and everything below is this project's own answer
+# in `docs/reference/warrant-format.md`, and everything below is this project's own answer
 # to it. It is here so a change to a duty is dogfooded on the pull request that
 # makes it, and so the taxonomy that ships as an example is one somebody has to
 # live with.
@@ -33,7 +33,7 @@ labels:
     description: >-
       A duty, or the machinery under one, does not do what its own documentation
       says it does. The reporter is using it as intended — a workflow that names
-      the action the way `docs/usage/installation.md` names it — and getting a
+      the action the way `docs/getting-started/installation.md` names it — and getting a
       wrong result.
     not: >-
       A model that answered badly. Reeve rotates models rather than retrying, so
@@ -67,7 +67,7 @@ labels:
       decision is not a documentation defect — the disagreement is with the
       decision, and that is `enhancement`.
     examples:
-      - "docs/usage/warrant.md lists a capability no duty defines"
+      - "docs/guides/warrant.md lists a capability no duty defines"
       - "The installation page pins @v0.1 but the tag does not exist yet"
 
   - name: question
