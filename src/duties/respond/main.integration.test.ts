@@ -478,6 +478,10 @@ describe("the action", () => {
     expect(run.outputs.responded).toBe("false");
     expect(run.outputs["respond-text"]).toBe(REPLY);
     expect(run.summary).toContain("`comment` was not granted");
+    // Report-only dogfooding: `respond-text` is invisible to anyone reading
+    // only the job summary, so the confident, withheld draft has to be
+    // legible there too, fenced under the verdict.
+    expect(run.summary).toContain(`\`\`\`\n${REPLY}\n\`\`\``);
   });
 
   it("never speaks over a human who already replied", async () => {
@@ -638,6 +642,7 @@ describe("the action", () => {
     expect(run.outputs.responded).toBe("false");
     expect(run.outputs["respond-text"]).toBe(REPLY);
     expect(run.summary).toContain("below the floor");
+    expect(run.summary).toContain(`\`\`\`\n${REPLY}\n\`\`\``);
   });
 
   it("writes every output and posts nothing on a dry run", async () => {

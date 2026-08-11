@@ -34181,7 +34181,7 @@ function verdict(run2) {
     ["Outcome", cell(outcome(run2))]
   ];
   const parts = ["### Verdict", "", table(["Field", "Value"], rows)];
-  if (confidence < run2.floor) parts.push("", ...fence(responded.text));
+  if (!run2.published && responded.text.length > 0) parts.push("", ...fence(responded.text));
   return parts.join("\n");
 }
 function decisionRows(decision) {
