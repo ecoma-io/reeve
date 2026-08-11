@@ -1,5 +1,7 @@
 # The language layer
 
+_Understand the three language roles and how detection reasons about them. Prerequisites: [Languages](../guides/languages.md)._
+
 This is the part of the core that the rest of the field does not have, and the
 reason [D1](../doctrine/north-star.md#d1--no-duty-is-english-only) is the first doctrine
 rather than the tenth.
@@ -101,27 +103,12 @@ The layer is only worth having if duties actually consume it. Concretely:
 - **`respond`** writes to the author, in the author's language, about a project
   whose documentation is in the project's.
 
-## Evaluation
+This is the concept behind [Languages](../guides/languages.md)'s
+configuration surface — the input and warrant keys on that page are how you
+tell this layer what to work with; this page is why it is shaped the way it
+is.
 
-Because of D11, a duty's evaluation set is multilingual and its headline number
-is **the worst language it claims**, not the mean. An average hides exactly the
-failure this project exists to remove: the tool that works, on average, because
-it works in English.
+---
 
-A duty may claim fewer languages. It may not claim a language it has not
-measured.
-
-## Open
-
-These are unresolved and marked so a reader does not mistake a sketch for a
-decision.
-
-1. **Multi-language threads.** A body in Vietnamese with an English title, or a
-   thread where the author switches after a maintainer replies. Per-item
-   detection handles the common case and does not describe this one.
-2. **Reader languages beyond two.** See open question 2 in the north star: the
-   author/project two-pole model is a simplification, and a project with
-   maintainers in three countries will break it.
-3. **Script versus language.** Simplified and traditional Chinese, and the
-   several Serbian and Punjabi cases, are one language and two scripts. Whether
-   the warrant expresses script separately is undecided.
+**Related:** [Languages](../guides/languages.md) · [The authority model](authority-model.md) · [The warrant](../guides/warrant.md)
+**Next:** [The authority model](authority-model.md) — the other concept every duty is built on

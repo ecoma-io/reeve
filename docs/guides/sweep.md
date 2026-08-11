@@ -1,5 +1,7 @@
 # The sweep
 
+_Run Reeve against a backlog instead of one thread. Prerequisites: [Installation](../getting-started/installation.md)._
+
 Working a backlog that already exists, on a schedule, instead of one thread at
 a time — and what it looks like when a free provider cannot finish it in one
 run.
@@ -31,7 +33,7 @@ free tier's own rate limit; the example above raises it deliberately.
 
 ## Why a sweep exists at all: weather
 
-[D12](../north-star.md#d12--capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
 is the doctrine; this is what it looks like from the outside. A 429, a 5xx or
 a timeout is **weather** — a provider could not serve this particular request
 right now, and that says nothing about whether Reeve is allowed near your
@@ -136,7 +138,12 @@ whatever you are willing to spend finding out what it costs.
 
 Working through an existing backlog one thread at a time, from a
 `workflow_dispatch` you trigger by hand with the
-[`number`](installation.md#a-backfill-or-one-thread-on-purpose) input, still
+[`number`](../getting-started/installation.md#a-backfill-or-one-thread-on-purpose) input, still
 works exactly as before. `sweep` does not remove that path — a single thread
 on purpose is still exactly that — it adds the scheduled, unattended one next
 to it.
+
+---
+
+**Related:** [Cost](cost.md) · [Dry run](dry-run.md) · [Troubleshooting](troubleshooting.md)
+**Next:** [Cost](cost.md) — what a run like this actually spends, and how to keep it predictable

@@ -41,7 +41,7 @@ body:
     id: failure
     attributes:
       label: What went wrong
-      description: Pick the closest. The first four are things the core is meant to catch regardless of duty — see docs/north-star.md.
+      description: Pick the closest. The first four are things the core is meant to catch regardless of duty — see docs/doctrine/north-star.md.
       options:
         - It did something the warrant does not name
         - It altered or removed something a person wrote or decided
