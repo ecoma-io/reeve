@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.0](https://github.com/ecoma-io/reeve/compare/v0.1.0...v0.2.0) (2026-08-11)
+
+
+### Features
+
+* **core:** the warrant is the whole answer — languages, capabilities, and the office ([#16](https://github.com/ecoma-io/reeve/issues/16)) ([7da04ec](https://github.com/ecoma-io/reeve/commit/7da04ecdda29fb7fecef6e13ef46307987894f96))
+* **duplicate:** rank the open backlog and let a judge confirm before anyone comments ([9d342c9](https://github.com/ecoma-io/reeve/commit/9d342c9e453a891b41909fbea5a6f6281232f582))
+* **memory:** the store learns from label changes, and recall crosses languages ([#19](https://github.com/ecoma-io/reeve/issues/19)) ([372d364](https://github.com/ecoma-io/reeve/commit/372d3647f52cb69ea0e286cbde2f07ff87c57629))
+* **respond:** add the respond duty — one first reply, then done ([b1b9f4c](https://github.com/ecoma-io/reeve/commit/b1b9f4cd955d0a0a4bc0685b0e4bfa2046a49efd))
+
 ## 0.1.0 (2026-08-11)
 
 
