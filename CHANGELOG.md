@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/ecoma-io/reeve/compare/v0.2.0...v0.2.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **respond:** render the withheld draft in the job summary ([af4171a](https://github.com/ecoma-io/reeve/commit/af4171a1871a9253164a66fc32dcbc401b4e1ed1))
+
 ## [0.2.0](https://github.com/ecoma-io/reeve/compare/v0.1.0...v0.2.0) (2026-08-11)
 
 
