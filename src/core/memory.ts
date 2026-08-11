@@ -251,12 +251,17 @@ function searchable(correction: Correction): string {
  * and this query can never surface it — not "falls back to its own text
  * regardless of language", which is exactly the false-match noise this rule
  * exists to keep out.
+ *
+ * Codes compare case-insensitively, the same way `findLanguage` reads them
+ * everywhere else — a store recorded under `vi` stays reachable from a
+ * warrant that spells the pivot `VI`.
  */
 function searchablePivot(correction: Correction, target: string): string {
-  if (correction.pivot?.language === target) {
+  const wanted = target.toLowerCase();
+  if (correction.pivot?.language.toLowerCase() === wanted) {
     return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
   }
-  if (correction.language === target) {
+  if (correction.language?.toLowerCase() === wanted) {
     return searchable(correction);
   }
   return "";

@@ -33454,10 +33454,11 @@ function searchable(correction) {
   return [correction.title, correction.excerpt, correction.note ?? ""].join("\n");
 }
 function searchablePivot(correction, target) {
-  if (correction.pivot?.language === target) {
+  const wanted = target.toLowerCase();
+  if (correction.pivot?.language.toLowerCase() === wanted) {
     return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
   }
-  if (correction.language === target) {
+  if (correction.language?.toLowerCase() === wanted) {
     return searchable(correction);
   }
   return "";

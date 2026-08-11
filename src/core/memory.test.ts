@@ -234,6 +234,32 @@ describe("recallAcrossQueries", () => {
     ).toEqual([bridged]);
   });
 
+  it("compares pivot language codes case-insensitively, the way codes read everywhere else", () => {
+    // A warrant spelling the pivot `EN` and a store recorded under `en` are
+    // the same configuration — `findLanguage` already reads codes that way,
+    // and a case-only difference silently emptying cross-language recall
+    // would be the kind of miss nobody can see in a log.
+    const bridged = correction({
+      thread: 31,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: {
+        language: "en",
+        title: "The dark mode toggle",
+        excerpt: "does not persist after a page reload",
+      },
+    });
+    const memory = createMemory([bridged]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "dark mode toggle reload", against: { pivot: "EN" } }],
+        3,
+      ),
+    ).toEqual([bridged]);
+  });
+
   it("does not rank a rendering in a language the query is not asking for", () => {
     // The rendering below is in English, left over from before this project's
     // configured first language moved to French. A French-pivot query has to
