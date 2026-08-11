@@ -189,7 +189,7 @@ Judged from the consumer's workflow file, not from the source:
 - Changing an input's default.
 - Changing what a duty does by default — a capability that becomes on, or a
   guardrail that becomes looser.
-- Breaking one of [the invariants](security.md#invariants), which is a breaking
+- Breaking one of [the invariants](../security/security.md#invariants), which is a breaking
   change regardless of what any `action.yml` says.
 - Raising the Node major in `runs.using`.
 
