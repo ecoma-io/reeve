@@ -50,7 +50,9 @@ None.
 
 Every invocation fails red, naming the duty you meant to run — `duty`, when
 set — and the corrected `uses:` line to write instead:
-`uses: ecoma-io/reeve/<duty>@v0.1`. There is no green path.
+`uses: ecoma-io/reeve/<duty>@<the ref you pinned>`. The message repeats the
+ref your workflow already pinned rather than naming any particular version,
+so it can never go stale or tell you to switch lines. There is no green path.
 
 ## Dry-run behavior
 

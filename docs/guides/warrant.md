@@ -201,7 +201,7 @@ reversible version of "post a comment that reads as this project answering a
 stranger." So an absent warrant, or a written one that is simply silent about
 `respond`, grants it nothing — not `comment`, not anything — until
 `capabilities: { respond: [comment] }` names it explicitly. See [the
-`respond` duty](../reference/duties/respond.md#granting-it).
+`respond` duty](../reference/duties/respond.md#required-permissions).
 
 **A duty also takes an `apply` input, and the narrower of the two wins.** The
 file and the workflow are both reviewable, they can disagree, and the fail-safe
@@ -314,7 +314,7 @@ jobs:
           apply: label, record
 ```
 
-See [the triage duty](../reference/duties/triage.md#memory) for the full shape of this.
+See [the triage duty](../reference/duties/triage.md#configuration) for the full shape of this.
 
 **The pivot language is what makes the store cross-language.** The first
 language `triage` resolves — from `languages:` here, or from the `languages`

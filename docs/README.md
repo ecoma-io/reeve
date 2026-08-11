@@ -79,8 +79,10 @@ remember.
 Four duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
 [`duplicate`](reference/duties/duplicate.md), and
-[`respond`](reference/duties/respond.md) — and `triage` and `translate` are
-dogfooded on this repository today.
+[`respond`](reference/duties/respond.md) — and all four are dogfooded on this
+repository today: `triage` and `translate` acting on real threads, `duplicate`
+and `respond` in report-only mode, writing verdicts to job summaries and
+touching nothing.
 
 ## Full index
 

@@ -14,11 +14,11 @@ the author did not write in English.**
 Most tools have a language setting. Reeve has three roles, and confusing them is
 where every naive design fails.
 
-| Role                 | What it is                                                                                                                       | Where it comes from                    |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| **Author language**  | What the person on the other end actually wrote in.                                                                              | Detected, per item, deterministically. |
-| **Project language** | The language the project's own artefacts are in — its taxonomy, its docs, its issue titles as a maintainer expects to scan them. | The warrant.                           |
-| **Reader languages** | What the maintainers actually read. Often more than one, often not the project language.                                         | The warrant.                           |
+| Role                 | What it is                                                                                                                       | Where it comes from                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Author language**  | What the person on the other end actually wrote in.                                                                              | Detected, per item, deterministically.                                    |
+| **Project language** | The language the project's own artefacts are in — its taxonomy, its docs, its issue titles as a maintainer expects to scan them. | The warrant — or the `languages` input where no warrant carries the list. |
+| **Reader languages** | What the maintainers actually read. Often more than one, often not the project language.                                         | The warrant — or the `languages` input where no warrant carries the list. |
 
 A tool with one setting can translate. It cannot decide, because deciding
 requires knowing _whose_ language a given piece of output is for. A label

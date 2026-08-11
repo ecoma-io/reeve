@@ -23,8 +23,12 @@ src/
   duties/
     translate/     one decision
     triage/        another decision
+    duplicate/     another
+    respond/       another
 translate/action.yml
 triage/action.yml
+duplicate/action.yml
+respond/action.yml
 ```
 
 ## What the core supplies
