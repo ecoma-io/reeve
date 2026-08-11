@@ -355,12 +355,11 @@ describe("resolveLanguages", () => {
   });
 
   it("refuses a run where neither source names a language, naming both", () => {
-    expect(() => resolveLanguages(warrant(MINIMAL), "  ")).toThrow(
-      new RegExp(
-        `Write \`languages:\` in the warrant \\(\`${PATH.replace(/\./g, "\\.")}\`\\).*` +
-          "or set the `languages` input",
-      ),
-    );
+    const refusing = (): void => {
+      resolveLanguages(warrant(MINIMAL), "  ");
+    };
+    expect(refusing).toThrow(`Write \`languages:\` in the warrant (\`${PATH}\`)`);
+    expect(refusing).toThrow("or set the `languages` input");
   });
 });
 
