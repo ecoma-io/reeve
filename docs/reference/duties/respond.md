@@ -74,10 +74,11 @@ jobs:
           models: gpt-5-mini
 ```
 
-That alone drafts a reply and reports it on `respond-text` — and posts
-nothing, because the default warrant grants `respond` no capability at all.
-Read the draft on a few real issues first; grant `comment` once you trust
-it.
+That alone drafts a reply and posts nothing, because the default warrant
+grants `respond` no capability at all. The job summary is where to actually
+read it — the fenced draft sits right under the verdict on every run that
+withheld it, so watching a few real issues never means digging through
+`respond-text` by hand. Grant `comment` once you trust it.
 
 ## Required permissions
 

@@ -133,13 +133,20 @@ function verdict(run: Run): string {
 
   const parts = ["### Verdict", "", table(["Field", "Value"], rows)];
 
-  // Below the floor is the tuning workflow `confidence`'s own description
-  // sells: the draft is real work a maintainer is meant to read and judge,
-  // not just a fact that one was written. `respond-text` carries the same
-  // text for a workflow to route elsewhere; this is what makes it legible
-  // without leaving this page. `fence` rather than a bare ``` — a draft that
-  // itself quotes a fenced block would otherwise close this one early.
-  if (confidence < run.floor) parts.push("", ...fence(responded.text));
+  // Shown here unless the thread itself already carries these exact words —
+  // `published` is `true` only at the one place `main.ts` actually posts a
+  // comment, never for a dry run, so every other outcome (below the floor,
+  // `comment` withheld, a dry run, or anything this summary's own `outcome`
+  // ladder does not recognise) leaves the draft unread anywhere else.
+  // `respond-text` carries the same text for a workflow to route elsewhere,
+  // but a job summary reader cannot see a step output — this page is the
+  // only place a human reads it, so it has to carry the draft itself, not
+  // just the fact that one was written. Skipped for an empty draft: `text`
+  // rendered nothing, and `outcome` already says so — a bare, empty fence
+  // would only look like a rendering mistake. `fence` rather than a literal
+  // ``` — a draft that itself quotes a fenced block would otherwise close
+  // this one early.
+  if (!run.published && responded.text.length > 0) parts.push("", ...fence(responded.text));
 
   return parts.join("\n");
 }
