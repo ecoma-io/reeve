@@ -156,3 +156,191 @@ export function createReply(api: GitHubApi, at: Location, reply: Reply): Thread 
     },
   };
 }
+
+/**
+ * The part of an Octokit client a duty that decides about a thread uses.
+ *
+ * Separate from `GitHubApi` rather than folded into it, and the reason is what
+ * a reviewer can conclude from each. `GitHubApi` is the surface for reading a
+ * body and writing under a marker, and it is deliberately four methods long: a
+ * duty holding one of those cannot label, comment, close or assign, and that is
+ * legible from the type. Merging the two would make every consumer of the
+ * narrow port hold the wide one, and the answer to "what can this reach?" would
+ * become "everything, look at the call sites".
+ *
+ * A real client satisfies both, which the integration test asserts.
+ */
+export interface TrackerApi {
+  readonly rest: {
+    readonly issues: {
+      get(params: { owner: string; repo: string; issue_number: number }): Promise<{
+        data: {
+          title?: string;
+          body?: string | null;
+          state?: string;
+          labels?: (string | { name?: string })[];
+        };
+      }>;
+      update(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        state?: "open" | "closed";
+        state_reason?: "completed" | "not_planned" | "reopened" | null;
+      }): Promise<unknown>;
+      addLabels(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        labels: string[];
+      }): Promise<unknown>;
+      createComment(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        body: string;
+      }): Promise<unknown>;
+      addAssignees(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        assignees: string[];
+      }): Promise<unknown>;
+      listLabelsForRepo(params: {
+        owner: string;
+        repo: string;
+        per_page?: number;
+        page?: number;
+      }): Promise<{ data: { name: string }[] }>;
+    };
+  };
+}
+
+/**
+ * A thread as it stands, for a duty that has to decide about it rather than
+ * only translate it.
+ *
+ * The labels are the load-bearing field and they are read for one reason: a
+ * label a maintainer applied is a decision, and every guardrail that refuses to
+ * overrule one needs to know what is already there. Reading them at the start
+ * of the run rather than at the apply stage is deliberate — it is the same
+ * request that fetched the body, and a second read would be a second chance to
+ * race a human who labelled the thread while the model was thinking.
+ */
+export interface Standing {
+  readonly title: string;
+  readonly body: string;
+  /** Every label on the thread now, whoever put it there. */
+  readonly labels: readonly string[];
+  readonly closed: boolean;
+}
+
+export async function readStanding(api: TrackerApi, at: Location): Promise<Standing> {
+  const { data } = await api.rest.issues.get({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number,
+  });
+
+  return {
+    title: data.title ?? "",
+    body: data.body ?? "",
+    // The REST API returns a label as an object, and as a bare string when the
+    // request asked for it that way. Both shapes are documented, so both are
+    // read rather than one being assumed and the other becoming an empty list
+    // that silently makes every guardrail think the thread is unlabelled.
+    labels: (data.labels ?? [])
+      .map((label) => (typeof label === "string" ? label : (label.name ?? "")))
+      .filter((name) => name.length > 0),
+    closed: data.state === "closed",
+  };
+}
+
+/**
+ * How many labels one run will read, and why there is a ceiling.
+ *
+ * A repository's label list is small by nature — it is a taxonomy a human
+ * maintains — and a thousand of them is far past the point where the warrant
+ * would have been the problem. The pages exist because a repository with a
+ * hundred and one labels must not silently validate against the first hundred,
+ * which would report the hundred-and-first as missing and fail a run over a
+ * label that is right there.
+ */
+const LABEL_PAGE = 100;
+const LABEL_PAGES = 10;
+
+/** Every label this repository has, which is what the warrant is checked against. */
+export async function listRepositoryLabels(
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+): Promise<readonly string[]> {
+  const names: string[] = [];
+
+  for (let page = 1; page <= LABEL_PAGES; page += 1) {
+    const { data } = await api.rest.issues.listLabelsForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      per_page: LABEL_PAGE,
+      page,
+    });
+    names.push(...data.map((label) => label.name));
+    if (data.length < LABEL_PAGE) break;
+  }
+
+  return names;
+}
+
+/**
+ * Everything a duty can do to a thread that is not editing its body, behind one
+ * object.
+ *
+ * Four methods, and that is the complete list of ways Reeve changes a tracker.
+ * A reviewer asking "what can this thing do to my repository?" reads them and
+ * is finished — which is the property that made the port worth having, and the
+ * reason a duty is never handed the client.
+ *
+ * **Every method adds.** There is no `removeLabel`, no `reopen`, no
+ * `unassign`, and adding one would take more than an input: it would take a
+ * different argument about what this project is for. What a maintainer did to a
+ * thread stands.
+ */
+export interface Effects {
+  /** Adds labels, keeping every label already there. */
+  addLabels(names: readonly string[]): Promise<void>;
+  /** Posts a new comment. Never edits somebody else's. */
+  comment(body: string): Promise<void>;
+  /** Adds assignees, keeping every assignee already there. */
+  assign(users: readonly string[]): Promise<void>;
+  /**
+   * Closes as not planned.
+   *
+   * `not_planned` rather than `completed`, always: nothing Reeve closes was
+   * completed by Reeve closing it, and a tracker that records the difference is
+   * one a maintainer can still audit afterwards.
+   */
+  closeAsNotPlanned(): Promise<void>;
+}
+
+export function createEffects(api: TrackerApi, at: Location): Effects {
+  const issue = { owner: at.owner, repo: at.repo, issue_number: at.number };
+
+  return {
+    async addLabels(names) {
+      if (names.length === 0) return;
+      await api.rest.issues.addLabels({ ...issue, labels: [...names] });
+    },
+
+    async comment(body) {
+      await api.rest.issues.createComment({ ...issue, body });
+    },
+
+    async assign(users) {
+      if (users.length === 0) return;
+      await api.rest.issues.addAssignees({ ...issue, assignees: [...users] });
+    },
+
+    async closeAsNotPlanned() {
+      await api.rest.issues.update({ ...issue, state: "closed", state_reason: "not_planned" });
+    },
+  };
+}
