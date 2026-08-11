@@ -28,8 +28,9 @@
 
 > [!IMPORTANT]
 > **Reeve is being assembled, not announced.** It is on a `0.x` line: four
-> duties ship, two of them — `triage` and `translate` — dogfooded on this
-> repository, and the rest of [the roadmap](docs/north-star.md#7-roadmap) is
+> duties ship and all four are dogfooded on this repository — `duplicate` and
+> `respond` in report-only mode, writing verdicts to job summaries and touching
+> nothing — and the rest of [the roadmap](docs/north-star.md#7-roadmap) is
 > still open. `1.0` is the
 > release where all of it is done — until then an input can still be renamed on
 > a minor, and the release notes will say so.
