@@ -29,7 +29,7 @@
 import { enclose } from "../../core/enclose.js";
 import type { Correction } from "../../core/memory.js";
 import { segments } from "../../core/markdown.js";
-import type { Failure, Message, Provider } from "../../core/provider.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import type { Label } from "../../core/warrant.js";
 
@@ -68,6 +68,8 @@ export interface TriageRequest {
   readonly language: string | null;
   /** The nearest maintainer decisions, closest first. Empty is the cold start. */
   readonly recalled: readonly Correction[];
+  /** This run's memory of capacity failures — see `core/provider.ts`'s `Weather`. */
+  readonly weather?: Weather;
 }
 
 export interface Triaged {
@@ -84,10 +86,14 @@ export interface Triaged {
 }
 
 export async function triage(request: TriageRequest): Promise<Triaged> {
-  const { provider, models } = request;
+  const { provider, models, weather } = request;
   const messages = prompt(request);
 
-  const rotation = await rotateModels(models, (model) => provider.complete(model, messages));
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, messages),
+    weather,
+  );
   if (!rotation.success) {
     return { verdict: NOTHING, failures: rotation.failures, unreadable: null };
   }

@@ -178,6 +178,42 @@ inputs:
     required: false
     default: "false"
 
+  sweep:
+    description: >-
+      Work the backlog instead of the one thread this event named: every open
+      issue this duty has not already labelled, newest created first. Not an
+      escalation of authority — a sweep decides how much work a run looks for,
+      never what it is allowed to do to a thread, so the same warrant and the
+      same `apply` bound it exactly as they bound a single-thread run.
+
+      Cannot be combined with `number` — set one or the other.
+    required: false
+    default: "false"
+
+  since:
+    description: >-
+      The oldest issue a sweep will consider, bounded by when it was opened —
+      never by when it was last touched, because this duty's own labelling
+      would otherwise push that bound forward under it. Empty for no bound, a
+      calendar date (`2026-01-01`), or a duration (`90d`). This is what "no
+      archaeology on threads before Reeve adoption" means: point it at the day
+      this duty started running here, and everything older stays a deliberate,
+      separate backfill rather than something a scheduled run stumbles into.
+    required: false
+    default: ""
+
+  limit:
+    description: >-
+      The most issues one sweep will actually process. A skip — an issue this
+      duty already labelled — costs nothing and does not count against it.
+      Kept modest by default to protect a free tier's own rate limit: a
+      keyless provider caps requests by IP, and a run that tried the whole
+      backlog in one job would spend most of it rotating through 429s instead
+      of finishing a smaller batch for good. Raise it for a paid provider or a
+      deliberate backfill.
+    required: false
+    default: "50"
+
 outputs:
   labels:
     description: >-
@@ -216,6 +252,32 @@ outputs:
       `closed`. `{}` under `dry-run`, which is a shape no real run produces — a
       real run always reports all four keys, whether or not it did anything with
       them.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a 429,
+      a 5xx, a timeout, or a network failure, on every one of them. Weather,
+      never a failure by itself: outside `sweep` this run still delivered
+      whatever a verdict it reached before the roster ran dry, and under
+      `sweep` see `remaining` for what is left. Worth alerting on if a
+      schedule keeps producing it, because that is a quota worth raising
+      rather than a run worth retrying.
+
+  processed:
+    description: >-
+      How many issues a sweep actually processed this run — decided about,
+      whether or not anything was applied. `0` outside `sweep`.
+
+  skipped:
+    description: >-
+      How many issues a sweep found already labelled and left alone, at no
+      cost beyond the listing itself. `0` outside `sweep`.
+
+  remaining:
+    description: >-
+      Candidates this sweep did not reach — past `limit`, or left behind when
+      the roster ran out of capacity. The next sweep starts here. `0` outside
+      `sweep`, and `0` when a sweep finished its whole backlog.
 
 runs:
   using: node24

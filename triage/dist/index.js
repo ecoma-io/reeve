@@ -32565,7 +32565,13 @@ function createProvider(config) {
           signal: AbortSignal.timeout(timeoutMs)
         });
       } catch (error2) {
-        return { ok: false, model, usage: null, reason: describeRequestError(error2, timeoutMs) };
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          reason: describeRequestError(error2, timeoutMs)
+        };
       }
       let text2;
       try {
@@ -32575,6 +32581,7 @@ function createProvider(config) {
           ok: false,
           model,
           usage: null,
+          kind: "capacity",
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
         };
       }
@@ -32584,17 +32591,24 @@ function createProvider(config) {
 }
 function readCompletion(model, status, text2) {
   const at = `HTTP ${String(status)}`;
+  const kind = classifyStatus(status);
   let payload;
   try {
     payload = JSON.parse(text2);
   } catch {
-    return { ok: false, model, usage: null, reason: `${at}: body was not JSON \u2014 ${excerpt(text2)}` };
+    return {
+      ok: false,
+      model,
+      usage: null,
+      kind,
+      reason: `${at}: body was not JSON \u2014 ${excerpt(text2)}`
+    };
   }
   const usage = readUsage(payload);
   const reported = readErrorMessage(payload);
-  if (reported !== null) return { ok: false, model, usage, reason: `${at}: ${reported}` };
+  if (reported !== null) return { ok: false, model, usage, kind, reason: `${at}: ${reported}` };
   if (status < 200 || status >= 300) {
-    return { ok: false, model, usage, reason: `${at}: ${excerpt(text2)}` };
+    return { ok: false, model, usage, kind, reason: `${at}: ${excerpt(text2)}` };
   }
   const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
   if (choice === null) {
@@ -32602,15 +32616,16 @@ function readCompletion(model, status, text2) {
       ok: false,
       model,
       usage,
+      kind,
       reason: `${at}: no choices in the response \u2014 ${excerpt(text2)}`
     };
   }
   const content = asRecord(choice.message)?.content;
   if (typeof content !== "string") {
-    return { ok: false, model, usage, reason: `${at}: message content was not a string` };
+    return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
   }
   if (content.trim().length === 0) {
-    return { ok: false, model, usage, reason: `${at}: answered with empty content` };
+    return { ok: false, model, usage, kind, reason: `${at}: answered with empty content` };
   }
   const finishReason = choice.finish_reason;
   return {
@@ -32620,6 +32635,11 @@ function readCompletion(model, status, text2) {
     content,
     finishReason: typeof finishReason === "string" ? finishReason : null
   };
+}
+function classifyStatus(status) {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429 || status >= 500 && status < 600) return "capacity";
+  return "protocol";
 }
 function readUsage(payload) {
   const usage = asRecord(asRecord(payload)?.usage);
@@ -32632,11 +32652,55 @@ function readUsage(payload) {
 function asCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
 }
-async function rotateModels(models, attempt) {
+var AuthenticationFailure = class extends Error {
+  failure;
+  constructor(failure) {
+    super(`${failure.model}: ${failure.reason}`);
+    this.name = "AuthenticationFailure";
+    this.failure = failure;
+  }
+};
+function createWeather() {
+  const order = [];
+  const dead = /* @__PURE__ */ new Set();
+  return {
+    grounded: (model) => dead.has(model),
+    ground: (model) => {
+      if (dead.has(model)) return;
+      dead.add(model);
+      order.push(model);
+    },
+    get starved() {
+      return order;
+    }
+  };
+}
+function starved(models, weather) {
+  return models.length > 0 && models.every((model) => weather.grounded(model));
+}
+function weatherFailure(model) {
+  return {
+    ok: false,
+    model,
+    kind: "capacity",
+    usage: null,
+    reason: "already rotated past for capacity earlier in this run \u2014 a provider's limit does not clear inside one job, so it was not asked again"
+  };
+}
+function reckon(failure, weather) {
+  if (failure.kind === "auth") throw new AuthenticationFailure(failure);
+  if (failure.kind === "capacity") weather?.ground(failure.model);
+}
+async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
     const completion = await attempt(model);
     if (completion.ok) return { success: completion, failures };
+    reckon(completion, weather);
     failures.push(completion);
   }
   return { success: null, failures };
@@ -32686,11 +32750,12 @@ async function detectLanguage(text2, languages, pick) {
   }
   return { language: null, by: "none", candidates };
 }
-function createLanguagePicker(provider, models) {
+function createLanguagePicker(provider, models, weather) {
   return async (text2, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) => provider.complete(model, question(text2, candidates))
+      (model) => provider.complete(model, question(text2, candidates)),
+      weather
     );
     if (!rotation.success) return null;
     const { content } = rotation.success;
@@ -33039,6 +33104,9 @@ function enforceLabels(warrant, proposed, onThread) {
   }
   return { applied, refused };
 }
+function alreadyTaxonomized(warrant, labels) {
+  return labels.some((name) => warrant.labelNamed(name) !== void 0);
+}
 function owners(warrant, applied) {
   const users = [];
   const teams = [];
@@ -33088,6 +33156,40 @@ async function listRepositoryLabels(api, at) {
   }
   return labels;
 }
+var SWEEP_PAGE = 100;
+var SWEEP_PAGES = 10;
+async function listOpenThreads(api, at, since) {
+  const listed = [];
+  for (let page2 = 1; page2 <= SWEEP_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      sort: "created",
+      direction: "desc",
+      per_page: SWEEP_PAGE,
+      page: page2
+    });
+    let stop = false;
+    for (const entry of data) {
+      const createdAt = new Date(entry.created_at);
+      if (since !== null && createdAt < since) {
+        stop = true;
+        break;
+      }
+      listed.push({
+        number: entry.number,
+        title: entry.title ?? "",
+        body: entry.body ?? "",
+        labels: (entry.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+        createdAt,
+        isPullRequest: entry.pull_request !== void 0
+      });
+    }
+    if (stop || data.length < SWEEP_PAGE) break;
+  }
+  return listed;
+}
 function createEffects(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
   return {
@@ -33116,15 +33218,46 @@ function readShared() {
   if (roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
+  const sweep = getBooleanInput("sweep");
+  const configuredNumber = getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
+    );
+  }
   return {
     token: getInput("github-token", { required: true }),
-    number: threadNumber(),
+    number: sweep ? null : threadNumber(),
     models: roster.models,
     modelNames: roster.names,
     baseUrl: getInput("base-url", { required: true }),
     apiKey,
-    dryRun: getBooleanInput("dry-run")
+    dryRun: getBooleanInput("dry-run"),
+    sweep,
+    since: parseSince(getInput("since")),
+    limit: whole("limit", getInput("limit"))
   };
+}
+function parseSince(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
+  }
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
+  );
 }
 function threadNumber() {
   const configured = getInput("number");
@@ -33466,9 +33599,13 @@ function cost(spent, name) {
 
 // src/duties/triage/spam.ts
 async function sift(request2) {
-  const { provider, models } = request2;
+  const { provider, models, weather } = request2;
   if (models.length === 0) return { dropped: null, failures: [] };
-  const rotation = await rotateModels(models, (model) => provider.complete(model, prompt(request2)));
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, prompt(request2)),
+    weather
+  );
   if (!rotation.success) return { dropped: null, failures: rotation.failures };
   return { dropped: read(rotation.success.content), failures: rotation.failures };
 }
@@ -33619,13 +33756,47 @@ function withheld(run2) {
   if (run2.withheld.length === 0) return "";
   return `\`apply\` asks for ${run2.withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`;
 }
+function summarizeSweep(run2) {
+  if (run2.ungranted !== null) {
+    return `${["## Reeve \xB7 triage \u2014 sweep", "", run2.ungranted, "", cost(run2.spent, () => "")].join("\n").trimEnd()}
+`;
+  }
+  const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
+  const rendered = table(["Thread", "Outcome"], rows);
+  const parts = [
+    "## Reeve \xB7 triage \u2014 sweep",
+    "",
+    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (already labelled), ${String(run2.remaining)} remaining.`,
+    "",
+    rendered.length === 0 ? "Nothing was processed this run." : rendered
+  ];
+  if (run2.starvedRun) {
+    parts.push(
+      "",
+      "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
+    );
+  }
+  parts.push(
+    "",
+    cost(
+      run2.spent,
+      (spend) => shown(spend.purpose === "screen" ? run2.screenNames : run2.modelNames, spend.model)
+    )
+  );
+  return `${parts.join("\n").trimEnd()}
+`;
+}
 
 // src/duties/triage/verdict.ts
 var NOTHING = { labels: [], confidence: 0, duplicateOf: null, rationale: "" };
 async function triage(request2) {
-  const { provider, models } = request2;
+  const { provider, models, weather } = request2;
   const messages = prompt2(request2);
-  const rotation = await rotateModels(models, (model) => provider.complete(model, messages));
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, messages),
+    weather
+  );
   if (!rotation.success) {
     return { verdict: NOTHING, failures: rotation.failures, unreadable: null };
   }
@@ -33774,15 +33945,66 @@ async function resolveAuthority(read2, path, api, at) {
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+async function runSweep(acc, api, authority2, settings, stages, weather) {
+  if (authority2.warrant.unnamed("triage")) {
+    acc.ungranted = notGranted(authority2.warrant).ungranted;
+    return;
+  }
+  if (!authority2.implicit) {
+    checkLabelsExist(
+      authority2.warrant,
+      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name)
+    );
+  }
+  const listed = await listOpenThreads(api, context2.repo, settings.since);
+  const candidates = listed.filter((thread) => !thread.isPullRequest);
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (acc.results.length >= settings.limit) break;
+    if (alreadyTaxonomized(authority2.warrant, thread.labels)) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    const at = { ...context2.repo, number: thread.number };
+    const standing = {
+      title: thread.title,
+      body: thread.body,
+      labels: thread.labels,
+      closed: false
+    };
+    const outcome = await decide(authority2, standing, settings, stages, weather);
+    const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
+    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+  }
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function describeOutcome(outcome, done) {
+  if (outcome.ungranted !== null) return "not granted";
+  if (outcome.screenedOut !== null) return `screened out \u2014 ${outcome.screenedOut.reason}`;
+  if (done.labels.length > 0) {
+    return `applied ${done.labels.map((name) => `\`${name}\``).join(", ")}`;
+  }
+  if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
+  return "no label";
+}
 async function run() {
   const meter = createMeter();
+  const weather = createWeather();
   let settings = null;
-  let outcome = null;
-  let done = NOTHING_DONE;
+  let single = null;
+  let bulk = null;
   try {
     settings = readSettings();
     const api = getOctokit(settings.token);
-    const at = { ...context2.repo, number: settings.number };
     const provider = createProvider({ baseUrl: settings.baseUrl, apiKey: settings.apiKey });
     const stages = {
       detect: metered(provider, meter, "detect"),
@@ -33790,32 +34012,53 @@ async function run() {
       triage: metered(provider, meter, "triage")
     };
     const read2 = await readWarrant(settings.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority2 = await resolveAuthority(read2, settings.warrant, api, at);
-    if (authority2.warrant.unnamed("triage")) {
-      outcome = notGranted(authority2.warrant);
+    const authority2 = await resolveAuthority(read2, settings.warrant, api, context2.repo);
+    if (settings.sweep) {
+      bulk = newAccumulator();
+      await runSweep(bulk, api, authority2, settings, stages, weather);
     } else {
-      const standing = await readStanding(api, at);
-      if (!authority2.implicit) {
-        checkLabelsExist(
-          authority2.warrant,
-          (await listRepositoryLabels(api, at)).map((label) => label.name)
-        );
+      const number = settings.number;
+      if (number === null) throw new Error("number: required outside `sweep`.");
+      const at = { ...context2.repo, number };
+      let outcome;
+      if (authority2.warrant.unnamed("triage")) {
+        outcome = notGranted(authority2.warrant);
+      } else {
+        const standing = await readStanding(api, at);
+        if (!authority2.implicit) {
+          checkLabelsExist(
+            authority2.warrant,
+            (await listRepositoryLabels(api, at)).map((label) => label.name)
+          );
+        }
+        outcome = await decide(authority2, standing, settings, stages, weather);
       }
-      outcome = await decide(authority2, standing, settings, stages);
+      const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
+      single = { number, outcome, done };
     }
-    if (!settings.dryRun) {
-      done = await act(createEffects(api, at), authority2.warrant, outcome);
-    }
-    report(outcome, done, settings.dryRun);
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
-    if (settings !== null && outcome !== null) {
-      await writeSummary(page(settings, outcome, done, meter.spent()));
+    if (settings !== null) {
+      const roosterStarved = starved(settings.models, weather);
+      if (roosterStarved) {
+        warning(
+          "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
+        );
+      }
+      if (settings.sweep && bulk !== null) {
+        reportSweep(bulk, roosterStarved);
+        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+      } else if (!settings.sweep && single !== null) {
+        report(single.outcome, single.done, settings.dryRun, roosterStarved);
+        await writeSummary(
+          page(settings, single.number, single.outcome, single.done, meter.spent())
+        );
+      }
     }
   }
 }
-async function decide(authority2, standing, settings, stages) {
+async function decide(authority2, standing, settings, stages, weather) {
   const warrant = authority2.warrant;
   const body = standing.body.slice(0, settings.maxBodyChars);
   if (standing.body.length > settings.maxBodyChars) {
@@ -33861,7 +34104,8 @@ async function decide(authority2, standing, settings, stages) {
     // the expensive model for it would be paying it to do the cheap one's work.
     createLanguagePicker(
       stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather
     )
   );
   const language = detection.language?.label ?? null;
@@ -33873,7 +34117,8 @@ async function decide(authority2, standing, settings, stages) {
     models: settings.screenModels,
     title: standing.title,
     body,
-    about: settings.about
+    about: settings.about,
+    weather
   });
   for (const failure of sifted.failures) {
     warning(`screen: ${shown(settings.screenNames, failure.model)} \u2014 ${failure.reason}`);
@@ -33899,7 +34144,8 @@ ${body}`, RECALLED);
     body,
     taxonomy: warrant.labels,
     language,
-    recalled
+    recalled,
+    weather
   });
   for (const failure of triaged.failures) {
     warning(`triage: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
@@ -34014,7 +34260,7 @@ function excerpt2(answer) {
   const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
-function report(outcome, done, dryRun) {
+function report(outcome, done, dryRun, roosterStarved) {
   setOutput("labels", JSON.stringify(outcome.applied));
   setOutput("proposed", JSON.stringify(outcome.verdict.labels));
   setOutput("confidence", outcome.verdict.confidence.toFixed(2));
@@ -34025,10 +34271,20 @@ function report(outcome, done, dryRun) {
   );
   setOutput("screened-out", outcome.screenedOut?.reason ?? "");
   setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
+  setOutput("starved", String(roosterStarved));
+  setOutput("processed", "0");
+  setOutput("skipped", "0");
+  setOutput("remaining", "0");
 }
-function page(settings, outcome, done, spent) {
+function reportSweep(bulk, roosterStarved) {
+  setOutput("processed", String(bulk.results.length));
+  setOutput("skipped", String(bulk.skipped));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(roosterStarved));
+}
+function page(settings, thread, outcome, done, spent) {
   return summarize({
-    thread: settings.number,
+    thread,
     dryRun: settings.dryRun,
     warrant: settings.warrant,
     language: outcome.language,
@@ -34047,6 +34303,20 @@ function page(settings, outcome, done, spent) {
     implicit: outcome.implicit,
     excludedLabels: outcome.excludedLabels,
     ungranted: outcome.ungranted,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+function sweepPage(settings, bulk, spent) {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    results: bulk.results,
+    skipped: bulk.skipped,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    ungranted: bulk.ungranted,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames

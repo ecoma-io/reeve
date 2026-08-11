@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Spend } from "../../core/meter.js";
 
-import { summarize, type Run } from "./summary.js";
+import { summarize, summarizeSweep, type Run, type SweepRun } from "./summary.js";
 
 // This page is read by the person who configured the run, and the question they
 // open it with is never "what did it apply" — that is visible on the thread. It
@@ -259,5 +259,115 @@ describe("summarize", () => {
     expect(page).toContain("No expensive model was asked anything. This is a real answer");
     // No table of refusals — nothing was ever proposed for one to hold.
     expect(page).not.toContain("### What the verdict proposed");
+  });
+});
+
+function sweep(over: Partial<SweepRun> = {}): SweepRun {
+  return {
+    dryRun: false,
+    warrant: ".github/reeve.yml",
+    results: [{ number: 7, outcome: "applied `bug`" }],
+    skipped: 2,
+    remaining: 0,
+    starvedRun: false,
+    ungranted: null,
+    spent: [],
+    modelNames: new Map(),
+    screenNames: new Map(),
+    ...over,
+  };
+}
+
+describe("summarizeSweep", () => {
+  it("names the mode and reports the three counts every sweep answers with", () => {
+    const page = summarizeSweep(sweep({ results: [], skipped: 5, remaining: 3 }));
+
+    expect(page).toContain("## Reeve · triage — sweep");
+    expect(page).toContain("Processed 0, skipped 5 (already labelled), 3 remaining.");
+  });
+
+  it("says a dry run rehearsed rather than applied", () => {
+    expect(summarizeSweep(sweep({ dryRun: true }))).toContain("**Dry run** — nothing was applied.");
+  });
+
+  it("tables one row per thread, with its outcome", () => {
+    const page = summarizeSweep(
+      sweep({
+        results: [
+          { number: 7, outcome: "applied `bug`" },
+          { number: 9, outcome: "screened out — spam" },
+        ],
+      }),
+    );
+
+    expect(page).toContain("| #7 | applied `bug` |");
+    expect(page).toContain("| #9 | screened out — spam |");
+  });
+
+  it("says plainly when nothing was processed, rather than an empty table", () => {
+    expect(summarizeSweep(sweep({ results: [] }))).toContain("Nothing was processed this run.");
+  });
+
+  it("explains a starved roster as weather, not a failure", () => {
+    const page = summarizeSweep(sweep({ starvedRun: true, remaining: 4 }));
+
+    expect(page).toContain("ran out of capacity partway through");
+    expect(page).toContain("Weather, not a failure.");
+  });
+
+  it("says nothing about the roster when it was never starved", () => {
+    expect(summarizeSweep(sweep({ starvedRun: false }))).not.toContain("ran out of capacity");
+  });
+
+  it("bills the cheap roster and the expensive one as separate rows, as a single run does", () => {
+    const page = summarizeSweep(
+      sweep({
+        spent: [
+          {
+            purpose: "screen",
+            model: "small",
+            requests: 1,
+            failed: 0,
+            prompt: 10,
+            completion: 2,
+            unreported: 0,
+          },
+          {
+            purpose: "triage",
+            model: "big",
+            requests: 1,
+            failed: 0,
+            prompt: 900,
+            completion: 40,
+            unreported: 0,
+          },
+        ],
+        screenNames: new Map([["small", "Quick"]]),
+        modelNames: new Map([["big", "Careful"]]),
+      }),
+    );
+
+    expect(page).toContain("| Screening | Quick |");
+    expect(page).toContain("| Triage | Careful |");
+  });
+
+  it("reports why nothing was even attempted when a written block did not name this duty", () => {
+    const page = summarizeSweep(
+      sweep({
+        ungranted:
+          "`.github/reeve.yml`'s `capabilities:` block does not name `triage`; once that " +
+          "block exists it is the whole answer, so add `triage: [label]` to it (or remove " +
+          "the block to return to defaults).",
+      }),
+    );
+
+    expect(page).toContain("## Reeve · triage — sweep");
+    expect(page).toContain("does not name `triage`");
+    // No table of results — nothing was ever attempted for one to hold.
+    expect(page).not.toContain("| Thread | Outcome |");
+  });
+
+  it("ends with exactly one newline, whatever the last section was", () => {
+    expect(summarizeSweep(sweep())).toMatch(/[^\n]\n$/);
   });
 });

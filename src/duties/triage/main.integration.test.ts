@@ -81,6 +81,17 @@ interface Answer {
   readonly payload: unknown;
 }
 
+/** One entry in a sweep's open-thread listing, as the stub returns it. */
+interface ListedIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  readonly labels: string[];
+  readonly createdAt: string;
+  /** Present, and true, only for the entries a sweep must skip as a pull request. */
+  readonly pullRequest?: boolean;
+}
+
 /** Everything a request is answered from, and everything a case may change. */
 interface State {
   title: string;
@@ -95,6 +106,12 @@ interface State {
    * warrant leaves out of the taxonomy it builds.
    */
   labelDescriptions: Record<string, string>;
+  /**
+   * The open backlog a sweep lists, newest first — the order this suite has to
+   * hand it in, since the stub serves it back verbatim rather than sorting it.
+   * Empty for every case outside `describe("the sweep", ...)`.
+   */
+  issues: ListedIssue[];
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
@@ -137,6 +154,7 @@ async function startStub(): Promise<Stub> {
     labels: [],
     repositoryLabels: ["bug", "docs", "question"],
     labelDescriptions: {},
+    issues: [],
     answer: triaging(verdict()),
     asked: [],
     effects: { applied: [], comments: [], assigned: [], closed: false },
@@ -190,6 +208,29 @@ async function route(
     const payload = parsed(raw) as { state?: string; state_reason?: string };
     stub.effects.closed = payload.state === "closed" && payload.state_reason === "not_planned";
     send(response, 200, { number: Number(issue[1]) });
+    return;
+  }
+
+  // A sweep's listing. `page` is honoured so a case could exercise pagination
+  // directly, but every case in this suite fits on page one — pagination and
+  // the `since` cutoff are exercised in isolation, against `listOpenThreads`
+  // itself, in `forge.test.ts`.
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues$/.test(path)) {
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      page === 1
+        ? stub.issues.map((candidate) => ({
+            number: candidate.number,
+            title: candidate.title,
+            body: candidate.body,
+            labels: candidate.labels.map((name) => ({ name })),
+            created_at: candidate.createdAt,
+            ...(candidate.pullRequest === true ? { pull_request: {} } : {}),
+          }))
+        : [],
+    );
     return;
   }
 
@@ -310,6 +351,9 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     "max-body-chars": "6000",
     about: "",
     "dry-run": "false",
+    sweep: "false",
+    since: "",
+    limit: "50",
   };
 }
 
@@ -443,6 +487,10 @@ describe("the action", () => {
       "duplicate-of": "",
       "screened-out": "",
       applied: JSON.stringify({ labels: ["bug"], commented: false, assigned: [], closed: false }),
+      starved: "false",
+      processed: "0",
+      skipped: "0",
+      remaining: "0",
     });
   });
 
@@ -507,6 +555,37 @@ describe("the action", () => {
     expect(stub.effects.applied).toEqual([]);
     expect(run.summary).toContain("No verdict — every model failed.");
     expect(run.summary).toContain("unusable and rotated past");
+  });
+
+  it("rotates through the whole roster before starving, and reports it on the output", async () => {
+    // D12: capacity is weather. A run that ran the roster dry is still green,
+    // and `starved` is how a workflow tells that run from an ordinary one.
+    stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+
+    const run = await runAction(stub, { models: "stub-model-a, stub-model-b" });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked.map((ask) => ask.model)).toEqual(["stub-model-a", "stub-model-b"]);
+    expect(run.outputs.starved).toBe("true");
+    expect(run.log).toContain(
+      "This run delivered what it could rather than failing red — weather, not a broken " +
+        "configuration.",
+    );
+  });
+
+  it("fails red the instant a model reports an authentication problem, asking no other", async () => {
+    // D12's other half: an auth failure is a broken configuration, not
+    // weather, so it stops the run immediately rather than rotating past it —
+    // rotating would spend a call on `stub-model-b` proving nothing, since the
+    // same key is wrong for both.
+    stub.answer = () => ({ status: 401, payload: { error: { message: "invalid api key" } } });
+
+    const run = await runAction(stub, { models: "stub-model-a, stub-model-b" });
+
+    expect(run.code).not.toBe(0);
+    expect(stub.asked).toHaveLength(1);
+    expect(stub.effects.applied).toEqual([]);
+    expect(run.log).toContain("stub-model-a: HTTP 401: invalid api key");
   });
 
   it("comments only when both the file and the workflow allow it", async () => {
@@ -852,9 +931,16 @@ describe("the action contract", () => {
       readFile(join(ROOT, "src", "duties", "triage", "main.ts"), "utf8"),
       readFile(join(ROOT, "src", "core", "inputs.ts"), "utf8"),
     ]);
-    return [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
-      ([, name]) => name ?? "",
-    );
+    // A set, not a list: `number` is read twice in `inputs.ts` — once to check
+    // it is not combined with `sweep`, again inside `threadNumber` — and that
+    // duplication is harmless plumbing rather than a second, different input.
+    return [
+      ...new Set(
+        [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
+          ([, name]) => name ?? "",
+        ),
+      ),
+    ];
   }
 
   it("reads every input it declares, under the name it declared", async () => {
@@ -958,4 +1044,145 @@ describe("zero config", () => {
     );
     expect(run.summary).toContain("No expensive model was asked anything.");
   });
+});
+
+describe("the sweep", () => {
+  /** One entry in the backlog `stub.issues` lists, newest-first order left to the case. */
+  function candidate(
+    number: number,
+    createdAt: string,
+    over: Partial<ListedIssue> = {},
+  ): ListedIssue {
+    return {
+      number,
+      title: `Thread ${String(number)}`,
+      body: REPORT,
+      labels: [],
+      createdAt,
+      ...over,
+    };
+  }
+
+  /**
+   * `sweep: true` needs `number` cleared — `baseInputs` sets `number: "42"` for
+   * the single-thread suite above, and `readShared` refuses the two together.
+   */
+  function sweepInputs(over: Record<string, string> = {}): Record<string, string> {
+    return { sweep: "true", number: "", ...over };
+  }
+
+  it(
+    "shrinks the roster run-wide, never retrying a model a capacity failure already " +
+      "grounded on an earlier thread",
+    async () => {
+      stub.issues = [
+        candidate(101, "2026-01-03T00:00:00Z"),
+        candidate(102, "2026-01-02T00:00:00Z"),
+      ];
+      stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+
+      const run = await runAction(stub, sweepInputs({ models: "stub-model-a, stub-model-b" }));
+
+      expect(run.code).toBe(0);
+      // Both models are asked once each, and only once — on #101. #102 is never
+      // reached: `starved` is checked before `decide` on every iteration of the
+      // loop, against the one `Weather` object the whole run shares, so a
+      // roster grounded dry on the first thread stays dry for the rest of it.
+      expect(stub.asked.map((ask) => ask.model)).toEqual(["stub-model-a", "stub-model-b"]);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.remaining).toBe("1");
+      expect(run.outputs.starved).toBe("true");
+      expect(run.summary).toContain("| #101 |");
+      expect(run.summary).not.toContain("| #102 |");
+    },
+  );
+
+  it("keeps only threads created on or after a calendar `since` date", async () => {
+    stub.issues = [candidate(201, "2026-01-10T00:00:00Z"), candidate(202, "2025-06-01T00:00:00Z")];
+
+    const run = await runAction(stub, sweepInputs({ since: "2026-01-01" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.outputs.remaining).toBe("0");
+    expect(stub.effects.applied).toEqual(["bug"]);
+    expect(run.summary).toContain("| #201 |");
+    expect(run.summary).not.toContain("| #202 |");
+  });
+
+  it("keeps only threads created within a duration-style `since`", async () => {
+    const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const old = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    stub.issues = [candidate(301, recent), candidate(302, old)];
+
+    const run = await runAction(stub, sweepInputs({ since: "90d" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.summary).toContain("| #301 |");
+    expect(run.summary).not.toContain("| #302 |");
+  });
+
+  it("honours `limit`, and counts what it left behind as `remaining`", async () => {
+    stub.issues = [
+      candidate(401, "2026-01-03T00:00:00Z"),
+      candidate(402, "2026-01-02T00:00:00Z"),
+      candidate(403, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs({ limit: "2" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("2");
+    expect(run.outputs.remaining).toBe("1");
+    expect(run.summary).toContain("| #401 |");
+    expect(run.summary).toContain("| #402 |");
+    expect(run.summary).not.toContain("| #403 |");
+  });
+
+  it("skips a thread that already carries a taxonomy label, at no cost", async () => {
+    stub.issues = [
+      candidate(501, "2026-01-02T00:00:00Z", { labels: ["docs"] }),
+      candidate(502, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs());
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.outputs.skipped).toBe("1");
+    expect(run.outputs.remaining).toBe("0");
+    // The skip is free: only #502 was ever decided about, so only #502 spent a
+    // model call.
+    expect(stub.asked).toHaveLength(1);
+    expect(run.summary).toContain("| #502 |");
+    expect(run.summary).not.toContain("| #501 |");
+  });
+
+  it("refuses `sweep` combined with `number`, before spending anything", async () => {
+    const run = await runAction(stub, { sweep: "true", number: "7" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("sweep: cannot be combined with `number`");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it(
+    "rehearses the loop on a dry run, applying nothing but still reporting processed and " +
+      "remaining",
+    async () => {
+      stub.issues = [
+        candidate(601, "2026-01-02T00:00:00Z"),
+        candidate(602, "2026-01-01T00:00:00Z"),
+      ];
+
+      const run = await runAction(stub, sweepInputs({ "dry-run": "true" }));
+
+      expect(run.code).toBe(0);
+      expect(stub.effects.applied).toEqual([]);
+      expect(run.outputs.processed).toBe("2");
+      expect(run.outputs.remaining).toBe("0");
+      expect(run.summary).toContain("**Dry run** — nothing was applied.");
+    },
+  );
 });
