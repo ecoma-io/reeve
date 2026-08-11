@@ -20,6 +20,11 @@
 </p>
 
 <p align="center">
+  Reeve labels, translates, deduplicates, and answers issues from inside your own
+  warrant file — not a chatbot, not a hosted service, not a workflow engine.
+</p>
+
+<p align="center">
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="#what-it-refuses-to-do"><b>What it refuses to do</b></a> ·
   <a href="docs/doctrine/north-star.md"><b>North star</b></a> ·
@@ -49,7 +54,7 @@ vaguer one in English.
 
 Reeve treats language as something the core knows and every duty consumes, not
 as one feature bolted on beside the others. That is the whole thesis, and
-[`docs/doctrine/north-star.md`](docs/doctrine/north-star.md) is where it is argued properly.
+[the north star](docs/doctrine/north-star.md) is where it is argued properly.
 
 ## Quick start
 
@@ -94,34 +99,6 @@ and could withdraw at any moment. The owner stayed the owner.
 
 That is the whole product. Everything below follows from it.
 
-## Duties, and the ladder they sit on
-
-A **duty** is one job Reeve does, and none of them is switched on by a mode —
-they sit on [a ladder](docs/doctrine/north-star.md#3-the-ladder), and what runs is
-exactly as much as you wrote down. The `uses:` line alone gets you the bottom
-rung: the narrowest authority Reeve knows how to grant, built from the labels
-your repository already has. Write a taxonomy and you climb one rung; write
-capabilities, `owner`, `languages` and you climb another. Nothing widens on
-its own.
-
-Every duty shares a core — the provider client and its fallback, the language
-layer, several drafts filtered by deterministic scoring, the sanitiser, the
-allowlist, the state kept as files in your repository — and differs only in
-what it decides:
-
-| Duty        | Status | What it does                                                                                                                                                                                                                                                                                                                  |
-| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `triage`    | ships  | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has. The easy majority is decided by code for nothing, and only what survives that reaches a model. It applies labels you defined and nothing else — as well in Vietnamese as in English, or it is a bug. |
-| `translate` | ships  | Your contributors write in their language; your maintainers read in theirs. Every issue and pull request carries both, in its own body, with the author's words kept byte-for-byte and marked as the version that counts.                                                                                                     |
-| `duplicate` | ships  | Finds the thread that already reported this — **across the language it was reported in**. Nothing else in this category does that, because everything else matches within one language. Top rung: opt-in, never on by accident.                                                                                               |
-| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Answers once and never converses. Top rung: granted nothing until a warrant names it.                                                                                                                |
-
-What comes after them is decided by one test, and it is a strict one: the work
-has to recur, be uniformly expensive today, already be work a maintainer stopped
-doing, and be harder on a project whose contributors do not share a language.
-[Doctrine D10](docs/doctrine/north-star.md#d10--a-duty-must-earn-its-place) rejects most
-feature requests, on purpose.
-
 ## What it refuses to do
 
 The list is short, it is enforced in code, and it is the most important section
@@ -138,37 +115,56 @@ on this page.
 | **Pretend it worked**           | A run that cannot do its job fails red. It never reports an empty result in green to mean something went wrong.                                                                                                                                                                                                       |
 | **Hold your data**              | No account, no dashboard, no hosted state. Taxonomy, corrections, configuration and markers are plain files in your repository — reviewed in a pull request, and deleted with `rm`.                                                                                                                                   |
 
+## Duties, and the ladder they sit on
+
+A **duty** is one job Reeve does, and none of them is switched on by a mode —
+what runs is exactly as much as you wrote down, one rung of
+[the ladder](docs/concepts/authority-model.md) at a time. Every duty shares a
+core — the provider client and its fallback, the language layer, several
+drafts filtered by deterministic scoring, the sanitiser, the allowlist, the
+state kept as files in your repository — and differs only in what it decides:
+
+| Duty        | What it does                                                                                                                                                                 | Reference                                       |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `triage`    | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has.                                                     | [Reference](docs/reference/duties/triage.md)    |
+| `translate` | Puts every issue and pull request in every language your project reads — in the thread's own body, marked as the version that counts.                                        | [Reference](docs/reference/duties/translate.md) |
+| `duplicate` | Finds the thread that already reported this — across the language it was reported in. Top rung: opt-in, never on by accident.                                                | [Reference](docs/reference/duties/duplicate.md) |
+| `respond`   | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Top rung: granted nothing until a warrant names it. | [Reference](docs/reference/duties/respond.md)   |
+
+What comes after them is decided by one test, and it is a strict one: the work
+has to recur, be uniformly expensive today, already be work a maintainer stopped
+doing, and be harder on a project whose contributors do not share a language.
+[Doctrine D10](docs/doctrine/north-star.md#d10--a-duty-must-earn-its-place)
+rejects most feature requests, on purpose.
+
 ## Cost
 
-Three tiers and the first is free. Most of a backlog is decided by code — an
-empty body, obvious spam, a thread Reeve has already handled and recognises as
-its own. What survives that reaches a small model. What survives the small model
-is the minority that was always worth a careful read, and only it reaches an
-expensive one.
+Reeve is arranged so the expensive step runs last and least: code decides the
+easy majority for nothing, a cheap model screens what survives that, and only
+the minority that was always worth a careful read reaches the model you chose.
+
+| Tier                    | Decides                                                                                       | Costs         |
+| ----------------------- | --------------------------------------------------------------------------------------------- | ------------- |
+| **Code**                | Empty bodies, unfilled templates, obvious spam, exact repeats, a thread Reeve already handled | Nothing       |
+| **A cheap model**       | Is this worth a careful read — spam, off-topic, out of scope                                  | Very little   |
+| **The model you chose** | The actual verdict, on what survived                                                          | The real bill |
 
 Providers serving OpenAI-compatible models with no key at all are a supported
 configuration, not a tolerated one: point `base-url` at one and give Reeve
-several models. Free models are individually weak and operationally flaky, which
-is exactly what multi-draft scoring exists for — three cheap attempts filtered
-deterministically cost calls instead of money.
+several models. Full breakdown, including a worked estimate and how to measure
+it instead of estimating it: [Cost](docs/guides/cost.md).
 
 ## Documentation
 
-| Document                                             | For                                                                      |
-| ---------------------------------------------------- | ------------------------------------------------------------------------ |
-| [North star](docs/doctrine/north-star.md)            | What Reeve is for, the doctrine, the roadmap, and what it will never be. |
-| [Installation](docs/getting-started/installation.md) | Adding a duty to a workflow — triggers, permissions, versions.           |
-| [The warrant](docs/guides/warrant.md)                | Writing down what Reeve is allowed to do to your repository.             |
-| [Languages](docs/guides/languages.md)                | Who writes in what, who reads in what, and what detection costs.         |
-| [The sweep](docs/guides/sweep.md)                    | Working a whole backlog on a schedule instead of one thread at a time.   |
-| [Cost](docs/guides/cost.md)                          | What a backlog costs before you point it at one — including at zero.     |
-| [Troubleshooting](docs/guides/troubleshooting.md)    | A run went red, or went green and did nothing.                           |
-| [Architecture](docs/development/architecture.md)     | The pipeline, the boundaries, and how to change it.                      |
-| [Threat model](docs/development/security.md)         | What holds when the model does what the attacker asked.                  |
-| [Contributing](CONTRIBUTING.md)                      | How to work on it.                                                       |
-| [Reporting a vulnerability](SECURITY.md)             | The private channel. Never a public issue.                               |
+[`docs/`](docs/) is the full index, organized by who's reading. Start here:
 
-[`docs/`](docs/) is the full index, split by audience.
+| If you are…                  | Start at                                                |
+| ---------------------------- | ------------------------------------------------------- |
+| New to Reeve                 | [Getting started](docs/getting-started/installation.md) |
+| Deciding whether to adopt it | [The authority model](docs/concepts/authority-model.md) |
+| Running it day to day        | [Guides](docs/guides/warrant.md)                        |
+| Reviewing it for security    | [Threat model](docs/security/threat-model.md)           |
+| Changing the code            | [Development](docs/development/README.md)               |
 
 ## License
 
@@ -179,8 +175,6 @@ deterministically cost calls instead of money.
 <p align="center">
   <img src=".github/assets/logo.png" alt="" width="56" /><br />
   <sub>
-    Part of the <a href="https://ecoma.io">Ecoma</a> ecosystem ·
-    <a href="https://ecoma.io">Website</a> ·
-    <a href="https://github.com/ecoma-io">Organisation</a>
+    Reeve is developed at <a href="https://github.com/ecoma-io/reeve">github.com/ecoma-io/reeve</a>.
   </sub>
 </p>
