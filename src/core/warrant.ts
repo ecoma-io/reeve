@@ -513,14 +513,27 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
  *
  * Absent entirely, this is `null` — the file never turned its mind to the
  * question, and `resolveLanguages` reads that as leaving the `languages`
- * input to answer it instead, exactly as it does today. Present, every entry
- * is fed to `parseLanguages` unchanged: this is the identical bare-code and
- * `code:Label:Script` grammar the input already accepts, joined into the same
- * newline-delimited shape that grammar was written for, rather than a second
- * parser for a second surface that happens to say the same thing.
+ * input to answer it instead, exactly as it does today. That reading is for
+ * a key that was never written, not for one written empty: `languages:` with
+ * nothing under it is refused, because once the key is in the file the file
+ * is the whole answer, and silently consulting the input behind an empty key
+ * would make an unfinished edit indistinguishable from a decision.
+ *
+ * Present, every entry is fed to `parseLanguages` unchanged, as the list YAML
+ * already split: this is the identical bare-code and `code:Label:Script`
+ * grammar the input accepts, not a second parser for a second surface — and
+ * handing entries over one-per-element means a comma inside a spelled-out
+ * label stays inside it, where the input's one-line grammar would have read
+ * it as a separator.
  */
 function readLanguages(path: string, raw: unknown): readonly Language[] | null {
-  if (raw === undefined || raw === null) return null;
+  if (raw === undefined) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one ` +
+        "language, or delete the key to leave the `languages` input in charge.",
+    );
+  }
   if (!Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
   }
@@ -531,10 +544,15 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
         `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`,
       );
     }
-    return entry;
+    if (entry.trim().length === 0) {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`,
+      );
+    }
+    return entry.trim();
   });
 
-  return parseLanguages(entries.join("\n"));
+  return parseLanguages(entries);
 }
 
 /** Whether the block existed at all, and what it named if it did. */

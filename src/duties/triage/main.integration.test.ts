@@ -1075,6 +1075,29 @@ describe("zero config", () => {
     );
     expect(run.summary).toContain("No expensive model was asked anything.");
   });
+
+  it("stays green when denied, even with no languages configured anywhere", async () => {
+    // The grant question outranks the language question: a denied duty is
+    // promised a green no-op, and `languages` is configuration it was never
+    // going to use.
+    await writeFile(
+      warrantPath,
+      [
+        "version: 1",
+        "labels:",
+        "  - name: bug",
+        "    description: Something that used to work and does not.",
+        "capabilities:",
+        "  translate: [comment]",
+      ].join("\n"),
+    );
+
+    const run = await runAction(stub, { languages: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).toHaveLength(0);
+    expect(run.summary).toContain("does not name `triage`");
+  });
 });
 
 describe("the sweep", () => {

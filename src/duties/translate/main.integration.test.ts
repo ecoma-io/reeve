@@ -139,6 +139,12 @@ interface State {
    */
   issues: ListedIssue[];
   /**
+   * How many times the listing endpoint was asked, counted so a case can
+   * assert it never was — `bodies` cannot answer that, because only a `PATCH`
+   * writes it and a sweep that listed without writing would leave it empty.
+   */
+  listings: number;
+  /**
    * The replies, by id, read and written the way GitHub's comment endpoints do.
    *
    * A map rather than a list because the write is addressed by id: a run that
@@ -208,6 +214,7 @@ async function startStub(): Promise<Stub> {
     body: "",
     bodies: new Map(),
     issues: [],
+    listings: 0,
     replies: new Map(),
     answer: translating({}),
     asked: [],
@@ -283,6 +290,7 @@ async function route(
   // the `since` cutoff are exercised in isolation, against `listOpenThreads`
   // itself, in `forge.test.ts`.
   if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues$/.test(path)) {
+    stub.listings += 1;
     const page = Number(query.get("page") ?? "1");
     send(
       response,
@@ -1293,6 +1301,36 @@ describe("the warrant", () => {
     expect(run.summary).toContain("No model was asked anything. This is a real answer");
   });
 
+  it("stays green when denied, even with no languages configured anywhere", async () => {
+    // The grant question outranks the language question: a denied duty is
+    // promised a green no-op, and `languages` is configuration it was never
+    // going to use — red-failing over it would fail the run for a key that
+    // could not have mattered.
+    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+
+    const run = await runAction(stub, { languages: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).toHaveLength(0);
+    expect(run.summary).toContain("does not name `translate`");
+  });
+
+  it("says in the summary why a drafted translation was not published, when `edit-body` is withheld", async () => {
+    // `[none]` names the duty and grants it nothing: the pipeline still
+    // detects, drafts and judges — the same spend an `apply: none` narrowing
+    // costs triage — and only the write is withheld. The summary has to say
+    // that, because with `posted` emptied a blocked write and a run where no
+    // draft survived would otherwise read identically.
+    await writeFile(warrantPath, ["version: 1", "capabilities:", "  translate: [none]"].join("\n"));
+
+    const run = await runAction(stub, { languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toBe(VIETNAMESE);
+    expect(stub.asked.length).toBeGreaterThan(0);
+    expect(run.summary).toContain("does not grant `edit-body`");
+  });
+
   it("grants translate nothing in a sweep too, checked once before the listing", async () => {
     await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
     stub.issues = [{ number: 701, body: VIETNAMESE, createdAt: "2026-01-01T00:00:00Z" }];
@@ -1304,7 +1342,7 @@ describe("the warrant", () => {
     expect(run.outputs.processed).toBe("0");
     expect(run.summary).toContain("does not name `translate`");
     // No listing request was ever made — the short-circuit is before it.
-    expect(stub.bodies.size).toBe(0);
+    expect(stub.listings).toBe(0);
   });
 });
 

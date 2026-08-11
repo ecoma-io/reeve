@@ -79,6 +79,14 @@ export function summarize(run: Run): string {
       run.ungranted,
       "",
       "No model was asked anything. This is a real answer rather than a failure.",
+      "",
+      // The same three-part report every other run writes — `cost` renders an
+      // empty spend as the explicit "every decision was made by code" line,
+      // which is this page's whole story, and the sweep's ungranted page
+      // already says it this way.
+      cost(run.spent, (spend) =>
+        shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model),
+      ),
     ];
     return `${parts.join("\n").trimEnd()}\n`;
   }

@@ -218,7 +218,9 @@ languages:
 The grammar is the same one the `languages` input has always used — a bare
 code, or a spelled-out `code:Label:Script` with `+` between scripts for a
 language written in several — because this is the same list read from a
-different place, not a second format to learn. See
+different place, not a second format to learn. One YAML element is one entry,
+so a label with a comma in it needs no special care here, where the input's
+one-line form would read that comma as a separator. See
 [Languages](languages.md) for the full grammar and how detection uses it.
 
 **Written here, it is the whole answer.** Once `languages:` exists in the
@@ -226,7 +228,9 @@ warrant, the `languages` input on `translate` and `triage` is not consulted
 at all — not blended with it, not a fallback for anything it left out — and
 the run says so once, naming both the file and the input, rather than
 silently picking one. Leave the key out and nothing changes: the input
-answers the question exactly as it always has.
+answers the question exactly as it always has. Writing the key with nothing
+under it is refused rather than read as leaving it out — an unfinished edit
+should fail loudly, not quietly hand the answer back to the input.
 
 An implicit warrant — no file at the default path — carries no languages of
 its own, for the same reason it carries no capabilities of its own: there is

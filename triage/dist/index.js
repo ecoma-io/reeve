@@ -32349,7 +32349,7 @@ function parseList(raw) {
 
 // src/core/languages.ts
 function parseLanguages(raw) {
-  const entries = parseList(raw);
+  const entries = typeof raw === "string" ? parseList(raw) : raw;
   if (entries.length === 0) {
     throw new Error("languages: no entries. Expected at least one language code.");
   }
@@ -33082,7 +33082,12 @@ function readLabels(path, raw) {
   return labels;
 }
 function readLanguages(path, raw) {
-  if (raw === void 0 || raw === null) return null;
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+    );
+  }
   if (!Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
   }
@@ -33092,9 +33097,14 @@ function readLanguages(path, raw) {
         `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
       );
     }
-    return entry;
+    if (entry.trim().length === 0) {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
+      );
+    }
+    return entry.trim();
   });
-  return parseLanguages(entries.join("\n"));
+  return parseLanguages(entries);
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -34049,9 +34059,10 @@ async function run() {
     };
     const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     const authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
-    const resolution = resolveLanguages(authority2.warrant, getInput("languages"));
-    if (resolution.notice !== null) notice(resolution.notice);
-    settings = { ...base, languages: resolution.languages };
+    const denied = authority2.warrant.unnamed("triage");
+    const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
+    if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
+    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority2, settings, stages, weather);

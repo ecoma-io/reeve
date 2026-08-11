@@ -365,9 +365,16 @@ export async function run(): Promise<void> {
     // Only now, because whether the warrant or the input answers this is the
     // authority's to decide — and once it does, `languages` is complete and
     // `settings` can become the object every stage below already expects.
-    const resolution = resolveLanguages(authority.warrant, core.getInput("languages"));
-    if (resolution.notice !== null) core.notice(resolution.notice);
-    settings = { ...base, languages: resolution.languages };
+    // Except when the same authority already denied this duty outright — that
+    // run is promised a green no-op, and red-failing it over a `languages`
+    // nobody configured would fail it over configuration it was never going
+    // to use.
+    const denied = authority.warrant.unnamed("triage");
+    const resolution = denied
+      ? null
+      : resolveLanguages(authority.warrant, core.getInput("languages"));
+    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
 
     if (settings.sweep) {
       bulk = newAccumulator();

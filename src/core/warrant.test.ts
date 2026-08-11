@@ -328,6 +328,28 @@ describe("languages", () => {
     expect(() => warrant(source)).toThrow(/no entries/);
   });
 
+  it("refuses the key written with nothing under it, rather than consulting the input", () => {
+    // `languages:` alone parses as YAML null. Reading it as absence would
+    // silently hand the answer back to the input behind a key the file
+    // visibly wrote — an unfinished edit read as a decision.
+    const source = `${MINIMAL}languages:\n`;
+    expect(() => warrant(source)).toThrow(/writes `languages:` with nothing under it/);
+  });
+
+  it("refuses an empty entry, which the input's own splitting would have dropped", () => {
+    const source = `${MINIMAL}languages:\n  - en\n  - "  "\n`;
+    expect(() => warrant(source)).toThrow(/entry 2 is empty/);
+  });
+
+  it("keeps a comma inside a spelled-out label, where the input would read a separator", () => {
+    // A YAML element is one entry by construction — the one-line grammar's
+    // comma rule has no business inside it.
+    const source = `${MINIMAL}languages:\n  - "vi:Tiếng Việt, phổ thông:Latin"\n`;
+    expect(warrant(source).languages).toEqual([
+      { code: "vi", label: "Tiếng Việt, phổ thông", scripts: ["Latin"] },
+    ]);
+  });
+
   it("refuses a bare code the runtime knows no language by, the same as the input", () => {
     const source = `${MINIMAL}languages:\n  - qqq\n`;
     expect(() => warrant(source)).toThrow(/`qqq` is not a language code/);

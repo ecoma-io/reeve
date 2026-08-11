@@ -32349,7 +32349,7 @@ function parseList(raw) {
 
 // src/core/languages.ts
 function parseLanguages(raw) {
-  const entries = parseList(raw);
+  const entries = typeof raw === "string" ? parseList(raw) : raw;
   if (entries.length === 0) {
     throw new Error("languages: no entries. Expected at least one language code.");
   }
@@ -33347,7 +33347,12 @@ function readLabels(path, raw) {
   return labels;
 }
 function readLanguages(path, raw) {
-  if (raw === void 0 || raw === null) return null;
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+    );
+  }
   if (!Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
   }
@@ -33357,9 +33362,14 @@ function readLanguages(path, raw) {
         `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
       );
     }
-    return entry;
+    if (entry.trim().length === 0) {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
+      );
+    }
+    return entry.trim();
   });
-  return parseLanguages(entries.join("\n"));
+  return parseLanguages(entries);
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33908,7 +33918,16 @@ function summarize(run2) {
       "",
       run2.ungranted,
       "",
-      "No model was asked anything. This is a real answer rather than a failure."
+      "No model was asked anything. This is a real answer rather than a failure.",
+      "",
+      // The same three-part report every other run writes — `cost` renders an
+      // empty spend as the explicit "every decision was made by code" line,
+      // which is this page's whole story, and the sweep's ungranted page
+      // already says it this way.
+      cost(
+        run2.spent,
+        (spend) => shown(spend.purpose === "judge" ? run2.judgeNames : run2.modelNames, spend.model)
+      )
     ];
     return `${parts2.join("\n").trimEnd()}
 `;
@@ -34252,6 +34271,14 @@ ${assemble(official, marker, would)}`
       warning(
         `${what}: \`${settings.warrant}\` does not grant \`edit-body\` to translate, so ${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} drafted this run ${posted.length === 1 ? "was" : "were"} not published.`
       );
+      return {
+        what,
+        from: detection.language,
+        posted: [],
+        skipped,
+        note: `\`${settings.warrant}\` does not grant \`edit-body\`, so the ${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} drafted this run ${posted.length === 1 ? "was" : "were"} not published`,
+        published: false
+      };
     }
     return { what, from: detection.language, posted: [], skipped, note: null, published: false };
   }
@@ -34368,11 +34395,12 @@ async function run() {
     };
     const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
-    const resolution = resolveLanguages(authority2.warrant, getInput("languages"));
-    if (resolution.notice !== null) notice(resolution.notice);
+    const denied = authority2.warrant.unnamed("translate");
+    const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
+    if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
     settings = {
       ...base,
-      languages: resolution.languages,
+      languages: resolution === null ? [] : resolution.languages,
       permitted: authority2.warrant.granted("translate", DEFAULT_CAPABILITIES)
     };
     if (settings.sweep) {

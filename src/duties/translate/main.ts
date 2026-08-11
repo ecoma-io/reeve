@@ -454,12 +454,28 @@ async function translateText(
   // under an `apply: none` narrowing in triage — a capability the warrant
   // withheld is a reason not to write, not a reason not to have decided.
   if (!settings.permitted.includes("edit-body")) {
+    // The note reaches the summary and the sweep's outcome column, so a
+    // reader can tell a write the warrant blocked from a run where no draft
+    // survived — the two look identical once `posted` is emptied. Only set
+    // when something was actually withheld: with no drafts, "no draft
+    // survived" is the true story whatever the warrant says.
     if (posted.length > 0) {
       core.warning(
         `${what}: \`${settings.warrant}\` does not grant \`edit-body\` to translate, so ` +
           `${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} ` +
           `drafted this run ${posted.length === 1 ? "was" : "were"} not published.`,
       );
+      return {
+        what,
+        from: detection.language,
+        posted: [],
+        skipped,
+        note:
+          `\`${settings.warrant}\` does not grant \`edit-body\`, so the ` +
+          `${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} ` +
+          `drafted this run ${posted.length === 1 ? "was" : "were"} not published`,
+        published: false,
+      };
     }
     return { what, from: detection.language, posted: [], skipped, note: null, published: false };
   }
@@ -719,12 +735,18 @@ export async function run(): Promise<void> {
     // Only now, for the same reason triage waits: whether the warrant or the
     // input answers `languages` is the authority's to decide, and only once it
     // has can `settings` become the object every stage below already expects.
-    const resolution = resolveLanguages(authority.warrant, core.getInput("languages"));
-    if (resolution.notice !== null) core.notice(resolution.notice);
+    // Except when the same authority already denied this duty outright — that
+    // run is promised a green no-op, and a duty that will never translate has
+    // no business failing red over a `languages` nobody configured for it.
+    const denied = authority.warrant.unnamed("translate");
+    const resolution = denied
+      ? null
+      : resolveLanguages(authority.warrant, core.getInput("languages"));
+    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
 
     settings = {
       ...base,
-      languages: resolution.languages,
+      languages: resolution === null ? [] : resolution.languages,
       permitted: authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
     };
 

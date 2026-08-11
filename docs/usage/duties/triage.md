@@ -64,7 +64,7 @@ it label anything.
 | ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `models`         | _required_           | The model that produces the verdict. Order is preference.                                                                                                                |
 | `screen-models`  | _empty_              | Cheap models for the first pass, which decides only whether an issue is worth the expensive one.                                                                         |
-| `warrant`        | `.github/reeve.yml`  | The taxonomy and the capabilities. A file that does not parse is a failed run.                                                                                           |
+| `warrant`        | `.github/reeve.yml`  | The taxonomy, the capabilities, and optionally a `languages:` key that wins over the input below. A file that does not parse is a failed run.                            |
 | `apply`          | `label`              | What this run may do, comma separated. Narrowed by, never widening, the warrant.                                                                                         |
 | `confidence`     | `0.75`               | Below this the verdict is reported and nothing is applied. [Measure](../../development/evaluation.md) before you move it.                                                |
 | `corrections`    | `.reeve/corrections` | The memory store. Empty is the cold-start case and works.                                                                                                                |
