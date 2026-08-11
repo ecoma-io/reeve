@@ -15,7 +15,8 @@
 import * as core from "@actions/core";
 import { context } from "@actions/github";
 
-import { parseModels, type Names } from "./provider.js";
+import { parseList } from "./list.js";
+import { parseModels, type Names, type RoutedEndpoint } from "./provider.js";
 
 /** What every duty gets, whatever else its own `action.yml` declares. */
 export interface Shared {
@@ -54,9 +55,49 @@ export interface Shared {
   readonly since: Date | null;
   /**
    * The most threads a sweep will actually process in one run. A skip costs
-   * nothing and does not count against it.
+   * nothing and does not count against it. Null is no ceiling at all.
    */
-  readonly limit: number;
+  readonly limit: number | null;
+  /**
+   * Extra endpoints beyond the default `base-url`/`api-key` pair, named so a
+   * model id can route to one with `model@alias`. Empty for every duty that
+   * has not configured one, which is the common case and behaves exactly as
+   * it always has: one endpoint, no alias grammar in play.
+   */
+  readonly endpoints: readonly EndpointSpec[];
+  /**
+   * The key for each endpoint named in `endpoints`. A separate input, not a
+   * `key=` suffix on `endpoints`, because `endpoints` is loggable end to end
+   * — alias, url, timeout — and a roster's authentication never should be.
+   */
+  readonly apiKeys: readonly ApiKeySpec[];
+  /**
+   * How long this run waits for one completion before giving up on it, as
+   * weather rather than as a hang. Every endpoint uses this unless its own
+   * `endpoints` line names a shorter or longer one with `timeout=`.
+   */
+  readonly requestTimeoutMs: number;
+  /**
+   * Passed to every completion request when set, omitted from the request
+   * body entirely otherwise — some providers reject the field outright, so
+   * "not configured" and "configured as the provider's own default" are not
+   * the same thing and cannot share a spelling.
+   */
+  readonly temperature: number | undefined;
+}
+
+/** One line of `endpoints`: `alias = url`, optionally followed by `timeout=`. */
+export interface EndpointSpec {
+  readonly alias: string;
+  readonly baseUrl: string;
+  /** This endpoint's own override, or null to fall back to `request-timeout`. */
+  readonly timeoutMs: number | null;
+}
+
+/** One line of `api-keys`: `alias = key`. */
+export interface ApiKeySpec {
+  readonly alias: string;
+  readonly key: string;
 }
 
 export function readShared(): Shared {
@@ -80,6 +121,10 @@ export function readShared(): Shared {
     );
   }
 
+  const endpoints = parseEndpoints(core.getInput("endpoints"));
+  const apiKeys = parseApiKeys(core.getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+
   return {
     token: core.getInput("github-token", { required: true }),
     number: sweep ? null : threadNumber(),
@@ -90,8 +135,183 @@ export function readShared(): Shared {
     dryRun: core.getBooleanInput("dry-run"),
     sweep,
     since: parseSince(core.getInput("since")),
-    limit: whole("limit", core.getInput("limit")),
+    limit: bounded("limit", core.getInput("limit")),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", core.getInput("request-timeout")),
+    temperature: parseTemperature(core.getInput("temperature")),
   };
+}
+
+/**
+ * `endpoints`: one `alias = url` per line, with an optional `timeout=` after
+ * the url. Both halves are safe to quote back in an error — a maintainer
+ * reads endpoint aliases and urls in this run's log the same way they read
+ * `base-url` today.
+ *
+ * Written the same list grammar as `models` and `languages` for the same
+ * reason those three share it: one convention, not a fourth one to learn.
+ */
+export function parseEndpoints(raw: string): readonly EndpointSpec[] {
+  const seen = new Set<string>();
+  return parseList(raw).map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) {
+      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
+    }
+    const alias = entry.slice(0, at).trim();
+    const rest = entry.slice(at + 1).trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
+      throw new Error(
+        `endpoints: \`${alias || entry}\` is not a valid alias — letters, digits, \`-\` and \`_\` only.`,
+      );
+    }
+    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+
+    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
+    if (url === undefined) throw new Error(`endpoints: \`${alias}\` names no url.`);
+
+    let timeoutMs: number | null = null;
+    for (const token of rest2) {
+      const match = /^timeout=(.+)$/.exec(token);
+      if (!match) {
+        throw new Error(
+          `endpoints: \`${alias}\`: unrecognised \`${token}\` — expected \`timeout=<duration>\`.`,
+        );
+      }
+      const [, duration = ""] = match;
+      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
+    }
+
+    return { alias, baseUrl: url, timeoutMs };
+  });
+}
+
+/**
+ * `api-keys`: one `alias = key` per line. Every value is registered with
+ * `core.setSecret` before any of them are parsed, so a malformed line further
+ * down the input cannot land a key that has not been masked yet into a
+ * thrown error and from there into this run's log.
+ */
+export function parseApiKeys(raw: string): readonly ApiKeySpec[] {
+  const entries = parseList(raw);
+  for (const entry of entries) {
+    const at = entry.indexOf("=");
+    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
+    if (value.length > 0) core.setSecret(value);
+  }
+
+  const seen = new Set<string>();
+  return entries.map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
+    const alias = entry.slice(0, at).trim();
+    const key = entry.slice(at + 1).trim();
+    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
+    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    return { alias, key };
+  });
+}
+
+/**
+ * Every `api-keys` alias has to name an endpoint `endpoints` actually
+ * declared — a key with nowhere to route is a typo, and the honest place to
+ * catch it is before either list reaches `resolveEndpoints`.
+ *
+ * Exported rather than kept inline in `readShared`, because `respond` builds
+ * its settings by hand instead of through `readShared` — see its `main.ts` —
+ * and this check is exactly the part of that assembly this module should not
+ * make every duty reimplement.
+ */
+export function checkApiKeysDeclared(
+  endpoints: readonly EndpointSpec[],
+  apiKeys: readonly ApiKeySpec[],
+): void {
+  for (const { alias } of apiKeys) {
+    if (!endpoints.some((endpoint) => endpoint.alias === alias)) {
+      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
+    }
+  }
+}
+
+/**
+ * `request-timeout`, and an `endpoints` line's own `timeout=`: a whole number
+ * of seconds or minutes, refused otherwise. A bare number is refused rather
+ * than assumed to be seconds, because a silent unit is exactly the kind of
+ * thing that is only ever noticed once a request has already hung for the
+ * wrong amount of time.
+ */
+export function parseTimeout(name: string, raw: string): number {
+  const trimmed = raw.trim();
+  const match = /^(\d+)(s|m)$/.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` — a bare ` +
+        `number names no unit, got \`${raw}\`.`,
+    );
+  }
+  const [, digits, unit] = match;
+  const value = Number(digits);
+  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
+  return unit === "m" ? value * 60_000 : value * 1000;
+}
+
+/**
+ * `temperature`: empty omits the field from every request body outright,
+ * because some providers reject a field they were never asked to accept.
+ * Configured, it is refused outside the range every OpenAI-compatible
+ * provider documents for it.
+ */
+export function parseTemperature(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 2) {
+    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
+  }
+  return value;
+}
+
+/**
+ * Every endpoint a run can route to, resolved from `Shared` into what
+ * `createRoutedProvider` actually needs: the default `base-url`/`api-key`
+ * pair first, then every `endpoints` line with its key looked up out of
+ * `api-keys` and its timeout defaulted to `request-timeout` when its own
+ * line named none.
+ *
+ * One function rather than four call sites doing the same lookup, because
+ * every duty builds its provider from these same five fields — this is the
+ * one place that assembly happens, so a duty's own `main.ts` never touches
+ * an `EndpointSpec` or an `ApiKeySpec` directly.
+ *
+ * Takes the five fields it needs rather than the whole of `Shared`, because
+ * `respond` assembles its settings by hand — it has no `sweep`/`since`/`limit`
+ * concept, so it is never a `Shared` — and this is the shape every duty's
+ * settings actually has in common for routing, whether or not it went through
+ * `readShared` to get there.
+ */
+export function resolveEndpoints(
+  shared: Pick<Shared, "baseUrl" | "apiKey" | "requestTimeoutMs" | "endpoints" | "apiKeys">,
+): readonly RoutedEndpoint[] {
+  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
+
+  return [
+    {
+      alias: null,
+      baseUrl: shared.baseUrl,
+      apiKey: shared.apiKey,
+      timeoutMs: shared.requestTimeoutMs,
+    },
+    ...shared.endpoints.map((endpoint) => ({
+      alias: endpoint.alias,
+      baseUrl: endpoint.baseUrl,
+      apiKey: keyed.get(endpoint.alias) ?? "",
+      timeoutMs: endpoint.timeoutMs ?? shared.requestTimeoutMs,
+    })),
+  ];
 }
 
 /**

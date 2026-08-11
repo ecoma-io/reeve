@@ -3,10 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   bounded,
+  checkApiKeysDeclared,
   counted,
   fraction,
+  parseApiKeys,
+  parseEndpoints,
   parseSince,
+  parseTemperature,
+  parseTimeout,
   readShared,
+  resolveEndpoints,
   threadNumber,
   whole,
 } from "./inputs.js";
@@ -35,6 +41,10 @@ const COMPLETE = {
   sweep: "false",
   since: "",
   limit: "50",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
 };
 
 /** The workflow file as the runner hands it over. */
@@ -71,6 +81,10 @@ describe("readShared", () => {
       sweep: false,
       since: null,
       limit: 50,
+      endpoints: [],
+      apiKeys: [],
+      requestTimeoutMs: 120_000,
+      temperature: undefined,
     });
   });
 
@@ -345,5 +359,239 @@ describe("fraction", () => {
     expect(() => fraction("confidence", raw)).toThrow(
       /confidence: expected a number between 0 and 1/,
     );
+  });
+});
+
+describe("parseTimeout", () => {
+  it.each([
+    ["120s", 120_000],
+    ["2m", 120_000],
+    ["1s", 1000],
+    ["  90s  ", 90_000],
+  ])("reads %s as milliseconds", (raw, expected) => {
+    expect(parseTimeout("request-timeout", raw)).toBe(expected);
+  });
+
+  it("refuses a bare number, naming that the unit is missing", () => {
+    expect(() => parseTimeout("request-timeout", "120")).toThrow(
+      "request-timeout: expected a whole number of seconds or minutes, like `120s` or `2m` — " +
+        "a bare number names no unit, got `120`.",
+    );
+  });
+
+  it.each([
+    ["", ""],
+    ["0s", "0s"],
+    ["-1s", "-1s"],
+    ["1h", "1h"],
+    ["1.5s", "1.5s"],
+  ])("refuses %s", (_case, raw) => {
+    expect(() => parseTimeout("request-timeout", raw)).toThrow(/request-timeout:/);
+  });
+});
+
+describe("parseTemperature", () => {
+  it("omits the field entirely when empty", () => {
+    expect(parseTemperature("")).toBeUndefined();
+    expect(parseTemperature("  ")).toBeUndefined();
+  });
+
+  it.each([
+    ["0", 0],
+    ["2", 2],
+    ["0.7", 0.7],
+  ])("reads %s", (raw, expected) => {
+    expect(parseTemperature(raw)).toBe(expected);
+  });
+
+  it.each([
+    ["-0.1", "-0.1"],
+    ["2.1", "2.1"],
+    ["hot", "hot"],
+  ])(
+    "refuses %s, out of the 0–2 range every OpenAI-compatible provider documents",
+    (_case, raw) => {
+      expect(() => parseTemperature(raw)).toThrow(
+        `temperature: expected a number between 0 and 2, got \`${raw}\`.`,
+      );
+    },
+  );
+});
+
+describe("parseEndpoints", () => {
+  it("reads one alias and url", () => {
+    expect(parseEndpoints("fast = https://api.example.com/v1")).toEqual([
+      { alias: "fast", baseUrl: "https://api.example.com/v1", timeoutMs: null },
+    ]);
+  });
+
+  it("reads a `timeout=` override after the url", () => {
+    expect(parseEndpoints("fast = https://api.example.com/v1 timeout=30s")).toEqual([
+      { alias: "fast", baseUrl: "https://api.example.com/v1", timeoutMs: 30_000 },
+    ]);
+  });
+
+  it("reads more than one endpoint, comma or newline separated", () => {
+    expect(
+      parseEndpoints("fast = https://a.example.com/v1\nslow = https://b.example.com/v1"),
+    ).toEqual([
+      { alias: "fast", baseUrl: "https://a.example.com/v1", timeoutMs: null },
+      { alias: "slow", baseUrl: "https://b.example.com/v1", timeoutMs: null },
+    ]);
+  });
+
+  it("returns nothing for an empty input", () => {
+    expect(parseEndpoints("")).toEqual([]);
+  });
+
+  it("refuses an entry with no `=`", () => {
+    expect(() => parseEndpoints("https://api.example.com/v1")).toThrow(
+      "endpoints: expected `alias = url`, got `https://api.example.com/v1`.",
+    );
+  });
+
+  it("refuses an alias outside letters, digits, `-` and `_`", () => {
+    expect(() => parseEndpoints("fast! = https://api.example.com/v1")).toThrow(
+      "endpoints: `fast!` is not a valid alias — letters, digits, `-` and `_` only.",
+    );
+  });
+
+  it("refuses the same alias declared twice", () => {
+    expect(() =>
+      parseEndpoints("fast = https://a.example.com/v1\nfast = https://b.example.com/v1"),
+    ).toThrow("endpoints: `fast` is declared more than once.");
+  });
+
+  it("refuses an alias with no url", () => {
+    expect(() => parseEndpoints("fast = ")).toThrow("endpoints: `fast` names no url.");
+  });
+
+  it("refuses a token after the url it does not recognise", () => {
+    expect(() => parseEndpoints("fast = https://api.example.com/v1 wat")).toThrow(
+      "endpoints: `fast`: unrecognised `wat` — expected `timeout=<duration>`.",
+    );
+  });
+});
+
+describe("parseApiKeys", () => {
+  it("reads one alias and key", () => {
+    expect(parseApiKeys("fast = sk-secret")).toEqual([{ alias: "fast", key: "sk-secret" }]);
+  });
+
+  it("registers every value as a secret before any of them are parsed", () => {
+    // The masking has to happen before a malformed later line can throw an
+    // error that quotes an earlier, still-unmasked key.
+    parseApiKeys("fast = sk-one\nslow = sk-two");
+
+    expect(vi.mocked(core.setSecret)).toHaveBeenCalledWith("sk-one");
+    expect(vi.mocked(core.setSecret)).toHaveBeenCalledWith("sk-two");
+  });
+
+  it("masks every value even when a later line is malformed", () => {
+    expect(() => parseApiKeys("fast = sk-one\nno-equals-sign")).toThrow();
+
+    expect(vi.mocked(core.setSecret)).toHaveBeenCalledWith("sk-one");
+  });
+
+  it("returns nothing for an empty input", () => {
+    expect(parseApiKeys("")).toEqual([]);
+  });
+
+  it("refuses an entry with no `=`", () => {
+    expect(() => parseApiKeys("sk-secret")).toThrow(
+      "api-keys: expected `alias = key`, got an entry with no `=`.",
+    );
+  });
+
+  it("refuses the same alias declared twice", () => {
+    expect(() => parseApiKeys("fast = sk-one\nfast = sk-two")).toThrow(
+      "api-keys: `fast` is declared more than once.",
+    );
+  });
+});
+
+describe("checkApiKeysDeclared", () => {
+  it("passes when every api-keys alias is declared in endpoints", () => {
+    const endpoints = parseEndpoints("fast = https://api.example.com/v1");
+    const apiKeys = parseApiKeys("fast = sk-secret");
+
+    expect(() => {
+      checkApiKeysDeclared(endpoints, apiKeys);
+    }).not.toThrow();
+  });
+
+  it("refuses an api-keys alias endpoints never declared", () => {
+    const apiKeys = parseApiKeys("fast = sk-secret");
+
+    expect(() => {
+      checkApiKeysDeclared([], apiKeys);
+    }).toThrow("api-keys: `fast` is not declared in `endpoints`.");
+  });
+});
+
+describe("resolveEndpoints", () => {
+  it("always leads with the default `base-url`/`api-key` pair, aliased null", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: [],
+      apiKeys: [],
+    });
+
+    expect(resolved).toEqual([
+      {
+        alias: null,
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "sk-default",
+        timeoutMs: 120_000,
+      },
+    ]);
+  });
+
+  it("keys every configured endpoint from api-keys by alias", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: parseEndpoints("fast = https://a.example.com/v1"),
+      apiKeys: parseApiKeys("fast = sk-fast"),
+    });
+
+    expect(resolved).toContainEqual({
+      alias: "fast",
+      baseUrl: "https://a.example.com/v1",
+      apiKey: "sk-fast",
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("falls back to an empty key for an endpoint api-keys never named", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: parseEndpoints("open = https://a.example.com/v1"),
+      apiKeys: [],
+    });
+
+    expect(resolved).toContainEqual({
+      alias: "open",
+      baseUrl: "https://a.example.com/v1",
+      apiKey: "",
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("prefers an endpoint's own `timeout=` over `request-timeout`", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: parseEndpoints("fast = https://a.example.com/v1 timeout=5s"),
+      apiKeys: [],
+    });
+
+    expect(resolved.find((endpoint) => endpoint.alias === "fast")?.timeoutMs).toBe(5000);
   });
 });
