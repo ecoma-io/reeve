@@ -174,6 +174,21 @@ export function enforceLabels(
   return { applied, refused };
 }
 
+/**
+ * Whether a thread already carries a label this project's own taxonomy names.
+ *
+ * A sweep's idempotent skip, and deliberately not "does it carry any label at
+ * all" — a maintainer's own workflow labels routinely mark priority or a
+ * milestone, and a thread wearing one of those has not been triaged by this
+ * duty's own reading of it. Reusing `labelNamed` keeps this the same
+ * definition `enforceLabels` already uses for "the thread already carries
+ * it" (above), rather than inventing a second one that could drift from the
+ * first.
+ */
+export function alreadyTaxonomized(warrant: Warrant, labels: readonly string[]): boolean {
+  return labels.some((name) => warrant.labelNamed(name) !== undefined);
+}
+
 /** The handles behind a set of applied labels, split by what GitHub can do with them. */
 export interface Owners {
   /** Handles the assignee endpoint takes, without the `@`. */
