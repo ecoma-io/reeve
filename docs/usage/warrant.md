@@ -76,6 +76,7 @@ version: 1
 capabilities:
   triage: [label]
   translate: [edit-body]
+  duplicate: [comment]
 
 # What to translate into. Optional — leave it out and the `languages` input
 # on each duty answers this instead, exactly as it always has. Written here,
@@ -194,6 +195,14 @@ their report was not worth keeping open, and costs you a contributor.
 
 Turn the others on deliberately, one at a time, after a `dry-run` on your own
 backlog told you what the rate actually is.
+
+**`duplicate` has no default at all — not even the cheapest one.** Its own
+`capabilities:` entry and its `apply` input both start at nothing, so posting
+a comment naming a suspected duplicate needs `duplicate: [comment]` written
+here **and** `apply: comment` on the workflow; either alone still leaves the
+run reporting `duplicate-of` and `score` without touching the thread. See
+[the duty's own page](duties/duplicate.md) for why a claim about somebody
+else's report did not earn the same free default a label did.
 
 **A duty also takes an `apply` input, and the narrower of the two wins.** The
 file and the workflow are both reviewable, they can disagree, and the fail-safe

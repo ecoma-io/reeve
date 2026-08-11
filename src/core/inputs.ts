@@ -185,6 +185,33 @@ export function counted(name: string, raw: string): number {
 }
 
 /**
+ * A ceiling that may also be no ceiling at all: a whole number of 1 or more,
+ * or the literal `none`, returned as `null`.
+ *
+ * Not `counted` with an extra case bolted on, because `0` means something
+ * different on a ceiling than it does on a floor. `min-body-chars: 0` turns a
+ * rule off at the scale's own vanishing point — there is nothing smaller than
+ * no minimum, so `0` is an honest spelling of it. A ceiling has no such point:
+ * `corpus-limit: 0` cannot mean "unbounded" without also being reachable by a
+ * typo for `10`, and it cannot mean "process nothing" without duplicating what
+ * leaving the duty unnamed in the warrant already means. So `0` is refused
+ * here, on either input, and `none` is the only spelling of "no bound" — a
+ * word a stray keystroke does not produce.
+ */
+export function bounded(name: string, raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
+    );
+  }
+  return value;
+}
+
+/**
  * A threshold between 0 and 1, refused rather than clamped.
  *
  * Clamping would make `75` mean `1` — every verdict below certainty rejected,

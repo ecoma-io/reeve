@@ -2652,34 +2652,34 @@ var require_constants2 = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.SPECIAL_HEADERS = exports.HEADER_STATE = exports.MINOR = exports.MAJOR = exports.CONNECTION_TOKEN_CHARS = exports.HEADER_CHARS = exports.TOKEN = exports.STRICT_TOKEN = exports.HEX = exports.URL_CHAR = exports.STRICT_URL_CHAR = exports.USERINFO_CHARS = exports.MARK = exports.ALPHANUM = exports.NUM = exports.HEX_MAP = exports.NUM_MAP = exports.ALPHA = exports.FINISH = exports.H_METHOD_MAP = exports.METHOD_MAP = exports.METHODS_RTSP = exports.METHODS_ICE = exports.METHODS_HTTP = exports.METHODS = exports.LENIENT_FLAGS = exports.FLAGS = exports.TYPE = exports.ERROR = void 0;
     var utils_1 = require_utils();
-    var ERROR2;
-    (function(ERROR3) {
-      ERROR3[ERROR3["OK"] = 0] = "OK";
-      ERROR3[ERROR3["INTERNAL"] = 1] = "INTERNAL";
-      ERROR3[ERROR3["STRICT"] = 2] = "STRICT";
-      ERROR3[ERROR3["LF_EXPECTED"] = 3] = "LF_EXPECTED";
-      ERROR3[ERROR3["UNEXPECTED_CONTENT_LENGTH"] = 4] = "UNEXPECTED_CONTENT_LENGTH";
-      ERROR3[ERROR3["CLOSED_CONNECTION"] = 5] = "CLOSED_CONNECTION";
-      ERROR3[ERROR3["INVALID_METHOD"] = 6] = "INVALID_METHOD";
-      ERROR3[ERROR3["INVALID_URL"] = 7] = "INVALID_URL";
-      ERROR3[ERROR3["INVALID_CONSTANT"] = 8] = "INVALID_CONSTANT";
-      ERROR3[ERROR3["INVALID_VERSION"] = 9] = "INVALID_VERSION";
-      ERROR3[ERROR3["INVALID_HEADER_TOKEN"] = 10] = "INVALID_HEADER_TOKEN";
-      ERROR3[ERROR3["INVALID_CONTENT_LENGTH"] = 11] = "INVALID_CONTENT_LENGTH";
-      ERROR3[ERROR3["INVALID_CHUNK_SIZE"] = 12] = "INVALID_CHUNK_SIZE";
-      ERROR3[ERROR3["INVALID_STATUS"] = 13] = "INVALID_STATUS";
-      ERROR3[ERROR3["INVALID_EOF_STATE"] = 14] = "INVALID_EOF_STATE";
-      ERROR3[ERROR3["INVALID_TRANSFER_ENCODING"] = 15] = "INVALID_TRANSFER_ENCODING";
-      ERROR3[ERROR3["CB_MESSAGE_BEGIN"] = 16] = "CB_MESSAGE_BEGIN";
-      ERROR3[ERROR3["CB_HEADERS_COMPLETE"] = 17] = "CB_HEADERS_COMPLETE";
-      ERROR3[ERROR3["CB_MESSAGE_COMPLETE"] = 18] = "CB_MESSAGE_COMPLETE";
-      ERROR3[ERROR3["CB_CHUNK_HEADER"] = 19] = "CB_CHUNK_HEADER";
-      ERROR3[ERROR3["CB_CHUNK_COMPLETE"] = 20] = "CB_CHUNK_COMPLETE";
-      ERROR3[ERROR3["PAUSED"] = 21] = "PAUSED";
-      ERROR3[ERROR3["PAUSED_UPGRADE"] = 22] = "PAUSED_UPGRADE";
-      ERROR3[ERROR3["PAUSED_H2_UPGRADE"] = 23] = "PAUSED_H2_UPGRADE";
-      ERROR3[ERROR3["USER"] = 24] = "USER";
-    })(ERROR2 = exports.ERROR || (exports.ERROR = {}));
+    var ERROR;
+    (function(ERROR2) {
+      ERROR2[ERROR2["OK"] = 0] = "OK";
+      ERROR2[ERROR2["INTERNAL"] = 1] = "INTERNAL";
+      ERROR2[ERROR2["STRICT"] = 2] = "STRICT";
+      ERROR2[ERROR2["LF_EXPECTED"] = 3] = "LF_EXPECTED";
+      ERROR2[ERROR2["UNEXPECTED_CONTENT_LENGTH"] = 4] = "UNEXPECTED_CONTENT_LENGTH";
+      ERROR2[ERROR2["CLOSED_CONNECTION"] = 5] = "CLOSED_CONNECTION";
+      ERROR2[ERROR2["INVALID_METHOD"] = 6] = "INVALID_METHOD";
+      ERROR2[ERROR2["INVALID_URL"] = 7] = "INVALID_URL";
+      ERROR2[ERROR2["INVALID_CONSTANT"] = 8] = "INVALID_CONSTANT";
+      ERROR2[ERROR2["INVALID_VERSION"] = 9] = "INVALID_VERSION";
+      ERROR2[ERROR2["INVALID_HEADER_TOKEN"] = 10] = "INVALID_HEADER_TOKEN";
+      ERROR2[ERROR2["INVALID_CONTENT_LENGTH"] = 11] = "INVALID_CONTENT_LENGTH";
+      ERROR2[ERROR2["INVALID_CHUNK_SIZE"] = 12] = "INVALID_CHUNK_SIZE";
+      ERROR2[ERROR2["INVALID_STATUS"] = 13] = "INVALID_STATUS";
+      ERROR2[ERROR2["INVALID_EOF_STATE"] = 14] = "INVALID_EOF_STATE";
+      ERROR2[ERROR2["INVALID_TRANSFER_ENCODING"] = 15] = "INVALID_TRANSFER_ENCODING";
+      ERROR2[ERROR2["CB_MESSAGE_BEGIN"] = 16] = "CB_MESSAGE_BEGIN";
+      ERROR2[ERROR2["CB_HEADERS_COMPLETE"] = 17] = "CB_HEADERS_COMPLETE";
+      ERROR2[ERROR2["CB_MESSAGE_COMPLETE"] = 18] = "CB_MESSAGE_COMPLETE";
+      ERROR2[ERROR2["CB_CHUNK_HEADER"] = 19] = "CB_CHUNK_HEADER";
+      ERROR2[ERROR2["CB_CHUNK_COMPLETE"] = 20] = "CB_CHUNK_COMPLETE";
+      ERROR2[ERROR2["PAUSED"] = 21] = "PAUSED";
+      ERROR2[ERROR2["PAUSED_UPGRADE"] = 22] = "PAUSED_UPGRADE";
+      ERROR2[ERROR2["PAUSED_H2_UPGRADE"] = 23] = "PAUSED_H2_UPGRADE";
+      ERROR2[ERROR2["USER"] = 24] = "USER";
+    })(ERROR = exports.ERROR || (exports.ERROR = {}));
     var TYPE;
     (function(TYPE2) {
       TYPE2[TYPE2["BOTH"] = 0] = "BOTH";
@@ -20690,12 +20690,12 @@ var require_stringifyComment = __commonJS({
   "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/stringify/stringifyComment.js"(exports) {
     "use strict";
     var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
-    function indentComment(comment2, indent) {
-      if (/^\n+$/.test(comment2))
-        return comment2.substring(1);
-      return indent ? comment2.replace(/^(?! *$)/gm, indent) : comment2;
+    function indentComment(comment, indent) {
+      if (/^\n+$/.test(comment))
+        return comment.substring(1);
+      return indent ? comment.replace(/^(?! *$)/gm, indent) : comment;
     }
-    var lineComment = (str, indent, comment2) => str.endsWith("\n") ? indentComment(comment2, indent) : comment2.includes("\n") ? "\n" + indentComment(comment2, indent) : (str.endsWith(" ") ? "" : " ") + comment2;
+    var lineComment = (str, indent, comment) => str.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str.endsWith(" ") ? "" : " ") + comment;
     exports.indentComment = indentComment;
     exports.lineComment = lineComment;
     exports.stringifyComment = stringifyComment;
@@ -20979,7 +20979,7 @@ ${indent}`) + "'";
     } catch {
       blockEndNewlines = /\n+(?!\n|$)/g;
     }
-    function blockString({ comment: comment2, type, value }, ctx, onComment, onChompKeep) {
+    function blockString({ comment, type, value }, ctx, onComment, onChompKeep) {
       const { blockQuote, commentString, lineWidth } = ctx.options;
       if (!blockQuote || /\n[\t ]+$/.test(value)) {
         return quotedString(value, ctx);
@@ -21031,8 +21031,8 @@ ${indent}`) + "'";
       }
       const indentSize = indent ? "2" : "1";
       let header = (startWithSpace ? indentSize : "") + chomp;
-      if (comment2) {
-        header += " " + commentString(comment2.replace(/ ?[\r\n]+/g, " "));
+      if (comment) {
+        header += " " + commentString(comment.replace(/ ?[\r\n]+/g, " "));
         if (onComment)
           onComment();
       }
@@ -21576,20 +21576,20 @@ var require_stringifyCollection = __commonJS({
       const stringify2 = flow ? stringifyFlowCollection : stringifyBlockCollection;
       return stringify2(collection, ctx, options);
     }
-    function stringifyBlockCollection({ comment: comment2, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
+    function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
       const { indent, options: { commentString } } = ctx;
       const itemCtx = Object.assign({}, ctx, { indent: itemIndent, type: null });
       let chompKeep = false;
       const lines = [];
       for (let i = 0; i < items.length; ++i) {
         const item = items[i];
-        let comment3 = null;
+        let comment2 = null;
         if (identity.isNode(item)) {
           if (!chompKeep && item.spaceBefore)
             lines.push("");
           addCommentBefore(ctx, lines, item.commentBefore, chompKeep);
           if (item.comment)
-            comment3 = item.comment;
+            comment2 = item.comment;
         } else if (identity.isPair(item)) {
           const ik = identity.isNode(item.key) ? item.key : null;
           if (ik) {
@@ -21599,10 +21599,10 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str2 = stringify.stringify(item, itemCtx, () => comment3 = null, () => chompKeep = true);
-        if (comment3)
-          str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment3));
-        if (chompKeep && comment3)
+        let str2 = stringify.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        if (comment2)
+          str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment2));
+        if (chompKeep && comment2)
           chompKeep = false;
         lines.push(blockItemPrefix + str2);
       }
@@ -21617,8 +21617,8 @@ var require_stringifyCollection = __commonJS({
 ${indent}${line}` : "\n";
         }
       }
-      if (comment2) {
-        str += "\n" + stringifyComment.indentComment(commentString(comment2), indent);
+      if (comment) {
+        str += "\n" + stringifyComment.indentComment(commentString(comment), indent);
         if (onComment)
           onComment();
       } else if (chompKeep && onChompKeep)
@@ -21638,13 +21638,13 @@ ${indent}${line}` : "\n";
       const lines = [];
       for (let i = 0; i < items.length; ++i) {
         const item = items[i];
-        let comment2 = null;
+        let comment = null;
         if (identity.isNode(item)) {
           if (item.spaceBefore)
             lines.push("");
           addCommentBefore(ctx, lines, item.commentBefore, false);
           if (item.comment)
-            comment2 = item.comment;
+            comment = item.comment;
         } else if (identity.isPair(item)) {
           const ik = identity.isNode(item.key) ? item.key : null;
           if (ik) {
@@ -21657,16 +21657,16 @@ ${indent}${line}` : "\n";
           const iv = identity.isNode(item.value) ? item.value : null;
           if (iv) {
             if (iv.comment)
-              comment2 = iv.comment;
+              comment = iv.comment;
             if (iv.commentBefore)
               reqNewline = true;
           } else if (item.value == null && ik?.comment) {
-            comment2 = ik.comment;
+            comment = ik.comment;
           }
         }
-        if (comment2)
+        if (comment)
           reqNewline = true;
-        let str = stringify.stringify(item, itemCtx, () => comment2 = null);
+        let str = stringify.stringify(item, itemCtx, () => comment = null);
         reqNewline || (reqNewline = lines.length > linesAtValue || str.includes("\n"));
         if (i < items.length - 1) {
           str += ",";
@@ -21678,8 +21678,8 @@ ${indent}${line}` : "\n";
             str += ",";
           }
         }
-        if (comment2)
-          str += stringifyComment.lineComment(str, itemIndent, commentString(comment2));
+        if (comment)
+          str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
         lines.push(str);
         linesAtValue = lines.length;
       }
@@ -21703,11 +21703,11 @@ ${indent}${end}`;
         }
       }
     }
-    function addCommentBefore({ indent, options: { commentString } }, lines, comment2, chompKeep) {
-      if (comment2 && chompKeep)
-        comment2 = comment2.replace(/^\n+/, "");
-      if (comment2) {
-        const ic = stringifyComment.indentComment(commentString(comment2), indent);
+    function addCommentBefore({ indent, options: { commentString } }, lines, comment, chompKeep) {
+      if (comment && chompKeep)
+        comment = comment.replace(/^\n+/, "");
+      if (comment) {
+        const ic = stringifyComment.indentComment(commentString(comment), indent);
         lines.push(ic.trimStart());
       }
     }
@@ -22327,7 +22327,7 @@ var require_binary = __commonJS({
           return src;
         }
       },
-      stringify({ comment: comment2, type, value }, ctx, onComment, onChompKeep) {
+      stringify({ comment, type, value }, ctx, onComment, onChompKeep) {
         if (!value)
           return "";
         const buf = value;
@@ -22352,7 +22352,7 @@ var require_binary = __commonJS({
           }
           str = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
-        return stringifyString.stringifyString({ comment: comment2, type, value: str }, ctx, onComment, onChompKeep);
+        return stringifyString.stringifyString({ comment, type, value: str }, ctx, onComment, onChompKeep);
       }
     };
     exports.binary = binary;
@@ -23484,7 +23484,7 @@ var require_resolve_props = __commonJS({
       let spaceBefore = false;
       let atNewline = startOnNewline;
       let hasSpace = startOnNewline;
-      let comment2 = "";
+      let comment = "";
       let commentSep = "";
       let hasNewline = false;
       let reqSpace = false;
@@ -23518,18 +23518,18 @@ var require_resolve_props = __commonJS({
             if (!hasSpace)
               onError(token, "MISSING_CHAR", "Comments must be separated from other tokens by white space characters");
             const cb = token.source.substring(1) || " ";
-            if (!comment2)
-              comment2 = cb;
+            if (!comment)
+              comment = cb;
             else
-              comment2 += commentSep + cb;
+              comment += commentSep + cb;
             commentSep = "";
             atNewline = false;
             break;
           }
           case "newline":
             if (atNewline) {
-              if (comment2)
-                comment2 += token.source;
+              if (comment)
+                comment += token.source;
               else if (!found || indicator !== "seq-item-ind")
                 spaceBefore = true;
             } else
@@ -23597,7 +23597,7 @@ var require_resolve_props = __commonJS({
         comma,
         found,
         spaceBefore,
-        comment: comment2,
+        comment,
         hasNewline,
         anchor,
         tag,
@@ -23850,7 +23850,7 @@ var require_resolve_end = __commonJS({
   "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/compose/resolve-end.js"(exports) {
     "use strict";
     function resolveEnd(end, offset, reqSpace, onError) {
-      let comment2 = "";
+      let comment = "";
       if (end) {
         let hasSpace = false;
         let sep2 = "";
@@ -23864,15 +23864,15 @@ var require_resolve_end = __commonJS({
               if (reqSpace && !hasSpace)
                 onError(token, "MISSING_CHAR", "Comments must be separated from other tokens by white space characters");
               const cb = source.substring(1) || " ";
-              if (!comment2)
-                comment2 = cb;
+              if (!comment)
+                comment = cb;
               else
-                comment2 += sep2 + cb;
+                comment += sep2 + cb;
               sep2 = "";
               break;
             }
             case "newline":
-              if (comment2)
+              if (comment)
                 sep2 += source;
               hasSpace = true;
               break;
@@ -23882,7 +23882,7 @@ var require_resolve_end = __commonJS({
           offset += source.length;
         }
       }
-      return { comment: comment2, offset };
+      return { comment, offset };
     }
     exports.resolveEnd = resolveEnd;
   }
@@ -24281,7 +24281,7 @@ var require_resolve_block_scalar = __commonJS({
       if (error2 !== -1)
         onError(error2, "UNEXPECTED_TOKEN", `Block scalar header includes extra characters: ${source}`);
       let hasSpace = false;
-      let comment2 = "";
+      let comment = "";
       let length = source.length;
       for (let i = 1; i < props.length; ++i) {
         const token = props[i];
@@ -24298,7 +24298,7 @@ var require_resolve_block_scalar = __commonJS({
               onError(token, "MISSING_CHAR", message);
             }
             length += token.source.length;
-            comment2 = token.source.substring(1);
+            comment = token.source.substring(1);
             break;
           case "error":
             onError(token, "UNEXPECTED_TOKEN", token.message);
@@ -24314,7 +24314,7 @@ var require_resolve_block_scalar = __commonJS({
           }
         }
       }
-      return { mode, indent, chomp, comment: comment2, length };
+      return { mode, indent, chomp, comment, length };
     }
     function splitLines(source) {
       const split2 = source.split(/\n( *)/);
@@ -24559,7 +24559,7 @@ var require_compose_scalar = __commonJS({
     var resolveBlockScalar = require_resolve_block_scalar();
     var resolveFlowScalar = require_resolve_flow_scalar();
     function composeScalar(ctx, token, tagToken, onError) {
-      const { value, type, comment: comment2, range } = token.type === "block-scalar" ? resolveBlockScalar.resolveBlockScalar(ctx, token, onError) : resolveFlowScalar.resolveFlowScalar(token, ctx.options.strict, onError);
+      const { value, type, comment, range } = token.type === "block-scalar" ? resolveBlockScalar.resolveBlockScalar(ctx, token, onError) : resolveFlowScalar.resolveFlowScalar(token, ctx.options.strict, onError);
       const tagName = tagToken ? ctx.directives.tagName(tagToken.source, (msg) => onError(tagToken, "TAG_RESOLVE_FAILED", msg)) : null;
       let tag;
       if (ctx.options.stringKeys && ctx.atKey) {
@@ -24587,8 +24587,8 @@ var require_compose_scalar = __commonJS({
         scalar.tag = tagName;
       if (tag.format)
         scalar.format = tag.format;
-      if (comment2)
-        scalar.comment = comment2;
+      if (comment)
+        scalar.comment = comment;
       return scalar;
     }
     function findScalarTagByName(schema, value, tagName, tagToken, onError) {
@@ -24674,7 +24674,7 @@ var require_compose_node = __commonJS({
     var CN = { composeNode, composeEmptyNode };
     function composeNode(ctx, token, props, onError) {
       const atKey = ctx.atKey;
-      const { spaceBefore, comment: comment2, anchor, tag } = props;
+      const { spaceBefore, comment, anchor, tag } = props;
       let node;
       let isSrcToken = true;
       switch (token.type) {
@@ -24718,17 +24718,17 @@ var require_compose_node = __commonJS({
       }
       if (spaceBefore)
         node.spaceBefore = true;
-      if (comment2) {
+      if (comment) {
         if (token.type === "scalar" && token.source === "")
-          node.comment = comment2;
+          node.comment = comment;
         else
-          node.commentBefore = comment2;
+          node.commentBefore = comment;
       }
       if (ctx.options.keepSourceTokens && isSrcToken)
         node.srcToken = token;
       return node;
     }
-    function composeEmptyNode(ctx, offset, before, pos, { spaceBefore, comment: comment2, anchor, tag, end }, onError) {
+    function composeEmptyNode(ctx, offset, before, pos, { spaceBefore, comment, anchor, tag, end }, onError) {
       const token = {
         type: "scalar",
         offset: utilEmptyScalarPosition.emptyScalarPosition(offset, before, pos),
@@ -24743,8 +24743,8 @@ var require_compose_node = __commonJS({
       }
       if (spaceBefore)
         node.spaceBefore = true;
-      if (comment2) {
-        node.comment = comment2;
+      if (comment) {
+        node.comment = comment;
         node.range[2] = end;
       }
       return node;
@@ -24830,14 +24830,14 @@ var require_composer = __commonJS({
       return [offset, offset + (typeof source === "string" ? source.length : 1)];
     }
     function parsePrelude(prelude) {
-      let comment2 = "";
+      let comment = "";
       let atComment = false;
       let afterEmptyLine = false;
       for (let i = 0; i < prelude.length; ++i) {
         const source = prelude[i];
         switch (source[0]) {
           case "#":
-            comment2 += (comment2 === "" ? "" : afterEmptyLine ? "\n\n" : "\n") + (source.substring(1) || " ");
+            comment += (comment === "" ? "" : afterEmptyLine ? "\n\n" : "\n") + (source.substring(1) || " ");
             atComment = true;
             afterEmptyLine = false;
             break;
@@ -24852,7 +24852,7 @@ var require_composer = __commonJS({
             atComment = false;
         }
       }
-      return { comment: comment2, afterEmptyLine };
+      return { comment, afterEmptyLine };
     }
     var Composer = class {
       constructor(options = {}) {
@@ -24872,25 +24872,25 @@ var require_composer = __commonJS({
         this.options = options;
       }
       decorate(doc, afterDoc) {
-        const { comment: comment2, afterEmptyLine } = parsePrelude(this.prelude);
-        if (comment2) {
+        const { comment, afterEmptyLine } = parsePrelude(this.prelude);
+        if (comment) {
           const dc = doc.contents;
           if (afterDoc) {
             doc.comment = doc.comment ? `${doc.comment}
-${comment2}` : comment2;
+${comment}` : comment;
           } else if (afterEmptyLine || doc.directives.docStart || !dc) {
-            doc.commentBefore = comment2;
+            doc.commentBefore = comment;
           } else if (identity.isCollection(dc) && !dc.flow && dc.items.length > 0) {
             let it = dc.items[0];
             if (identity.isPair(it))
               it = it.key;
             const cb = it.commentBefore;
-            it.commentBefore = cb ? `${comment2}
-${cb}` : comment2;
+            it.commentBefore = cb ? `${comment}
+${cb}` : comment;
           } else {
             const cb = dc.commentBefore;
-            dc.commentBefore = cb ? `${comment2}
-${cb}` : comment2;
+            dc.commentBefore = cb ? `${comment}
+${cb}` : comment;
           }
         }
         if (afterDoc) {
@@ -27070,9 +27070,6 @@ var require_dist2 = __commonJS({
     exports.visitAsync = visit.visitAsync;
   }
 });
-
-// src/duties/triage/main.ts
-import { isAbsolute, relative } from "node:path";
 
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 import * as os from "os";
@@ -32432,45 +32429,45 @@ function withoutTerminator(line) {
 function fenceOpener(line) {
   const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(withoutTerminator(line));
   if (!match) return null;
-  const [, marker = "", info3 = ""] = match;
-  if (marker.startsWith("`") && info3.includes("`")) return null;
-  return marker;
+  const [, marker2 = "", info3 = ""] = match;
+  if (marker2.startsWith("`") && info3.includes("`")) return null;
+  return marker2;
 }
-function closesFence(line, marker) {
-  const fenceChar = marker[0];
+function closesFence(line, marker2) {
+  const fenceChar = marker2[0];
   const body = withoutTerminator(line).replace(/^ {0,3}/, "");
   let run2 = 0;
   while (run2 < body.length && body[run2] === fenceChar) run2++;
-  if (run2 < marker.length) return false;
+  if (run2 < marker2.length) return false;
   return body.slice(run2).trim().length === 0;
 }
 function splitFences(markdown) {
   const out = [];
   let buffer = [];
-  let marker = null;
+  let marker2 = null;
   const flush = (kind) => {
     if (buffer.length > 0) out.push({ kind, text: buffer.join("") });
     buffer = [];
   };
   for (const line of terminatedLines(markdown)) {
-    if (marker === null) {
+    if (marker2 === null) {
       const opener = fenceOpener(line);
       if (opener === null) {
         buffer.push(line);
         continue;
       }
       flush("prose");
-      marker = opener;
+      marker2 = opener;
       buffer.push(line);
       continue;
     }
     buffer.push(line);
-    if (closesFence(line, marker)) {
+    if (closesFence(line, marker2)) {
       flush("fence");
-      marker = null;
+      marker2 = null;
     }
   }
-  flush(marker === null ? "prose" : "fence");
+  flush(marker2 === null ? "prose" : "fence");
   return out;
 }
 function splitCodeSpans(text2) {
@@ -32653,10 +32650,10 @@ function classifyStatus(status) {
 function readUsage(payload) {
   const usage = asRecord(asRecord(payload)?.usage);
   if (usage === null) return null;
-  const prompt4 = asCount(usage.prompt_tokens);
+  const prompt3 = asCount(usage.prompt_tokens);
   const completion = asCount(usage.completion_tokens);
-  if (prompt4 === null && completion === null) return null;
-  return { prompt: prompt4 ?? 0, completion: completion ?? 0 };
+  if (prompt3 === null && completion === null) return null;
+  return { prompt: prompt3 ?? 0, completion: completion ?? 0 };
 }
 function asCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
@@ -32790,9 +32787,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer2, code) {
+function spells(answer3, code) {
   const escaped = code.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer2);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer3);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -32898,78 +32895,6 @@ async function listOpenThreads(api, at, since) {
   }
   return listed;
 }
-function isMissing(error2) {
-  return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
-}
-async function listCorrectionFiles(api, at, path) {
-  let data;
-  try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
-  } catch (error2) {
-    if (isMissing(error2)) return [];
-    throw error2;
-  }
-  if (!Array.isArray(data)) return [];
-  return data.filter(
-    (entry) => typeof entry === "object" && entry !== null && typeof entry.name === "string" && entry.name.endsWith(".ndjson")
-  ).map((entry) => ({ path: entry.path, sha: entry.sha }));
-}
-async function readContentsFile(api, at, path) {
-  let data;
-  try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
-  } catch (error2) {
-    if (isMissing(error2)) return null;
-    throw error2;
-  }
-  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
-  const file = data;
-  if (typeof file.sha !== "string") return null;
-  if (typeof file.content === "string" && file.encoding === "base64") {
-    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
-  }
-  throw new UnreadableContentsFile(path);
-}
-var UnreadableContentsFile = class extends Error {
-  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
-  path;
-  constructor(path) {
-    super(
-      `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
-    );
-    this.name = "UnreadableContentsFile";
-    this.path = path;
-  }
-};
-async function writeContentsFile(api, at, path, text2, message, sha) {
-  await api.rest.repos.createOrUpdateFileContents({
-    owner: at.owner,
-    repo: at.repo,
-    path,
-    message,
-    content: Buffer.from(text2, "utf8").toString("base64"),
-    ...sha === null ? {} : { sha }
-  });
-}
-function createEffects(api, at) {
-  const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
-  return {
-    async addLabels(names) {
-      if (names.length === 0) return;
-      await api.rest.issues.addLabels({ ...issue2, labels: [...names] });
-    },
-    async comment(body) {
-      await api.rest.issues.createComment({ ...issue2, body });
-    },
-    async assign(users) {
-      if (users.length === 0) return;
-      await api.rest.issues.addAssignees({ ...issue2, assignees: [...users] });
-    },
-    async closeAsNotPlanned() {
-      await api.rest.issues.update({ ...issue2, state: "closed", state_reason: "not_planned" });
-    }
-  };
-}
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -33030,14 +32955,6 @@ function parseWarrant(path, source) {
     labelNamed: (name) => byName.get(name)
   };
 }
-function checkLabelsExist(warrant, existing) {
-  const present = new Set(existing);
-  const missing = warrant.labels.map((label) => label.name).filter((name) => !present.has(name));
-  if (missing.length === 0) return;
-  throw new Error(
-    `warrant: \`${warrant.path}\` names ${missing.length === 1 ? "a label" : "labels"} this repository does not have \u2014 ${missing.map((name) => `\`${name}\``).join(", ")}. Create them, or correct the taxonomy.`
-  );
-}
 function implicitWarrant(path, repositoryLabels) {
   const labels = [];
   const excluded = [];
@@ -33069,8 +32986,8 @@ function implicitWarrant(path, repositoryLabels) {
     excluded
   };
 }
-async function resolveAuthority(read2, path, api, at) {
-  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
+async function resolveAuthority(read, path, api, at) {
+  if (read !== null) return { warrant: read, implicit: false, excludedLabels: [] };
   const repositoryLabels = await listRepositoryLabels(api, at);
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
@@ -33271,57 +33188,6 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
-function enforceLabels(warrant, proposed, onThread) {
-  const applied = [];
-  const refused = [];
-  const seen = /* @__PURE__ */ new Set();
-  const already = new Set(onThread);
-  for (const name of proposed) {
-    if (seen.has(name)) continue;
-    seen.add(name);
-    const entry = warrant.labelNamed(name);
-    if (entry === void 0) {
-      refused.push({ what: name, why: `\`${warrant.path}\` does not name it` });
-      continue;
-    }
-    if (already.has(name)) {
-      refused.push({ what: name, why: "the thread already carries it" });
-      continue;
-    }
-    const human = entry.exclusiveWith.find((other) => already.has(other));
-    if (human !== void 0) {
-      refused.push({
-        what: name,
-        why: `the thread already carries \`${human}\`, which excludes it`
-      });
-      continue;
-    }
-    const conflict = applied.find(
-      (kept) => entry.exclusiveWith.includes(kept) || (warrant.labelNamed(kept)?.exclusiveWith.includes(name) ?? false)
-    );
-    if (conflict !== void 0) {
-      refused.push({ what: name, why: `it cannot be applied alongside \`${conflict}\`` });
-      continue;
-    }
-    applied.push(name);
-  }
-  return { applied, refused };
-}
-function alreadyTaxonomized(warrant, labels) {
-  return labels.some((name) => warrant.labelNamed(name) !== void 0);
-}
-function owners(warrant, applied) {
-  const users = [];
-  const teams = [];
-  for (const name of applied) {
-    const owner = warrant.labelNamed(name)?.owner;
-    if (owner === null || owner === void 0) continue;
-    const handle = owner.replace(/^@/, "");
-    const into = handle.includes("/") ? teams : users;
-    if (!into.includes(handle)) into.push(handle);
-  }
-  return { users, teams };
-}
 
 // src/core/inputs.ts
 function readShared() {
@@ -33392,10 +33258,14 @@ function whole(name, raw) {
   }
   return value;
 }
-function counted(name, raw) {
-  const value = Number(raw);
-  if (raw.trim().length === 0 || !Number.isInteger(value) || value < 0) {
-    throw new Error(`${name}: expected a whole number of 0 or more, got \`${raw}\`.`);
+function bounded(name, raw) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
   }
   return value;
 }
@@ -33405,200 +33275,6 @@ function fraction(name, raw) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
   }
   return value;
-}
-
-// src/core/memory.ts
-import { readdir as readdir2, readFile as readFile2 } from "node:fs/promises";
-import { join } from "node:path";
-var EXCERPT = 500;
-function createMemory(corrections, similarity = lexical) {
-  const ownDocuments = corrections.map(searchable);
-  function ranked(text2, against) {
-    if (corrections.length === 0) return /* @__PURE__ */ new Map();
-    const documents = against === "own" ? ownDocuments : corrections.map((correction) => searchablePivot(correction, against.pivot));
-    const scores = similarity(text2, documents);
-    const scored = /* @__PURE__ */ new Map();
-    scores.forEach((score, index) => {
-      if (score > 0) scored.set(index, score);
-    });
-    return scored;
-  }
-  function topOf(scored, count2) {
-    return [...scored.entries()].sort(
-      ([leftIndex, leftScore], [rightIndex, rightScore]) => rightScore - leftScore || compareAt(corrections[leftIndex], corrections[rightIndex])
-    ).slice(0, count2).map(([index]) => corrections[index]).filter((correction) => correction !== void 0);
-  }
-  return {
-    size: corrections.length,
-    recall(text2, count2) {
-      if (corrections.length === 0 || count2 <= 0) return [];
-      return topOf(ranked(text2, "own"), count2);
-    },
-    recallAcrossQueries(queries, count2) {
-      if (corrections.length === 0 || count2 <= 0 || queries.length === 0) return [];
-      const best = /* @__PURE__ */ new Map();
-      for (const query of queries) {
-        for (const [index, score] of ranked(query.text, query.against)) {
-          const current = best.get(index);
-          if (current === void 0 || score > current) best.set(index, score);
-        }
-      }
-      return topOf(best, count2);
-    }
-  };
-}
-function compareAt(left, right) {
-  return (right?.at ?? "").localeCompare(left?.at ?? "");
-}
-function searchable(correction) {
-  return [correction.title, correction.excerpt, correction.note ?? ""].join("\n");
-}
-function searchablePivot(correction, target) {
-  const wanted = target.toLowerCase();
-  if (correction.pivot?.language.toLowerCase() === wanted) {
-    return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
-  }
-  if (correction.language?.toLowerCase() === wanted) {
-    return searchable(correction);
-  }
-  return "";
-}
-var K1 = 1.2;
-var B = 0.75;
-var lexical = (query, documents) => {
-  const asked = new Set(tokenise(query));
-  if (asked.size === 0 || documents.length === 0) return documents.map(() => 0);
-  const tokenised = documents.map(tokenise);
-  const lengths = tokenised.map((tokens) => tokens.length);
-  const average = lengths.reduce((sum, length) => sum + length, 0) / documents.length;
-  const carrying = /* @__PURE__ */ new Map();
-  for (const tokens of tokenised) {
-    for (const term of new Set(tokens)) {
-      if (asked.has(term)) carrying.set(term, (carrying.get(term) ?? 0) + 1);
-    }
-  }
-  return tokenised.map((tokens, index) => {
-    const counts = /* @__PURE__ */ new Map();
-    for (const term of tokens) counts.set(term, (counts.get(term) ?? 0) + 1);
-    const length = lengths[index] ?? 0;
-    const normalised = average === 0 ? 1 : length / average;
-    let score = 0;
-    for (const term of asked) {
-      const frequency = counts.get(term);
-      if (frequency === void 0) continue;
-      const documentsWith = carrying.get(term) ?? 0;
-      const weight = Math.log(1 + (documents.length - documentsWith + 0.5) / (documentsWith + 0.5));
-      score += weight * (frequency * (K1 + 1) / (frequency + K1 * (1 - B + B * normalised)));
-    }
-    return score;
-  });
-};
-var RUN = /[\p{Letter}\p{Number}]+/gu;
-var LETTER = new RegExp("\\p{Letter}", "u");
-var LONGEST_RUN = 40;
-function tokenise(text2) {
-  const terms = [];
-  for (const [run2] of text2.toLowerCase().matchAll(RUN)) {
-    terms.push(run2);
-    if (run2.length < 2 || run2.length > LONGEST_RUN) continue;
-    if (!LETTER.test(run2) || cased(run2)) continue;
-    const characters = Array.from(run2);
-    for (let at = 0; at + 1 < characters.length; at += 1) {
-      terms.push(`${characters[at] ?? ""}${characters[at + 1] ?? ""}`);
-    }
-  }
-  return terms;
-}
-function cased(run2) {
-  return Array.from(run2).some((character) => character.toLowerCase() !== character.toUpperCase());
-}
-var EMPTY = { corrections: [], unreadable: [] };
-async function readStore(path) {
-  let names;
-  try {
-    names = (await readdir2(path)).filter((name) => name.endsWith(".ndjson")).sort();
-  } catch {
-    return EMPTY;
-  }
-  const corrections = [];
-  const unreadable = [];
-  for (const name of names) {
-    const file = join(path, name);
-    let source;
-    try {
-      source = await readFile2(file, "utf8");
-    } catch (error2) {
-      unreadable.push(`${file}: ${error2 instanceof Error ? error2.message : String(error2)}`);
-      continue;
-    }
-    for (const [index, line] of source.split("\n").entries()) {
-      if (line.trim().length === 0) continue;
-      const correction = parseCorrection(line);
-      if (correction === null) {
-        unreadable.push(`${file}:${String(index + 1)} is not a correction`);
-        continue;
-      }
-      corrections.push(correction);
-    }
-  }
-  return { corrections, unreadable };
-}
-function parseCorrection(line) {
-  let raw;
-  try {
-    raw = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw;
-  const thread = record.thread;
-  const decided = strings2(record.decided);
-  if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
-  return {
-    thread,
-    at: typeof record.at === "string" ? record.at : "",
-    title: typeof record.title === "string" ? record.title : "",
-    excerpt: typeof record.excerpt === "string" ? record.excerpt : "",
-    language: typeof record.language === "string" && record.language.length > 0 ? record.language : null,
-    proposed: strings2(record.proposed) ?? [],
-    decided,
-    by: typeof record.by === "string" ? record.by : "",
-    note: typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
-    pivot: readPivot(record.pivot)
-  };
-}
-function strings2(raw) {
-  if (!Array.isArray(raw)) return null;
-  return raw.every((entry) => typeof entry === "string") ? raw : null;
-}
-function readPivot(raw) {
-  if (raw === null || raw === void 0 || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-  const record = raw;
-  if (typeof record.language !== "string" || record.language.length === 0) return null;
-  if (typeof record.title !== "string" || typeof record.excerpt !== "string") return null;
-  if (record.title.trim().length === 0) return null;
-  return { language: record.language, title: record.title, excerpt: record.excerpt };
-}
-function formatCorrection(correction) {
-  return JSON.stringify({
-    thread: correction.thread,
-    at: correction.at,
-    title: correction.title,
-    excerpt: correction.excerpt.slice(0, EXCERPT),
-    language: correction.language,
-    proposed: correction.proposed,
-    decided: correction.decided,
-    by: correction.by,
-    note: correction.note,
-    pivot: correction.pivot === null ? null : {
-      language: correction.pivot.language,
-      title: correction.pivot.title,
-      excerpt: correction.pivot.excerpt.slice(0, EXCERPT)
-    }
-  });
 }
 
 // src/core/meter.ts
@@ -33677,19 +33353,19 @@ function sanitize(markdown) {
 function defangComments(prose) {
   const lastCloser = prose.lastIndexOf(CLOSER);
   let defanged = "";
-  let read2 = 0;
+  let read = 0;
   for (; ; ) {
-    const opener = prose.indexOf(OPENER, read2);
-    if (opener === -1) return defanged + prose.slice(read2);
-    defanged += prose.slice(read2, opener);
+    const opener = prose.indexOf(OPENER, read);
+    if (opener === -1) return defanged + prose.slice(read);
+    defanged += prose.slice(read, opener);
     const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
     if (closer === -1) {
       defanged += `<${INERT}!--`;
-      read2 = opener + OPENER.length;
+      read = opener + OPENER.length;
       continue;
     }
     defanged += emptied(prose.slice(opener + OPENER.length, closer));
-    read2 = closer + CLOSER.length;
+    read = closer + CLOSER.length;
   }
 }
 var OPAQUE = /[^`~\\\n\r ]/g;
@@ -33749,8 +33425,8 @@ ${body}`);
     { role: "user", content: enclosed.block }
   ];
 }
-function unwrapped(answer2) {
-  const trimmed = answer2.trim();
+function unwrapped(answer3) {
+  const trimmed = answer3.trim();
   const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence?.[1] ?? trimmed;
 }
@@ -33766,49 +33442,6 @@ function readAnswer(text2) {
   if (typeof record.title !== "string" || typeof record.body !== "string") return null;
   if (record.title.trim().length === 0) return null;
   return { title: record.title, body: record.body };
-}
-
-// src/core/screen.ts
-function screen(request2) {
-  const { scaffolded, authored } = strip(request2.body);
-  const written = `${request2.title.trim()}
-${authored}`.trim();
-  const short = request2.minimum > 0 && written.length < request2.minimum && !evidenced(request2.body);
-  if (written.length > 0 && !short) return null;
-  if (scaffolded && authored.length === 0) {
-    return { reason: "template", note: "the issue template came back with nothing filled in" };
-  }
-  if (written.length === 0) {
-    return { reason: "empty", note: "the thread carries no text to work from" };
-  }
-  return {
-    reason: "too-short",
-    note: `there are ${String(written.length)} characters of authored text and no code, link or error in it, which is under the ${String(request2.minimum)} this run asks for`
-  };
-}
-var HEADING = /^\s{0,3}#{1,6}\s/;
-var COMMENT = /<!--[\s\S]*?-->/g;
-var NO_RESPONSE = /^\s*_No response_\s*$/i;
-var UNTICKED = /^\s*[-*]\s*\[ \]\s/;
-var RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
-function strip(body) {
-  const withoutComments = body.replace(COMMENT, "\n");
-  let scaffolded = withoutComments !== body;
-  const kept = [];
-  for (const line of withoutComments.split("\n")) {
-    if (HEADING.test(line) || NO_RESPONSE.test(line) || UNTICKED.test(line) || RULE.test(line)) {
-      scaffolded = true;
-      continue;
-    }
-    kept.push(line);
-  }
-  return { scaffolded, authored: kept.join("\n").trim() };
-}
-var LINK = /https?:\/\/\S/;
-var ERROR = /(^|\n)\s*(at\s+\S+\(|Traceback \(most recent call last\)|File "[^"]+", line \d)|\b([A-Z][A-Za-z0-9_.]*)?(Error|Exception|Panic|Fatal|Segmentation fault)\b|\bexit(ed with)? (code|status) [1-9]/;
-function evidenced(body) {
-  if (LINK.test(body) || ERROR.test(body)) return true;
-  return segments(body).some((segment) => segment.kind !== "prose");
 }
 
 // src/core/summary.ts
@@ -33887,112 +33520,269 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
-// src/duties/triage/spam.ts
-async function sift(request2) {
-  const { provider, models, weather } = request2;
-  if (models.length === 0) return { dropped: null, failures: [] };
-  const rotation = await rotateModels(
-    models,
-    (model) => provider.complete(model, prompt2(request2)),
-    weather
-  );
-  if (!rotation.success) return { dropped: null, failures: rotation.failures };
-  return { dropped: read(rotation.success.content), failures: rotation.failures };
-}
-function read(answer2) {
-  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
-  if (said("spam") === said("off-topic")) return null;
-  if (said("spam")) {
-    return { reason: "spam", note: "the cheap pass read it as spam" };
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
   }
-  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
-}
-function prompt2(request2) {
-  const { title, body, about } = request2;
-  const material = enclose("untrusted-thread", `TITLE: ${title}
-BODY:
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
-        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
-        "written report is worth attention.",
-        "",
-        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
-        "Answer with exactly one of these words and nothing else:",
-        "",
-        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
-        "- off-topic: a real request about something other than this repository.",
-        "- keep: anything else, including a report you cannot make sense of.",
-        "",
-        "When you are not sure, answer keep.",
-        "",
-        material.rule
-      ].join("\n")
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
     },
-    { role: "user", content: material.block }
-  ];
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
 }
 
-// src/duties/triage/summary.ts
+// src/duties/duplicate/corpus.ts
+var CORPUS_PAGE = 100;
+var ANY_MARKER = /<!-- reeve:[a-z][a-z0-9-]*\ssource=/;
+function authorText(body) {
+  const match = ANY_MARKER.exec(body);
+  return match === null ? body : authorHalf(body.slice(0, match.index));
+}
+async function listCorpus(api, at, exclude, limit, since, maxBodyChars = null) {
+  const corpus = [];
+  for (let page2 = 1; ; page2 += 1) {
+    const { data } = await api.rest.issues.listForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      sort: "created",
+      direction: "desc",
+      per_page: CORPUS_PAGE,
+      page: page2
+    });
+    let stop = false;
+    for (const entry of data) {
+      const createdAt = new Date(entry.created_at);
+      if (since !== null && createdAt < since) {
+        stop = true;
+        break;
+      }
+      if (entry.pull_request !== void 0 || entry.number === exclude) continue;
+      const authored = authorText(entry.body ?? "");
+      corpus.push({
+        number: entry.number,
+        title: entry.title ?? "",
+        body: maxBodyChars === null ? authored : authored.slice(0, maxBodyChars),
+        createdAt
+      });
+      if (limit !== null && corpus.length >= limit) {
+        stop = true;
+        break;
+      }
+    }
+    if (stop || data.length < CORPUS_PAGE) break;
+  }
+  return corpus;
+}
+
+// src/duties/duplicate/publish.ts
+var marker = markerFor("duplicate");
+function proposalFingerprint(source, candidates) {
+  return fingerprint(
+    source,
+    candidates.map((number) => String(number))
+  );
+}
+function payloadFor(fp, duplicateOf) {
+  return `${fp} duplicate-of=${String(duplicateOf)}`;
+}
+function isBot(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
+var COMMENT_PAGE = 100;
+async function findMarked(api, at) {
+  const { data } = await api.rest.issues.listComments({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number,
+    per_page: COMMENT_PAGE
+  });
+  for (const comment of data) {
+    if (!isBot(comment.user)) continue;
+    const { official, fingerprint: found } = marker.split(comment.body ?? "");
+    if (found !== null && official === "")
+      return { marked: { id: comment.id, fingerprint: found }, uncertain: false };
+  }
+  return { marked: null, uncertain: data.length === COMMENT_PAGE };
+}
+async function classify(api, at, proposal, fp) {
+  const payload = payloadFor(fp, proposal.duplicateOf);
+  const body = [marker.render(payload), render(proposal)].join("\n\n");
+  const { marked: existing, uncertain } = await findMarked(api, at);
+  if (existing === null && uncertain) {
+    return { disposition: "withheld", body, existing: null };
+  }
+  const disposition2 = existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
+  return { disposition: disposition2, body, existing };
+}
+async function postOrReplace(api, at, proposal, fp) {
+  const { disposition: disposition2, body, existing } = await classify(api, at, proposal, fp);
+  if (disposition2 === "withheld") return disposition2;
+  if (existing === null) {
+    await api.rest.issues.createComment({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      body
+    });
+    return disposition2;
+  }
+  if (disposition2 === "unchanged") return disposition2;
+  await api.rest.issues.updateComment({
+    owner: at.owner,
+    repo: at.repo,
+    comment_id: existing.id,
+    body
+  });
+  return disposition2;
+}
+async function rehearse(api, at, proposal, fp) {
+  return (await classify(api, at, proposal, fp)).disposition;
+}
+function render(proposal) {
+  const lines = [
+    `Possible duplicate of #${String(proposal.duplicateOf)}.`,
+    ...proposal.rationale.length > 0 ? ["", defang(proposal.rationale, proposal.duplicateOf)] : [],
+    "",
+    footer(proposal)
+  ];
+  return lines.join("\n");
+}
+function defang(text2, allowed) {
+  return text2.replace(
+    /#(\d+)/g,
+    (match, digits) => Number(digits) === allowed ? match : `\`${match}\``
+  );
+}
+function footer(proposal) {
+  const parts = ["Proposed by a model, not decided by a maintainer \u2014 read it as a lead to check."];
+  if (proposal.attribution !== "none") {
+    parts.push(`Suggested by \`${proposal.model}\`.`);
+  }
+  if (proposal.attribution === "detail") {
+    parts.push(
+      `Confidence ${proposal.confidence.toFixed(2)} of 1.00, lexical match ${proposal.lexicalScore.toFixed(2)}.`
+    );
+  }
+  parts.push("Editing this thread and re-running replaces this comment; it is never posted twice.");
+  return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
+}
+function escapeHtml(text2) {
+  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// src/core/memory.ts
+var K1 = 1.2;
+var B = 0.75;
+var lexical = (query, documents) => {
+  const asked = new Set(tokenise(query));
+  if (asked.size === 0 || documents.length === 0) return documents.map(() => 0);
+  const tokenised = documents.map(tokenise);
+  const lengths = tokenised.map((tokens) => tokens.length);
+  const average = lengths.reduce((sum, length) => sum + length, 0) / documents.length;
+  const carrying = /* @__PURE__ */ new Map();
+  for (const tokens of tokenised) {
+    for (const term of new Set(tokens)) {
+      if (asked.has(term)) carrying.set(term, (carrying.get(term) ?? 0) + 1);
+    }
+  }
+  return tokenised.map((tokens, index) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of tokens) counts.set(term, (counts.get(term) ?? 0) + 1);
+    const length = lengths[index] ?? 0;
+    const normalised = average === 0 ? 1 : length / average;
+    let score = 0;
+    for (const term of asked) {
+      const frequency = counts.get(term);
+      if (frequency === void 0) continue;
+      const documentsWith = carrying.get(term) ?? 0;
+      const weight = Math.log(1 + (documents.length - documentsWith + 0.5) / (documentsWith + 0.5));
+      score += weight * (frequency * (K1 + 1) / (frequency + K1 * (1 - B + B * normalised)));
+    }
+    return score;
+  });
+};
+var RUN = /[\p{Letter}\p{Number}]+/gu;
+var LETTER = new RegExp("\\p{Letter}", "u");
+var LONGEST_RUN = 40;
+function tokenise(text2) {
+  const terms = [];
+  for (const [run2] of text2.toLowerCase().matchAll(RUN)) {
+    terms.push(run2);
+    if (run2.length < 2 || run2.length > LONGEST_RUN) continue;
+    if (!LETTER.test(run2) || cased(run2)) continue;
+    const characters = Array.from(run2);
+    for (let at = 0; at + 1 < characters.length; at += 1) {
+      terms.push(`${characters[at] ?? ""}${characters[at + 1] ?? ""}`);
+    }
+  }
+  return terms;
+}
+function cased(run2) {
+  return Array.from(run2).some((character) => character.toLowerCase() !== character.toUpperCase());
+}
+
+// src/duties/duplicate/rank.ts
+function documentOf(candidate) {
+  return [candidate.title, candidate.body].join("\n\n");
+}
+function rank(queries, candidates, limit, similarity = lexical) {
+  if (candidates.length === 0 || limit <= 0) return [];
+  const documents = candidates.map(documentOf);
+  const best = /* @__PURE__ */ new Map();
+  for (const query of queries) {
+    if (query.trim().length === 0) continue;
+    const scores = similarity(query, documents);
+    scores.forEach((score, index) => {
+      if (score <= 0) return;
+      const candidate = candidates[index];
+      if (candidate === void 0) return;
+      const current = best.get(index);
+      if (current === void 0 || score > current.score) best.set(index, { candidate, score });
+    });
+  }
+  return [...best.values()].sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    return right.candidate.number - left.candidate.number;
+  }).slice(0, limit);
+}
+
+// src/duties/duplicate/summary.ts
 function summarize(run2) {
   const parts = [
-    "## Reeve \xB7 triage",
+    "## Reeve \xB7 duplicate",
     "",
     `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was applied" : ""}.`,
     "",
-    ...run2.implicit ? [authority(run2), ""] : [],
     verdict(run2),
     "",
-    decisions(run2),
-    "",
-    cost(
-      run2.spent,
-      (spend) => shown(spend.purpose === "screen" ? run2.screenNames : run2.modelNames, spend.model)
-    )
+    cost(run2.spent, (spend) => shown(run2.modelNames, spend.model))
   ];
   return `${parts.join("\n").trimEnd()}
 `;
-}
-function summarizeRecord(run2) {
-  const parts = [
-    "## Reeve \xB7 triage \u2014 record",
-    "",
-    `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was committed" : ""}.`,
-    "",
-    run2.recorded ? `${run2.dryRun ? "Would have recorded" : "Recorded"} to \`${run2.corrections}\` as ` + (run2.decided.length > 0 ? run2.decided.map((name) => `\`${name}\``).join(", ") : "no labels") + `${run2.language !== null ? `, in ${run2.language}` : ", in an unidentified language"}.` : "Nothing was recorded."
-  ];
-  if (run2.pivot) {
-    parts.push(
-      "",
-      run2.dryRun ? "A pivot-language rendering was translated and would have been stored alongside it." : "A pivot-language rendering was translated and stored alongside it."
-    );
-  } else if (run2.pivotNote !== null) {
-    parts.push("", run2.pivotNote);
-  }
-  parts.push(
-    "",
-    cost(
-      run2.spent,
-      (spend) => shown(spend.purpose === "screen" ? run2.screenNames : run2.modelNames, spend.model)
-    )
-  );
-  return `${parts.join("\n").trimEnd()}
-`;
-}
-function authority(run2) {
-  const lines = [
-    `No \`${run2.warrant}\` \u2014 ran at the narrowest authority: labels only, from this repository's own label descriptions.`
-  ];
-  if (run2.excludedLabels.length > 0) {
-    lines.push(
-      "",
-      `${run2.excludedLabels.map((name) => `\`${name}\``).join(", ")} \u2014 these labels have no description on GitHub, so they were not offered to the model \u2014 add a description there, or write a taxonomy in \`${run2.warrant}\`.`
-    );
-  }
-  return lines.join("\n");
 }
 function verdict(run2) {
   const lines = ["### Verdict", ""];
@@ -34004,69 +33794,50 @@ function verdict(run2) {
     );
     return lines.join("\n");
   }
-  if (run2.screenedOut !== null) {
-    lines.push(
-      `Screened out as \`${run2.screenedOut.reason}\` \u2014 ${run2.screenedOut.note}.`,
-      "",
-      "No expensive model was asked anything. This is a real answer rather than a failure."
-    );
-    return lines.join("\n");
-  }
   if (run2.note !== null) {
     lines.push(`No verdict \u2014 ${run2.note}.`, "");
   }
+  lines.push(
+    run2.duplicateOf === null ? "No duplicate was proposed." : `Proposed as a duplicate of #${String(run2.duplicateOf)}.`
+  );
   const language = run2.language ?? "not one of the configured languages";
   lines.push(
-    run2.applied.length === 0 ? "No label was applied." : `Applied ${run2.applied.map((name) => `\`${name}\``).join(", ")}.`,
     "",
-    `Confidence ${run2.confidence.toFixed(2)} against a floor of ${run2.floor.toFixed(2)}. Author language: ${language}. Memory: ${String(run2.memory.recalled)} of ${String(run2.memory.size)} correction${run2.memory.size === 1 ? "" : "s"} reached the prompt` + (run2.memory.pivotRecalled > 0 ? `, ${String(run2.memory.pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
+    `Confidence ${run2.confidence.toFixed(2)} against a floor of ${run2.floor.toFixed(2)}. Author language: ${language}. ${String(run2.rank.offered)} of ${String(run2.rank.corpusSize)} open thread${run2.rank.corpusSize === 1 ? "" : "s"} reached the judge.`
   );
-  if (run2.confidence < run2.floor && run2.proposed.length > 0) {
-    lines.push(
-      "",
-      "The verdict was under the floor, so it is reported and not applied. `proposed` has it."
-    );
+  if (run2.pivot.note !== null) {
+    lines.push("", run2.pivot.note);
   }
   if (run2.duplicateOf !== null) {
-    lines.push(
-      "",
-      `Reported as a possible duplicate of #${String(run2.duplicateOf)}` + (run2.done.closed ? ", and closed." : ". Nothing was done about it \u2014 `apply` does not name `close`.")
-    );
-  }
-  return lines.join("\n");
-}
-function decisions(run2) {
-  if (run2.screenedOut !== null || run2.ungranted !== null) return withheld(run2);
-  const refusals = new Map(run2.refused.map((refusal) => [refusal.what, refusal.why]));
-  const rows = run2.proposed.map((name) => {
-    const why = refusals.get(name);
-    return [
-      // In code formatting, because a label name is a string GitHub matches
-      // exactly — including its case and its spaces, which are invisible in
-      // prose and are the difference between a name that exists and one that
-      // does not.
-      `\`${cell(name)}\``,
-      why === void 0 ? run2.applied.includes(name) ? "applied" : "**not applied**" : "**refused**",
-      why === void 0 ? run2.applied.includes(name) ? "\u2014" : cell(`below the confidence floor of ${run2.floor.toFixed(2)}`) : cell(why)
-    ];
-  });
-  const rendered = table(["Label", "Result", "Why"], rows);
-  const parts = [
-    "### What the verdict proposed",
-    "",
-    rendered.length === 0 ? "The verdict proposed no labels, which is a real answer." : rendered
-  ];
-  const actions = [
-    ...run2.done.commented ? ["a comment"] : [],
-    ...run2.done.assigned.length > 0 ? [`assigned ${run2.done.assigned.join(", ")}`] : [],
-    ...run2.done.closed ? ["closed"] : []
-  ];
-  if (actions.length > 0) {
-    parts.push("", `Also${run2.dryRun ? " would have" : ""}: ${actions.join(", ")}.`);
+    if (run2.confidence < run2.floor) {
+      lines.push(
+        "",
+        "The verdict was under the floor, so it is reported and not applied. `duplicate-of` and `score` still carry it."
+      );
+      lines.push(...why(run2));
+    } else {
+      lines.push("", disposition(run2, run2.duplicateOf));
+      const echoedOnThread = !run2.dryRun && (run2.posted === "posted" || run2.posted === "replaced");
+      if (!echoedOnThread) lines.push(...why(run2));
+    }
   }
   const gap = withheld(run2);
-  if (gap.length > 0) parts.push("", gap);
-  return parts.join("\n");
+  if (gap.length > 0) lines.push("", gap);
+  return lines.join("\n");
+}
+function disposition(run2, duplicateOf) {
+  if (run2.posted === null) {
+    return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
+  }
+  if (run2.posted === "withheld") {
+    return `Nothing was posted \u2014 this thread carries more comments than one run reads, and none of the ones read were this duty's own, so whether it already commented could not actually be told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so this run left the thread alone rather than guess.`;
+  }
+  const verb = run2.posted === "posted" ? run2.dryRun ? "Would have posted" : "Posted" : run2.posted === "replaced" ? run2.dryRun ? "Would have replaced its own previous comment with" : "Replaced its own previous comment with" : "Left its own previous comment unchanged \u2014 this run reached the same fingerprint as";
+  return `${verb} a comment naming #${String(duplicateOf)}.`;
+}
+function why(run2) {
+  if (run2.rationale === null || run2.rationale.length === 0) return [];
+  return ["", `> ${run2.rationale.replace(/\s+/g, " ").trim()}`];
 }
 function withheld(run2) {
   if (run2.withheld.length === 0) return "";
@@ -34074,15 +33845,15 @@ function withheld(run2) {
 }
 function summarizeSweep(run2) {
   if (run2.ungranted !== null) {
-    return `${["## Reeve \xB7 triage \u2014 sweep", "", run2.ungranted, "", cost(run2.spent, () => "")].join("\n").trimEnd()}
+    return `${["## Reeve \xB7 duplicate \u2014 sweep", "", run2.ungranted, "", cost(run2.spent, () => "")].join("\n").trimEnd()}
 `;
   }
   const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
   const rendered = table(["Thread", "Outcome"], rows);
   const parts = [
-    "## Reeve \xB7 triage \u2014 sweep",
+    "## Reeve \xB7 duplicate \u2014 sweep",
     "",
-    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (already labelled), ${String(run2.remaining)} remaining.`,
+    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, ${String(run2.remaining)} remaining.`,
     "",
     rendered.length === 0 ? "Nothing was processed this run." : rendered
   ];
@@ -34094,107 +33865,117 @@ function summarizeSweep(run2) {
   }
   parts.push(
     "",
-    cost(
-      run2.spent,
-      (spend) => shown(spend.purpose === "screen" ? run2.screenNames : run2.modelNames, spend.model)
-    )
+    cost(run2.spent, (spend) => shown(run2.modelNames, spend.model))
   );
   return `${parts.join("\n").trimEnd()}
 `;
 }
 
-// src/duties/triage/verdict.ts
-var NOTHING = { labels: [], confidence: 0, duplicateOf: null, rationale: "" };
-async function triage(request2) {
-  const { provider, models, weather } = request2;
-  const messages = prompt3(request2);
+// src/duties/duplicate/verdict.ts
+var NOTHING = { duplicateOf: null, confidence: 0, rationale: "" };
+var EXCERPT = 1e3;
+async function judge(request2) {
+  const { provider, models, weather, candidates } = request2;
+  if (candidates.length === 0) {
+    return { verdict: NOTHING, failures: [], unreadable: null, model: null };
+  }
+  const messages = prompt2(request2);
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, messages),
+    (model) => answer2(provider, model, messages),
     weather
   );
   if (!rotation.success) {
-    return { verdict: NOTHING, failures: rotation.failures, unreadable: null };
+    return { verdict: NOTHING, failures: rotation.failures, unreadable: null, model: null };
   }
-  const verdict2 = parseVerdict(rotation.success.content);
+  const verdict2 = parseVerdict(rotation.success.content, candidates);
   return {
     verdict: verdict2 ?? NOTHING,
     failures: rotation.failures,
-    unreadable: verdict2 === null ? rotation.success.content : null
+    unreadable: verdict2 === null ? rotation.success.content : null,
+    model: rotation.success.model
   };
 }
-function parseVerdict(answer2) {
+async function answer2(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function parseVerdict(answer3, candidates) {
   let parsed;
   try {
-    parsed = JSON.parse(unwrapped2(answer2));
+    parsed = JSON.parse(unwrapped2(answer3));
   } catch {
     return null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const fields = parsed;
-  const labels = fields.labels;
-  if (!Array.isArray(labels) || labels.some((label) => typeof label !== "string")) return null;
+  const duplicate = fields.duplicate_of ?? null;
+  if (duplicate !== null) {
+    if (!Number.isInteger(duplicate)) return null;
+    if (!candidates.some((candidate) => candidate.number === duplicate)) return null;
+  }
   const confidence = fields.confidence;
   if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
   if (confidence < 0 || confidence > 1) return null;
-  const duplicate = fields.duplicate_of ?? null;
-  if (duplicate !== null && (!Number.isInteger(duplicate) || duplicate < 1)) {
-    return null;
-  }
   const rationale = fields.rationale ?? "";
   if (typeof rationale !== "string") return null;
   return {
-    // Trimmed, because a model that answered `" bug"` means `bug` and GitHub
-    // does not. Empty entries are dropped rather than refused: they are the
-    // model padding a list, not the answer coming apart.
-    labels: labels.map((label) => label.trim()).filter((label) => label.length > 0),
-    confidence,
     duplicateOf: duplicate,
+    confidence,
     rationale: rationale.trim()
   };
 }
-function unwrapped2(answer2) {
-  const parts = segments(answer2.trim());
+function unwrapped2(answer3) {
+  const parts = segments(answer3.trim());
   const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer3;
   const lines = only.text.split("\n");
   return lines.slice(1, -1).join("\n");
 }
-function prompt3(request2) {
-  const { title, body, taxonomy, language, recalled } = request2;
+function prompt2(request2) {
+  const { title, body, language, candidates } = request2;
   const material = enclose(
     "untrusted-thread",
     [
-      ...recalled.length === 0 ? [] : [examples(recalled), ""],
-      "--- THREAD TO TRIAGE ---",
+      "--- THREAD TO CHECK ---",
       `TITLE: ${title}`,
       "BODY:",
-      body
+      body,
+      "",
+      "--- CANDIDATES ALREADY OPEN, RANKED BY SHARED WORDS ---",
+      ...candidates.map(
+        (candidate) => `#${String(candidate.number)}: ${candidate.title}
+${excerpt2(candidate.body)}`
+      )
     ].join("\n")
   );
-  const names = taxonomy.map((label) => label.name);
   return [
     {
       role: "system",
       content: [
-        "You are triaging an issue on a GitHub repository. Decide which of this project's",
-        "labels apply to it.",
+        "You are checking whether a new GitHub issue repeats one already open on the same",
+        "repository. The candidates below were found by shared vocabulary, which is not the same",
+        "thing as being the same problem \u2014 judge whether they actually describe the same bug or",
+        "request, not merely similar words.",
         "",
         language === null ? "The thread's language could not be identified from the languages this project reads." : `The thread is written in ${language}. Judge it as well as you would judge the same report in any other language.`,
         "",
-        "THE LABELS, which are this project's own and are the only ones that exist:",
-        "",
-        ...taxonomy.map(describe2),
-        "",
         "Answer with one JSON object and nothing else \u2014 no prose, no explanation:",
         "",
-        '{"labels": [], "confidence": 0.0, "duplicate_of": null, "rationale": ""}',
+        '{"duplicate_of": null, "confidence": 0.0, "rationale": ""}',
         "",
-        `- \`labels\`: the ones that apply, chosen from exactly these names: ${names.join(", ")}.`,
-        "  An empty list is a real answer. Propose nothing rather than the closest thing.",
-        "- `confidence`: 0 to 1, how sure you are of the labels as a set.",
-        "- `duplicate_of`: the number of an issue this repeats, or null. Only when an example",
-        "  above says so; do not guess a number.",
+        "- `duplicate_of`: the number of the one candidate above that is genuinely the same",
+        "  problem, chosen only from the numbers listed, or `null` when none of them are.",
+        "  Sharing words is not enough \u2014 the two have to describe the same bug or request.",
+        "- `confidence`: 0 to 1, how sure you are of that answer.",
         "- `rationale`: one sentence, in the language of the thread.",
         "",
         material.rule
@@ -34203,80 +33984,54 @@ function prompt3(request2) {
     { role: "user", content: material.block }
   ];
 }
-function describe2(label) {
-  const lines = [`- ${label.name}: ${label.description}`];
-  if (label.not !== null) lines.push(`  NOT: ${label.not}`);
-  if (label.examples.length > 0) {
-    lines.push(...label.examples.map((example) => `  e.g. ${example}`));
-  }
-  return lines.join("\n");
-}
-function examples(recalled) {
-  const written = recalled.map((correction) => {
-    const lines = [
-      `#${String(correction.thread)}: ${correction.title}`,
-      `  DECIDED: ${correction.decided.length === 0 ? "no labels" : correction.decided.join(", ")}`
-    ];
-    if (differs(correction)) {
-      lines.push(
-        `  (proposed at the time: ${correction.proposed.length === 0 ? "no labels" : correction.proposed.join(", ")})`
-      );
-    }
-    if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
-    return lines.join("\n");
-  });
-  return ["--- DECISIONS THIS PROJECT ALREADY MADE ---", ...written].join("\n");
-}
-function differs(correction) {
-  const decided = [...correction.decided].sort();
-  const proposed = [...correction.proposed].sort();
-  return decided.length !== proposed.length || decided.some((name, at) => name !== proposed[at]);
+function excerpt2(body) {
+  return body.length <= EXCERPT ? body : `${body.slice(0, EXCERPT)}\u2026`;
 }
 
-// src/duties/triage/main.ts
-var DEFAULT_CAPABILITIES = ["label"];
+// src/duties/duplicate/main.ts
+var DEFAULT_CAPABILITIES = [];
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
-var RECALLED = 4;
 function readSettings() {
   const shared = readShared();
-  const cheap = parseModels(getInput("screen-models"));
   return {
     ...shared,
-    screenModels: cheap.models,
-    screenNames: cheap.names,
     warrant: getInput("warrant", { required: true }),
     apply: parseApply(getInput("apply", { required: true })),
     confidence: fraction("confidence", getInput("confidence")),
-    corrections: getInput("corrections", { required: true }),
-    about: getInput("about"),
-    minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: whole("max-body-chars", getInput("max-body-chars"))
+    candidates: whole("candidates", getInput("candidates")),
+    corpusLimit: bounded("corpus-limit", getInput("corpus-limit")),
+    corpusSince: parseSince(getInput("corpus-since")),
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
+    attribution: readAttribution()
   };
 }
-var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
-function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+function readAttribution() {
+  const raw = getInput("show-attribution").trim().toLowerCase();
+  if (raw === "none" || raw === "model" || raw === "detail") return raw;
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
-async function runSweep(acc, api, authority2, settings, stages, weather) {
-  if (authority2.warrant.unnamed("triage")) {
-    acc.ungranted = notGranted(authority2.warrant).ungranted;
+function newAccumulator() {
+  return { results: [], starvedRun: false, candidates: 0, ungranted: null };
+}
+async function runSweep(acc, api, authority, settings, stages, weather) {
+  if (authority.warrant.unnamed("duplicate")) {
+    acc.ungranted = notGranted(authority.warrant).ungranted;
     return;
-  }
-  if (!authority2.implicit) {
-    checkLabelsExist(
-      authority2.warrant,
-      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name)
-    );
   }
   const listed = await listOpenThreads(api, context2.repo, settings.since);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
+  const corpus = await listCorpus(
+    api,
+    context2.repo,
+    null,
+    settings.corpusLimit,
+    settings.corpusSince,
+    settings.maxBodyChars
+  );
+  const languageCache = /* @__PURE__ */ new Map();
   for (const thread of candidates) {
     if (acc.results.length >= settings.limit) break;
-    if (alreadyTaxonomized(authority2.warrant, thread.labels)) {
-      acc.skipped += 1;
-      continue;
-    }
     if (starved(settings.models, weather)) {
       acc.starvedRun = true;
       break;
@@ -34288,29 +34043,36 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       labels: thread.labels,
       closed: false
     };
-    const outcome = await decide(authority2, standing, settings, stages, weather);
-    const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+    const outcome = await decide(
+      api,
+      authority,
+      thread.number,
+      standing,
+      settings,
+      stages,
+      weather,
+      corpus,
+      languageCache
+    );
+    const acted = await act(api, at, outcome, settings.dryRun);
+    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
+    if (starved(settings.models, weather)) acc.starvedRun = true;
   }
 }
 function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+  return Math.max(acc.candidates - acc.results.length, 0);
 }
 function describeOutcome(outcome, done) {
   if (outcome.ungranted !== null) return "not granted";
-  if (outcome.screenedOut !== null) return `screened out \u2014 ${outcome.screenedOut.reason}`;
-  if (done.labels.length > 0) {
-    return `applied ${done.labels.map((name) => `\`${name}\``).join(", ")}`;
-  }
-  if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
-  return "no label";
+  if (outcome.duplicateOf === null) return "no duplicate";
+  if (done.commented) return `proposed #${String(outcome.duplicateOf)}`;
+  return `proposed #${String(outcome.duplicateOf)}, not applied`;
 }
 async function run() {
   const meter = createMeter();
   const weather = createWeather();
   let settings = null;
   let single = null;
-  let recorded = null;
   let bulk = null;
   try {
     const base = readSettings();
@@ -34318,66 +34080,33 @@ async function run() {
     const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
     const stages = {
       detect: metered(provider, meter, "detect"),
-      screen: metered(provider, meter, "screen"),
-      triage: metered(provider, meter, "triage"),
+      duplicate: metered(provider, meter, "duplicate"),
       pivot: metered(provider, meter, "pivot")
     };
-    const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
-    const denied = authority2.warrant.unnamed("triage");
-    const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
+    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
+    const authority = await resolveAuthority(read, base.warrant, api, context2.repo);
+    const denied = authority.warrant.unnamed("duplicate");
+    const resolution = denied ? null : resolveLanguages(authority.warrant, getInput("languages"));
     if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
     settings = { ...base, languages: resolution === null ? [] : resolution.languages };
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, authority2, settings, stages, weather);
+      await runSweep(bulk, api, authority, settings, stages, weather);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context2.repo, number };
-      let outcome = null;
-      let recordOutcome = null;
-      if (authority2.warrant.unnamed("triage")) {
-        outcome = notGranted(authority2.warrant);
-      } else {
-        const standing = await readStanding(api, at);
-        if (!authority2.implicit) {
-          checkLabelsExist(
-            authority2.warrant,
-            (await listRepositoryLabels(api, at)).map((label) => label.name)
-          );
-        }
-        const trigger = recordTrigger();
-        const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
-        const { permitted } = narrow(grantedCapabilities, settings.apply);
-        if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
-          notice(
-            `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
-          );
-        }
-        if (trigger.reason !== "" && permitted.includes("record")) {
-          info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
-        }
-        if (trigger.eligible && permitted.includes("record")) {
-          recordOutcome = await recordCorrection(
-            api,
-            at,
-            standing,
-            authority2,
-            settings,
-            stages,
-            weather
-          );
-        } else {
-          outcome = await decide(authority2, standing, settings, stages, weather);
-        }
-      }
-      if (recordOutcome !== null) {
-        recorded = { number, outcome: recordOutcome };
-      } else if (outcome !== null) {
-        const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
-        single = { number, outcome, done };
-      }
+      const outcome = denied ? notGranted(authority.warrant) : await decide(
+        api,
+        authority,
+        number,
+        await readStanding(api, at),
+        settings,
+        stages,
+        weather
+      );
+      const acted = await act(api, at, outcome, settings.dryRun);
+      single = { number, outcome, done: acted.done, posted: acted.posted };
     }
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
@@ -34392,503 +34121,252 @@ async function run() {
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
-      } else if (!settings.sweep && recorded !== null) {
-        reportRecordRun(recorded.outcome, rosterStarved);
-        await writeSummary(recordPage(settings, recorded.number, recorded.outcome, meter.spent()));
       } else if (!settings.sweep && single !== null) {
-        report(single.outcome, single.done, settings.dryRun, rosterStarved);
+        report(single.outcome, single.done, rosterStarved);
         await writeSummary(
-          page(settings, single.number, single.outcome, single.done, meter.spent())
+          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent())
         );
       }
     }
   }
 }
-async function decide(authority2, standing, settings, stages, weather) {
-  const warrant = authority2.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
-  if (standing.body.length > settings.maxBodyChars) {
+async function decide(api, authority, thread, standing, settings, stages, weather, corpusSource = null, languageCache = /* @__PURE__ */ new Map()) {
+  const warrant = authority.warrant;
+  const rawBody = authorText(standing.body);
+  const body = settings.maxBodyChars === null ? rawBody : rawBody.slice(0, settings.maxBodyChars);
+  if (settings.maxBodyChars !== null && rawBody.length > settings.maxBodyChars) {
     warning(
-      `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
+      `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\`, or set it to \`none\`, to read the rest.`
     );
   }
   const { permitted, withheld: withheld2 } = narrow(
-    warrant.granted("triage", DEFAULT_CAPABILITIES),
+    warrant.granted("duplicate", DEFAULT_CAPABILITIES),
     settings.apply
   );
   for (const capability of withheld2) {
     warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to triage. The narrower of the two wins.`
+      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. The narrower of the two wins.`
     );
   }
-  const stopped = (screened, language2) => ({
+  const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence = 0) => ({
     language: language2,
-    screenedOut: screened,
-    verdict: NOTHING,
-    applied: [],
-    refused: [],
+    duplicateOf: null,
+    confidence,
+    lexicalScore: 0,
     permitted,
     withheld: withheld2,
-    note: null,
-    memory: { size: 0, recalled: 0, pivotRecalled: 0 },
-    implicit: authority2.implicit,
-    excludedLabels: authority2.excludedLabels,
+    note: note2,
+    rank: rankInfo2,
+    pivot: pivotInfo2,
+    proposal: null,
+    fingerprint: null,
+    rationale: null,
     ungranted: null
   });
-  const free = screen({ title: standing.title, body, minimum: settings.minBodyChars });
-  if (free !== null) {
-    info(`Screened out as ${free.reason} \u2014 ${free.note}.`);
-    return stopped(free, null);
-  }
   const detection = await detectLanguage(
-    // The title when there is no body. A one-line issue is a real issue, and
-    // the alternative is asking a model to identify the language of nothing.
+    // The title when there is no body — a one-line issue is a real issue.
     body.length === 0 ? standing.title : body,
     settings.languages,
-    // The cheap roster when there is one. Choosing between listed codes is an
-    // enum answer, which is the shape a small model is reliable on, and paying
-    // the expensive model for it would be paying it to do the cheap one's work.
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather
-    )
+    createLanguagePicker(stages.detect, settings.models, weather)
   );
   const language = detection.language?.label ?? null;
   info(
     detection.language === null ? "The author's language is none of the configured ones." : `Author language ${detection.language.code} (by ${detection.by}).`
   );
-  const sifted = await sift({
-    provider: stages.screen,
-    models: settings.screenModels,
-    title: standing.title,
-    body,
-    about: settings.about,
-    weather
-  });
-  for (const failure of sifted.failures) {
-    warning(`screen: ${shown(settings.screenNames, failure.model)} \u2014 ${failure.reason}`);
-  }
-  if (sifted.dropped !== null) {
-    info(`Screened out as ${sifted.dropped.reason} \u2014 ${sifted.dropped.note}.`);
-    return stopped(sifted.dropped, language);
-  }
-  const store = await readStore(settings.corrections);
-  for (const line of store.unreadable) {
-    warning(`corrections: ${line}`);
-  }
-  const memory = createMemory(store.corrections);
-  const queries = [{ text: `${standing.title}
-${body}`, against: "own" }];
+  const corpus = corpusSource === null ? await listCorpus(
+    api,
+    context2.repo,
+    thread,
+    settings.corpusLimit,
+    settings.corpusSince,
+    settings.maxBodyChars
+  ) : corpusSource.filter((entry) => entry.number !== thread);
+  const queries = [`${standing.title}
+${body}`];
+  let pivotUsed = false;
+  let pivotNote = null;
   const pivotLanguage = settings.languages[0] ?? null;
   const threadLanguage = detection.language;
-  const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
-  if (worthBridging) {
+  if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache)) {
     const draft = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: settings.models,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather
     });
     if (draft !== null) {
-      queries.push({
-        text: `${draft.title}
-${draft.body}`,
-        against: { pivot: pivotLanguage.code }
-      });
+      queries.push(`${draft.title}
+${draft.body}`);
+      pivotUsed = true;
+      pivotNote = `Bridged the query into ${pivotLanguage.label} to compare against candidates written in other languages.`;
+      info(pivotNote);
     } else {
-      info(
-        "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-      );
-    }
-  }
-  const recalled = memory.recallAcrossQueries(queries, RECALLED);
-  const pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
-    (correction) => correction.language !== null && correction.language !== threadLanguage.code
-  ).length;
-  info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
-  );
-  const triaged = await triage({
-    provider: stages.triage,
-    models: settings.models,
-    title: standing.title,
-    body,
-    taxonomy: warrant.labels,
-    language,
-    recalled,
-    weather
-  });
-  for (const failure of triaged.failures) {
-    warning(`triage: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
-  }
-  if (triaged.unreadable !== null) {
-    warning(
-      `The verdict could not be read, so nothing was applied. A half-parsed answer is the shape an injection produces, so it is refused whole \u2014 it began: ${excerpt2(triaged.unreadable)}`
-    );
-  }
-  const note = triaged.unreadable !== null ? "the verdict did not parse" : triaged.failures.length > 0 && triaged.verdict.labels.length === 0 ? "every model failed" : null;
-  const verdict2 = triaged.verdict;
-  const decided = {
-    language,
-    screenedOut: null,
-    verdict: verdict2,
-    permitted,
-    withheld: withheld2,
-    note,
-    memory: { size: memory.size, recalled: recalled.length, pivotRecalled },
-    implicit: authority2.implicit,
-    excludedLabels: authority2.excludedLabels,
-    ungranted: null
-  };
-  if (verdict2.confidence < settings.confidence) {
-    if (verdict2.labels.length > 0) {
-      info(
-        `Confidence ${verdict2.confidence.toFixed(2)} is under the floor of ${settings.confidence.toFixed(2)} \u2014 reported, not applied.`
-      );
-    }
-    return { ...decided, applied: [], refused: [] };
-  }
-  const decision = enforceLabels(warrant, verdict2.labels, standing.labels);
-  for (const refusal of decision.refused) {
-    info(`\`${refusal.what}\` was not applied \u2014 ${refusal.why}.`);
-  }
-  return {
-    ...decided,
-    // Narrowed here rather than at apply time, so `labels` reports what this run
-    // may do and a rehearsal rehearses the same narrowing a real run has.
-    applied: permitted.includes("label") ? decision.applied : [],
-    refused: decision.refused
-  };
-}
-function recordTrigger() {
-  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") return { eligible: false, reason: "" };
-  const payload = context2.payload;
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return { eligible: false, reason: "" };
-  }
-  const sender = payload.sender;
-  if (sender?.type === "Bot" || (sender?.login ?? "").endsWith("[bot]")) {
-    return { eligible: false, reason: "the label change came from a bot" };
-  }
-  return { eligible: true, reason: "" };
-}
-function senderLogin() {
-  const payload = context2.payload;
-  return payload.sender?.login ?? "";
-}
-async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather) {
-  const warrant = authority2.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather
-    )
-  );
-  const code = detection.language?.code ?? null;
-  const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== void 0);
-  const pivotLanguage = settings.languages[0] ?? null;
-  let pivot = null;
-  let pivotNote = null;
-  if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const draft = await translateToPivot({
-      provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather
-    });
-    if (draft !== null) {
-      pivot = {
-        language: pivotLanguage.code,
-        title: draft.title,
-        excerpt: draft.body.slice(0, EXCERPT)
-      };
-    } else {
-      pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
+      pivotNote = "Cross-language matching could not translate this thread into the pivot language this run \u2014 matching used the thread's own language only.";
       info(pivotNote);
     }
   }
-  const correction = {
-    thread: at.number,
-    at: (/* @__PURE__ */ new Date()).toISOString(),
+  const ranked = rank(queries, corpus, settings.candidates);
+  const rankInfo = { corpusSize: corpus.length, offered: ranked.length };
+  const pivotInfo = { used: pivotUsed, note: pivotNote };
+  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null);
+  const judged = await judge({
+    provider: stages.duplicate,
+    models: settings.models,
     title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed: [],
-    decided: decidedLabels,
-    by: senderLogin(),
-    note: null,
-    pivot
-  };
-  if (settings.dryRun) {
+    body,
+    language,
+    candidates: ranked.map((entry) => entry.candidate),
+    weather
+  });
+  for (const failure of judged.failures) {
+    warning(`duplicate: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (judged.unreadable !== null) {
+    warning(
+      `The verdict could not be read, so nothing was proposed. A half-parsed answer is the shape an injection produces, so it is refused whole \u2014 it began: ${excerpt3(judged.unreadable)}`
+    );
+  }
+  const note = judged.unreadable !== null ? "the verdict did not parse" : judged.model === null ? "every model failed" : null;
+  const verdict2 = judged.verdict;
+  if (verdict2.duplicateOf === null) {
+    return nothing(language, rankInfo, pivotInfo, note, verdict2.confidence);
+  }
+  const matched = ranked.find((entry) => entry.candidate.number === verdict2.duplicateOf);
+  if (matched === void 0) {
+    warning(
+      "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. That shape \u2014 a number the ranking never offered \u2014 is what a thread body trying to steer the verdict at an arbitrary target looks like, and it is refused the same as an answer that failed to parse."
+    );
+    return nothing(
+      language,
+      rankInfo,
+      pivotInfo,
+      "the verdict named a thread outside the shortlist"
+    );
+  }
+  const lexicalScore = matched.score;
+  const rationale = sanitize(verdict2.rationale);
+  const eligible = verdict2.confidence >= settings.confidence;
+  if (!eligible) {
     info(
-      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
+      `Confidence ${verdict2.confidence.toFixed(2)} is under the floor of ${settings.confidence.toFixed(2)} \u2014 reported, not applied.`
     );
-  } else {
-    await writeCorrection(contentsApi, at, settings.corrections, correction);
   }
+  const fp = proposalFingerprint(
+    `${standing.title}
+${body}`,
+    ranked.map((entry) => entry.candidate.number)
+  );
+  const proposal = eligible ? {
+    duplicateOf: verdict2.duplicateOf,
+    confidence: verdict2.confidence,
+    lexicalScore,
+    rationale,
+    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    attribution: settings.attribution
+  } : null;
   return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote
+    language,
+    duplicateOf: verdict2.duplicateOf,
+    confidence: verdict2.confidence,
+    lexicalScore,
+    permitted,
+    withheld: withheld2,
+    note,
+    rank: rankInfo,
+    pivot: pivotInfo,
+    proposal,
+    // Under the floor, `duplicate-of`/`score` still answer, but there is
+    // nothing eligible to fingerprint against a write that will never happen.
+    fingerprint: eligible ? fp : null,
+    rationale,
+    ungranted: null
   };
 }
-var WRITE_ATTEMPTS = 3;
-async function writeCorrection(contentsApi, at, path, correction) {
-  const relativePath = repoRelativePath(path);
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
-      return;
-    } catch (error2) {
-      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error2)) throw error2;
-      info(
-        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`
-      );
+async function crossLanguageCorpus(languages, pivotLanguage, corpus, cache) {
+  for (const candidate of corpus) {
+    let detected;
+    if (cache.has(candidate.number)) {
+      detected = cache.get(candidate.number) ?? null;
+    } else {
+      detected = (await detectLanguage(documentOf(candidate), languages)).language;
+      cache.set(candidate.number, detected);
     }
+    if (detected !== null && detected.code === pivotLanguage.code) return true;
   }
-}
-async function attemptWrite(contentsApi, at, path, correction) {
-  const files = await listCorrectionFiles(contentsApi, at, path);
-  const unreadable = [];
-  for (const file of files) {
-    let read2;
-    try {
-      read2 = await readContentsFile(contentsApi, at, file.path);
-    } catch (error2) {
-      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
-      warning(
-        `corrections: \`${file.path}\` could not be read, so it was skipped rather than failing the whole write \u2014 the search continued through the rest of the store. Split the corrections store into smaller shards.`
-      );
-      unreadable.push(file.path);
-      continue;
-    }
-    if (read2 === null) continue;
-    const lines = read2.text.split("\n");
-    const index = lines.findIndex((line) => {
-      if (line.trim().length === 0) return false;
-      const existing2 = parseCorrection(line);
-      return existing2 !== null && existing2.thread === correction.thread;
-    });
-    if (index !== -1) {
-      lines[index] = formatCorrection(correction);
-      await writeContentsFile(
-        contentsApi,
-        at,
-        file.path,
-        `${lines.join("\n").replace(/\n*$/, "")}
-`,
-        commitMessage(correction),
-        file.sha
-      );
-      return;
-    }
-  }
-  if (unreadable.length > 0) {
-    throw new Error(
-      `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
-    );
-  }
-  const shard = `${path.replace(/\/+$/, "")}/${monthShard()}.ndjson`;
-  const existing = await readContentsFile(contentsApi, at, shard);
-  const text2 = existing === null ? `${formatCorrection(correction)}
-` : `${existing.text.replace(/\n*$/, "")}
-${formatCorrection(correction)}
-`;
-  await writeContentsFile(
-    contentsApi,
-    at,
-    shard,
-    text2,
-    commitMessage(correction),
-    existing?.sha ?? null
-  );
-}
-function isShaConflict(error2) {
-  const status = error2?.status;
-  if (status === 409) return true;
-  if (status !== 422) return false;
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return message.toLowerCase().includes("sha");
-}
-function repoRelativePath(path) {
-  if (!isAbsolute(path)) return path;
-  const workspace = process.env.GITHUB_WORKSPACE;
-  if (workspace !== void 0 && workspace.length > 0) {
-    const stripped = relative(workspace, path);
-    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
-  }
-  throw new Error(
-    `\`corrections\` (\`${path}\`) is an absolute path record cannot use \u2014 the Contents API only understands a path relative to the repository root. Use a repo-relative path, or one under \`GITHUB_WORKSPACE\` if the workflow built it from \`\${{ github.workspace }}\`.`
-  );
-}
-function monthShard() {
-  const now = /* @__PURE__ */ new Date();
-  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-function commitMessage(correction) {
-  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
-  return `memory: record #${String(correction.thread)} as ${decided}`;
+  return false;
 }
 function notGranted(warrant) {
   return {
     language: null,
-    screenedOut: null,
-    verdict: NOTHING,
-    applied: [],
-    refused: [],
+    duplicateOf: null,
+    confidence: 0,
+    lexicalScore: 0,
     permitted: [],
     withheld: [],
     note: null,
-    memory: { size: 0, recalled: 0, pivotRecalled: 0 },
-    implicit: false,
-    excludedLabels: [],
-    ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block exists it is the whole answer, so add \`triage: [label]\` to it (or remove the block to return to defaults).`
+    rank: { corpusSize: 0, offered: 0 },
+    pivot: { used: false, note: null },
+    proposal: null,
+    fingerprint: null,
+    rationale: null,
+    ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
   };
 }
-async function act(effects, warrant, outcome) {
-  let labels = [];
-  let assigned = [];
-  let closed = false;
-  if (outcome.applied.length > 0) {
-    await effects.addLabels(outcome.applied);
-    labels = outcome.applied;
+async function act(api, at, outcome, dryRun) {
+  if (outcome.proposal === null || outcome.fingerprint === null) {
+    return { done: { commented: false }, posted: null };
   }
-  if (outcome.permitted.includes("assign") && labels.length > 0) {
-    const who = owners(warrant, labels);
-    for (const team of who.teams) {
-      warning(
-        `\`${warrant.path}\` gives a label the owner \`@${team}\`, and an issue cannot be assigned to a team. Name a person to have one assigned.`
-      );
-    }
-    if (who.users.length > 0) {
-      await effects.assign(who.users);
-      assigned = who.users;
-    }
+  if (!outcome.permitted.includes("comment")) {
+    return { done: { commented: false }, posted: null };
   }
-  if (outcome.permitted.includes("close") && outcome.verdict.duplicateOf !== null) {
-    await effects.closeAsNotPlanned();
-    closed = true;
+  if (dryRun) {
+    const posted2 = await rehearse(api, at, outcome.proposal, outcome.fingerprint);
+    return { done: { commented: false }, posted: posted2 };
   }
-  const said = comment(outcome, { labels, commented: false, assigned, closed });
-  let commented = false;
-  if (outcome.permitted.includes("comment") && said.length > 0) {
-    await effects.comment(said);
-    commented = true;
-  }
-  return { labels, commented, assigned, closed };
+  const posted = await postOrReplace(api, at, outcome.proposal, outcome.fingerprint);
+  return { done: { commented: posted !== "withheld" }, posted };
 }
-function comment(outcome, done) {
-  const parts = [];
-  if (done.labels.length > 0) {
-    parts.push(`Triaged as ${done.labels.map((name) => `\`${name}\``).join(", ")}.`);
-  }
-  if (outcome.verdict.duplicateOf !== null) {
-    const number = `#${String(outcome.verdict.duplicateOf)}`;
-    parts.push(
-      done.closed ? `Closed as a duplicate of ${number}.` : `This may duplicate ${number}.`
-    );
-  }
-  if (parts.length === 0) return "";
-  if (outcome.verdict.rationale.length > 0) parts.push("", `> ${outcome.verdict.rationale}`);
-  parts.push(
-    "",
-    "<sub>Proposed by a model and checked against this repository's own taxonomy. Correcting the labels is the intended way to disagree.</sub>"
-  );
-  return parts.join("\n");
-}
-function excerpt2(answer2) {
-  const flat = answer2.replace(/\s+/g, " ").trim();
+function excerpt3(answer3) {
+  const flat = answer3.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
-function report(outcome, done, dryRun, rosterStarved) {
-  setOutput("labels", JSON.stringify(outcome.applied));
-  setOutput("proposed", JSON.stringify(outcome.verdict.labels));
-  setOutput("confidence", outcome.verdict.confidence.toFixed(2));
+function report(outcome, done, rosterStarved) {
+  setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
+  setOutput("score", outcome.confidence.toFixed(2));
   setOutput("language", outcome.language ?? "");
-  setOutput(
-    "duplicate-of",
-    outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf)
-  );
-  setOutput("screened-out", outcome.screenedOut?.reason ?? "");
-  setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
+  setOutput("commented", String(done.commented));
   setOutput("starved", String(rosterStarved));
   setOutput("processed", "0");
-  setOutput("skipped", "0");
   setOutput("remaining", "0");
-  setOutput("recorded", "false");
 }
 function reportSweep(bulk, rosterStarved) {
   setOutput("processed", String(bulk.results.length));
-  setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
-  setOutput("recorded", "false");
 }
-function reportRecordRun(outcome, rosterStarved) {
-  setOutput("labels", JSON.stringify([]));
-  setOutput("proposed", JSON.stringify([]));
-  setOutput("confidence", "0.00");
-  setOutput("language", outcome.language ?? "");
-  setOutput("duplicate-of", "");
-  setOutput("screened-out", "");
-  setOutput("applied", JSON.stringify(NOTHING_DONE));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("skipped", "0");
-  setOutput("remaining", "0");
-  setOutput("recorded", String(outcome.recorded));
-}
-function page(settings, thread, outcome, done, spent) {
+function page(settings, thread, outcome, done, posted, spent) {
   return summarize({
     thread,
     dryRun: settings.dryRun,
     warrant: settings.warrant,
     language: outcome.language,
-    screenedOut: outcome.screenedOut,
-    proposed: outcome.verdict.labels,
-    confidence: outcome.verdict.confidence,
+    ungranted: outcome.ungranted,
+    duplicateOf: outcome.duplicateOf,
+    confidence: outcome.confidence,
     floor: settings.confidence,
-    applied: outcome.applied,
-    refused: outcome.refused,
-    duplicateOf: outcome.verdict.duplicateOf,
+    lexicalScore: outcome.lexicalScore,
+    rank: outcome.rank,
+    pivot: outcome.pivot,
+    note: outcome.note,
     permitted: outcome.permitted,
     withheld: outcome.withheld,
+    rationale: outcome.rationale,
     done,
-    memory: outcome.memory,
-    note: outcome.note,
-    implicit: outcome.implicit,
-    excludedLabels: outcome.excludedLabels,
-    ungranted: outcome.ungranted,
+    posted,
     spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
-}
-function recordPage(settings, thread, outcome, spent) {
-  return summarizeRecord({
-    thread,
-    dryRun: settings.dryRun,
-    recorded: outcome.recorded,
-    language: outcome.language,
-    decided: outcome.decided,
-    pivot: outcome.pivot,
-    pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
+    modelNames: settings.modelNames
   });
 }
 function sweepPage(settings, bulk, spent) {
@@ -34896,13 +34374,11 @@ function sweepPage(settings, bulk, spent) {
     dryRun: settings.dryRun,
     warrant: settings.warrant,
     results: bulk.results,
-    skipped: bulk.skipped,
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
     ungranted: bulk.ungranted,
     spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
+    modelNames: settings.modelNames
   });
 }
 await run();
