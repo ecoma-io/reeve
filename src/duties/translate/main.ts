@@ -641,8 +641,8 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
-      const roosterStarved = starved(settings.models, weather);
-      if (roosterStarved) {
+      const rosterStarved = starved(settings.models, weather);
+      if (rosterStarved) {
         core.warning(
           "Every model in `models` failed on capacity this run. " +
             (settings.sweep
@@ -654,10 +654,10 @@ export async function run(): Promise<void> {
       }
 
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, roosterStarved);
+        reportSweep(bulk, rosterStarved);
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
       } else if (!settings.sweep && single !== null) {
-        report(single.result.translated, single.result.replies, roosterStarved);
+        report(single.result.translated, single.result.replies, rosterStarved);
         await writeSummary(page(settings, single.number, single.result.looked, meter.spent()));
       }
     }
@@ -675,12 +675,12 @@ export async function run(): Promise<void> {
  * — so replies report the one thing that is answerable across all of them: how
  * many got a translation written.
  */
-function report(translated: Report, replies: number, roosterStarved: boolean): void {
+function report(translated: Report, replies: number, rosterStarved: boolean): void {
   core.setOutput("source-language", translated.from?.code ?? "");
   core.setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   core.setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   core.setOutput("replies-translated", String(replies));
-  core.setOutput("starved", String(roosterStarved));
+  core.setOutput("starved", String(rosterStarved));
   // `0`, not unset: `processed`/`remaining` are a sweep's own outputs, and a
   // single-thread run answers both honestly at zero rather than leaving a
   // workflow that reads them on every run reading an empty string on this one.
@@ -700,11 +700,11 @@ function report(translated: Report, replies: number, roosterStarved: boolean): v
  * actually has, and `action.yml` documents both readings under it rather than
  * inventing a second output nobody would think to look for.
  */
-function reportSweep(bulk: SweepAccumulator, roosterStarved: boolean): void {
+function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
   core.setOutput("processed", String(bulk.results.length));
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
-  core.setOutput("starved", String(roosterStarved));
+  core.setOutput("starved", String(rosterStarved));
 }
 
 function page(

@@ -430,8 +430,8 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
-      const roosterStarved = starved(settings.models, weather);
-      if (roosterStarved) {
+      const rosterStarved = starved(settings.models, weather);
+      if (rosterStarved) {
         core.warning(
           "Every model in `models` failed on capacity this run. " +
             (settings.sweep
@@ -443,10 +443,10 @@ export async function run(): Promise<void> {
       }
 
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, roosterStarved);
+        reportSweep(bulk, rosterStarved);
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
       } else if (!settings.sweep && single !== null) {
-        report(single.outcome, single.done, settings.dryRun, roosterStarved);
+        report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
           page(settings, single.number, single.outcome, single.done, meter.spent()),
         );
@@ -756,7 +756,7 @@ function excerpt(answer: string): string {
  * be an empty string rather than an unset output on the run where everything
  * worked.
  */
-function report(outcome: Outcome, done: Done, dryRun: boolean, roosterStarved: boolean): void {
+function report(outcome: Outcome, done: Done, dryRun: boolean, rosterStarved: boolean): void {
   core.setOutput("labels", JSON.stringify(outcome.applied));
   core.setOutput("proposed", JSON.stringify(outcome.verdict.labels));
   core.setOutput("confidence", outcome.verdict.confidence.toFixed(2));
@@ -770,7 +770,7 @@ function report(outcome: Outcome, done: Done, dryRun: boolean, roosterStarved: b
   // is a shape no real run produces, because a real run always reports all four
   // keys whether or not it did anything with them.
   core.setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
-  core.setOutput("starved", String(roosterStarved));
+  core.setOutput("starved", String(rosterStarved));
   // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
   // outputs, and a single-thread run answers all three honestly at zero rather
   // than leaving a workflow that reads them on every run reading an empty
@@ -785,11 +785,11 @@ function report(outcome: Outcome, done: Done, dryRun: boolean, roosterStarved: b
  * from every output above because none of those name one thread. `starved` is
  * shared vocabulary between the two modes, so it keeps the same name here.
  */
-function reportSweep(bulk: SweepAccumulator, roosterStarved: boolean): void {
+function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
   core.setOutput("processed", String(bulk.results.length));
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
-  core.setOutput("starved", String(roosterStarved));
+  core.setOutput("starved", String(rosterStarved));
 }
 
 function page(

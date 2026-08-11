@@ -34040,17 +34040,17 @@ async function run() {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
-      const roosterStarved = starved(settings.models, weather);
-      if (roosterStarved) {
+      const rosterStarved = starved(settings.models, weather);
+      if (rosterStarved) {
         warning(
           "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
         );
       }
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, roosterStarved);
+        reportSweep(bulk, rosterStarved);
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
       } else if (!settings.sweep && single !== null) {
-        report(single.outcome, single.done, settings.dryRun, roosterStarved);
+        report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
           page(settings, single.number, single.outcome, single.done, meter.spent())
         );
@@ -34260,7 +34260,7 @@ function excerpt2(answer) {
   const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
-function report(outcome, done, dryRun, roosterStarved) {
+function report(outcome, done, dryRun, rosterStarved) {
   setOutput("labels", JSON.stringify(outcome.applied));
   setOutput("proposed", JSON.stringify(outcome.verdict.labels));
   setOutput("confidence", outcome.verdict.confidence.toFixed(2));
@@ -34271,16 +34271,16 @@ function report(outcome, done, dryRun, roosterStarved) {
   );
   setOutput("screened-out", outcome.screenedOut?.reason ?? "");
   setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
-  setOutput("starved", String(roosterStarved));
+  setOutput("starved", String(rosterStarved));
   setOutput("processed", "0");
   setOutput("skipped", "0");
   setOutput("remaining", "0");
 }
-function reportSweep(bulk, roosterStarved) {
+function reportSweep(bulk, rosterStarved) {
   setOutput("processed", String(bulk.results.length));
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
-  setOutput("starved", String(roosterStarved));
+  setOutput("starved", String(rosterStarved));
 }
 function page(settings, thread, outcome, done, spent) {
   return summarize({

@@ -26730,36 +26730,36 @@ async function run() {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
-      const roosterStarved = starved(settings.models, weather);
-      if (roosterStarved) {
+      const rosterStarved = starved(settings.models, weather);
+      if (rosterStarved) {
         warning(
           "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
         );
       }
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, roosterStarved);
+        reportSweep(bulk, rosterStarved);
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
       } else if (!settings.sweep && single !== null) {
-        report(single.result.translated, single.result.replies, roosterStarved);
+        report(single.result.translated, single.result.replies, rosterStarved);
         await writeSummary(page(settings, single.number, single.result.looked, meter.spent()));
       }
     }
   }
 }
-function report(translated, replies, roosterStarved) {
+function report(translated, replies, rosterStarved) {
   setOutput("source-language", translated.from?.code ?? "");
   setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   setOutput("replies-translated", String(replies));
-  setOutput("starved", String(roosterStarved));
+  setOutput("starved", String(rosterStarved));
   setOutput("processed", "0");
   setOutput("remaining", "0");
 }
-function reportSweep(bulk, roosterStarved) {
+function reportSweep(bulk, rosterStarved) {
   setOutput("processed", String(bulk.results.length));
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
-  setOutput("starved", String(roosterStarved));
+  setOutput("starved", String(rosterStarved));
 }
 function page(settings, thread, looked, spent) {
   return summarize({
