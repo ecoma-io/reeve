@@ -52,6 +52,8 @@ export interface SiftRequest {
    * not weather, and fails open nowhere.
    */
   readonly weather?: Weather;
+  /** Passed to every request. Omitted from the request body when not set. */
+  readonly temperature?: number;
 }
 
 export interface Sifted {
@@ -61,12 +63,17 @@ export interface Sifted {
 }
 
 export async function sift(request: SiftRequest): Promise<Sifted> {
-  const { provider, models, weather } = request;
+  const { provider, models, weather, temperature } = request;
   if (models.length === 0) return { dropped: null, failures: [] };
 
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, prompt(request)),
+    (model) =>
+      provider.complete(
+        model,
+        prompt(request),
+        temperature === undefined ? undefined : { temperature },
+      ),
     weather,
   );
   // Every cheap model failing is not a reason to skip the thread. It is a

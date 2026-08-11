@@ -33,6 +33,7 @@ describe("the meter", () => {
       {
         purpose: "draft",
         model: "a",
+        endpoint: null,
         requests: 1,
         failed: 0,
         unreported: 0,

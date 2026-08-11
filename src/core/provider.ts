@@ -58,6 +58,13 @@ export interface Success {
   readonly ok: true;
   readonly model: string;
   /**
+   * Which endpoint answered: the alias an `endpoints` line declared, or null
+   * for the default `base-url`/`api-key` pair. Set only by
+   * `createRoutedProvider` — a plain `createProvider` never populates it,
+   * because a single-endpoint run has nothing to distinguish.
+   */
+  readonly endpoint?: string | null;
+  /**
    * What it cost, when a provider said. Absent or null is the ordinary case —
    * gateways drop the field, and a null rendered as zero would put a free line
    * in a bill that was not free. Only the provider fills this in; a failure a
@@ -80,6 +87,18 @@ export interface Failure {
   readonly ok: false;
   readonly model: string;
   readonly reason: string;
+  /** Same as `Success.endpoint` — which endpoint this attempt was routed to. */
+  readonly endpoint?: string | null;
+  /**
+   * True for a `"capacity"` failure that never reached the endpoint at all —
+   * a timeout, a DNS failure, a connection refused. Set only for those two
+   * cases, never for an HTTP-level 429 or 5xx: a transport failure says
+   * something about the endpoint itself, so `reckon` grounds every model
+   * routed to it rather than just the one that happened to be asked first.
+   * An HTTP status came from the endpoint, which is proof it is reachable —
+   * only the one model that asked is grounded.
+   */
+  readonly transport?: boolean;
   /**
    * What it cost anyway. A request that answered `HTTP 200` with nothing usable
    * in it is a failure to Reeve and a billable completion to the provider, and
@@ -324,6 +343,7 @@ export function createProvider(config: ProviderConfig): Provider {
           model,
           usage: null,
           kind: "capacity",
+          transport: true,
           reason: describeRequestError(error, timeoutMs),
         };
       }
@@ -337,11 +357,101 @@ export function createProvider(config: ProviderConfig): Provider {
           model,
           usage: null,
           kind: "capacity",
+          transport: true,
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error, timeoutMs)})`,
         };
       }
 
       return readCompletion(model, response.status, text);
+    },
+  };
+}
+
+/**
+ * Splits a model id at its **last** `@`, and only when what follows names a
+ * declared endpoint.
+ *
+ * Last rather than first, because a model id is a provider's identifier and
+ * routinely contains its own `@` — `user@org/model`, a revision tag, whatever
+ * a provider's own catalogue uses — while an endpoint alias is one the
+ * `endpoints` input just declared and is never the id's business to contain.
+ * The alias grammar has to be the one that never collides with a real id, not
+ * the other way around.
+ *
+ * Only when declared, so a bare id that happens to contain `@something` nobody
+ * configured routes to the default endpoint exactly as it always did, rather
+ * than failing to find an endpoint that was never meant to be one.
+ */
+export function splitEndpointAlias(
+  model: string,
+  aliases: ReadonlySet<string>,
+): { readonly id: string; readonly alias: string | null } {
+  const at = model.lastIndexOf("@");
+  if (at === -1) return { id: model, alias: null };
+
+  const alias = model.slice(at + 1);
+  if (!aliases.has(alias)) return { id: model, alias: null };
+
+  return { id: model.slice(0, at), alias };
+}
+
+/** One endpoint fully resolved: enough for `createRoutedProvider` to reach it. */
+export interface RoutedEndpoint {
+  /** null names the default `base-url`/`api-key` endpoint every duty has. */
+  readonly alias: string | null;
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly timeoutMs: number;
+}
+
+/**
+ * The single-endpoint `Provider` every duty used to build directly, made to
+ * route across a roster instead.
+ *
+ * A model id of `id@alias` is dispatched to the endpoint `alias` named — with
+ * `@alias` stripped before the request is made, since no endpoint's catalogue
+ * has ever heard of Reeve's own routing suffix — and everything else goes to
+ * the default endpoint unchanged, which is exactly what happens when
+ * `endpoints` was never configured at all: `aliases` is empty, every id is a
+ * plain id, and this behaves like `createProvider` with one endpoint in it.
+ *
+ * The completion that comes back is stamped with `model` as the caller wrote
+ * it — the composite id, not the one actually sent — because `Weather`, the
+ * meter and every duty's own name lookup all key on the id `models` was
+ * configured with, and only this function knows the two ever differed.
+ */
+export function createRoutedProvider(endpoints: readonly RoutedEndpoint[]): Provider {
+  const aliases = new Set(
+    endpoints.flatMap((endpoint) => (endpoint.alias === null ? [] : [endpoint.alias])),
+  );
+  const byAlias = new Map<string | null, Provider>(
+    endpoints.map((endpoint) => [
+      endpoint.alias,
+      createProvider({
+        baseUrl: endpoint.baseUrl,
+        apiKey: endpoint.apiKey,
+        timeoutMs: endpoint.timeoutMs,
+      }),
+    ]),
+  );
+
+  return {
+    async complete(model, messages, options) {
+      const { id, alias } = splitEndpointAlias(model, aliases);
+      const provider = byAlias.get(alias);
+      if (provider === undefined) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "protocol",
+          endpoint: alias,
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`,
+        };
+      }
+
+      const completion = await provider.complete(id, messages, options);
+      return { ...completion, model, endpoint: alias };
     },
   };
 }
@@ -508,27 +618,73 @@ export class AuthenticationFailure extends Error {
  * about what was asked — earns a model a place here.
  */
 export interface Weather {
-  /** True once `model` has already failed here with `"capacity"` this run. */
+  /**
+   * True once `model` is no longer worth asking: either this exact
+   * `model@alias` pair was grounded, or a transport failure grounded the
+   * whole endpoint it routes to.
+   */
   grounded(model: string): boolean;
-  /** Records a capacity failure. A model already grounded is left as it was. */
+  /** Records a capacity failure against one `model@alias` pair. */
   ground(model: string): void;
-  /** Every model grounded so far, in the order it happened. */
+  /**
+   * Records a transport failure against a whole endpoint — every model
+   * routed to it is grounded from here on, not just the one that was asked.
+   */
+  groundEndpoint(alias: string | null): void;
+  /** Every `model@alias` pair grounded so far, in the order it happened. */
   readonly starved: readonly string[];
+  /**
+   * True once more than one endpoint is in play. D12's ordinary rule — an
+   * auth failure fails the run red the moment it happens — assumes the one
+   * endpoint that just refused a key is the only endpoint there was to try.
+   * That assumption is what a second endpoint removes.
+   */
+  readonly multiEndpoint: boolean;
+  /** Records an auth failure against one endpoint, deferred rather than thrown. */
+  failAuth(alias: string | null, failure: Failure): void;
+  /** True once every endpoint this run knows about has an auth failure recorded. */
+  readonly authExhausted: boolean;
+  /** Every deferred auth failure recorded, one per endpoint, in the order seen. */
+  readonly authFailures: readonly Failure[];
 }
 
-export function createWeather(): Weather {
+/**
+ * `aliases` is every endpoint `endpoints` declared — empty for the common
+ * case, which is what makes `multiEndpoint` false and every method below
+ * behave exactly as it always did for a run with one endpoint.
+ */
+export function createWeather(aliases: ReadonlySet<string> = new Set()): Weather {
   const order: string[] = [];
   const dead = new Set<string>();
+  const deadEndpoints = new Set<string | null>();
+  // Every endpoint this run can route to: the default, plus every declared
+  // alias — the universe `authExhausted` checks for completeness against.
+  const universe = new Set<string | null>([null, ...aliases]);
+  const authFailed = new Map<string | null, Failure>();
 
   return {
-    grounded: (model) => dead.has(model),
+    grounded: (model) => {
+      const { alias } = splitEndpointAlias(model, aliases);
+      return dead.has(model) || deadEndpoints.has(alias);
+    },
     ground: (model) => {
       if (dead.has(model)) return;
       dead.add(model);
       order.push(model);
     },
+    groundEndpoint: (alias) => deadEndpoints.add(alias),
     get starved() {
       return order;
+    },
+    multiEndpoint: aliases.size > 0,
+    failAuth: (alias, failure) => {
+      if (!authFailed.has(alias)) authFailed.set(alias, failure);
+    },
+    get authExhausted() {
+      return [...universe].every((alias) => authFailed.has(alias));
+    },
+    get authFailures() {
+      return [...authFailed.values()];
     },
   };
 }
@@ -570,16 +726,45 @@ export function weatherFailure(model: string): Failure {
 /**
  * What every failure means for the rest of the run, applied once wherever a
  * provider is asked something: an `"auth"` failure is not this run's to carry
- * on past, so it throws; a `"capacity"` failure is remembered in `weather` so
- * the next model asked, on the next thread, does not repeat it.
+ * on past, so it throws — unless a second endpoint means it might still have
+ * one left to try, in which case the failure is recorded and judgement waits
+ * for `settleAuth`. A `"capacity"` failure is remembered in `weather`, against
+ * the one `model@alias` pair for an HTTP-level failure or the whole endpoint
+ * for a transport one, so the next model asked, on the next thread, does not
+ * repeat it.
  *
  * The one piece of D12 every call site shares, factored out so `rotateModels`
  * and a panel's own loop enforce it identically rather than by two readings of
  * the same rule.
  */
 export function reckon(failure: Failure, weather?: Weather): void {
-  if (failure.kind === "auth") throw new AuthenticationFailure(failure);
-  if (failure.kind === "capacity") weather?.ground(failure.model);
+  if (failure.kind === "auth") {
+    if (weather?.multiEndpoint === true) {
+      weather.failAuth(failure.endpoint ?? null, failure);
+      return;
+    }
+    throw new AuthenticationFailure(failure);
+  }
+  if (failure.kind === "capacity") {
+    if (failure.transport === true) weather?.groundEndpoint(failure.endpoint ?? null);
+    else weather?.ground(failure.model);
+  }
+}
+
+/**
+ * The deferred half of the multi-endpoint amendment to
+ * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration):
+ * call once, after a run has tried everything it is going to try. A
+ * single-endpoint run never needs this — `reckon` already threw the moment
+ * its one endpoint answered unauthenticated. A multi-endpoint run defers
+ * exactly that judgement until every endpoint has had its turn; this is
+ * where the judgement lands, and only when every one of them turned out to
+ * be misconfigured the same way.
+ */
+export function settleAuth(weather: Weather): void {
+  if (!weather.multiEndpoint || !weather.authExhausted) return;
+  const [first] = weather.authFailures;
+  if (first !== undefined) throw new AuthenticationFailure(first);
 }
 
 /**

@@ -140,7 +140,7 @@ that. It is how a duty already holding its authority is asked to operate —
 how many threads a sweep considers, how long one request is allowed to run,
 which endpoint carries a model, how much of a body gets read before it is
 translated. None of those grant a duty anything it did not already have; they
-shape the *how* of work the warrant already permitted, and a maintainer
+shape the _how_ of work the warrant already permitted, and a maintainer
 narrows or loosens them the same way they would any other step input, in the
 workflow file, without a warrant review. This is why `endpoints`,
 `api-keys`, `request-timeout`, `temperature`, `max-body-chars` and `limit`

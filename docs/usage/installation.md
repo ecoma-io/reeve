@@ -86,6 +86,78 @@ models: |
 
 Order is preference, not last-resort. Put the model you actually want first.
 
+**`request-timeout` bounds how long one request may run** before it counts as
+weather rather than a failure — `120s` by default, a whole number of seconds
+or minutes (`30s`, `2m`). A bare number with no unit is refused rather than
+guessed at: the runner's own job timeout and this provider's request timeout
+are not the same number, and treating them as interchangeable hides which one
+actually fired.
+
+**`temperature` sets the sampling temperature Reeve asks for**, between `0`
+and `2`. Left empty — the default — the field is left out of the request
+entirely, because some providers reject it outright rather than fall back to
+a default of their own when one is sent. A value outside `0`–`2` is refused
+rather than clamped to the nearest end.
+
+### More than one endpoint
+
+A single `base-url`/`api-key` pair is the ordinary case, and everything above
+still describes it unchanged. `endpoints` adds more without replacing it —
+a free provider to rotate to when the paid one is out of quota, a second
+gateway that carries models the first does not, a self-hosted `llama.cpp`
+sitting beside a hosted one:
+
+```yaml
+with:
+  base-url: https://api.openai.com/v1
+  api-key: ${{ secrets.OPENAI_API_KEY }}
+  endpoints: |
+    free = https://api.example.com/v1 timeout=30s
+  api-keys: |
+    free = ${{ secrets.FREE_API_KEY }}
+  models: |
+    gpt-5-mini
+    llama-3-70b@free
+```
+
+Each `endpoints` line is `alias = url`, with an optional trailing
+`timeout=<duration>` overriding `request-timeout` for that one endpoint.
+`api-keys` is `alias = key`, one line per alias that needs one — every value
+in it is registered as a secret before anything else is even parsed, so a
+malformed later line's error message can never expose an earlier key. An
+alias named in `api-keys` that `endpoints` never declared is refused; a key
+is optional, and an alias with none simply sends no `Authorization` header,
+the same as a keyless `base-url`.
+
+**`model@alias` routes that one model to that one endpoint.** The alias is
+split off the model id at its _last_ `@`, and only when that alias was
+actually declared in `endpoints` — a model id that happens to contain its own
+`@` and names no declared alias is left whole and sent to the default
+`base-url`, exactly as it always was, so an id is never misread as a routing
+suffix by accident. A model with no `@alias` always means the default
+endpoint, whatever else is configured.
+
+**Weather is tracked per model _and_ per endpoint.** A 429, a 5xx or a
+timeout from `llama-3-70b@free` demotes that pair alone — the same model
+reached through a different endpoint, or a different model reached through
+`free`, is still tried. A transport-level failure — the connection itself,
+never an answer from the provider — demotes the whole endpoint instead, on
+the reasoning that a broken connection says nothing about the model that was
+asked over it.
+
+**An auth failure behaves differently once there is more than one endpoint.**
+A single-endpoint run still fails red immediately on the first 401 or 403,
+exactly as
+[D12](../north-star.md#d12--capacity-is-weather-authority-is-configuration)
+has always described. Once `endpoints` names more than one, a 401 or 403 is
+recorded instead of thrown, and the run keeps going — one endpoint's wrong
+key says nothing about another endpoint's — failing red only at the end, and
+only once **every** configured endpoint has ended up auth-failed. See the
+doctrine's own amendment at that same link for the full reasoning.
+
+Once more than one endpoint has carried any spend, every duty's job summary
+gains an Endpoint column, naming which one answered each row.
+
 ## 2. Pick a trigger
 
 ### Issues

@@ -114,9 +114,15 @@ export function fence(text: string): readonly string[] {
  */
 export function cost(spent: readonly Spend[], name: (spend: Spend) => string): string {
   const sum = total(spent);
+  // Only shown once a second endpoint actually appears in the spend — a run
+  // against the one endpoint every duty has always had gets the table it has
+  // always gotten, with no column naming an endpoint nobody configured.
+  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
+
   const rows = spent.map((spend) => [
     STAGE[spend.purpose],
     cell(name(spend)),
+    ...(multiEndpoint ? [cell(spend.endpoint ?? "default")] : []),
     count(spend.requests),
     spend.failed === 0 ? "—" : count(spend.failed),
     count(spend.prompt),
@@ -135,6 +141,7 @@ export function cost(spent: readonly Spend[], name: (spend: Spend) => string): s
   rows.push([
     "**Total**",
     "",
+    ...(multiEndpoint ? [""] : []),
     `**${count(sum.requests)}**`,
     sum.failed === 0 ? "—" : `**${count(sum.failed)}**`,
     `**${count(sum.prompt)}**`,
@@ -145,7 +152,19 @@ export function cost(spent: readonly Spend[], name: (spend: Spend) => string): s
   const lines = [
     "### Cost",
     "",
-    table(["Stage", "Model", "Requests", "Failed", "Prompt", "Completion", "Tokens"], rows),
+    table(
+      [
+        "Stage",
+        "Model",
+        ...(multiEndpoint ? ["Endpoint"] : []),
+        "Requests",
+        "Failed",
+        "Prompt",
+        "Completion",
+        "Tokens",
+      ],
+      rows,
+    ),
   ];
 
   // Said plainly, because the alternative is a reader treating a floor as a

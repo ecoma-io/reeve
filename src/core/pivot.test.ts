@@ -222,7 +222,16 @@ describe("translateToPivot", () => {
   });
 
   it("passes `weather` through to the rotation", async () => {
-    const weather = { grounded: vi.fn(() => false), ground: vi.fn(), starved: [] };
+    const weather = {
+      grounded: vi.fn(() => false),
+      ground: vi.fn(),
+      groundEndpoint: vi.fn(),
+      starved: [],
+      multiEndpoint: false,
+      failAuth: vi.fn(),
+      authExhausted: false,
+      authFailures: [],
+    };
 
     await translateToPivot(request({ weather }));
 

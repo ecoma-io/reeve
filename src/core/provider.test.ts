@@ -4,17 +4,21 @@ import { parseList } from "./list.js";
 import {
   AuthenticationFailure,
   createProvider,
+  createRoutedProvider,
   createWeather,
   parseModels,
   parseSeats,
   reckon,
   rotateModels,
+  settleAuth,
   shown,
+  splitEndpointAlias,
   starved,
   weatherFailure,
   type Completion,
   type Failure,
   type Provider,
+  type RoutedEndpoint,
   type Success,
 } from "./provider.js";
 
@@ -779,5 +783,211 @@ describe("rotateModels", () => {
       expect(failure).toMatchObject({ ok: false, model: "a", kind: "capacity" });
       expect(failure.reason).toContain("capacity");
     });
+  });
+});
+
+describe("splitEndpointAlias", () => {
+  it("returns the id unchanged when there is no `@` at all", () => {
+    expect(splitEndpointAlias("gpt-4o-mini", new Set(["fast"]))).toEqual({
+      id: "gpt-4o-mini",
+      alias: null,
+    });
+  });
+
+  it("splits at the alias when it was declared", () => {
+    expect(splitEndpointAlias("gpt-4o-mini@fast", new Set(["fast"]))).toEqual({
+      id: "gpt-4o-mini",
+      alias: "fast",
+    });
+  });
+
+  it("splits at the last `@`, so an id that itself contains one is untouched", () => {
+    expect(splitEndpointAlias("user@example.com@fast", new Set(["fast"]))).toEqual({
+      id: "user@example.com",
+      alias: "fast",
+    });
+  });
+
+  it("leaves a model with an `@` alone when the alias after it was never declared", () => {
+    // A model id may legitimately contain an `@` of its own — only a
+    // declared alias turns the last one into a routing suffix.
+    expect(splitEndpointAlias("gpt-4o-mini@nowhere", new Set(["fast"]))).toEqual({
+      id: "gpt-4o-mini@nowhere",
+      alias: null,
+    });
+  });
+
+  it("leaves every id alone when no alias was ever declared", () => {
+    expect(splitEndpointAlias("gpt-4o-mini@fast", new Set())).toEqual({
+      id: "gpt-4o-mini@fast",
+      alias: null,
+    });
+  });
+});
+
+describe("createRoutedProvider", () => {
+  function endpoint(over: Partial<RoutedEndpoint> = {}): RoutedEndpoint {
+    return {
+      alias: null,
+      baseUrl: "https://default.example.test/v1",
+      apiKey: "sk-default",
+      timeoutMs: 1000,
+      ...over,
+    };
+  }
+
+  it("routes a plain id, with no `@alias`, to the default endpoint unchanged", async () => {
+    fetchMock.mockResolvedValue(answering("hi"));
+    const provider = createRoutedProvider([endpoint()]);
+
+    const completion = await provider.complete("gpt-4o-mini", HELLO);
+
+    expect(lastRequest().url).toBe("https://default.example.test/v1/chat/completions");
+    expect(lastRequest().body.model).toBe("gpt-4o-mini");
+    expect(completion).toMatchObject({ ok: true, model: "gpt-4o-mini", endpoint: null });
+  });
+
+  it("routes `model@alias` to the endpoint the alias names, with `@alias` stripped", async () => {
+    fetchMock.mockResolvedValue(answering("hi"));
+    const provider = createRoutedProvider([
+      endpoint(),
+      endpoint({ alias: "fast", baseUrl: "https://fast.example.test/v1", apiKey: "sk-fast" }),
+    ]);
+
+    const completion = await provider.complete("gpt-4o-mini@fast", HELLO);
+
+    expect(lastRequest().url).toBe("https://fast.example.test/v1/chat/completions");
+    // The id actually sent has the routing suffix stripped — no endpoint's own
+    // catalogue has ever heard of it.
+    expect(lastRequest().body.model).toBe("gpt-4o-mini");
+    expect(lastRequest().headers.authorization).toBe("Bearer sk-fast");
+    // The completion that comes back is stamped with the id the caller wrote,
+    // the composite one, and with the endpoint it actually reached.
+    expect(completion).toMatchObject({ ok: true, model: "gpt-4o-mini@fast", endpoint: "fast" });
+  });
+
+  it("leaves a model alone when its trailing `@name` is not a declared alias at all", async () => {
+    // `splitEndpointAlias` treats an undeclared alias as part of the id, not a
+    // routing suffix — so this reaches the default endpoint whole, exactly as
+    // it would if `@nowhere` were never written.
+    fetchMock.mockResolvedValue(answering("hi"));
+    const provider = createRoutedProvider([endpoint()]);
+
+    const completion = await provider.complete("gpt-4o-mini@nowhere", HELLO);
+
+    expect(lastRequest().body.model).toBe("gpt-4o-mini@nowhere");
+    expect(completion).toMatchObject({ ok: true, endpoint: null });
+  });
+
+  it("fails a model that routes to no configured endpoint, without calling anything", async () => {
+    // Only reachable when the roster of endpoints has no default entry —
+    // `resolveEndpoints` always supplies one, but this function is not the
+    // only thing that can build a `RoutedEndpoint[]`, and the branch has to
+    // answer for itself when the default is missing.
+    const provider = createRoutedProvider([
+      endpoint({ alias: "fast", baseUrl: "https://fast.example.test/v1" }),
+    ]);
+
+    const completion = await provider.complete("gpt-4o-mini", HELLO);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(completion).toMatchObject({ ok: false, model: "gpt-4o-mini", kind: "protocol" });
+  });
+});
+
+describe("multi-endpoint weather", () => {
+  it("grounds only the one `model@alias` pair on an ordinary capacity failure", () => {
+    const weather = createWeather(new Set(["fast"]));
+
+    reckon({ ok: false, model: "a@fast", reason: "429", kind: "capacity" }, weather);
+
+    expect(weather.grounded("a@fast")).toBe(true);
+    expect(weather.grounded("b@fast")).toBe(false);
+  });
+
+  it("grounds every model routed to an endpoint on a transport failure", () => {
+    const weather = createWeather(new Set(["fast"]));
+
+    reckon(
+      {
+        ok: false,
+        model: "a@fast",
+        reason: "timeout",
+        kind: "capacity",
+        transport: true,
+        endpoint: "fast",
+      },
+      weather,
+    );
+
+    expect(weather.grounded("a@fast")).toBe(true);
+    // Never asked, but routed to the same now-dead endpoint.
+    expect(weather.grounded("b@fast")).toBe(true);
+    // A different endpoint is untouched.
+    expect(weather.grounded("c")).toBe(false);
+  });
+
+  it("records a multi-endpoint auth failure instead of throwing", () => {
+    const weather = createWeather(new Set(["fast"]));
+
+    expect(() => {
+      reckon({ ok: false, model: "a", reason: "401", kind: "auth", endpoint: null }, weather);
+    }).not.toThrow();
+
+    expect(weather.authFailures).toHaveLength(1);
+    expect(weather.authExhausted).toBe(false);
+  });
+
+  it("still throws immediately for a single-endpoint auth failure", () => {
+    const weather = createWeather();
+
+    expect(() => {
+      reckon({ ok: false, model: "a", reason: "401", kind: "auth" }, weather);
+    }).toThrow(AuthenticationFailure);
+  });
+
+  it("keeps only the first auth failure recorded per endpoint", () => {
+    const weather = createWeather(new Set(["fast"]));
+
+    reckon({ ok: false, model: "a", reason: "first", kind: "auth", endpoint: null }, weather);
+    reckon({ ok: false, model: "a", reason: "second", kind: "auth", endpoint: null }, weather);
+
+    expect(weather.authFailures).toHaveLength(1);
+    expect(weather.authFailures[0]?.reason).toBe("first");
+  });
+});
+
+describe("settleAuth", () => {
+  it("does nothing for a single-endpoint run, whatever weather recorded", () => {
+    const weather = createWeather();
+
+    expect(() => {
+      settleAuth(weather);
+    }).not.toThrow();
+  });
+
+  it("does nothing when only some endpoints have failed auth", () => {
+    const weather = createWeather(new Set(["fast", "slow"]));
+    reckon({ ok: false, model: "a", reason: "401", kind: "auth", endpoint: "fast" }, weather);
+
+    expect(() => {
+      settleAuth(weather);
+    }).not.toThrow();
+  });
+
+  it("throws once every endpoint this run knows about has failed auth", () => {
+    const weather = createWeather(new Set(["fast"]));
+    reckon(
+      { ok: false, model: "a", reason: "default failed", kind: "auth", endpoint: null },
+      weather,
+    );
+    reckon(
+      { ok: false, model: "b@fast", reason: "fast failed", kind: "auth", endpoint: "fast" },
+      weather,
+    );
+
+    expect(() => {
+      settleAuth(weather);
+    }).toThrow(AuthenticationFailure);
   });
 });
