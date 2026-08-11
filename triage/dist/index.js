@@ -32829,12 +32829,16 @@ var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
 
 // src/core/forge.ts
+function isBotAuthor(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
 async function readStanding(api, at) {
   const { data } = await api.rest.issues.get({
     owner: at.owner,
     repo: at.repo,
     issue_number: at.number
   });
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -32843,7 +32847,8 @@ async function readStanding(api, at) {
     // read rather than one being assumed and the other becoming an empty list
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-    closed: data.state === "closed"
+    closed: data.state === "closed",
+    author: { login, isBot: isBotAuthor(data.user) }
   };
 }
 var LABEL_PAGE = 100;
@@ -33399,6 +33404,17 @@ function counted(name, raw) {
   }
   return value;
 }
+function bounded(name, raw) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
 function fraction(name, raw) {
   const value = Number(raw.trim());
   if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
@@ -33712,10 +33728,13 @@ async function translateToPivot(request2) {
     (model) => answer(provider, model, messages),
     weather
   );
-  if (!rotation.success) return null;
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
   const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return null;
-  return { title: sanitize(draft.title), body: sanitize(draft.body) };
+  if (draft === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures
+  };
 }
 async function answer(provider, model, messages) {
   const completion = await provider.complete(model, messages);
@@ -33811,6 +33830,55 @@ function evidenced(body) {
   return segments(body).some((segment) => segment.kind !== "prose");
 }
 
+// src/core/spam.ts
+async function sift(request2) {
+  const { provider, models, weather } = request2;
+  if (models.length === 0) return { dropped: null, failures: [] };
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, prompt2(request2)),
+    weather
+  );
+  if (!rotation.success) return { dropped: null, failures: rotation.failures };
+  return { dropped: read(rotation.success.content), failures: rotation.failures };
+}
+function read(answer2) {
+  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
+  if (said("spam") === said("off-topic")) return null;
+  if (said("spam")) {
+    return { reason: "spam", note: "the cheap pass read it as spam" };
+  }
+  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
+}
+function prompt2(request2) {
+  const { title, body, about } = request2;
+  const material = enclose("untrusted-thread", `TITLE: ${title}
+BODY:
+${body}`);
+  return [
+    {
+      role: "system",
+      content: [
+        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
+        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
+        "written report is worth attention.",
+        "",
+        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
+        "Answer with exactly one of these words and nothing else:",
+        "",
+        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
+        "- off-topic: a real request about something other than this repository.",
+        "- keep: anything else, including a report you cannot make sense of.",
+        "",
+        "When you are not sure, answer keep.",
+        "",
+        material.rule
+      ].join("\n")
+    },
+    { role: "user", content: material.block }
+  ];
+}
+
 // src/core/summary.ts
 async function writeSummary(markdown) {
   if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
@@ -33885,55 +33953,6 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
-}
-
-// src/duties/triage/spam.ts
-async function sift(request2) {
-  const { provider, models, weather } = request2;
-  if (models.length === 0) return { dropped: null, failures: [] };
-  const rotation = await rotateModels(
-    models,
-    (model) => provider.complete(model, prompt2(request2)),
-    weather
-  );
-  if (!rotation.success) return { dropped: null, failures: rotation.failures };
-  return { dropped: read(rotation.success.content), failures: rotation.failures };
-}
-function read(answer2) {
-  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
-  if (said("spam") === said("off-topic")) return null;
-  if (said("spam")) {
-    return { reason: "spam", note: "the cheap pass read it as spam" };
-  }
-  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
-}
-function prompt2(request2) {
-  const { title, body, about } = request2;
-  const material = enclose("untrusted-thread", `TITLE: ${title}
-BODY:
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
-        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
-        "written report is worth attention.",
-        "",
-        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
-        "Answer with exactly one of these words and nothing else:",
-        "",
-        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
-        "- off-topic: a real request about something other than this repository.",
-        "- keep: anything else, including a report you cannot make sense of.",
-        "",
-        "When you are not sure, answer keep.",
-        "",
-        material.rule
-      ].join("\n")
-    },
-    { role: "user", content: material.block }
-  ];
 }
 
 // src/duties/triage/summary.ts
@@ -34250,7 +34269,7 @@ function readSettings() {
     corrections: getInput("corrections", { required: true }),
     about: getInput("about"),
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: whole("max-body-chars", getInput("max-body-chars"))
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars"))
   };
 }
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
@@ -34286,7 +34305,11 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       title: thread.title,
       body: thread.body,
       labels: thread.labels,
-      closed: false
+      closed: false,
+      // A sweep's listing endpoint does not carry the opener's account type,
+      // and triage has no guard that reads it — this placeholder is never
+      // inspected, only `respond`'s bot-author guard reads `author` at all.
+      author: { login: "", isBot: false }
     };
     const outcome = await decide(authority2, standing, settings, stages, weather);
     const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
@@ -34406,10 +34429,11 @@ async function run() {
 }
 async function decide(authority2, standing, settings, stages, weather) {
   const warrant = authority2.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
-  if (standing.body.length > settings.maxBodyChars) {
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  if (limit !== null && standing.body.length > limit) {
     warning(
-      `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
+      `Only the first ${String(limit)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
     );
   }
   const { permitted, withheld: withheld2 } = narrow(
@@ -34484,18 +34508,23 @@ ${body}`, against: "own" }];
   const threadLanguage = detection.language;
   const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
   if (worthBridging) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const pivot = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather
     });
-    if (draft !== null) {
+    for (const failure of pivot.failures) {
+      warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
       queries.push({
-        text: `${draft.title}
-${draft.body}`,
+        text: `${pivot.draft.title}
+${pivot.draft.body}`,
         against: { pivot: pivotLanguage.code }
       });
     } else {
@@ -34570,8 +34599,7 @@ function recordTrigger() {
   if (payload.action !== "labeled" && payload.action !== "unlabeled") {
     return { eligible: false, reason: "" };
   }
-  const sender = payload.sender;
-  if (sender?.type === "Bot" || (sender?.login ?? "").endsWith("[bot]")) {
+  if (isBotAuthor(payload.sender)) {
     return { eligible: false, reason: "the label change came from a bot" };
   }
   return { eligible: true, reason: "" };
@@ -34582,7 +34610,8 @@ function senderLogin() {
 }
 async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather) {
   const warrant = authority2.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,
@@ -34598,19 +34627,24 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
   let pivot = null;
   let pivotNote = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const rendered = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather
     });
-    if (draft !== null) {
+    for (const failure of rendered.failures) {
+      warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (rendered.draft !== null) {
       pivot = {
         language: pivotLanguage.code,
-        title: draft.title,
-        excerpt: draft.body.slice(0, EXCERPT)
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT)
       };
     } else {
       pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";

@@ -1,0 +1,253 @@
+# The `respond` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/respond@v0.1`.
+name: Reeve - respond
+description: Post a first reply to a newly opened issue, in the author's own language, grounded in what this project already knows — never over a human who got there first, and never without an explicit grant.
+author: Ecoma
+
+branding:
+  icon: message-circle
+  color: purple
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read the thread and post the reply. `GITHUB_TOKEN` is
+      enough. `issues: write` is one indivisible scope — a token that can
+      comment can also label, close and assign — which is why the warrant
+      file exists: what this run may actually do is decided in code, against
+      a file in your repository, and not by what the token can reach.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The issue to answer. Defaults to the thread that triggered the
+      workflow — this duty is meant to run on `issues: opened`, not on a
+      backfill, since a first reply to a thread that already has replies is
+      not what "first" means.
+
+      An event that carries no thread — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for issue `NaN`.
+    required: false
+    default: ""
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. The order is
+      preference and not last resort: the first one that answers is used, and a
+      model that fails is never asked again in the same run.
+
+      `id = Name` gives a model a display name, and everything a person reads —
+      the job summary, every warning — shows the name instead of the id. A
+      model nobody named shows its id.
+    required: true
+
+  judge-models:
+    description: >-
+      A panel of models asked which draft reads best. Comma or newline
+      separates seats and every seat is asked — this is a panel, not a
+      fallback list — and the deterministic score breaks every tie. Within
+      one seat, `|` names models to fall back through: `a | b, c` is two
+      votes, and `b` is asked only when `a` could not deliver the first
+      seat's vote. A model that has already voted or already failed is
+      skipped by every later seat, so one model never counts twice. Empty
+      means no panel, which is the default and a perfectly good setting for
+      `drafts: 1`.
+
+      `a | b = Careful` names the seat rather than a model: it is one voter
+      called `Careful` whichever of the two delivered its vote.
+    required: false
+    default: ""
+
+  drafts:
+    description: >-
+      How many first replies to ask for. Every answer is scored
+      deterministically and the best is judged against the others — a first
+      reply is the one a stranger reads before they read anything else this
+      project says, and that is worth more than one attempt. The quality
+      lever that costs calls instead of money.
+    required: false
+    default: "1"
+
+  languages:
+    description: >-
+      The languages your contributors write in, comma or newline separated.
+      Detection narrows by script, then by profile, and only then asks a
+      model — so a list of two costs nothing on most threads. The first
+      language named is this project's pivot: what a correction written in
+      another language is bridged into before it is recalled for a thread
+      written in a third.
+
+      Ignored once `warrant`'s own `languages:` key is written — the file is
+      the whole answer from there, and the run says once which of the two it
+      read.
+    required: false
+    default: en, vi, zh
+
+  warrant:
+    description: >-
+      Where the permissions and the taxonomy live. A first reply is the top
+      rung of what Reeve may do, and unlike every other duty here it has no
+      cheap, reversible default: `respond` is granted nothing until a
+      warrant explicitly names it, whether the file is missing entirely or
+      merely silent about this duty. Write `capabilities: { respond: [comment] }`
+      to grant it. It may also carry a `languages:` key, which becomes the
+      whole answer for detection once it is written — see `languages` above.
+
+      A file missing at this default path is not a failure — the run
+      resolves to granting nothing and says so in the job summary, the same
+      quiet green no-op as a `capabilities:` block that leaves `respond`
+      out. Point this at a path of your own instead, and a file missing
+      there fails the run red, because naming a file that is not there is a
+      configuration mistake rather than an absence. A file that exists but
+      does not parse always fails red, wherever it lives.
+    required: false
+    default: .github/reeve.yml
+
+  apply:
+    description: >-
+      What this run may do: `comment`, or `none` for a run that decides and
+      writes nothing but its outputs. The narrower of this and the warrant
+      file wins, always — this is the workflow's half of the answer, useful
+      for turning posting off on one trigger without editing the file, and
+      the file remains the authority. Defaults to `none`, matching the
+      warrant's own default of granting nothing: an unconfigured `respond`
+      never posts by accident.
+    required: false
+    default: none
+
+  confidence:
+    description: >-
+      How sure the winning draft has to be before it is posted, between 0 and
+      1. Under the floor the draft is still written to `respond-text` and
+      shown in the job summary, which is how a maintainer tunes this against
+      real threads before letting it write to one.
+
+      Refused rather than clamped: `75` is a typo that would otherwise mean
+      `1`, and a duty that silently stopped answering anything is worse than
+      a red run.
+    required: false
+    default: "0.75"
+
+  guidance:
+    description: >-
+      A repo-relative path to a file in your own voice: what this project
+      never promises, where to point a question this duty cannot answer, the
+      tone a maintainer would use. Read from the checkout, not fetched, and
+      entered into the model's instructions unfenced — it is your own
+      maintainers' text, reviewed like any other change, the same shelf the
+      taxonomy sits on.
+
+      A file that is not there is the cold start, not a misconfiguration —
+      the run proceeds exactly as it would with an empty one.
+    required: false
+    default: .github/reeve-guidance.md
+
+  screen-models:
+    description: >-
+      A cheap roster, asked one question before a single expensive request is
+      spent: is this thread spam, off-topic, or worth an answer? The same
+      check `triage` runs, on the same terms — a `spam` or `off-topic` verdict
+      ends the run with no draft written, because a first-reply bot that
+      courteously answers spam is a spam amplifier, not a feature. Empty
+      turns the check off, which is the default; every model failing carries
+      on rather than blocking a real report on a down provider.
+    required: false
+    default: ""
+
+  about:
+    description: >-
+      What this repository is about, in one sentence and in your own words.
+      Read only by the off-topic half of `screen-models`' check, the same
+      input `triage` reads — worth writing once you set `screen-models`.
+    required: false
+    default: ""
+
+  corrections:
+    description: >-
+      A directory of `.ndjson` files recording decisions a maintainer made
+      after a run. The nearest few are shown to the model as examples of how
+      this project has already chosen to answer, which is how a first reply
+      learns a project's edges without anybody rewriting a prompt.
+
+      A directory that is not there is the cold start and reads as an empty
+      store. Retrieval is lexical and runs in the action, so this costs no
+      embedding calls and nothing leaves your repository.
+    required: false
+    default: .reeve/corrections
+
+  max-body-chars:
+    description: >-
+      How much of the author's own text one run reads, or `none` for no
+      bound at all. A longer body has its tail left behind and the job
+      summary says so rather than pretending otherwise. `0` is refused —
+      write `none` for that meaning instead.
+    required: false
+    default: "6000"
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and post nothing. The
+      reply that would have been posted is printed to the log and still
+      written to `respond-text`.
+    required: false
+    default: "false"
+
+outputs:
+  responded:
+    description: >-
+      `true` when a reply was posted this run. `false` on every other path —
+      including one that drafted an answer but the floor, the warrant,
+      `apply`, or `dry-run` withheld it — never unset. There is no
+      update-in-place: respond answers a thread once, so `true` always means
+      a brand-new comment.
+
+  language:
+    description: >-
+      The detected language of the thread, or empty — empty means none of
+      the configured languages wrote it, which is an answer rather than a
+      failure. The reply itself, when there is one, is written in this
+      language.
+
+  respond-text:
+    description: >-
+      The winning draft's own text, already sanitised, whether or not it was
+      posted. Written on every run that reached a verdict, so a repository
+      that withholds `comment` — or sets `apply: none` — can still route a
+      draft to maintainer review. Empty on a run that stopped before
+      drafting: a bot-opened issue, a thread a human already answered, or a
+      thread already carrying this duty's own reply.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a
+      429, a 5xx, a timeout, or a network failure, on every one of them.
+      Weather, never a failure by itself. Worth alerting on if a schedule
+      keeps producing it, because that is a quota worth raising rather than
+      a run worth retrying.
+
+runs:
+  using: node24
+  main: dist/index.js

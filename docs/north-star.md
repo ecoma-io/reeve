@@ -28,12 +28,12 @@ deterministic scoring, a language layer that knows who wrote in what and who
 reads in what, a sanitiser that assumes the thread is hostile, an allowlist
 checked in code, and state kept as plain files in the user's own repository.
 
-| Duty        | Status                | Does                                                                            |
-| ----------- | --------------------- | ------------------------------------------------------------------------------- |
-| `triage`    | ships                 | Sorts the backlog against a taxonomy the project wrote.                         |
-| `translate` | ships                 | Puts every issue and pull request in the languages the project reads.           |
-| `duplicate` | ships                 | Finds the thread that already asked this — across the language it was asked in. |
-| `respond`   | [Stage 5](#7-roadmap) | Gives a stranger a first, useful reply in the language they wrote to us in.     |
+| Duty        | Status | Does                                                                            |
+| ----------- | ------ | ------------------------------------------------------------------------------- |
+| `triage`    | ships  | Sorts the backlog against a taxonomy the project wrote.                         |
+| `translate` | ships  | Puts every issue and pull request in the languages the project reads.           |
+| `duplicate` | ships  | Finds the thread that already asked this — across the language it was asked in. |
+| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.     |
 
 ## 2. The end state
 
@@ -505,7 +505,11 @@ refused the same as one that failed to parse. Off in both halves by default:
 posting the one comment it may ever write needs `duplicate: [comment]` in the
 warrant **and** `apply: comment` on the workflow, because a wrong duplicate is
 a claim about somebody else's report, not a label one click undoes. `respond`
-is still open.
+has landed too — see [the duty's own page](usage/duties/respond.md). It
+writes the first reply itself, once, in the thread's own language, and never
+speaks over a human or its own earlier marker; `DEFAULT_CAPABILITIES` for it
+is empty, so nothing short of an explicit `respond: [comment]` in the warrant
+ever lets it post.
 
 **Done when:** a project can point at a thread that was found, matched and
 answered across a language boundary with no human reading both.

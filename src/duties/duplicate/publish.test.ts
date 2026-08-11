@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import type { Author } from "../../core/forge.js";
 import {
   findMarked,
   marker,
   postOrReplace,
   proposalFingerprint,
   rehearse,
-  type Author,
   type CommentApi,
   type Proposal,
 } from "./publish.js";

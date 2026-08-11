@@ -32826,12 +32826,16 @@ var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
 
 // src/core/forge.ts
+function isBotAuthor(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
 async function readStanding(api, at) {
   const { data } = await api.rest.issues.get({
     owner: at.owner,
     repo: at.repo,
     issue_number: at.number
   });
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -32840,7 +32844,8 @@ async function readStanding(api, at) {
     // read rather than one being assumed and the other becoming an empty list
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-    closed: data.state === "closed"
+    closed: data.state === "closed",
+    author: { login, isBot: isBotAuthor(data.user) }
   };
 }
 var LABEL_PAGE = 100;
@@ -33388,10 +33393,13 @@ async function translateToPivot(request2) {
     (model) => answer(provider, model, messages),
     weather
   );
-  if (!rotation.success) return null;
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
   const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return null;
-  return { title: sanitize(draft.title), body: sanitize(draft.body) };
+  if (draft === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures
+  };
 }
 async function answer(provider, model, messages) {
   const completion = await provider.complete(model, messages);
@@ -33609,9 +33617,6 @@ function proposalFingerprint(source, candidates) {
 function payloadFor(fp, duplicateOf) {
   return `${fp} duplicate-of=${String(duplicateOf)}`;
 }
-function isBot(author) {
-  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
-}
 var COMMENT_PAGE = 100;
 async function findMarked(api, at) {
   const { data } = await api.rest.issues.listComments({
@@ -33621,7 +33626,7 @@ async function findMarked(api, at) {
     per_page: COMMENT_PAGE
   });
   for (const comment of data) {
-    if (!isBot(comment.user)) continue;
+    if (!isBotAuthor(comment.user)) continue;
     const { official, fingerprint: found } = marker.split(comment.body ?? "");
     if (found !== null && official === "")
       return { marked: { id: comment.id, fingerprint: found }, uncertain: false };
@@ -34041,7 +34046,12 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
       title: thread.title,
       body: thread.body,
       labels: thread.labels,
-      closed: false
+      closed: false,
+      // The sweep listing this candidate came from does not carry who opened
+      // it — only `readStanding`'s single-thread fetch does — and nothing in
+      // `duplicate`'s own decision reads it: ranking a candidate against the
+      // thread in hand never turns on who either one's author is.
+      author: { login: "", isBot: false }
     };
     const outcome = await decide(
       api,
@@ -34188,7 +34198,7 @@ ${body}`];
   const pivotLanguage = settings.languages[0] ?? null;
   const threadLanguage = detection.language;
   if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache)) {
-    const draft = await translateToPivot({
+    const pivot = await translateToPivot({
       provider: stages.pivot,
       models: settings.models,
       title: standing.title,
@@ -34196,9 +34206,12 @@ ${body}`];
       to: pivotLanguage,
       weather
     });
-    if (draft !== null) {
-      queries.push(`${draft.title}
-${draft.body}`);
+    for (const failure of pivot.failures) {
+      warning(`match: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
+      queries.push(`${pivot.draft.title}
+${pivot.draft.body}`);
       pivotUsed = true;
       pivotNote = `Bridged the query into ${pivotLanguage.label} to compare against candidates written in other languages.`;
       info(pivotNote);

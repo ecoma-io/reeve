@@ -72,7 +72,7 @@ beforeEach(() => {
 
 describe("translateToPivot", () => {
   it("returns the translated title and body, each passed through sanitize", async () => {
-    const draft = await translateToPivot(request());
+    const { draft } = await translateToPivot(request());
 
     expect(draft).toEqual({ title: "Tiêu đề", body: "Nội dung." });
     expect(mockedSanitize).toHaveBeenCalledWith("Tiêu đề");
@@ -81,15 +81,47 @@ describe("translateToPivot", () => {
 
   it("strips a code fence around the answer, when a model added one anyway", async () => {
     const fenced = '```json\n{"title":"Tiêu đề","body":"Nội dung."}\n```';
-    const draft = await translateToPivot(request({ provider: answering({ a: fenced }) }));
+    const { draft } = await translateToPivot(request({ provider: answering({ a: fenced }) }));
 
     expect(draft).toEqual({ title: "Tiêu đề", body: "Nội dung." });
   });
 
   it("is null, not a throw, when every model in the roster failed", async () => {
-    const draft = await translateToPivot(request({ provider: answering({}), models: ["a", "b"] }));
+    const { draft } = await translateToPivot(
+      request({ provider: answering({}), models: ["a", "b"] }),
+    );
 
     expect(draft).toBeNull();
+  });
+
+  it("reports every failure rotation hit, alongside the null draft", async () => {
+    const { draft, failures } = await translateToPivot(
+      request({ provider: answering({}), models: ["a", "b"] }),
+    );
+
+    expect(draft).toBeNull();
+    expect(failures.map((failure) => failure.model)).toEqual(["a", "b"]);
+  });
+
+  it("still reports rotation's failures alongside a draft that went on to succeed", async () => {
+    const provider: Provider = {
+      complete: vi.fn((model: string): Promise<Completion> => {
+        if (model === "a") {
+          return Promise.resolve({ ok: false, model, reason: "down", kind: "capacity" });
+        }
+        return Promise.resolve({
+          ok: true,
+          model,
+          content: '{"title":"Tiêu đề","body":"Nội dung."}',
+          finishReason: "stop",
+        });
+      }),
+    };
+
+    const { draft, failures } = await translateToPivot(request({ provider, models: ["a", "b"] }));
+
+    expect(draft).toEqual({ title: "Tiêu đề", body: "Nội dung." });
+    expect(failures.map((failure) => failure.model)).toEqual(["a"]);
   });
 
   it("rotates past a model whose answer was cut off before the next one completes it", async () => {
@@ -116,20 +148,20 @@ describe("translateToPivot", () => {
       }),
     };
 
-    const draft = await translateToPivot(request({ provider, models: ["a", "b"] }));
+    const { draft } = await translateToPivot(request({ provider, models: ["a", "b"] }));
 
     expect(draft).toEqual({ title: "Tiêu đề", body: "Nội dung." });
     expect(provider.complete).toHaveBeenCalledTimes(2);
   });
 
   it("is null when the answer is not JSON at all", async () => {
-    const draft = await translateToPivot(request({ provider: answering({ a: "not json" }) }));
+    const { draft } = await translateToPivot(request({ provider: answering({ a: "not json" }) }));
 
     expect(draft).toBeNull();
   });
 
   it("is null when the answer is JSON but missing the title or the body", async () => {
-    const draft = await translateToPivot(
+    const { draft } = await translateToPivot(
       request({ provider: answering({ a: '{"title":"Only a title"}' }) }),
     );
 
@@ -137,7 +169,7 @@ describe("translateToPivot", () => {
   });
 
   it("is null for a blank title, the shape an injected answer produces", async () => {
-    const draft = await translateToPivot(
+    const { draft } = await translateToPivot(
       request({ provider: answering({ a: '{"title":"   ","body":"Nội dung."}' }) }),
     );
 

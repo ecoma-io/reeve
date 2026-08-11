@@ -16,14 +16,17 @@
  * given it to them. So every model failing, an answer nobody can read, and an
  * answer that hedges all mean the same thing: carry on.
  *
- * **Nothing here is authoritative about content.** A `spam` answer stops this
- * run and applies no label, closes nothing and says nothing on the thread. The
+ * **Nothing here is authoritative about content.** A `spam` answer stops the
+ * run that asked and applies no label, closes nothing, posts nothing. The
  * worst a manipulated answer can achieve is a run that did nothing, which is
- * this duty's designed failure mode anyway.
+ * every caller's designed failure mode anyway. `triage` and `respond` both
+ * call this — a thread neither the taxonomy nor a first reply is owed to is
+ * the same verdict either way, asked with whichever roster that duty was
+ * configured with.
  */
-import { enclose } from "../../core/enclose.js";
-import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
-import { rotateModels } from "../../core/provider.js";
+import { enclose } from "./enclose.js";
+import type { Failure, Message, Provider, Weather } from "./provider.js";
+import { rotateModels } from "./provider.js";
 
 /** What the cheap pass can conclude. Anything else is `keep`, which is not a value. */
 export type Judgement = "spam" | "off-topic";

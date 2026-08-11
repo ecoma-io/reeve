@@ -274,7 +274,7 @@ describe("publishing into a reply", () => {
     const [reply] = (await listReplies(thread, AT)).replies;
 
     const outcome = await publish(
-      createReply(thread, AT, reply ?? { id: 0, body: "" }),
+      createReply(thread, AT, reply ?? { id: 0, body: "", login: "", isBot: false }),
       marker,
       publication(await run([[english, { a: ENGLISH }]])),
     );
@@ -291,7 +291,7 @@ describe("publishing into a reply", () => {
     const [reply] = (await listReplies(thread, AT)).replies;
 
     await publish(
-      createReply(thread, AT, reply ?? { id: 0, body: "" }),
+      createReply(thread, AT, reply ?? { id: 0, body: "", login: "", isBot: false }),
       marker,
       publication(await run([[english, { a: ENGLISH }]])),
     );

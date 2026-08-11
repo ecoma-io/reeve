@@ -159,7 +159,7 @@ describe("publish", () => {
     const at = { owner: "ecoma-io", repo: "reeve", number: 42 };
 
     const outcome = await publish(
-      createReply(api, at, { id: 991, body: OFFICIAL }),
+      createReply(api, at, { id: 991, body: OFFICIAL, login: "someone", isBot: false }),
       translate,
       publication(),
     );

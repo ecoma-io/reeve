@@ -66,7 +66,13 @@ export interface GitHubApi {
         issue_number: number;
         per_page?: number;
         page?: number;
-      }): Promise<{ data: { id: number; body?: string | null }[] }>;
+      }): Promise<{
+        data: {
+          id: number;
+          body?: string | null;
+          user?: { login?: string; type?: string } | null;
+        }[];
+      }>;
       updateComment(params: {
         owner: string;
         repo: string;
@@ -92,10 +98,32 @@ export function createThread(api: GitHubApi, at: Location): Thread {
   };
 }
 
+/** Enough of an author to tell whether the account behind it is a bot. */
+export interface Author {
+  readonly login?: string | null;
+  readonly type?: string | null;
+}
+
+/**
+ * Whether an author is a bot account — the one convention every duty and
+ * every reader of a webhook payload uses to answer it: GitHub's own
+ * `type: "Bot"` when the API reports it, or a `[bot]`-suffixed login for the
+ * cases it does not — most visibly `github-actions[bot]` acting through a
+ * workflow's default token, which this project's own runs are one example
+ * of. Trusting `type` alone would read that account as human.
+ */
+export function isBotAuthor(author: Author | null | undefined): boolean {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
+
 /** A reply as a run found it: enough to decide about it, and to write it back. */
 export interface Reply {
   readonly id: number;
   readonly body: string;
+  /** Who wrote it. Empty when GitHub answered a comment with no author on it. */
+  readonly login: string;
+  /** Whether the author is a bot account — see `isBotAuthor`. */
+  readonly isBot: boolean;
 }
 
 /**
@@ -129,7 +157,15 @@ export async function listReplies(
     per_page: REPLY_PAGE,
   });
 
-  const replies = data.map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+  const replies = data.map((comment) => {
+    const login = comment.user?.login ?? "";
+    return {
+      id: comment.id,
+      body: comment.body ?? "",
+      login,
+      isBot: isBotAuthor(comment.user),
+    };
+  });
   return { replies, more: data.length === REPLY_PAGE };
 }
 
@@ -179,6 +215,7 @@ export interface TrackerApi {
           body?: string | null;
           state?: string;
           labels?: (string | { name?: string })[];
+          user?: { login?: string; type?: string } | null;
         };
       }>;
       update(params: {
@@ -251,6 +288,13 @@ export interface Standing {
   /** Every label on the thread now, whoever put it there. */
   readonly labels: readonly string[];
   readonly closed: boolean;
+  /**
+   * Who opened the thread. Same shape as a `Reply`'s author, for the same
+   * reason: a duty that decides whether to speak at all needs to know whether
+   * it would be speaking to a bot before it spends anything deciding what to
+   * say.
+   */
+  readonly author: { readonly login: string; readonly isBot: boolean };
 }
 
 export async function readStanding(api: TrackerApi, at: Location): Promise<Standing> {
@@ -260,6 +304,7 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
     issue_number: at.number,
   });
 
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -271,6 +316,7 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
       .map((label) => (typeof label === "string" ? label : (label.name ?? "")))
       .filter((name) => name.length > 0),
     closed: data.state === "closed",
+    author: { login, isBot: isBotAuthor(data.user) },
   };
 }
 

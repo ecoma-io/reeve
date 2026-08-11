@@ -31,14 +31,12 @@ repository, not before.
 
 ## The duties
 
-| Duty                               | Does                                                                             |
-| ---------------------------------- | -------------------------------------------------------------------------------- |
-| [`triage`](duties/triage.md)       | Sorts incoming work against a taxonomy you wrote, in the language it arrived in. |
-| [`translate`](duties/translate.md) | Puts every thread in front of every reader, without rewriting anyone.            |
-
-`duplicate` and `respond` are Stage 5 in
-[the roadmap](../north-star.md#7-roadmap) and have no pages yet, because a page
-about an input that does not exist is worse than no page.
+| Duty                               | Does                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------- |
+| [`triage`](duties/triage.md)       | Sorts incoming work against a taxonomy you wrote, in the language it arrived in.  |
+| [`translate`](duties/translate.md) | Puts every thread in front of every reader, without rewriting anyone.             |
+| [`duplicate`](duties/duplicate.md) | Finds the thread that already asked this — across the language it was asked in.   |
+| [`respond`](duties/respond.md)     | Drafts one first reply to a new issue, in the language it arrived in, then stops. |
 
 ## The shape of every duty
 

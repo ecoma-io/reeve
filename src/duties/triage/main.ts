@@ -68,6 +68,7 @@ import {
 } from "../../core/enforce.js";
 import {
   createEffects,
+  isBotAuthor,
   listCorrectionFiles,
   listOpenThreads,
   listRepositoryLabels,
@@ -81,7 +82,7 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import { counted, fraction, readShared, whole } from "../../core/inputs.js";
+import { bounded, counted, fraction, readShared } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import {
   createMemory,
@@ -105,6 +106,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { screen } from "../../core/screen.js";
+import { sift } from "../../core/spam.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
@@ -116,7 +118,6 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { sift } from "./spam.js";
 import {
   summarize,
   summarizeRecord,
@@ -175,7 +176,8 @@ interface Settings {
   readonly corrections: string;
   readonly about: string;
   readonly minBodyChars: number;
-  readonly maxBodyChars: number;
+  /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
+  readonly maxBodyChars: number | null;
   readonly dryRun: boolean;
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -204,7 +206,7 @@ function readSettings(): Omit<Settings, "languages"> {
     corrections: core.getInput("corrections", { required: true }),
     about: core.getInput("about"),
     minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
-    maxBodyChars: whole("max-body-chars", core.getInput("max-body-chars")),
+    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
   };
 }
 
@@ -342,6 +344,10 @@ async function runSweep(
       body: thread.body,
       labels: thread.labels,
       closed: false,
+      // A sweep's listing endpoint does not carry the opener's account type,
+      // and triage has no guard that reads it — this placeholder is never
+      // inspected, only `respond`'s bot-author guard reads `author` at all.
+      author: { login: "", isBot: false },
     };
     const outcome = await decide(authority, standing, settings, stages, weather);
     const done = settings.dryRun
@@ -562,12 +568,13 @@ async function decide(
   weather: Weather,
 ): Promise<Outcome> {
   const warrant = authority.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
-  if (standing.body.length > settings.maxBodyChars) {
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  if (limit !== null && standing.body.length > limit) {
     // Said, because a truncated body is a verdict reached on less than the
     // author wrote, and whoever reads that verdict deserves to know which.
     core.warning(
-      `Only the first ${String(settings.maxBodyChars)} characters of the body were read. ` +
+      `Only the first ${String(limit)} characters of the body were read. ` +
         "Raise `max-body-chars` to read the rest.",
     );
   }
@@ -668,17 +675,23 @@ async function decide(
     store.corrections.some((correction) => correction.language !== threadLanguage.code);
 
   if (worthBridging) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames =
+      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const pivot = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather,
     });
-    if (draft !== null) {
+    for (const failure of pivot.failures) {
+      core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
       queries.push({
-        text: `${draft.title}\n${draft.body}`,
+        text: `${pivot.draft.title}\n${pivot.draft.body}`,
         against: { pivot: pivotLanguage.code },
       });
     } else {
@@ -813,8 +826,7 @@ function recordTrigger(): RecordTrigger {
     return { eligible: false, reason: "" };
   }
 
-  const sender = payload.sender;
-  if (sender?.type === "Bot" || (sender?.login ?? "").endsWith("[bot]")) {
+  if (isBotAuthor(payload.sender)) {
     return { eligible: false, reason: "the label change came from a bot" };
   }
 
@@ -857,7 +869,8 @@ async function recordCorrection(
   weather: Weather,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
 
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
@@ -885,19 +898,25 @@ async function recordCorrection(
   let pivot: Correction["pivot"] = null;
   let pivotNote: string | null = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames =
+      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const rendered = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather,
     });
-    if (draft !== null) {
+    for (const failure of rendered.failures) {
+      core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+    }
+    if (rendered.draft !== null) {
       pivot = {
         language: pivotLanguage.code,
-        title: draft.title,
-        excerpt: draft.body.slice(0, EXCERPT),
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT),
       };
     } else {
       // Weather, not a broken configuration — the write below still happens.

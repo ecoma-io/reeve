@@ -34,7 +34,11 @@ const AT = { owner: "ecoma-io", repo: "reeve", number: 42 };
  */
 function apiOf(
   body: string | null | undefined,
-  comments: { id: number; body?: string | null }[] = [],
+  comments: {
+    id: number;
+    body?: string | null;
+    user?: { login?: string; type?: string } | null;
+  }[] = [],
 ) {
   const get = vi.fn(() => Promise.resolve({ data: { body } }));
   const update = vi.fn(() => Promise.resolve({}));
@@ -77,14 +81,14 @@ describe("createThread", () => {
 describe("listReplies", () => {
   it("reads the replies of the thread it was pointed at", async () => {
     const { api, listComments } = apiOf(OFFICIAL, [
-      { id: 991, body: "Tôi cũng gặp lỗi này." },
-      { id: 992, body: "Same here." },
+      { id: 991, body: "Tôi cũng gặp lỗi này.", user: { login: "reporter", type: "User" } },
+      { id: 992, body: "Same here.", user: { login: "bot-account", type: "Bot" } },
     ]);
 
     await expect(listReplies(api, AT)).resolves.toEqual({
       replies: [
-        { id: 991, body: "Tôi cũng gặp lỗi này." },
-        { id: 992, body: "Same here." },
+        { id: 991, body: "Tôi cũng gặp lỗi này.", login: "reporter", isBot: false },
+        { id: 992, body: "Same here.", login: "bot-account", isBot: true },
       ],
       more: false,
     });
@@ -99,7 +103,7 @@ describe("listReplies", () => {
   it("reads a reply GitHub sent with no body as an empty one", async () => {
     const { api } = apiOf(OFFICIAL, [{ id: 991, body: null }]);
     const { replies } = await listReplies(api, AT);
-    expect(replies).toEqual([{ id: 991, body: "" }]);
+    expect(replies).toEqual([{ id: 991, body: "", login: "", isBot: false }]);
   });
 
   it("says so when the thread has more replies than one run reads", async () => {
@@ -121,10 +125,23 @@ describe("listReplies", () => {
       more: false,
     });
   });
+
+  it("reads a `[bot]` login as a bot even when GitHub left `type` untyped", async () => {
+    // `github-actions[bot]` acting through a workflow's default token is the
+    // account this exists for — GitHub does not always type it, and trusting
+    // `type` alone would read it as human.
+    const { api } = apiOf(OFFICIAL, [
+      { id: 991, body: "Ran the checks.", user: { login: "github-actions[bot]" } },
+    ]);
+    const { replies } = await listReplies(api, AT);
+    expect(replies).toEqual([
+      { id: 991, body: "Ran the checks.", login: "github-actions[bot]", isBot: true },
+    ]);
+  });
 });
 
 describe("createReply", () => {
-  const reply = { id: 991, body: OFFICIAL };
+  const reply = { id: 991, body: OFFICIAL, login: "reporter", isBot: false };
 
   it("answers with the body the listing already read, asking GitHub nothing", async () => {
     // One request for the page rather than one per comment: a forty-reply
@@ -163,6 +180,7 @@ function trackerOf(
     body?: string | null;
     state?: string;
     labels?: (string | { name?: string })[];
+    user?: { login?: string; type?: string } | null;
   } = {},
   pages: { name: string; description?: string | null }[][] = [[]],
 ) {
@@ -211,8 +229,25 @@ describe("readStanding", () => {
       body: OFFICIAL,
       labels: ["bug", "needs reproduction"],
       closed: false,
+      author: { login: "", isBot: false },
     });
     expect(get).toHaveBeenCalledWith({ owner: "ecoma-io", repo: "reeve", issue_number: 42 });
+  });
+
+  it("reads who opened the thread, the same way it reads a reply's author", async () => {
+    const { api } = trackerOf({ user: { login: "reeve-bot", type: "Bot" } });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({
+      author: { login: "reeve-bot", isBot: true },
+    });
+  });
+
+  it("reads a `[bot]` login as a bot even when GitHub left `type` untyped", async () => {
+    const { api } = trackerOf({ user: { login: "dependabot[bot]" } });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({
+      author: { login: "dependabot[bot]", isBot: true },
+    });
   });
 
   it("reads a label GitHub sent as a bare string", async () => {
@@ -238,6 +273,7 @@ describe("readStanding", () => {
       body: "",
       labels: [],
       closed: false,
+      author: { login: "", isBot: false },
     });
   });
 

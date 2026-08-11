@@ -75,7 +75,7 @@ description.
 | `warrant`           | `.github/reeve.yml` | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at the default path is not a failure — see [The warrant](../warrant.md).            |
 | `drafts`            | `1`                 | Attempts per language, scored deterministically, best published. The quality lever that costs calls instead of money.                                                     |
 | `judge-models`      | _empty_             | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.                                                                  |
-| `max-body-chars`    | `6000`              | Bounds what is **read from the thread**, not what the model answers. Measured against the author's half only.                                                             |
+| `max-body-chars`    | `6000`              | Bounds what is **read from the thread**, not what the model answers, or `none` for no bound at all. Measured against the author's half only.                              |
 | `translate-replies` | `false`             | Off because the ceiling is real. See below.                                                                                                                               |
 | `show-attribution`  | `none`              | How much of the machinery the published block names. See below.                                                                                                           |
 | `dry-run`           | `false`             | Whole pipeline, every output, nothing written.                                                                                                                            |
@@ -83,7 +83,10 @@ description.
 **`max-body-chars`** deserves the extra sentence: when the body is longer, the
 tail is left behind and the published block says so rather than pretending it
 translated everything. Raising the limit later translates the rest, because the
-fingerprint is over the part that was actually read.
+fingerprint is over the part that was actually read. `none` turns the bound off
+entirely, reading the whole body every time; `0` is refused rather than read as
+that, because it is a typo for it that is also a legitimate ceiling elsewhere in
+this project.
 
 ### `judge-models` has two levels, and they mean opposite things
 

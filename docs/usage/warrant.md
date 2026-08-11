@@ -204,6 +204,13 @@ run reporting `duplicate-of` and `score` without touching the thread. See
 [the duty's own page](duties/duplicate.md) for why a claim about somebody
 else's report did not earn the same free default a label did.
 
+**Neither does `respond`.** It is the top rung, and there is no cheap,
+reversible version of "post a comment that reads as this project answering a
+stranger." So an absent warrant, or a written one that is simply silent about
+`respond`, grants it nothing — not `comment`, not anything — until
+`capabilities: { respond: [comment] }` names it explicitly. See [the
+`respond` duty](duties/respond.md#granting-it).
+
 **A duty also takes an `apply` input, and the narrower of the two wins.** The
 file and the workflow are both reviewable, they can disagree, and the fail-safe
 direction is the intersection. A workflow can restrict what the file granted; it

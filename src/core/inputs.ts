@@ -197,6 +197,12 @@ export function counted(name: string, raw: string): number {
  * leaving the duty unnamed in the warrant already means. So `0` is refused
  * here, on either input, and `none` is the only spelling of "no bound" — a
  * word a stray keystroke does not produce.
+ *
+ * Not `whole` with a sentinel bolted on either: `whole` has no way to say
+ * "there is no ceiling" — every number it accepts is one, and the sentinel
+ * has to come from outside the range it measures. `none`, refused nowhere
+ * near the numbers, is that sentinel: a `max-body-chars: 0` is a maintainer
+ * who meant `none` and typed the wrong kind of zero.
  */
 export function bounded(name: string, raw: string): number | null {
   const trimmed = raw.trim();

@@ -312,6 +312,11 @@ async function runSweep(
       body: thread.body,
       labels: thread.labels,
       closed: false,
+      // The sweep listing this candidate came from does not carry who opened
+      // it — only `readStanding`'s single-thread fetch does — and nothing in
+      // `duplicate`'s own decision reads it: ranking a candidate against the
+      // thread in hand never turns on who either one's author is.
+      author: { login: "", isBot: false },
     };
     const outcome = await decide(
       api,
@@ -573,7 +578,7 @@ async function decide(
     threadLanguage.code !== pivotLanguage.code &&
     (await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache))
   ) {
-    const draft = await translateToPivot({
+    const pivot = await translateToPivot({
       provider: stages.pivot,
       models: settings.models,
       title: standing.title,
@@ -581,8 +586,11 @@ async function decide(
       to: pivotLanguage,
       weather,
     });
-    if (draft !== null) {
-      queries.push(`${draft.title}\n${draft.body}`);
+    for (const failure of pivot.failures) {
+      core.warning(`match: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
+      queries.push(`${pivot.draft.title}\n${pivot.draft.body}`);
       pivotUsed = true;
       pivotNote = `Bridged the query into ${pivotLanguage.label} to compare against candidates written in other languages.`;
       core.info(pivotNote);
