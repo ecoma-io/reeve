@@ -125,6 +125,19 @@ describe("listReplies", () => {
       more: false,
     });
   });
+
+  it("reads a `[bot]` login as a bot even when GitHub left `type` untyped", async () => {
+    // `github-actions[bot]` acting through a workflow's default token is the
+    // account this exists for — GitHub does not always type it, and trusting
+    // `type` alone would read it as human.
+    const { api } = apiOf(OFFICIAL, [
+      { id: 991, body: "Ran the checks.", user: { login: "github-actions[bot]" } },
+    ]);
+    const { replies } = await listReplies(api, AT);
+    expect(replies).toEqual([
+      { id: 991, body: "Ran the checks.", login: "github-actions[bot]", isBot: true },
+    ]);
+  });
 });
 
 describe("createReply", () => {
@@ -226,6 +239,14 @@ describe("readStanding", () => {
 
     await expect(readStanding(api, AT)).resolves.toMatchObject({
       author: { login: "reeve-bot", isBot: true },
+    });
+  });
+
+  it("reads a `[bot]` login as a bot even when GitHub left `type` untyped", async () => {
+    const { api } = trackerOf({ user: { login: "dependabot[bot]" } });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({
+      author: { login: "dependabot[bot]", isBot: true },
     });
   });
 

@@ -122,9 +122,11 @@ inputs:
 
   max-body-chars:
     description: >-
-      How much of the author's own text one run reads. A longer body has its
-      tail left behind, and the published block says so rather than pretending
-      otherwise. Raising this later translates the rest.
+      How much of the author's own text one run reads, or `none` for no
+      bound at all. A longer body has its tail left behind, and the
+      published block says so rather than pretending otherwise. Raising this
+      later translates the rest. `0` is refused — write `none` for that
+      meaning instead.
     required: false
     default: "6000"
 

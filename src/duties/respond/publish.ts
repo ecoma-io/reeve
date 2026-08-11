@@ -16,15 +16,19 @@
  *
  * **The reply carries this duty's marker (`reeve:respond`) so a rerun can find
  * it.** The marker sits inside the one comment Reeve posted, in the same
- * `<!-- reeve:respond source=… -->` shape every duty uses, so `publish` can
- * split, compare and replace it exactly the way it does a translated body —
- * only the address differs, and choosing the address is `main.ts`'s job, not
- * this module's.
+ * `<!-- reeve:respond source=… -->` shape every duty uses — but this duty
+ * never calls the core's `publish`, which splits, compares and replaces an
+ * existing body in place. `main.ts` assembles this module's sections under
+ * the marker once, with `core/publish.ts`'s `assemble`, and posts the result
+ * as a brand-new comment. There is no address to find on a rerun, because a
+ * rerun that finds its own marker among the replies stops before drafting
+ * anything — see `main.ts`'s `decide`.
  *
- * **A run with nothing to post writes nothing.** A confidence below the
+ * **A run with nothing to post renders no sections.** A confidence below the
  * floor, or a draft nobody could produce, is a real outcome and not a reason
- * to post an empty reply — the core's `publish` already refuses an empty
- * section list, so it is enough for this module to render none.
+ * to post an empty reply — `publication` returns an empty section list for
+ * it, and `main.ts` checks that list itself before it will call
+ * `effects.comment`, rather than posting a marker with nothing under it.
  */
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 import type { Publication } from "../../core/publish.js";
@@ -75,19 +79,19 @@ export interface Responded {
 }
 
 /**
- * What identifies a reply as answering a particular thread.
+ * A provenance tag identifying what this reply answers — never a comparison
+ * key. `main.ts`'s guard against answering a thread twice is the marker's
+ * mere presence among the replies: once Reeve has posted, `decide` stops
+ * before drafting anything, for any title, body or language the thread goes
+ * on to have. No input reaches a second comparison, so this value is never
+ * checked against a previous run's fingerprint, and could not re-open the
+ * question of whether to answer even if it were.
  *
- * Over the title, the body and the language the reply was written in, and
- * deliberately over nothing else — the model id is not in it because rotating
- * past a failed model is not a reason to answer a thread twice, and `drafts`
- * is not in it because raising the quality knob is a choice about the next
- * thread, not a mandate to re-answer this one.
- *
- * The language is part of the key rather than assumed constant: an issue
- * whose language this run could not place the first time and can the second
- * — because a maintainer widened `languages` in between — is a thread worth
- * answering again, in the language now available, and a fingerprint blind to
- * the language would call that thread already answered.
+ * What it is for instead: a record, alongside the reply, of the exact text
+ * and detected language this run answered — over the title, the body and the
+ * language, and deliberately over nothing else. The model id is not in it,
+ * because rotating past a failed model is not a fact about what was
+ * answered; `drafts` is not in it, for the same reason.
  */
 export function responseFingerprint(title: string, body: string, language: string | null): string {
   return fingerprint(`${title}\n\n${body}`, language === null ? [] : [language]);
@@ -170,7 +174,7 @@ function footer(responded: Responded): string {
     responded.language === null
       ? "This project could not identify the thread's language, so the reply above is in English."
       : `The thread was written in ${responded.language}.`,
-    "Reeve answers a thread once — deleting this comment does not make it answer again.",
+    "Reeve answers a thread once. This comment is the record of it.",
   ];
 
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;

@@ -114,8 +114,8 @@ describe("publication", () => {
     expect(rendered).not.toContain("Written in");
   });
 
-  it("tells a reader deleting the comment does not make it answer again", () => {
-    expect(body()).toContain("does not make it answer again");
+  it("tells a reader this comment is the record of a once-only answer", () => {
+    expect(body()).toContain("Reeve answers a thread once. This comment is the record of it.");
   });
 
   it("escapes a model id, which arrives from a workflow file", () => {

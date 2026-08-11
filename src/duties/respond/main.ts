@@ -266,7 +266,7 @@ async function decide(
   // since, which is what keeps an edit from farming a second reply. A reply
   // from some other bot, or with neither trait, is neither — it is skipped,
   // and the walk continues past it.
-  const { replies } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at);
   let alreadyAnswered = false;
   let humanFirst = false;
   for (const reply of replies) {
@@ -298,6 +298,23 @@ async function decide(
       "A human already replied to this thread before this run looked at it. Answering the " +
         "first reply is the whole of what this duty does, and there is no input that lets it " +
         "speak over a person who got there first.",
+      null,
+    );
+  }
+  if (more) {
+    // Neither guard fired on the page this run actually read, and there is
+    // more of the thread this run never saw — this duty's own marker, or a
+    // human's reply, could be sitting past the first hundred. The top rung
+    // fails closed rather than draft a reply on an "unanswered so far" guess
+    // this thin: see D12 and this file's own doc comment on why an input
+    // cannot widen this duty's authority to speak.
+    core.warning(
+      `#${String(at.number)}: the reply list was truncated before this duty could rule out its ` +
+        "own marker or a human reply — refusing to guess.",
+    );
+    return stopped(
+      "Could not verify the thread is unanswered (reply list truncated). This duty stops rather " +
+        "than draft — let alone post — a first reply it cannot be sure is still owed.",
       null,
     );
   }
@@ -348,7 +365,7 @@ async function decide(
       : `#${String(at.number)}: language ${language.code} (by ${detection.by}).`,
   );
 
-  const wanted = responseFingerprint(standing.title, body, language?.code ?? null);
+  const record = responseFingerprint(standing.title, body, language?.code ?? null);
 
   const store = await readStore(settings.corrections);
   for (const line of store.unreadable) core.warning(`corrections: ${line}`);
@@ -477,7 +494,7 @@ async function decide(
     text: verdict.winner.text,
     model: modelName(verdict.winner.model),
     decision,
-    fingerprint: wanted,
+    fingerprint: record,
   };
 
   if (confidence < settings.confidence) {
@@ -511,8 +528,31 @@ async function decide(
     };
   }
 
+  // Computed once and checked here, right before the only two places this
+  // duty ever renders a comment body: never post a marker with nothing under
+  // it. `publication` already returns no sections for an empty draft, but the
+  // invariant is enforced here, locally, rather than trusted silently — a
+  // marker-only comment is indistinguishable from an answer to a reader who
+  // cannot see this duty's source.
+  const pub = publication(responded);
+  if (pub.sections.length === 0) {
+    core.warning(
+      `#${String(at.number)}: the winning draft rendered nothing to post — refusing to post a ` +
+        "marker with no reply under it.",
+    );
+    return {
+      note: null,
+      language: responded.language,
+      responded,
+      confidence,
+      published: false,
+      permitted,
+      withheld,
+    };
+  }
+
   if (settings.dryRun) {
-    const would = assemble("", marker, publication(responded));
+    const would = assemble("", marker, pub);
     core.info(`Dry run — #${String(at.number)} would have received:\n${would}`);
     return {
       note: null,
@@ -530,7 +570,7 @@ async function decide(
   // update-in-place path, because respond never posts a second time on the
   // same thread.
   const effects = createEffects(api, at);
-  await effects.comment(assemble("", marker, publication(responded)));
+  await effects.comment(assemble("", marker, pub));
   core.info(`#${String(at.number)}: posted the first reply.`);
 
   return {

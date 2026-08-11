@@ -64,7 +64,7 @@ import {
   listReplies,
   type Thread,
 } from "../../core/forge.js";
-import { readShared, whole } from "../../core/inputs.js";
+import { bounded, readShared, whole } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import {
   createProvider,
@@ -131,7 +131,8 @@ interface Settings {
   /** What to call each seat, keyed by every model that seat may be filled by. */
   readonly judgeNames: Names;
   readonly drafts: number;
-  readonly maxBodyChars: number;
+  /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
+  readonly maxBodyChars: number | null;
   readonly replies: boolean;
   readonly attribution: Attribution;
   readonly dryRun: boolean;
@@ -165,7 +166,7 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
-    maxBodyChars: whole("max-body-chars", core.getInput("max-body-chars")),
+    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
     replies: core.getBooleanInput("translate-replies"),
     attribution: readAttribution(),
   };
@@ -195,13 +196,13 @@ function readAttribution(): Attribution {
  */
 function readBody(
   body: string,
-  limit: number,
+  limit: number | null,
 ): { official: string; source: string; truncated: boolean; published: string | null } {
   const { official, fingerprint: published } = marker.split(body);
   return {
     official,
-    source: official.slice(0, limit),
-    truncated: official.length > limit,
+    source: limit === null ? official : official.slice(0, limit),
+    truncated: limit !== null && official.length > limit,
     published,
   };
 }

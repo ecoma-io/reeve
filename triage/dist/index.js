@@ -32835,6 +32835,7 @@ async function readStanding(api, at) {
     repo: at.repo,
     issue_number: at.number
   });
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -32844,10 +32845,7 @@ async function readStanding(api, at) {
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: {
-      login: data.user?.login ?? "",
-      isBot: data.user?.type === "Bot"
-    }
+    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") }
   };
 }
 var LABEL_PAGE = 100;
@@ -33407,6 +33405,16 @@ function fraction(name, raw) {
   const value = Number(raw.trim());
   if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
+  }
+  return value;
+}
+function bounded(name, raw) {
+  if (raw.trim().toLowerCase() === "none") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
   }
   return value;
 }
@@ -34254,7 +34262,7 @@ function readSettings() {
     corrections: getInput("corrections", { required: true }),
     about: getInput("about"),
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: whole("max-body-chars", getInput("max-body-chars"))
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars"))
   };
 }
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
@@ -34414,10 +34422,11 @@ async function run() {
 }
 async function decide(authority2, standing, settings, stages, weather) {
   const warrant = authority2.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
-  if (standing.body.length > settings.maxBodyChars) {
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  if (limit !== null && standing.body.length > limit) {
     warning(
-      `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
+      `Only the first ${String(limit)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
     );
   }
   const { permitted, withheld: withheld2 } = narrow(
@@ -34590,7 +34599,8 @@ function senderLogin() {
 }
 async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather) {
   const warrant = authority2.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,

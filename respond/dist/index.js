@@ -32847,12 +32847,15 @@ async function listReplies(api, at) {
     issue_number: at.number,
     per_page: REPLY_PAGE
   });
-  const replies = data.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    login: comment.user?.login ?? "",
-    isBot: comment.user?.type === "Bot"
-  }));
+  const replies = data.map((comment) => {
+    const login = comment.user?.login ?? "";
+    return {
+      id: comment.id,
+      body: comment.body ?? "",
+      login,
+      isBot: comment.user?.type === "Bot" || login.endsWith("[bot]")
+    };
+  });
   return { replies, more: data.length === REPLY_PAGE };
 }
 async function readStanding(api, at) {
@@ -32861,6 +32864,7 @@ async function readStanding(api, at) {
     repo: at.repo,
     issue_number: at.number
   });
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -32870,10 +32874,7 @@ async function readStanding(api, at) {
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: {
-      login: data.user?.login ?? "",
-      isBot: data.user?.type === "Bot"
-    }
+    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") }
   };
 }
 var LABEL_PAGE = 100;
@@ -34102,7 +34103,7 @@ function provenance(responded) {
 function footer(responded) {
   const notes = [
     responded.language === null ? "This project could not identify the thread's language, so the reply above is in English." : `The thread was written in ${responded.language}.`,
-    "Reeve answers a thread once \u2014 deleting this comment does not make it answer again."
+    "Reeve answers a thread once. This comment is the record of it."
   ];
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
 }
@@ -34166,7 +34167,9 @@ function verdict(run2) {
     ...decisionRows(responded.decision),
     ["Outcome", cell(outcome(run2))]
   ];
-  return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
+  const parts = ["### Verdict", "", table(["Field", "Value"], rows)];
+  if (confidence < run2.floor) parts.push("", "```", responded.text, "```");
+  return parts.join("\n");
 }
 function decisionRows(decision) {
   if (decision === null) return [];
@@ -34183,16 +34186,20 @@ function decisionRows(decision) {
   return rows;
 }
 function outcome(run2) {
-  const { responded, confidence } = run2;
+  const { responded, confidence, published } = run2;
   if (responded === null || confidence === null) return "nothing to post";
+  if (published) return "posted";
   if (confidence < run2.floor) {
     return `below the floor (${confidence.toFixed(2)} < ${run2.floor.toFixed(2)}) \u2014 the draft was written to \`respond-text\` but nothing was posted`;
   }
   if (!run2.permitted.includes("comment")) {
     return "`comment` was not granted \u2014 the draft was written to `respond-text` but nothing was posted";
   }
+  if (responded.text.length === 0) {
+    return "the winning draft rendered nothing to post \u2014 refused rather than posted with nothing under the marker";
+  }
   if (run2.dryRun) return "dry run \u2014 nothing was written";
-  return "posted";
+  return "not posted, for a reason this summary does not recognise";
 }
 function withheld(run2) {
   if (run2.withheld.length === 0) return [];
@@ -34266,7 +34273,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       null
     );
   }
-  const { replies } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at);
   let alreadyAnswered = false;
   let humanFirst = false;
   for (const reply of replies) {
@@ -34294,6 +34301,15 @@ async function decide(api, at, warrant, settings, stages, weather) {
     );
     return stopped(
       "A human already replied to this thread before this run looked at it. Answering the first reply is the whole of what this duty does, and there is no input that lets it speak over a person who got there first.",
+      null
+    );
+  }
+  if (more) {
+    warning(
+      `#${String(at.number)}: the reply list was truncated before this duty could rule out its own marker or a human reply \u2014 refusing to guess.`
+    );
+    return stopped(
+      "Could not verify the thread is unanswered (reply list truncated). This duty stops rather than draft \u2014 let alone post \u2014 a first reply it cannot be sure is still owed.",
       null
     );
   }
@@ -34333,7 +34349,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   info(
     language === null ? `#${String(at.number)}: language not identified (${String(detection.candidates.length)} candidate(s)).` : `#${String(at.number)}: language ${language.code} (by ${detection.by}).`
   );
-  const wanted = responseFingerprint(standing.title, body, language?.code ?? null);
+  const record = responseFingerprint(standing.title, body, language?.code ?? null);
   const store = await readStore(settings.corrections);
   for (const line of store.unreadable) warning(`corrections: ${line}`);
   const memory = createMemory(store.corrections);
@@ -34442,7 +34458,7 @@ ${bridged.body}`,
     text: verdict2.winner.text,
     model: modelName(verdict2.winner.model),
     decision,
-    fingerprint: wanted
+    fingerprint: record
   };
   if (confidence < settings.confidence) {
     warning(
@@ -34472,8 +34488,23 @@ ${bridged.body}`,
       withheld: withheld2
     };
   }
+  const pub = publication(responded);
+  if (pub.sections.length === 0) {
+    warning(
+      `#${String(at.number)}: the winning draft rendered nothing to post \u2014 refusing to post a marker with no reply under it.`
+    );
+    return {
+      note: null,
+      language: responded.language,
+      responded,
+      confidence,
+      published: false,
+      permitted,
+      withheld: withheld2
+    };
+  }
   if (settings.dryRun) {
-    const would = assemble("", marker, publication(responded));
+    const would = assemble("", marker, pub);
     info(`Dry run \u2014 #${String(at.number)} would have received:
 ${would}`);
     return {
@@ -34487,7 +34518,7 @@ ${would}`);
     };
   }
   const effects = createEffects(api, at);
-  await effects.comment(assemble("", marker, publication(responded)));
+  await effects.comment(assemble("", marker, pub));
   info(`#${String(at.number)}: posted the first reply.`);
   return {
     note: null,

@@ -103,14 +103,19 @@ GitHub's own order, and the first human reply stops the run before a draft is
 even written. Answering the first reply is the whole of what this duty does;
 there is no input that lets it speak over a person who got there first.
 
-**Its own marker ends it, forever, however the issue is edited afterward.**
-The reply `respond` posts carries a marker the same way every duty's output
-does, and a rerun that finds it stops immediately — this thread already has
-its one reply. This is deliberately **not** "the body hasn't changed since
-last time": the marker answers a _thread_, not a body version, so editing the
+**Its own marker ends it, however the issue is edited afterward.** The reply
+`respond` posts carries a marker the same way every duty's output does, and a
+rerun that finds it stops immediately — this thread already has its one
+reply. This is deliberately **not** "the body hasn't changed since last
+time": the marker answers a _thread_, not a body version, so editing the
 issue after `respond` has already spoken does not earn a second reply.
-Deleting the comment does not either — the reply itself says so, in its own
-footer, so nobody mistakes a missing comment for an unanswered thread.
+
+The marker lives only in that one comment, though, and nowhere else. Delete
+the comment and the marker goes with it — the next run reads an unanswered
+thread and drafts again. That is the accepted trade for keeping no record
+outside the thread itself: see [What the reply looks
+like](#what-the-reply-looks-like) for why the footer names the comment as the
+record instead of promising otherwise.
 
 Both guards are one walk over the same page of replies, so they cost nothing
 extra to check.
@@ -235,7 +240,7 @@ above it, and each one already stopped the run.
 <the drafted reply, in the thread's own language>
 
 <sub>Drafted by `gpt-5-mini`. Confidence 0.91 of 1.00, best of 2 drafts, decided by judges. Votes: `Referee`→`gpt-5-mini`.</sub>
-<sub>The thread was written in Vietnamese. Reeve answers a thread once — deleting this comment does not make it answer again.</sub>
+<sub>The thread was written in Vietnamese. Reeve answers a thread once. This comment is the record of it.</sub>
 ```
 
 **The notice at the top is unconditional and unstrippable.** There is no
@@ -250,10 +255,15 @@ many drafts it beat, and how the panel voted. One draft with no panel skips
 the confidence line entirely rather than dressing up a foregone conclusion as
 a verdict.
 
-**The footer says the reply will not come back.** Deleting the comment does
-not make `respond` answer again — the marker lives in the comment itself, so a
-deleted reply and an unanswered thread would otherwise look identical to a
-reader. The footer is what keeps that from being a surprise.
+**The footer names the comment as the record, because the guard is the
+comment.** `respond`'s once-only guard is not a fact kept anywhere else — it
+is the marker inside this exact reply, found the same walk that looks for a
+human's own reply. Delete the comment and the marker goes with it: the next
+run reads an unanswered thread and drafts again. That is the accepted trade,
+not an oversight — the alternative is a record kept outside the thread, which
+is state this duty does not want to own or a maintainer to have to trust
+separately from what they can see. The footer says what the comment is, not a
+promise about what deleting it would do.
 
 ## Failure, and what it looks like
 

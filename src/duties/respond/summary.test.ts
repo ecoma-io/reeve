@@ -138,6 +138,44 @@ describe("the run summary", () => {
     expect(summary).toContain("written to `respond-text` but nothing was posted");
   });
 
+  it("shows the sanitised draft in a fenced block when it was withheld below the floor", () => {
+    const summary = subject({
+      language: "English",
+      responded: responded({ text: "Could you share the version you're running?" }),
+      confidence: 0.5,
+      floor: 0.75,
+      published: false,
+      permitted: ["comment"],
+    });
+
+    expect(summary).toContain("```\nCould you share the version you're running?\n```");
+  });
+
+  it("does not render a fenced block for a reply that was actually posted", () => {
+    const summary = subject({
+      language: "English",
+      responded: responded(),
+      confidence: 0.9,
+      published: true,
+      permitted: ["comment"],
+    });
+
+    expect(summary).not.toContain("```");
+  });
+
+  it("says a rendered-empty draft was refused rather than posted with nothing under the marker", () => {
+    const summary = subject({
+      language: "English",
+      responded: responded({ text: "" }),
+      confidence: 0.9,
+      floor: 0.75,
+      published: false,
+      permitted: ["comment"],
+    });
+
+    expect(summary).toContain("refused rather than posted with nothing under the marker");
+  });
+
   it("says the draft was withheld when `comment` was not granted", () => {
     const summary = subject({
       language: "English",

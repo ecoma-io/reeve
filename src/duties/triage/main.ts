@@ -81,7 +81,7 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import { counted, fraction, readShared, whole } from "../../core/inputs.js";
+import { bounded, counted, fraction, readShared } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import {
   createMemory,
@@ -175,7 +175,8 @@ interface Settings {
   readonly corrections: string;
   readonly about: string;
   readonly minBodyChars: number;
-  readonly maxBodyChars: number;
+  /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
+  readonly maxBodyChars: number | null;
   readonly dryRun: boolean;
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -204,7 +205,7 @@ function readSettings(): Omit<Settings, "languages"> {
     corrections: core.getInput("corrections", { required: true }),
     about: core.getInput("about"),
     minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
-    maxBodyChars: whole("max-body-chars", core.getInput("max-body-chars")),
+    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
   };
 }
 
@@ -566,12 +567,13 @@ async function decide(
   weather: Weather,
 ): Promise<Outcome> {
   const warrant = authority.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
-  if (standing.body.length > settings.maxBodyChars) {
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  if (limit !== null && standing.body.length > limit) {
     // Said, because a truncated body is a verdict reached on less than the
     // author wrote, and whoever reads that verdict deserves to know which.
     core.warning(
-      `Only the first ${String(settings.maxBodyChars)} characters of the body were read. ` +
+      `Only the first ${String(limit)} characters of the body were read. ` +
         "Raise `max-body-chars` to read the rest.",
     );
   }
@@ -861,7 +863,8 @@ async function recordCorrection(
   weather: Weather,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
-  const body = standing.body.slice(0, settings.maxBodyChars);
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
 
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,

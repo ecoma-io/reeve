@@ -131,7 +131,16 @@ function verdict(run: Run): string {
     ["Outcome", cell(outcome(run))],
   ];
 
-  return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
+  const parts = ["### Verdict", "", table(["Field", "Value"], rows)];
+
+  // Below the floor is the tuning workflow `confidence`'s own description
+  // sells: the draft is real work a maintainer is meant to read and judge,
+  // not just a fact that one was written. `respond-text` carries the same
+  // text for a workflow to route elsewhere; this is what makes it legible
+  // without leaving this page.
+  if (confidence < run.floor) parts.push("", "```", responded.text, "```");
+
+  return parts.join("\n");
 }
 
 function decisionRows(decision: Decision | null): string[][] {
@@ -149,10 +158,19 @@ function decisionRows(decision: Decision | null): string[][] {
   return rows;
 }
 
-/** The one sentence explaining why the draft was, or was not, posted. */
+/**
+ * The one sentence explaining why the draft was, or was not, posted.
+ *
+ * `run.published` is the fact — set by `main.ts` at the one place a comment
+ * is actually created, and nowhere else. The ladder below never decides
+ * whether something was posted; it only picks which of `main.ts`'s guards
+ * explains a `false` it has already been handed, in the same order `decide`
+ * checks them.
+ */
 function outcome(run: Run): string {
-  const { responded, confidence } = run;
+  const { responded, confidence, published } = run;
   if (responded === null || confidence === null) return "nothing to post";
+  if (published) return "posted";
   if (confidence < run.floor) {
     return (
       `below the floor (${confidence.toFixed(2)} < ${run.floor.toFixed(2)}) — the draft was ` +
@@ -162,12 +180,14 @@ function outcome(run: Run): string {
   if (!run.permitted.includes("comment")) {
     return "`comment` was not granted — the draft was written to `respond-text` but nothing was posted";
   }
+  if (responded.text.length === 0) {
+    return "the winning draft rendered nothing to post — refused rather than posted with nothing under the marker";
+  }
   if (run.dryRun) return "dry run — nothing was written";
-  // Every guard above this line is a reason not to post, and each one already
-  // returned. Reaching here means none of them applied, and `main.ts` never
-  // reaches this point without posting — there is no update-in-place, so
-  // there is no other outcome left for `published` to be.
-  return "posted";
+  // `published` came back false and none of the reasons above explain it —
+  // a state this ladder does not expect from `decide`. Named honestly rather
+  // than defaulting to "posted", which `published` has already ruled out.
+  return "not posted, for a reason this summary does not recognise";
 }
 
 function withheld(run: Run): string[] {

@@ -652,6 +652,27 @@ describe("the action", () => {
     expect(run.log).toContain("HTTP 401");
   });
 
+  it("fails closed rather than guess when the reply list is truncated before either guard can rule", async () => {
+    // A full page of bot replies, none carrying this duty's marker and none
+    // human — this duty's own marker or a human's reply could be sitting
+    // just past what this run read. Top rung: refuse to draft, let alone
+    // post, on a guess that thin.
+    stub.comments = Array.from({ length: 100 }, (_, index) => ({
+      id: index,
+      body: "Ran the checks.",
+      login: "some-other-bot",
+      type: "Bot" as const,
+    }));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).toHaveLength(0);
+    expect(stub.comments).toHaveLength(100); // nothing new was posted
+    expect(run.outputs.responded).toBe("false");
+    expect(run.summary).toContain("Could not verify the thread is unanswered");
+  });
+
   it("grants nothing at all, and spends nothing deciding what to say, when a written block does not name it", async () => {
     const run = await runAction(stub, { warrant: await writtenAt(UNNAMED_WARRANT) });
 

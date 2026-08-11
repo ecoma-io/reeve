@@ -32859,12 +32859,15 @@ async function listReplies(api, at) {
     issue_number: at.number,
     per_page: REPLY_PAGE
   });
-  const replies = data.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    login: comment.user?.login ?? "",
-    isBot: comment.user?.type === "Bot"
-  }));
+  const replies = data.map((comment) => {
+    const login = comment.user?.login ?? "";
+    return {
+      id: comment.id,
+      body: comment.body ?? "",
+      login,
+      isBot: comment.user?.type === "Bot" || login.endsWith("[bot]")
+    };
+  });
   return { replies, more: data.length === REPLY_PAGE };
 }
 function createReply(api, at, reply) {
@@ -32999,6 +33002,16 @@ function whole(name, raw) {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
+  }
+  return value;
+}
+function bounded(name, raw) {
+  if (raw.trim().toLowerCase() === "none") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
   }
   return value;
 }
@@ -34128,7 +34141,7 @@ function readSettings() {
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", getInput("drafts")),
-    maxBodyChars: whole("max-body-chars", getInput("max-body-chars")),
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
     replies: getBooleanInput("translate-replies"),
     attribution: readAttribution()
   };
@@ -34142,8 +34155,8 @@ function readBody(body, limit) {
   const { official, fingerprint: published } = marker.split(body);
   return {
     official,
-    source: official.slice(0, limit),
-    truncated: official.length > limit,
+    source: limit === null ? official : official.slice(0, limit),
+    truncated: limit !== null && official.length > limit,
     published
   };
 }

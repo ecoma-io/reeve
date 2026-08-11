@@ -104,7 +104,14 @@ export interface Reply {
   readonly body: string;
   /** Who wrote it. Empty when GitHub answered a comment with no author on it. */
   readonly login: string;
-  /** Whether the author is a bot account — GitHub's own `type` field, not a guess from the name. */
+  /**
+   * Whether the author is a bot account. GitHub's own `type` field first, and
+   * a `[bot]` login suffix as well — the suffix is authoritative for the
+   * machine accounts GitHub's own API declines to type, most visibly a
+   * `github-actions[bot]` acting through a workflow's default token, which
+   * this project's own runs are one example of. Trusting `type` alone would
+   * read that account as human.
+   */
   readonly isBot: boolean;
 }
 
@@ -139,12 +146,15 @@ export async function listReplies(
     per_page: REPLY_PAGE,
   });
 
-  const replies = data.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    login: comment.user?.login ?? "",
-    isBot: comment.user?.type === "Bot",
-  }));
+  const replies = data.map((comment) => {
+    const login = comment.user?.login ?? "";
+    return {
+      id: comment.id,
+      body: comment.body ?? "",
+      login,
+      isBot: comment.user?.type === "Bot" || login.endsWith("[bot]"),
+    };
+  });
   return { replies, more: data.length === REPLY_PAGE };
 }
 
@@ -283,6 +293,7 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
     issue_number: at.number,
   });
 
+  const login = data.user?.login ?? "";
   return {
     title: data.title ?? "",
     body: data.body ?? "",
@@ -294,10 +305,7 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
       .map((label) => (typeof label === "string" ? label : (label.name ?? "")))
       .filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: {
-      login: data.user?.login ?? "",
-      isBot: data.user?.type === "Bot",
-    },
+    author: { login, isBot: data.user?.type === "Bot" || login.endsWith("[bot]") },
   };
 }
 
