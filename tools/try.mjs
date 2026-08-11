@@ -69,8 +69,10 @@ async function duties() {
  * Every input a duty's `action.yml` declares, with its default and whether it
  * is required.
  *
- * A regex rather than a YAML parser because there is no YAML dependency in this
- * repository and the shape is narrow: each input is a key at exactly two
+ * A regex rather than the YAML parser this repository now carries — that one is
+ * a runtime dependency of the duties, for reading a warrant, and a build tool
+ * has no business pulling the runtime in to read a manifest. The shape is
+ * narrow enough not to need it: each input is a key at exactly two
  * spaces, and a default is either a scalar on one line or a `|` block indented
  * six. A shape this file does not understand is reported rather than guessed
  * at, because a default read wrong is worse than one not read at all.

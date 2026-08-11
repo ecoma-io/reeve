@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createReply, createThread, listReplies, type GitHubApi } from "./forge.js";
+import {
+  createEffects,
+  createReply,
+  createThread,
+  listReplies,
+  listRepositoryLabels,
+  readStanding,
+  type GitHubApi,
+  type TrackerApi,
+} from "./forge.js";
 
 // The client arrives injected, so there is nothing to mock: a hand-built
 // Octokit is the whole environment of every port here.
@@ -131,5 +140,198 @@ describe("createReply", () => {
     // The failure this pins is the one that would be invisible in review and
     // catastrophic in a thread: a reply's block overwriting the thread body.
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The wider client, built the same way.
+ *
+ * Separate from `apiOf` because the two ports are separate on purpose: a test
+ * that handed the narrow functions this object would stop being able to fail
+ * when somebody widened `GitHubApi` back out again.
+ */
+function trackerOf(
+  issue: {
+    title?: string;
+    body?: string | null;
+    state?: string;
+    labels?: (string | { name?: string })[];
+  } = {},
+  pages: { name: string }[][] = [[]],
+) {
+  const get = vi.fn(() => Promise.resolve({ data: issue }));
+  const update = vi.fn(() => Promise.resolve({}));
+  const addLabels = vi.fn(() => Promise.resolve({}));
+  const createComment = vi.fn(() => Promise.resolve({}));
+  const addAssignees = vi.fn(() => Promise.resolve({}));
+  const listLabelsForRepo = vi.fn((params: { page?: number }) =>
+    Promise.resolve({ data: pages[(params.page ?? 1) - 1] ?? [] }),
+  );
+
+  return {
+    api: {
+      rest: {
+        issues: {
+          get,
+          update,
+          addLabels,
+          createComment,
+          addAssignees,
+          listLabelsForRepo,
+        },
+      },
+    } as unknown as TrackerApi,
+    get,
+    update,
+    addLabels,
+    createComment,
+    addAssignees,
+    listLabelsForRepo,
+  };
+}
+
+describe("readStanding", () => {
+  it("reads the title, the body, the labels and whether it is closed", async () => {
+    const { api, get } = trackerOf({
+      title: "Xuất file rỗng",
+      body: OFFICIAL,
+      state: "open",
+      labels: [{ name: "bug" }, { name: "needs reproduction" }],
+    });
+
+    await expect(readStanding(api, AT)).resolves.toEqual({
+      title: "Xuất file rỗng",
+      body: OFFICIAL,
+      labels: ["bug", "needs reproduction"],
+      closed: false,
+    });
+    expect(get).toHaveBeenCalledWith({ owner: "ecoma-io", repo: "reeve", issue_number: 42 });
+  });
+
+  it("reads a label GitHub sent as a bare string", async () => {
+    // Both shapes are documented. Assuming one and getting the other would make
+    // every guardrail believe the thread is unlabelled, which is the direction
+    // in which the mistake overrules a maintainer.
+    const { api } = trackerOf({ labels: ["bug", "documentation"] });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({
+      labels: ["bug", "documentation"],
+    });
+  });
+
+  it("drops a label with no name rather than carrying an empty one", async () => {
+    const { api } = trackerOf({ labels: [{ name: "bug" }, {}, ""] });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({ labels: ["bug"] });
+  });
+
+  it("reads a thread with nothing on it as empty text and no labels", async () => {
+    await expect(readStanding(trackerOf({}).api, AT)).resolves.toEqual({
+      title: "",
+      body: "",
+      labels: [],
+      closed: false,
+    });
+  });
+
+  it("reads a closed thread as closed", async () => {
+    const { api } = trackerOf({ state: "closed" });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({ closed: true });
+  });
+});
+
+describe("listRepositoryLabels", () => {
+  const where = { owner: "ecoma-io", repo: "reeve" };
+
+  it("reads the taxonomy the warrant will be checked against", async () => {
+    const { api, listLabelsForRepo } = trackerOf({}, [[{ name: "bug" }, { name: "performance" }]]);
+
+    await expect(listRepositoryLabels(api, where)).resolves.toEqual(["bug", "performance"]);
+    expect(listLabelsForRepo).toHaveBeenCalledWith({ ...where, per_page: 100, page: 1 });
+  });
+
+  it("reads past the first page, so label 101 is not reported as missing", async () => {
+    // The failure this exists for: a repository with more labels than one page
+    // validating against the first hundred and failing the run over a label
+    // that is right there.
+    const first = Array.from({ length: 100 }, (_, index) => ({ name: `label-${String(index)}` }));
+    const { api, listLabelsForRepo } = trackerOf({}, [first, [{ name: "performance" }]]);
+
+    await expect(listRepositoryLabels(api, where)).resolves.toHaveLength(101);
+    expect(listLabelsForRepo).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops on a short page rather than asking for one more that is empty", async () => {
+    const { api, listLabelsForRepo } = trackerOf({}, [[{ name: "bug" }]]);
+
+    await listRepositoryLabels(api, where);
+    expect(listLabelsForRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops at the ceiling rather than paging a repository forever", async () => {
+    const full = Array.from({ length: 100 }, (_, index) => ({ name: `label-${String(index)}` }));
+    const { api, listLabelsForRepo } = trackerOf(
+      {},
+      Array.from({ length: 20 }, () => full),
+    );
+
+    await expect(listRepositoryLabels(api, where)).resolves.toHaveLength(1000);
+    expect(listLabelsForRepo).toHaveBeenCalledTimes(10);
+  });
+
+  it("reads a repository with no labels as no labels", async () => {
+    await expect(listRepositoryLabels(trackerOf({}, [[]]).api, where)).resolves.toEqual([]);
+  });
+});
+
+describe("createEffects", () => {
+  const issue = { owner: "ecoma-io", repo: "reeve", issue_number: 42 };
+
+  it("adds labels, and adds rather than replaces", async () => {
+    // `addLabels` and not `setLabels`, which is the whole argument: what a
+    // maintainer put on a thread stays there.
+    const { api, addLabels } = trackerOf();
+
+    await createEffects(api, AT).addLabels(["bug", "performance"]);
+    expect(addLabels).toHaveBeenCalledWith({ ...issue, labels: ["bug", "performance"] });
+  });
+
+  it("asks GitHub nothing when there are no labels to add", async () => {
+    const { api, addLabels } = trackerOf();
+
+    await createEffects(api, AT).addLabels([]);
+    expect(addLabels).not.toHaveBeenCalled();
+  });
+
+  it("posts a new comment and never edits an existing one", async () => {
+    const { api, createComment } = trackerOf();
+
+    await createEffects(api, AT).comment("Xin chào.");
+    expect(createComment).toHaveBeenCalledWith({ ...issue, body: "Xin chào." });
+  });
+
+  it("adds assignees, keeping whoever is already assigned", async () => {
+    const { api, addAssignees } = trackerOf();
+
+    await createEffects(api, AT).assign(["maintainer"]);
+    expect(addAssignees).toHaveBeenCalledWith({ ...issue, assignees: ["maintainer"] });
+  });
+
+  it("asks GitHub nothing when there is nobody to assign", async () => {
+    const { api, addAssignees } = trackerOf();
+
+    await createEffects(api, AT).assign([]);
+    expect(addAssignees).not.toHaveBeenCalled();
+  });
+
+  it("closes as not planned, because nothing Reeve closes was completed", async () => {
+    // A tracker that records the difference is one a maintainer can audit
+    // afterwards; `completed` would put Reeve's guess in the same field a
+    // shipped fix goes in.
+    const { api, update } = trackerOf();
+
+    await createEffects(api, AT).closeAsNotPlanned();
+    expect(update).toHaveBeenCalledWith({ ...issue, state: "closed", state_reason: "not_planned" });
   });
 });

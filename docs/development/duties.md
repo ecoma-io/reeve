@@ -126,8 +126,10 @@ An integration test reads `action.yml` back and fails when the names it declares
 and the names the duty asks for stop matching. A rename in one place alone would
 otherwise leave the duty reading an empty string on every run, silently.
 
-Then add the entry point to the build and the release workflow — both carry
-`TODO(stage-0)` pointers at the lines that need it.
+Then add the entry point to `tools/build.mjs` and the duty's directory to the
+archive step in `.github/workflows/release.yml`. Both are short lists naming
+every duty, and a duty missing from the second one builds on your machine and is
+absent from the release tree.
 
 ### 6. Add the commit scope
 

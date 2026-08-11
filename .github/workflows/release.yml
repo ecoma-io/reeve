@@ -110,8 +110,11 @@ jobs:
         if: steps.release.outputs.release_created
         run: |
           pnpm build
-          if ! git diff --exit-code --stat -- dist; then
-            echo "::error::dist/ does not match src/ at this tag. The floating tag was not moved."
+          # Every bundle, not only the root one — a pathspec here would have
+          # answered for `dist/` and said nothing about a duty's, which is the
+          # bundle a consumer actually runs.
+          if ! git diff --exit-code --stat; then
+            echo "::error::A committed bundle does not match src/ at this tag. The floating tag was not moved."
             exit 1
           fi
 
@@ -150,7 +153,7 @@ jobs:
           # to `tools/build.mjs` is added here too, or its bytes go unattested
           # while the release claims otherwise.
           cp -r dist action.yml LICENSE README.md "$staged/"
-          cp -r translate "$staged/"
+          cp -r translate triage "$staged/"
           tar --sort=name --owner=0 --group=0 --numeric-owner \
               --mode='a+rX,u+w,go-w' \
               --mtime="@$(git log -1 --format=%ct)" \

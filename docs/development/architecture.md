@@ -139,10 +139,11 @@ pointing at the same bundle with a different entry point. A caller configuring
 `triage` never sees an input that belongs to `translate`, and neither duty
 carries the other's defaults.
 
-The build produces one bundle per duty entry point. Both the build script and
-the release workflow currently assume a single one; the `TODO(stage-0)` comments
-in `tools/build.mjs` and `.github/workflows/release.yml` mark the two places
-that have to change.
+The build produces one bundle per duty entry point. Two lists say which:
+`tools/build.mjs` names the entry points, and the archive step in
+`.github/workflows/release.yml` names the directories that go into the release
+tree. A duty that is in the first and not the second builds locally and ships
+nothing.
 
 ### The root action, which is a signpost
 

@@ -1,0 +1,218 @@
+import { describe, expect, it } from "vitest";
+
+import type { Spend } from "../../core/meter.js";
+
+import { summarize, type Run } from "./summary.js";
+
+// This page is read by the person who configured the run, and the question they
+// open it with is never "what did it apply" — that is visible on the thread. It
+// is "why is that different from what I expected", and every answer to that is
+// something the run refused. So the cases below are mostly refusals.
+
+function run(over: Partial<Run> = {}): Run {
+  return {
+    thread: 7,
+    dryRun: false,
+    warrant: ".github/reeve.yml",
+    language: "English",
+    screenedOut: null,
+    proposed: ["bug"],
+    confidence: 0.9,
+    floor: 0.75,
+    applied: ["bug"],
+    refused: [],
+    duplicateOf: null,
+    permitted: ["label"],
+    withheld: [],
+    done: { labels: ["bug"], commented: false, assigned: [], closed: false },
+    memory: { size: 0, recalled: 0 },
+    note: null,
+    spent: [],
+    modelNames: new Map(),
+    screenNames: new Map(),
+    ...over,
+  };
+}
+
+function spend(over: Partial<Spend> = {}): Spend {
+  return {
+    purpose: "triage",
+    model: "big",
+    requests: 1,
+    failed: 0,
+    prompt: 900,
+    completion: 40,
+    unreported: 0,
+    ...over,
+  };
+}
+
+describe("summarize", () => {
+  it("names the thread and what was applied", () => {
+    const page = summarize(run());
+
+    expect(page).toContain("## Reeve · triage");
+    expect(page).toContain("Thread #7");
+    expect(page).toContain("Applied `bug`.");
+  });
+
+  it("says a dry run was a dry run, at the top", () => {
+    expect(summarize(run({ dryRun: true }))).toContain("**dry run**, nothing was applied");
+  });
+
+  it("reports the confidence against the floor it was measured on", () => {
+    // A number on its own is not information. The pair is what a maintainer
+    // tunes.
+    expect(summarize(run({ confidence: 0.42, floor: 0.75 }))).toContain(
+      "Confidence 0.42 against a floor of 0.75",
+    );
+  });
+
+  it("explains a verdict that was under the floor rather than reporting nothing", () => {
+    const page = summarize(
+      run({ confidence: 0.4, applied: [], proposed: ["bug", "docs"], refused: [] }),
+    );
+
+    expect(page).toContain("under the floor, so it is reported and not applied");
+    expect(page).toContain("| `bug` | **not applied** | below the confidence floor of 0.75 |");
+  });
+
+  it("says which guardrail refused each label", () => {
+    // The difference between `proposed` and `labels` is the guardrails, and this
+    // is the only place a reader can see which guardrail it was.
+    const page = summarize(
+      run({
+        proposed: ["bug", "invented"],
+        applied: ["bug"],
+        refused: [{ what: "invented", why: "`.github/reeve.yml` does not name it" }],
+      }),
+    );
+
+    expect(page).toContain("| `bug` | applied | — |");
+    expect(page).toContain("| `invented` | **refused** | `.github/reeve.yml` does not name it |");
+  });
+
+  it("says a verdict that proposed nothing is a real answer", () => {
+    const page = summarize(run({ proposed: [], applied: [] }));
+
+    expect(page).toContain("No label was applied.");
+    expect(page).toContain("The verdict proposed no labels, which is a real answer.");
+  });
+
+  it("stops at the screen when the screen stopped the run", () => {
+    const page = summarize(
+      run({
+        screenedOut: {
+          reason: "template",
+          note: "the issue template came back with nothing filled in",
+        },
+        proposed: [],
+        applied: [],
+        confidence: 0,
+      }),
+    );
+
+    expect(page).toContain("Screened out as `template`");
+    expect(page).toContain("This is a real answer rather than a failure.");
+    // No table, because nothing was proposed and the reason it was not is at
+    // the top of the page rather than in a column.
+    expect(page).not.toContain("What the verdict proposed");
+  });
+
+  it("says why there is no verdict when there is none", () => {
+    // Every model failing and an answer nobody could read are different
+    // configurations with the same outcome, and a page reporting neither would
+    // read as a model that agreed with nothing.
+    expect(
+      summarize(run({ note: "the verdict did not parse", proposed: [], applied: [] })),
+    ).toContain("No verdict — the verdict did not parse.");
+  });
+
+  it("reports what memory contributed, including that it contributed nothing", () => {
+    expect(summarize(run({ memory: { size: 12, recalled: 3 } }))).toContain(
+      "Memory: 3 of 12 corrections reached the prompt",
+    );
+    expect(summarize(run({ memory: { size: 1, recalled: 0 } }))).toContain(
+      "Memory: 0 of 1 correction reached the prompt",
+    );
+  });
+
+  it("reports a duplicate it was not allowed to act on", () => {
+    const page = summarize(run({ duplicateOf: 12 }));
+
+    expect(page).toContain("possible duplicate of #12");
+    expect(page).toContain("`apply` does not name `close`");
+  });
+
+  it("says so when it did close one", () => {
+    const page = summarize(
+      run({
+        duplicateOf: 12,
+        permitted: ["label", "close"],
+        done: { labels: ["bug"], commented: false, assigned: [], closed: true },
+      }),
+    );
+
+    expect(page).toContain("possible duplicate of #12, and closed.");
+  });
+
+  it("lists the effects beyond labelling, and only the ones that happened", () => {
+    const page = summarize(
+      run({ done: { labels: ["bug"], commented: true, assigned: ["ana"], closed: false } }),
+    );
+
+    expect(page).toContain("Also: a comment, assigned ana.");
+  });
+
+  it("says nothing about other effects when there were none", () => {
+    expect(summarize(run())).not.toContain("Also:");
+  });
+
+  it("names the capabilities the workflow asked for and the file does not grant", () => {
+    // Not an error — the file is the authority — but a maintainer who wrote
+    // `apply: label, comment` and got no comment would otherwise read a working
+    // action as a broken one.
+    const page = summarize(run({ permitted: ["label"], withheld: ["comment", "close"] }));
+
+    expect(page).toContain("`apply` asks for `comment`, `close`");
+    expect(page).toContain("`.github/reeve.yml` does not grant to this duty");
+  });
+
+  it("says the same thing on a run the screen stopped", () => {
+    // The gap between what was asked for and what is granted is a configuration
+    // fact, and it is true whether or not the run reached a model.
+    const page = summarize(
+      run({
+        screenedOut: { reason: "empty", note: "the thread carries no text to work from" },
+        withheld: ["comment"],
+      }),
+    );
+
+    expect(page).toContain("`apply` asks for `comment`");
+  });
+
+  it("bills the cheap roster and the expensive one as separate rows", () => {
+    // Which is the whole point of metering them apart: a maintainer deciding
+    // whether the cheap pass earns its keep needs two rows rather than one.
+    const page = summarize(
+      run({
+        spent: [spend({ purpose: "screen", model: "small" }), spend()],
+        screenNames: new Map([["small", "Quick"]]),
+        modelNames: new Map([["big", "Careful"]]),
+      }),
+    );
+
+    expect(page).toContain("| Screening | Quick |");
+    expect(page).toContain("| Triage | Careful |");
+  });
+
+  it("says plainly when a run cost nothing", () => {
+    expect(summarize(run())).toContain(
+      "No model was asked anything this run — every decision was made by code.",
+    );
+  });
+
+  it("ends with exactly one newline, whatever the last section was", () => {
+    expect(summarize(run())).toMatch(/[^\n]\n$/);
+  });
+});

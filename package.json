@@ -52,7 +52,8 @@
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
-    "eld": "^2.0.3"
+    "eld": "^2.0.3",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",

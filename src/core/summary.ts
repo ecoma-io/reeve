@@ -17,6 +17,8 @@
  */
 import * as core from "@actions/core";
 
+import { STAGE, total, type Spend } from "./meter.js";
+
 export async function writeSummary(markdown: string): Promise<void> {
   // Set by every current runner and by nothing else — `act` and a local
   // `node dist/index.js` have no summary to write to, and warning about it on
@@ -76,4 +78,75 @@ export function count(value: number): string {
  */
 export function cell(text: string): string {
   return text.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+
+/**
+ * What the run spent, per stage and model, and what it adds up to.
+ *
+ * Here rather than in each duty because none of it is a duty's business: the
+ * columns are the meter's, the arithmetic is the meter's, and the sentences
+ * under the table are about the provider protocol rather than about labels or
+ * languages. A second duty rendering its own would be a second chance to leave
+ * out the line that says the totals are a floor.
+ *
+ * `name` is the one thing a duty knows and this does not: which of its rosters
+ * a model id came from, so a judge seat called `Careful` reads as `Careful`
+ * rather than as the id a maintainer masked out of the log.
+ */
+export function cost(spent: readonly Spend[], name: (spend: Spend) => string): string {
+  const sum = total(spent);
+  const rows = spent.map((spend) => [
+    STAGE[spend.purpose],
+    cell(name(spend)),
+    count(spend.requests),
+    spend.failed === 0 ? "—" : count(spend.failed),
+    count(spend.prompt),
+    count(spend.completion),
+    count(spend.prompt + spend.completion),
+  ]);
+
+  if (rows.length === 0) {
+    return [
+      "### Cost",
+      "",
+      "No model was asked anything this run — every decision was made by code.",
+    ].join("\n");
+  }
+
+  rows.push([
+    "**Total**",
+    "",
+    `**${count(sum.requests)}**`,
+    sum.failed === 0 ? "—" : `**${count(sum.failed)}**`,
+    `**${count(sum.prompt)}**`,
+    `**${count(sum.completion)}**`,
+    `**${count(sum.prompt + sum.completion)}**`,
+  ]);
+
+  const lines = [
+    "### Cost",
+    "",
+    table(["Stage", "Model", "Requests", "Failed", "Prompt", "Completion", "Tokens"], rows),
+  ];
+
+  // Said plainly, because the alternative is a reader treating a floor as a
+  // total. Many OpenAI-compatible gateways send no `usage` at all, and a run
+  // against one of those reports every request and no tokens — which is the
+  // truth, and is only misleading if it goes unlabelled.
+  if (sum.unreported > 0) {
+    lines.push(
+      "",
+      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} ` +
+        "came back without a `usage` field, so the token counts above are a floor rather than a total.",
+    );
+  }
+  if (sum.failed > 0) {
+    lines.push(
+      "",
+      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. ` +
+        "That is what rotation costs, and it is in the totals because the provider counted it too.",
+    );
+  }
+
+  return lines.join("\n");
 }

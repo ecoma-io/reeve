@@ -946,9 +946,11 @@ describe("the action contract", () => {
   /**
    * Every input `action.yml` declares, read straight out of it.
    *
-   * A regex rather than a parser because there is no YAML dependency here and
-   * the shape being read is two levels deep and fully indented — every input is
-   * a key at exactly two spaces inside the `inputs:` block.
+   * A regex rather than the YAML parser this repository now carries: that one
+   * is bundled into the duties to read a warrant at runtime, and reaching for
+   * it here would make this suite agree with itself about a file it is
+   * checking. The shape being read is two levels deep and fully indented —
+   * every input is a key at exactly two spaces inside the `inputs:` block.
    */
   async function declaredInputs(): Promise<string[]> {
     const text = await readFile(join(DUTY, "action.yml"), "utf8");
