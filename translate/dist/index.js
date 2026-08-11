@@ -32859,7 +32859,12 @@ async function listReplies(api, at) {
     issue_number: at.number,
     per_page: REPLY_PAGE
   });
-  const replies = data.map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+  const replies = data.map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    login: comment.user?.login ?? "",
+    isBot: comment.user?.type === "Bot"
+  }));
   return { replies, more: data.length === REPLY_PAGE };
 }
 function createReply(api, at, reply) {

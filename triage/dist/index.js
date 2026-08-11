@@ -32843,7 +32843,11 @@ async function readStanding(api, at) {
     // read rather than one being assumed and the other becoming an empty list
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-    closed: data.state === "closed"
+    closed: data.state === "closed",
+    author: {
+      login: data.user?.login ?? "",
+      isBot: data.user?.type === "Bot"
+    }
   };
 }
 var LABEL_PAGE = 100;
@@ -33811,6 +33815,55 @@ function evidenced(body) {
   return segments(body).some((segment) => segment.kind !== "prose");
 }
 
+// src/core/spam.ts
+async function sift(request2) {
+  const { provider, models, weather } = request2;
+  if (models.length === 0) return { dropped: null, failures: [] };
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, prompt2(request2)),
+    weather
+  );
+  if (!rotation.success) return { dropped: null, failures: rotation.failures };
+  return { dropped: read(rotation.success.content), failures: rotation.failures };
+}
+function read(answer2) {
+  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
+  if (said("spam") === said("off-topic")) return null;
+  if (said("spam")) {
+    return { reason: "spam", note: "the cheap pass read it as spam" };
+  }
+  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
+}
+function prompt2(request2) {
+  const { title, body, about } = request2;
+  const material = enclose("untrusted-thread", `TITLE: ${title}
+BODY:
+${body}`);
+  return [
+    {
+      role: "system",
+      content: [
+        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
+        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
+        "written report is worth attention.",
+        "",
+        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
+        "Answer with exactly one of these words and nothing else:",
+        "",
+        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
+        "- off-topic: a real request about something other than this repository.",
+        "- keep: anything else, including a report you cannot make sense of.",
+        "",
+        "When you are not sure, answer keep.",
+        "",
+        material.rule
+      ].join("\n")
+    },
+    { role: "user", content: material.block }
+  ];
+}
+
 // src/core/summary.ts
 async function writeSummary(markdown) {
   if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
@@ -33885,55 +33938,6 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
-}
-
-// src/duties/triage/spam.ts
-async function sift(request2) {
-  const { provider, models, weather } = request2;
-  if (models.length === 0) return { dropped: null, failures: [] };
-  const rotation = await rotateModels(
-    models,
-    (model) => provider.complete(model, prompt2(request2)),
-    weather
-  );
-  if (!rotation.success) return { dropped: null, failures: rotation.failures };
-  return { dropped: read(rotation.success.content), failures: rotation.failures };
-}
-function read(answer2) {
-  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
-  if (said("spam") === said("off-topic")) return null;
-  if (said("spam")) {
-    return { reason: "spam", note: "the cheap pass read it as spam" };
-  }
-  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
-}
-function prompt2(request2) {
-  const { title, body, about } = request2;
-  const material = enclose("untrusted-thread", `TITLE: ${title}
-BODY:
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
-        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
-        "written report is worth attention.",
-        "",
-        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
-        "Answer with exactly one of these words and nothing else:",
-        "",
-        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
-        "- off-topic: a real request about something other than this repository.",
-        "- keep: anything else, including a report you cannot make sense of.",
-        "",
-        "When you are not sure, answer keep.",
-        "",
-        material.rule
-      ].join("\n")
-    },
-    { role: "user", content: material.block }
-  ];
 }
 
 // src/duties/triage/summary.ts
@@ -34286,7 +34290,11 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       title: thread.title,
       body: thread.body,
       labels: thread.labels,
-      closed: false
+      closed: false,
+      // A sweep's listing endpoint does not carry the opener's account type,
+      // and triage has no guard that reads it — this placeholder is never
+      // inspected, only `respond`'s bot-author guard reads `author` at all.
+      author: { login: "", isBot: false }
     };
     const outcome = await decide(authority2, standing, settings, stages, weather);
     const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);

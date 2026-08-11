@@ -66,7 +66,13 @@ export interface GitHubApi {
         issue_number: number;
         per_page?: number;
         page?: number;
-      }): Promise<{ data: { id: number; body?: string | null }[] }>;
+      }): Promise<{
+        data: {
+          id: number;
+          body?: string | null;
+          user?: { login?: string; type?: string } | null;
+        }[];
+      }>;
       updateComment(params: {
         owner: string;
         repo: string;
@@ -96,6 +102,10 @@ export function createThread(api: GitHubApi, at: Location): Thread {
 export interface Reply {
   readonly id: number;
   readonly body: string;
+  /** Who wrote it. Empty when GitHub answered a comment with no author on it. */
+  readonly login: string;
+  /** Whether the author is a bot account — GitHub's own `type` field, not a guess from the name. */
+  readonly isBot: boolean;
 }
 
 /**
@@ -129,7 +139,12 @@ export async function listReplies(
     per_page: REPLY_PAGE,
   });
 
-  const replies = data.map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+  const replies = data.map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    login: comment.user?.login ?? "",
+    isBot: comment.user?.type === "Bot",
+  }));
   return { replies, more: data.length === REPLY_PAGE };
 }
 
@@ -179,6 +194,7 @@ export interface TrackerApi {
           body?: string | null;
           state?: string;
           labels?: (string | { name?: string })[];
+          user?: { login?: string; type?: string } | null;
         };
       }>;
       update(params: {
@@ -251,6 +267,13 @@ export interface Standing {
   /** Every label on the thread now, whoever put it there. */
   readonly labels: readonly string[];
   readonly closed: boolean;
+  /**
+   * Who opened the thread. Same shape as a `Reply`'s author, for the same
+   * reason: a duty that decides whether to speak at all needs to know whether
+   * it would be speaking to a bot before it spends anything deciding what to
+   * say.
+   */
+  readonly author: { readonly login: string; readonly isBot: boolean };
 }
 
 export async function readStanding(api: TrackerApi, at: Location): Promise<Standing> {
@@ -271,6 +294,10 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
       .map((label) => (typeof label === "string" ? label : (label.name ?? "")))
       .filter((name) => name.length > 0),
     closed: data.state === "closed",
+    author: {
+      login: data.user?.login ?? "",
+      isBot: data.user?.type === "Bot",
+    },
   };
 }
 

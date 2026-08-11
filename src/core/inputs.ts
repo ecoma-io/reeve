@@ -227,3 +227,30 @@ export function fraction(name: string, raw: string): number {
   }
   return value;
 }
+
+/**
+ * A whole number of 1 or more, or no bound at all.
+ *
+ * `whole` has no way to say "there is no ceiling" — every number it accepts is
+ * one, and the sentinel for "off" has to come from outside the range it
+ * measures. Zero cannot be that sentinel here: `0` is legitimate for a floor,
+ * where it is the scale's own vanishing point (`min-body-chars: 0` means
+ * "accept anything", a real setting `counted` already gives a meaning), but a
+ * ceiling has no vanishing point — there is no number of characters that
+ * means "unlimited" the way there is a count that means "nothing required".
+ * So a ceiling spells "no bound" as the word `none`, refused nowhere near the
+ * numbers, and `0` is refused here rather than silently meaning either "no
+ * bound" (surprising) or "truncate to nothing" (worse): a `max-body-chars: 0`
+ * is a maintainer who meant `none` and typed the wrong kind of zero.
+ */
+export function bounded(name: string, raw: string): number | null {
+  if (raw.trim().toLowerCase() === "none") return null;
+
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
+    );
+  }
+  return value;
+}

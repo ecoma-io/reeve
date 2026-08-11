@@ -105,6 +105,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { screen } from "../../core/screen.js";
+import { sift } from "../../core/spam.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
@@ -116,7 +117,6 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { sift } from "./spam.js";
 import {
   summarize,
   summarizeRecord,
@@ -342,6 +342,10 @@ async function runSweep(
       body: thread.body,
       labels: thread.labels,
       closed: false,
+      // A sweep's listing endpoint does not carry the opener's account type,
+      // and triage has no guard that reads it — this placeholder is never
+      // inspected, only `respond`'s bot-author guard reads `author` at all.
+      author: { login: "", isBot: false },
     };
     const outcome = await decide(authority, standing, settings, stages, weather);
     const done = settings.dryRun

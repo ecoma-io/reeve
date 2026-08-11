@@ -347,3 +347,29 @@ describe("fraction", () => {
     );
   });
 });
+
+describe("bounded", () => {
+  it("reads a ceiling", () => {
+    expect(bounded("max-body-chars", "6000")).toBe(6000);
+  });
+
+  it.each([
+    ["none", "none"],
+    ["upper case", "NONE"],
+    ["surrounding space", "  none\n"],
+  ])("reads %s as no bound at all", (_case, raw) => {
+    expect(bounded("max-body-chars", raw)).toBeNull();
+  });
+
+  it.each([
+    ["an empty input, which `Number` reads as zero", ""],
+    ["zero, the wrong kind of vanishing point for a ceiling", "0"],
+    ["a negative bound", "-1"],
+    ["a fraction", "1.5"],
+    ["a value with a unit", "6000 chars"],
+  ])("refuses %s, naming `none` as the way to say unlimited", (_case, raw) => {
+    expect(() => bounded("max-body-chars", raw)).toThrow(
+      `max-body-chars: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
+    );
+  });
+});

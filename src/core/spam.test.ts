@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Completion, Provider } from "../../core/provider.js";
+import type { Completion, Provider } from "./provider.js";
 
 import { sift, type SiftRequest } from "./spam.js";
 
