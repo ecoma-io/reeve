@@ -102,6 +102,38 @@ On a fork's pull request under plain `pull_request`, the token is read-only no
 matter what the block says. Use `pull_request_target` and read
 [Installation](installation.md#pull-requests) before you do.
 
+## The run went yellow, saying it delivered N of M
+
+This is [weather](sweep.md#why-a-sweep-exists-at-all-weather), not a bug. A
+429, a 5xx or a timeout on every remaining model in your list means the
+provider could not serve the rest of the run right now — nothing about that
+says Reeve was refused, only that capacity ran out before your list did. The
+run finished what it could, said exactly what is left, and ended in a
+warning on purpose, because failing the whole run over a provider's Tuesday
+would take the threads that did succeed down with it.
+
+**If this is a one-off run,** give it more models — the list is the budget,
+and a keyless or IP-rate-limited provider earns a longer one than you think it
+needs. **If this is a scheduled sweep,** do nothing: [the sweep](sweep.md) is what
+comes back for the remainder, for free, on whatever the fingerprint says is
+still untouched. Nothing is lost between runs, only deferred.
+
+## The run is red with an authentication error
+
+This is [configuration](sweep.md#why-a-sweep-exists-at-all-weather), not
+conditions, and it is the one provider failure that fails the run immediately
+rather than rotating past it. A 401 or a 403 means the key is wrong, expired,
+or was never set — and no amount of retrying or scheduling repairs that,
+because the request was never going to succeed. Waiting on a wrong key is
+waiting forever.
+
+Check `secrets.OPENAI_API_KEY` (or whatever secret your `api-key` input
+points at) is set on the repository or organisation the workflow runs in, and
+that it has not been rotated on the provider's side without being rotated
+here. If you meant to run keyless, remove `api-key` rather than passing an
+empty secret — [Cost](cost.md#running-it-with-no-key-at-all) covers that
+configuration.
+
 ## Provider problems
 
 Every provider failure is reported per model, with the HTTP status as context and

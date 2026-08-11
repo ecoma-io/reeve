@@ -32,8 +32,8 @@ checked in code, and state kept as plain files in the user's own repository.
 | ----------- | --------------------- | ------------------------------------------------------------------------------- |
 | `triage`    | ships                 | Sorts the backlog against a taxonomy the project wrote.                         |
 | `translate` | ships                 | Puts every issue and pull request in the languages the project reads.           |
-| `duplicate` | [Stage 4](#6-roadmap) | Finds the thread that already asked this — across the language it was asked in. |
-| `respond`   | [Stage 4](#6-roadmap) | Gives a stranger a first, useful reply in the language they wrote to us in.     |
+| `duplicate` | [Stage 5](#7-roadmap) | Finds the thread that already asked this — across the language it was asked in. |
+| `respond`   | [Stage 5](#7-roadmap) | Gives a stranger a first, useful reply in the language they wrote to us in.     |
 
 ## 2. The end state
 
@@ -61,7 +61,77 @@ Four things have to be true for that to count as reached:
    service to migrate off, no data held anywhere the project cannot delete with
    `rm`.
 
-## 3. Where this sits
+## 3. The ladder
+
+Reeve is not something you either install or don't. Everyone who wires an
+`uses:` line into a workflow starts at the same place, and what happens next is
+**exactly as much as they wrote down** — nothing more, and nothing that has to
+be guessed at. Picture it as a ladder rather than a switch: each rung is more
+of the warrant, never a different mode, and a maintainer climbs it only when
+the rung below stopped being enough.
+
+**Level 0 — zero config.** One `uses:` line, a provider, and nothing else. No
+`.github/reeve.yml` at all. An absent warrant is not an absent restriction — it
+is the narrowest one Reeve knows how to grant, enumerated in code: `triage` may
+only `label`, against a taxonomy it did not have to be told, because it is the
+labels the repository already has and the descriptions its own maintainers
+already wrote for them in GitHub's own UI — data that exists before Reeve is
+ever installed, so nobody types anything twice to get a sorted backlog on day
+one. `translate` may only `edit-body`. Nothing else runs. This arrives with
+[Stage 1](#7-roadmap); until then the file is required and its absence fails
+the run.
+
+**Level 1 — the taxonomy.** The maintainer writes `.github/reeve.yml` and puts
+the boundary between two labels into words a stranger's report can be checked
+against — `description`, `not`, `examples`. Sorting gets sharply better,
+because the confusion a general model was making was never about
+intelligence; it was about a decision the project made that nothing in a
+model's training could know. **A taxonomy-only warrant — labels and nothing
+else — is a complete, legitimate Level 1 configuration, not a half-finished
+one.** Every duty keeps its own narrow default capability, exactly as it did
+at level 0: writing the file changes what gets decided, not what is allowed to
+act. Nothing about authority moves until a maintainer says so explicitly,
+which is the next rung, not this one.
+
+**Level 2 — tuning authority.** Per-duty `capabilities:`, a label's `owner:`,
+its `exclusive_with:`, and — once [Stage 3](#7-roadmap) lands — `languages:`,
+all move into the warrant, reviewed the same way the taxonomy is. **The
+`capabilities:` block is where enumeration starts, and once it exists it is
+total:** a duty the block does not name is granted nothing at all — not its
+old default, not a smaller version of it. It runs, decides nothing, and says
+so in its own summary, rather than silently keeping the authority it held
+before the block was written. Writing `capabilities:` is therefore not
+additive to a taxonomy-only warrant; from the moment that key exists, every
+duty's authority is read out of it, and a duty a maintainer forgot to list
+there is a duty switched off, whether or not that was the intention. This is
+where a maintainer turns on the capability that was cheapest-but-not-safest by
+default, having watched a `dry-run` say what the rate actually is first.
+
+**Level 3 — the full office.** Sweep and backfill (`sweep:`, `since:`,
+`limit:`), memory's write path, and the `duplicate` and `respond` duties.
+Every one of these is opt-in, and every one sits at the top rung on purpose:
+they are the inputs and the duties that touch the most — a correction
+committed to the repository, a sweep across the whole backlog, an answer sent
+to a stranger — so they are the ones a maintainer reaches for last,
+deliberately, never by accident.
+
+**The discipline that keeps this from becoming knob soup is itself doctrine,
+not a style preference: every new setting lives in the warrant; every absent
+setting means today's behaviour; a "level" is not a mode.** It is simply how
+much of the warrant a maintainer has written. There is no `mode: basic` or
+`mode: full` anywhere in this design, and there will not be a second
+configuration file sitting next to this one, ever — one file, read the same
+way at every level, is what makes climbing the ladder something a `git diff`
+can show a reviewer, rather than something a support thread has to explain.
+
+This reshapes how [D2](#d2--authority-is-granted-written-and-bounded) reads: a
+`capabilities:` block, once written, is not an optional tightening of a duty's
+own defaults — it is the entire surface for what any duty may do — and the
+absence of that block, whether because there is no file at all or because the
+file stops at a taxonomy, is itself a stated, narrow authority rather than an
+unstated wide one.
+
+## 4. Where this sits
 
 Doctrine invented in a closed room is preference with better formatting. This
 section records what was true in the field when the doctrine was set, so that a
@@ -94,7 +164,7 @@ Three consequences, and they are load-bearing below: **interoperate on the
 boundary rather than compete on it**; **do not argue about price**; **treat
 language as the product, not as a feature of one duty**.
 
-## 4. Doctrine
+## 5. Doctrine
 
 These are load-bearing. Each one costs us something real — that is how you can
 tell they are doctrine and not preferences.
@@ -115,7 +185,27 @@ language do not ship until they are honest in several.
 
 Reeve does what the warrant names and nothing else. The check is in code,
 against the file — never against the model's own claim about what it was
-permitted to do. An unnamed label is not applied. An unnamed duty does not run.
+permitted to do. An unnamed label is not applied. A duty enumerated out of an
+existing `capabilities:` block is granted nothing.
+
+**Absence, silence, and enumeration are three different questions, and they
+get three different answers.** No warrant file at all is read as the
+narrowest authority Reeve defines in code — [level 0 of the
+ladder](#3-the-ladder): `triage` may only `label`, against the repository's
+own existing labels, and `translate` may only `edit-body`. A warrant that
+exists but carries no `capabilities:` block leaves every duty on that same
+narrow default — a taxonomy written to sharpen a verdict is not a claim about
+who may act, and a taxonomy-only file is a complete, working [level
+1](#3-the-ladder) configuration in its own right, not a half-finished [level
+2](#3-the-ladder) one. Only once a `capabilities:` block exists does
+enumeration become total: a duty the block does not name is granted nothing —
+not its old default, not a smaller version of it — because **once a
+maintainer begins enumerating who may act, the enumeration is the whole
+answer, and the file's mere existence is not.** Writing the first entry into
+`capabilities:` therefore does not add to what a taxonomy-only warrant already
+granted; from that point on every duty's authority is read out of the block,
+and a duty left out of it is a duty switched off, whether or not that was the
+intention.
 
 Where a platform or an established specification already expresses this, Reeve
 speaks that vocabulary rather than shipping a rival one. Being one more
@@ -213,7 +303,38 @@ language, not its average.
 _Costs us:_ a duty is not done when it works; it is done when it is measured, in
 every language it claims.
 
-## 5. Shape
+### D12 — Capacity is weather, authority is configuration
+
+A 429, a 5xx, or a timeout is weather: it says nothing about whether Reeve was
+ever allowed near the repository, only that a provider could not serve this
+particular request right now. A run that meets one rotates to the next model
+on the list, and when every model on the list is exhausted, it does not fail —
+it **delivers what it finished**, states exactly what remains in its outputs,
+and ends in a warning, never red. The repositories Reeve most wants to serve
+run on free, IP-rate-limited providers, where a 429 is nobody's fault, clears
+on nobody's schedule, and will not clear again inside the same run no matter
+how long the job waits for it. [The sweep](#7-roadmap) is what comes back for
+whatever the weather left undone.
+
+A 401 or a 403 is a different fact about the world, and gets the opposite
+answer: it is **configuration**, not conditions, and it fails the run red,
+immediately, on the first model that reports it. Waiting on a wrong key is
+waiting forever — no amount of rotation or scheduling repairs a credential
+that was never going to work — and a green run over a broken key is not a
+successful run. It is a repository silently never served at all, which is a
+worse outcome than a loud one.
+
+**A model is never retried within one run**, whichever kind of failure it
+reported. That is already doctrine ahead of this entry, and it still holds
+here: a provider's capacity does not clear inside a single job, and a runner
+minute spent finding that out twice is a runner minute somebody is paying for.
+
+_Costs us:_ every provider error has to be classified correctly at the one
+place it is received, because a 429 misread as configuration fails a run that
+would have finished on the next scheduled sweep, and a 401 misread as weather
+runs a repository's whole queue against a key that will never work.
+
+## 6. Shape
 
 ```
 reeve/
@@ -243,7 +364,7 @@ Architecture is documented for contributors in
 [`development/`](development/README.md); the configuration surface is documented
 for users in [`usage/`](usage/README.md).
 
-## 6. Roadmap
+## 7. Roadmap
 
 Stages, not dates. Each one names the thing that has to be true before the next
 begins, and each says what of it already stands — because a roadmap that only
@@ -265,100 +386,158 @@ and the state layer. They do: one client with model rotation, one nonce
 boundary, one warrant reader, one summary. Each ships from its own directory
 with its own `action.yml`, and this repository runs both on its own threads.
 
-### Stage 1 — The language layer, and the number that proves it
+### Stage 1 — The bottom rung
 
-Language stops being something `translate` does and becomes something the core
-knows: the language the author wrote in, the language the project works in, the
-languages its maintainers read. Every duty receives all three and is judged on
-whether its decision survives the author not writing in English.
+Zero config becomes real. No `.github/reeve.yml` stops being an error and
+becomes [level 0 of the ladder](#3-the-ladder) — the narrowest authority Reeve
+knows how to grant, enumerated in code rather than left to a duty's own
+defaults: `triage` may only `label`, against a taxonomy built from the
+repository's own labels and the descriptions their own maintainers already
+wrote for them on GitHub. `translate` may only `edit-body`.
 
-**Standing:** detection is the core's, it runs on the prose residue, it is free
-before it is paid for, and `unknown` is a real answer rather than a default. A
-verdict is told what it is reading, and the taxonomy is never translated.
+**Standing:** the warrant reader already treats an absent `labels:` block as
+an empty taxonomy rather than an error, and label existence is already checked
+against the repository's real labels over the API before anything is applied
+— both of which this stage reuses rather than rebuilding.
 
-**Missing:** the three roles as core state — today a duty is handed one
-`languages` input and infers the rest. And the evaluation: there is no fixture
-set and no harness in this repository, so every accuracy claim on these pages is
-currently unbacked.
+**Missing:** the code path that runs with no warrant file at all still fails
+the job red, naming the missing file as a missing authority. That has to
+become the level-0 path instead: read the repository's own labels and their
+descriptions, build the implicit taxonomy from them, and cap capabilities at
+`label` and `edit-body` with nothing configurable about either.
 
-**Done when:** `triage`'s worst-language number is published, and anyone can
-reproduce it from this repository.
+**Done when:** a repository with no `.github/reeve.yml` gets its backlog
+sorted against its own labels by adding two lines of workflow — one
+`uses: ecoma-io/reeve/triage@v0.1`, a provider, and nothing else.
 
-### Stage 2 — The warrant is the whole answer
+### Stage 2 — Weather, and the sweep
 
-One `.github/reeve.yml` declaring which duties are enabled and what each may do.
-Today's per-duty inputs collapse into it; workflow YAML stops being where
-authority is expressed. Where the platform has its own allowlist vocabulary,
-Reeve emits to it rather than around it.
+[D12](#d12--capacity-is-weather-authority-is-configuration) stops being a
+paragraph and becomes behaviour: a 429, a 5xx or a timeout rotates to the next
+model and, when the list runs out, delivers what finished and warns naming the
+remainder, rather than failing red over conditions nobody configured. A 401 or
+a 403 still fails red immediately — that half does not change. Every duty
+gains `sweep:`, `since:` and `limit:` so a scheduled run can work through open
+threads instead of one, bounded to what a run is willing to pay for, and a
+thread it already handled is skipped for free the same way a re-run of one
+thread already is.
+
+**Standing:** a model is already rotated past and never retried
+([D7](#d7--any-endpoint-including-the-free-ones)), and the idempotency
+fingerprint that makes re-running one thread free
+([D9](#d9--re-running-is-cheap-and-safe)) is exactly the mechanism a sweep
+needs to converge without a state file of its own — this stage wires listing
+and scheduling around a mechanism that already exists rather than inventing a
+second one.
+
+**Missing:** nothing yet distinguishes a starvation failure from a
+configuration one in the outputs a workflow can branch on; there is no
+`sweep`, `since` or `limit` input on any duty; and nothing lists open threads
+on a schedule — every run today still needs a single thread named by an event
+or by `number`.
+
+**Done when:** a four-thousand-issue backlog on a keyless provider finishes
+over scheduled runs without a single red run and without a single duplicated
+action.
+
+### Stage 3 — The warrant is the whole answer
+
+One `.github/reeve.yml` declaring the taxonomy and, once a maintainer writes a
+`capabilities:` block, what each duty may do. Per [the
+ladder](#3-the-ladder) and the corrected
+[D2](#d2--authority-is-granted-written-and-bounded), the whole-answer
+principle attaches to that block, not to the file's mere existence: a
+taxonomy-only warrant leaves every duty on its own default, and a
+`capabilities:` block, once written, grants a duty left out of it nothing at
+all. Today's per-duty inputs collapse into the file, `translate` starts
+reading it, and `languages:` moves in alongside the taxonomy — landing as a
+breaking change on a `0.x` minor, per
+[what that means here](development/releasing.md#what-0x-and-10-mean-here).
 
 **Standing:** the file is parsed, the taxonomy is an allowlist checked in code
-against the parsed file, capabilities are granted per duty, and the narrower of
-the file and the workflow wins. `triage` takes its authority from nowhere else.
+against the parsed file, capabilities are granted per duty, and the narrower
+of the file and the workflow wins. `triage` already takes its authority from
+nowhere else, and detection — the free script-narrowing and profile steps
+that resolve an author's language before any duty asks for it — already
+stands as core state ([the language layer](development/language.md)).
 
-**Missing:** `translate` does not read the file at all. The languages belong in
-it and are not there. And a duty the file does not name still runs on its own
-defaults, where D2 says an unnamed duty does not run — the code and the doctrine
-disagree, and the doctrine is right.
+**Missing:** `translate` does not read the file at all. The three language
+roles belong in it and are not there — today a duty is handed one `languages`
+input and infers the rest. And today, a duty left out of an already-existing
+`capabilities:` block still runs on its own quiet default rather than being
+granted nothing, where the corrected D2 says it should be granted nothing at
+all — the code and the doctrine disagree, and the doctrine is right. A
+taxonomy-only warrant with no `capabilities:` block is not affected by this
+gap; it already behaves correctly, because an absent block already falls back
+to each duty's own default.
 
 **Done when:** a maintainer can answer "what may this thing do to my repo?" by
-reading one file, and no duty takes authority from workflow YAML.
+reading one file: a taxonomy alone leaves every duty on its default, a
+`capabilities:` block is the total and only source of what runs once it
+exists, and no duty takes authority from workflow YAML.
 
-### Stage 3 — Memory
+### Stage 4 — Memory, both directions
 
 Any duty can retrieve the last few times a human corrected this kind of case,
-from files committed to the repository. An empty store works on the first run
-and works better on the hundredth. Corrections are stored in the language they
-were made in and retrieved across languages.
+from files committed to the repository, and — new at this stage — can write
+one back. Recording a correction is a commit, needs `contents: write`, and is
+an explicit, top-rung capability for exactly that reason. Retrieval starts
+crossing the language boundary, using [the pivot](#9-settled-questions) rather
+than staying lexical.
 
-**Standing:** retrieval is a core service rather than one duty's feature, ranks
-lexically for nothing, and an empty store is the cold start rather than an
-error.
+**Standing:** retrieval is a core service rather than one duty's feature,
+ranks lexically for nothing — no provider, no request — and an empty store is
+the cold start rather than an error.
 
-**Missing:** nothing writes to the store — recording a correction is a commit
-and needs `contents: write`. And the retrieval is lexical, so it matches within
-one language, which is the half that makes memory worth having here.
+**Missing:** nothing writes to the store yet. And retrieval is lexical only,
+which matches within one language — the half that makes memory worth having on
+a project that does not share one.
 
 **Done when:** a correction a maintainer made on an English thread changes the
 verdict on the Vietnamese one describing the same thing.
 
-### Stage 4 — The duties only a multilingual project needs
+### Stage 5 — The duties only a multilingual project needs
 
-`duplicate` and `respond`. These are the proof of the whole thesis: finding that
-an issue in Vietnamese is the one already answered in English is something no
-competitor can do, because they match within a language. `respond` closes the
-loop by answering the stranger in their own words.
+`duplicate`, then `respond`. Both top-rung, both off by default, both the
+proof of the whole thesis: finding that an issue in Vietnamese is the one
+already answered in English is something no competitor can do, because
+everything else in this category matches within a language. `respond` closes
+the loop by answering the stranger in their own words.
 
-Blocked on open question 1 in [the language layer](development/language.md#open)
-— cross-language comparison needs a common representation, and which one is not
-yet decided.
+**No longer blocked.** [The pivot](#9-settled-questions) is decided —
+translation to the project's working language, then the same lexical ranking
+already used within one language — so what used to hold this stage open is
+settled rather than outstanding.
 
 **Done when:** a project can point at a thread that was found, matched and
-answered without any human reading either language.
+answered across a language boundary with no human reading both.
 
-### Stage 5 — Scheduled upkeep
+### Stage 6 — The number
 
-Reeve stops being purely event-driven. A scheduled sweep works the backlog that
-already exists under the same warrant, with the same idempotency — because the
-repositories that need this most are the ones with four thousand open issues,
-none of which will ever fire an `opened` event again.
+A small paired-fixture evaluation, committed here: the same case written in two
+languages, a few dozen pairs rather than a few hundred singles, measuring the
+worst-language gap directly instead of inferring it from two separate
+averages. `pnpm eval <duty>`, fixtures committed, results committed — the one
+number the whole thesis rests on, published from this repository and
+reproducible by anyone who clones it.
 
-A ceiling per sweep is part of the stage rather than a later refinement: four
-thousand issues is four thousand requests unless something says otherwise, and
-discovering that in a bill is not a supported experience.
+**Missing:** there is no fixture set and no harness in this repository yet, so
+every accuracy claim on these pages remains unbacked until this stage lands.
 
-**Done when:** a backfill over a large tracker is routine and affordable.
+**Done when:** the worst-language number is published and reproducible from
+this repository.
 
 ### Then `1.0`
 
 Every stage above done, the numbers published, and the input surface frozen
 under semver's promise. Nothing else is waiting on it.
 
-## 7. Non-goals
+## 8. Non-goals
 
 Stated so that "why doesn't it..." has an answer that is not a shrug.
 
 - **Not a coding agent.** Reeve reads and decides. It does not author diffs, run
-  tests, or fix bugs. See §8.1.
+  tests, or fix bugs. See §9.1.
 - **Not a hosted service.** No account, no dashboard, no data of yours anywhere
   we control. (D6)
 - **Not a chatbot.** Reeve does not hold a conversation in your thread. It does
@@ -372,12 +551,12 @@ Stated so that "why doesn't it..." has an answer that is not a shrug.
 - **Not a policy standard.** The warrant is a configuration file, not a
   specification we are asking anyone else to adopt. (D2)
 
-## 8. Settled questions
+## 9. Settled questions
 
 Recorded with the reasoning, because a decision without its argument gets
 relitigated every six months.
 
-### 8.1 — Does Reeve ever write code? No.
+### 9.1 — Does Reeve ever write code? No.
 
 Authoring a diff needs a checkout, a sandbox, and a test run to be worth
 anything, and every one of those contradicts the shape Reeve chose. It is also
@@ -385,14 +564,14 @@ the most crowded and best-funded part of the field. Reeve stays in the half of
 maintenance that is reading and deciding — which is the half where language is
 the hard problem, and therefore the half where Reeve has an argument.
 
-### 8.2 — Does Reeve define its own policy format? No.
+### 9.2 — Does Reeve define its own policy format? No.
 
 Enough repository-agent policy vocabularies exist, including the platform's own.
 The warrant is Reeve's configuration; where an established allowlist exists,
 Reeve emits to it. Adding one more incompatible format would cost real work and
 win nothing.
 
-### 8.3 — Where does evaluation live? In this repository.
+### 9.3 — Where does evaluation live? In this repository.
 
 The fixtures and the harness are committed here, under the `eval` commit scope,
 and neither ships in the bundle a consumer downloads.
@@ -411,10 +590,34 @@ with their URLs kept, the expected answer is the one a maintainer actually gave,
 and the results are committed so a change to a prompt shows up as a diff rather
 than as a claim in a pull request description.
 
-## 9. Open questions
+### 9.4 — Does cross-language comparison use embeddings? No — a pivot language and lexical ranking.
 
-Unresolved on purpose. Each changes the shape of Stage 4 and beyond, and
-guessing now would be worse than deciding later with evidence.
+Matching a Vietnamese report against an English one — for memory recall, and
+for `duplicate` — uses **translation to a pivot language, the project's own
+working language, followed by the same lexical ranking that already runs
+within one language.** Not multilingual embeddings.
+
+The argument is availability, not accuracy. Pivot-and-rank runs on every
+OpenAI-compatible `/chat/completions` endpoint, keyless ones included, because
+it needs nothing an ordinary chat completion does not already give it. An
+embeddings approach needs an `/embeddings` endpoint, and that is precisely
+what the cheapest, keyless, IP-rate-limited providers are least likely to
+serve — which would make cross-language memory and `duplicate`, the flagship
+proof of [D1](#d1--no-duty-is-english-only), the one feature a free-tier
+project cannot have. That contradicts
+[the non-goal](#8-non-goals) against anything provider-differentiated
+([D7](#d7--any-endpoint-including-the-free-ones)) as surely as if it called a
+vendor's proprietary API directly.
+
+**This sits behind the existing retrieval seam, not in front of it:** a better
+representation can replace pivot-and-rank later without a format break,
+because nothing downstream of retrieval knows how the ranking was produced,
+only what it returned.
+
+## 10. Open questions
+
+Unresolved on purpose. Each changes the shape of the roadmap's later stages,
+and guessing now would be worse than deciding later with evidence.
 
 1. **Does the core stay GitHub-shaped?** A forge abstraction is cheap now and
    expensive later, but it is also the classic premature generalisation. What

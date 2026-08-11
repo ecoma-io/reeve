@@ -274,7 +274,7 @@ The bolded cell is the deliberate part. `bump-minor-pre-major` sends breaking
 changes to the minor digit while the version is below 1.0.0, so a duty cannot
 back into a 1.0 it has not earned. **1.0.0 is not a judgement call about
 maturity: it is the release where every stage of
-[the roadmap](docs/north-star.md#6-roadmap) is done.** Until then every release
+[the roadmap](docs/north-star.md#7-roadmap) is done.** Until then every release
 is a `0.x`, and the input surface is free to change on a minor —
 [the rule in full](docs/development/releasing.md#what-0x-and-10-mean-here).
 

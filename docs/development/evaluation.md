@@ -96,7 +96,7 @@ Both are under the `eval` commit scope. Neither ships in the bundle a consumer
 runs: they are development tooling, and putting them in `dist` would make every
 consumer download the fixture set.
 
-This is [settled](../north-star.md#8-settled-questions) — it was previously an
+This is [settled](../north-star.md#9-settled-questions) — it was previously an
 open question whether evaluation belonged in a repository of its own. It does
 not. **Reeve stands on its own**, and a fixture set that lives elsewhere gets
 updated on a different schedule than the duty it measures, at which point it
@@ -104,26 +104,32 @@ measures the wrong thing.
 
 ## Building a fixture set
 
+**The pair is the unit, not the thread.** Write the same case in two languages
+— identical content, different language — and any gap between the two results
+is the bug this project cares about most. [Stage 6](../north-star.md#7-roadmap)
+measures the worst-language gap directly from pairs like this rather than
+inferring it from two separate averages taken on unrelated cases, so a fixture
+written once is worth less than the same case written twice. It is also the
+only way to measure cross-language duplicate detection once `duplicate`
+arrives.
+
 **Use real threads.** Synthetic issues are written by someone who knows what
-answer they want, and they are uniformly easier than the real thing. Pull them
-from public repositories, keep the URL, and record who decided the expected
-answer.
+answer they want, and they are uniformly easier than the real thing. Source one
+side of a pair from a public repository, keep the URL, translate or source the
+other side honestly, and record who decided the expected answer.
 
 **Include the cases that should produce nothing.** An empty template, spam, a
 thread already handled. A fixture set of only interesting cases measures a duty
 on inputs it will rarely see, and it cannot catch a duty that lost its ability to
 stay quiet.
 
-**Write the same case in two languages where you can.** The pair is the most
-valuable fixture there is: identical content, different language, and any gap
-between the two results is the bug this project cares about most. It is also the
-only way to measure cross-language duplicate detection when `duplicate` arrives.
-
 **Record the expected answer, not the observed one.** A fixture whose expectation
 was copied from a passing run measures nothing.
 
-**Keep it small enough to run.** A few hundred threads is more than enough to
-find a regression, and small enough that a contributor will actually run it.
+**Keep it small enough to run.** A few dozen pairs is enough to hold a
+worst-language number steady and to catch a regression — deliberately smaller
+than a few hundred singles would need to be, because the pair is what does the
+measuring, not the raw count.
 
 ## Running it
 

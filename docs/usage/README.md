@@ -9,18 +9,25 @@ Reeve itself, [`../development/`](../development/) is the other half.
 > But the surface they describe is not frozen — an input can be renamed or
 > collapsed into the warrant on any minor, and the release notes will say so.
 > That settles at `1.0`, which arrives when
-> [the roadmap](../north-star.md#6-roadmap) is finished — see
+> [the roadmap](../north-star.md#7-roadmap) is finished — see
 > [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
-## Start here
+## Start at level 0, climb when a rung earns it
 
-| Page                                  | Read it when                                                                      |
-| ------------------------------------- | --------------------------------------------------------------------------------- |
-| [Installation](installation.md)       | Adding a duty to a workflow for the first time — triggers, permissions, versions. |
-| [The warrant](warrant.md)             | Deciding what Reeve is allowed to do to your repository, and writing it down.     |
-| [Languages](languages.md)             | Configuring who writes in what, and who reads in what.                            |
-| [Cost](cost.md)                       | Working out what a backlog costs before you point it at one — including at zero.  |
-| [Troubleshooting](troubleshooting.md) | A run went red, went green and did nothing, or did something you did not expect.  |
+Reeve is [a ladder](../north-star.md#3-the-ladder), not a mode you pick up
+front. The five minutes below get a duty running with a single `uses:` line
+and a provider — nothing else written down, nothing else to learn first. Every
+page past that is a rung: read it the day its problem shows up on your own
+repository, not before.
+
+| Level | Page                                  | Read it when                                                                                  |
+| ----- | ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| 0     | [Installation](installation.md)       | Adding a duty to a workflow for the first time — triggers, permissions, versions.             |
+| 1–2   | [The warrant](warrant.md)             | The implicit taxonomy is sorting worse than you'd like, and you want to write your own.       |
+| 2     | [Languages](languages.md)             | Configuring who writes in what, and who reads in what.                                        |
+| 3     | [The sweep](sweep.md)                 | Working a backlog that already exists, on a schedule, instead of one thread at a time.        |
+| —     | [Cost](cost.md)                       | Working out what a backlog costs before you point it at one — including at zero.              |
+| —     | [Troubleshooting](troubleshooting.md) | A run went red, went yellow, went green and did nothing, or did something you did not expect. |
 
 ## The duties
 
@@ -29,8 +36,8 @@ Reeve itself, [`../development/`](../development/) is the other half.
 | [`triage`](duties/triage.md)       | Sorts incoming work against a taxonomy you wrote, in the language it arrived in. |
 | [`translate`](duties/translate.md) | Puts every thread in front of every reader, without rewriting anyone.            |
 
-`duplicate` and `respond` are Stage 4 in
-[the roadmap](../north-star.md#6-roadmap) and have no pages yet, because a page
+`duplicate` and `respond` are Stage 5 in
+[the roadmap](../north-star.md#7-roadmap) and have no pages yet, because a page
 about an input that does not exist is worse than no page.
 
 ## The shape of every duty

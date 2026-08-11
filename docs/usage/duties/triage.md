@@ -47,7 +47,10 @@ jobs:
           models: gpt-5-mini
 ```
 
-This needs a warrant — `.github/reeve.yml` — before it does anything. Write one
+**Until [Stage 1](../../north-star.md#7-roadmap) lands, this needs a warrant —
+`.github/reeve.yml` — before it does anything**, and an absent file fails the
+run rather than granting the narrowest implicit authority
+[the ladder](../../north-star.md#3-the-ladder) promises at level 0. Write one
 first: [The warrant](../warrant.md).
 
 Then run it with `dry-run: true` over a month of your own history before you let
@@ -177,8 +180,8 @@ Cross-language retrieval is the part nothing else in this category has: a
 correction a maintainer made on an English report should inform the verdict on the
 Vietnamese one describing the same thing. Lexical ranking cannot do that, and the
 retrieval seam is pluggable for exactly that reason — a similarity that crosses
-languages goes in behind the same interface. That is Stage 3 in
-[the roadmap](../../north-star.md#6-roadmap).
+languages, by translating to a pivot language first, goes in behind the same
+interface. That is Stage 4 in [the roadmap](../../north-star.md#7-roadmap).
 
 **Nothing writes to the store yet.** Corrections are read; recording one is a
 commit, it needs `contents: write`, and it is opt-in for that reason. Until it

@@ -30,7 +30,7 @@
 > [!IMPORTANT]
 > **Reeve is being assembled, not announced.** It is on a `0.x` line: two
 > duties ship and are dogfooded on this repository, and the rest of
-> [the roadmap](docs/north-star.md#6-roadmap) is still open. `1.0` is the
+> [the roadmap](docs/north-star.md#7-roadmap) is still open. `1.0` is the
 > release where all of it is done — until then an input can still be renamed on
 > a minor, and the release notes will say so.
 
@@ -93,19 +93,27 @@ and could withdraw at any moment. The owner stayed the owner.
 
 That is the whole product. Everything below follows from it.
 
-## Duties
+## Duties, and the ladder they sit on
 
-A **duty** is one job Reeve does. They share a core — the provider client and
-its fallback, the language layer, several drafts filtered by deterministic
-scoring, the sanitiser, the allowlist, the state kept as files in your
-repository — and differ only in what they decide.
+A **duty** is one job Reeve does, and none of them is switched on by a mode —
+they sit on [a ladder](docs/north-star.md#3-the-ladder), and what runs is
+exactly as much as you wrote down. The `uses:` line alone gets you the bottom
+rung: the narrowest authority Reeve knows how to grant, built from the labels
+your repository already has. Write a taxonomy and you climb one rung; write
+capabilities, `owner`, `languages` and you climb another. Nothing widens on
+its own.
 
-| Duty        | Status  | What it does                                                                                                                                                                                                                                         |
-| ----------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `triage`    | ships   | Sorts a backlog against the taxonomy you wrote. The easy majority is decided by code for nothing, and only what survives that reaches a model. It applies labels you defined and nothing else — as well in Vietnamese as in English, or it is a bug. |
-| `translate` | ships   | Your contributors write in their language; your maintainers read in theirs. Every issue and pull request carries both, in its own body, with the author's words kept byte-for-byte and marked as the version that counts.                            |
-| `duplicate` | Stage 4 | Finds the thread that already reported this — **across the language it was reported in**. Nothing else in this category does that, because everything else matches within one language.                                                              |
-| `respond`   | Stage 4 | Gives a stranger a first, useful reply in the language they wrote to you in: what is missing, where it was already answered, which part of the docs applies.                                                                                         |
+Every duty shares a core — the provider client and its fallback, the language
+layer, several drafts filtered by deterministic scoring, the sanitiser, the
+allowlist, the state kept as files in your repository — and differs only in
+what it decides:
+
+| Duty        | Status  | What it does                                                                                                                                                                                                                                                                                                                  |
+| ----------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `triage`    | ships   | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has. The easy majority is decided by code for nothing, and only what survives that reaches a model. It applies labels you defined and nothing else — as well in Vietnamese as in English, or it is a bug. |
+| `translate` | ships   | Your contributors write in their language; your maintainers read in theirs. Every issue and pull request carries both, in its own body, with the author's words kept byte-for-byte and marked as the version that counts.                                                                                                     |
+| `duplicate` | Stage 5 | Finds the thread that already reported this — **across the language it was reported in**. Nothing else in this category does that, because everything else matches within one language. Top rung: opt-in, never on by accident.                                                                                               |
+| `respond`   | Stage 5 | Gives a stranger a first, useful reply in the language they wrote to you in: what is missing, where it was already answered, which part of the docs applies. Top rung, same reason.                                                                                                                                           |
 
 What comes after them is decided by one test, and it is a strict one: the work
 has to recur, be uniformly expensive today, already be work a maintainer stopped
@@ -118,16 +126,16 @@ feature requests, on purpose.
 The list is short, it is enforced in code, and it is the most important section
 on this page.
 
-|                                 |                                                                                                                                                                                                                                             |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Act outside its warrant**     | What Reeve may do is a file in your repository. A label your taxonomy does not name is never applied; a duty you did not enable never runs. Checked against the file — never against the model's own claim about what it was allowed to do. |
-| **Rewrite what a person wrote** | Titles and bodies belong to whoever wrote them. Machine output sits beside human text, marked, never in place of it.                                                                                                                        |
-| **Overrule a maintainer**       | It never removes a label, never reassigns, never reopens. It proposes; you decide.                                                                                                                                                          |
-| **Close, lock, or delete**      | Off by default and staying that way. Everything past the cheapest reversible action is opt-in, one at a time.                                                                                                                               |
-| **Write code**                  | Reeve reads and decides. It does not author diffs, run your tests, or fix your bugs. That is a different tool, and a crowded one.                                                                                                           |
-| **Guess when it cannot read**   | Model output that does not parse yields **no** result and a loud failure — not a best-effort read of the parts that looked fine. The shapes that fail to parse are the ones an injection produced.                                          |
-| **Pretend it worked**           | A run that cannot do its job fails red. It never reports an empty result in green to mean something went wrong.                                                                                                                             |
-| **Hold your data**              | No account, no dashboard, no hosted state. Taxonomy, corrections, configuration and markers are plain files in your repository — reviewed in a pull request, and deleted with `rm`.                                                         |
+|                                 |                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Act outside its warrant**     | What Reeve may do is a file in your repository, or its narrowest built-in default where you wrote no file at all. A label your taxonomy does not name is never applied; a capability you did not grant is never used. Checked against the file — never against the model's own claim about what it was allowed to do. |
+| **Rewrite what a person wrote** | Titles and bodies belong to whoever wrote them. Machine output sits beside human text, marked, never in place of it.                                                                                                                                                                                                  |
+| **Overrule a maintainer**       | It never removes a label, never reassigns, never reopens. It proposes; you decide.                                                                                                                                                                                                                                    |
+| **Close, lock, or delete**      | Off by default and staying that way. Everything past the cheapest reversible action is opt-in, one at a time.                                                                                                                                                                                                         |
+| **Write code**                  | Reeve reads and decides. It does not author diffs, run your tests, or fix your bugs. That is a different tool, and a crowded one.                                                                                                                                                                                     |
+| **Guess when it cannot read**   | Model output that does not parse yields **no** result and a loud failure — not a best-effort read of the parts that looked fine. The shapes that fail to parse are the ones an injection produced.                                                                                                                    |
+| **Pretend it worked**           | A run that cannot do its job fails red. It never reports an empty result in green to mean something went wrong.                                                                                                                                                                                                       |
+| **Hold your data**              | No account, no dashboard, no hosted state. Taxonomy, corrections, configuration and markers are plain files in your repository — reviewed in a pull request, and deleted with `rm`.                                                                                                                                   |
 
 ## Cost
 
@@ -151,6 +159,7 @@ deterministically cost calls instead of money.
 | [Installation](docs/usage/installation.md)       | Adding a duty to a workflow — triggers, permissions, versions.           |
 | [The warrant](docs/usage/warrant.md)             | Writing down what Reeve is allowed to do to your repository.             |
 | [Languages](docs/usage/languages.md)             | Who writes in what, who reads in what, and what detection costs.         |
+| [The sweep](docs/usage/sweep.md)                 | Working a whole backlog on a schedule instead of one thread at a time.   |
 | [Cost](docs/usage/cost.md)                       | What a backlog costs before you point it at one — including at zero.     |
 | [Troubleshooting](docs/usage/troubleshooting.md) | A run went red, or went green and did nothing.                           |
 | [Architecture](docs/development/architecture.md) | The pipeline, the boundaries, and how to change it.                      |
