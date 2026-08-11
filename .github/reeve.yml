@@ -1,0 +1,85 @@
+# What Reeve is allowed to do to this repository — including to its own issues.
+#
+# This is a consumer's file, not part of the product: the format is documented
+# in `docs/usage/warrant.md`, and everything below is this project's own answer
+# to it. It is here so a change to a duty is dogfooded on the pull request that
+# makes it, and so the taxonomy that ships as an example is one somebody has to
+# live with.
+#
+# Every `not` names the label this one gets confused with, because that is the
+# boundary this project made and nothing in a model's training knows where we
+# put it. Where a `not` reads oddly specific, it is because a real thread here
+# was labelled wrong that way.
+
+version: 1
+
+# Labels only, on both duties. `comment`, `assign` and `close` stay off until a
+# `dry-run` on this backlog says what the rate actually is — which is the advice
+# the docs give and it would be strange to take our own advice second.
+capabilities:
+  triage: [label]
+  translate: [edit-body]
+
+labels:
+  - name: bug
+    description: >-
+      A duty, or the machinery under one, does not do what its own documentation
+      says it does. The reporter is using it as intended — a workflow that names
+      the action the way `docs/usage/installation.md` names it — and getting a
+      wrong result.
+    not: >-
+      A model that answered badly. Reeve rotates models rather than retrying, so
+      a poor translation or a wrong label is the provider's answer being poor,
+      not this project misbehaving. That is `enhancement` when it is a request
+      for better prompting or better guardrails, and `question` when it is not.
+    examples:
+      - "translate republishes an unchanged body on every edit"
+      - "The warrant parses but a label named in it is never applied"
+
+  - name: enhancement
+    description: >-
+      A capability this project does not have and should — a new duty, a new
+      input, a guardrail that would have caught something, a warrant field that
+      would let a taxonomy say what it means.
+    not: >-
+      A capability it HAS, that does not work. That is `bug`, however the
+      reporter phrased it — "it would be nice if the fingerprint noticed edits"
+      is a bug report about a fingerprint that already claims to.
+    examples:
+      - "A duty that answers a first-time contributor with the contributing guide"
+      - "Let the warrant name a label that may only ever be proposed, never applied"
+
+  - name: documentation
+    description: >-
+      Something under `docs/` is wrong, missing, or says what the code does not
+      do. Includes a documented input that no `action.yml` declares, and a page
+      that describes behaviour from before it changed.
+    not: >-
+      Behaviour somebody disagrees with. A page that accurately describes a
+      decision is not a documentation defect — the disagreement is with the
+      decision, and that is `enhancement`.
+    examples:
+      - "docs/usage/warrant.md lists a capability no duty defines"
+      - "The installation page pins @v1 but the tag does not exist yet"
+
+  - name: question
+    description: >-
+      Someone asking how to do something with what already ships — which input
+      to set, how to write a `not`, why a run decided what it decided.
+    not: >-
+      A report that the documented way does not work. Somebody who followed the
+      page and got a different result is reporting a `bug` even when they were
+      polite enough to phrase it as a question.
+    examples:
+      - "How do I run a duty against a provider with no api key?"
+      - "Can the same warrant serve two repositories?"
+
+  - name: invalid
+    description: >-
+      A thread this project cannot act on at all: advertising, a request for
+      unrelated work, an empty template, or a report about somebody else's
+      software that arrived here by mistake.
+    not: >-
+      A thread that is merely short, or written in a language the maintainers do
+      not read. Both are real reports, and one of them is exactly what this
+      project exists to make readable.
