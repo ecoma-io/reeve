@@ -32787,9 +32787,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer2, code) {
+function spells(answer3, code) {
   const escaped = code.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer2);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer3);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -33425,8 +33425,8 @@ ${body}`);
     { role: "user", content: enclosed.block }
   ];
 }
-function unwrapped(answer2) {
-  const trimmed = answer2.trim();
+function unwrapped(answer3) {
+  const trimmed = answer3.trim();
   const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence?.[1] ?? trimmed;
 }
@@ -33623,19 +33623,24 @@ async function findMarked(api, at) {
   for (const comment of data) {
     if (!isBot(comment.user)) continue;
     const { official, fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null && official === "") return { id: comment.id, fingerprint: found };
+    if (found !== null && official === "")
+      return { marked: { id: comment.id, fingerprint: found }, uncertain: false };
   }
-  return null;
+  return { marked: null, uncertain: data.length === COMMENT_PAGE };
 }
 async function classify(api, at, proposal, fp) {
   const payload = payloadFor(fp, proposal.duplicateOf);
   const body = [marker.render(payload), render(proposal)].join("\n\n");
-  const existing = await findMarked(api, at);
+  const { marked: existing, uncertain } = await findMarked(api, at);
+  if (existing === null && uncertain) {
+    return { disposition: "withheld", body, existing: null };
+  }
   const disposition2 = existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
   return { disposition: disposition2, body, existing };
 }
 async function postOrReplace(api, at, proposal, fp) {
   const { disposition: disposition2, body, existing } = await classify(api, at, proposal, fp);
+  if (disposition2 === "withheld") return disposition2;
   if (existing === null) {
     await api.rest.issues.createComment({
       owner: at.owner,
@@ -33812,7 +33817,8 @@ function verdict(run2) {
       lines.push(...why(run2));
     } else {
       lines.push("", disposition(run2, run2.duplicateOf));
-      if (run2.dryRun || run2.posted === null) lines.push(...why(run2));
+      const echoedOnThread = !run2.dryRun && (run2.posted === "posted" || run2.posted === "replaced");
+      if (!echoedOnThread) lines.push(...why(run2));
     }
   }
   const gap = withheld(run2);
@@ -33823,11 +33829,15 @@ function disposition(run2, duplicateOf) {
   if (run2.posted === null) {
     return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
   }
+  if (run2.posted === "withheld") {
+    return `Nothing was posted \u2014 this thread carries more comments than one run reads, and none of the ones read were this duty's own, so whether it already commented could not actually be told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so this run left the thread alone rather than guess.`;
+  }
   const verb = run2.posted === "posted" ? run2.dryRun ? "Would have posted" : "Posted" : run2.posted === "replaced" ? run2.dryRun ? "Would have replaced its own previous comment with" : "Replaced its own previous comment with" : "Left its own previous comment unchanged \u2014 this run reached the same fingerprint as";
   return `${verb} a comment naming #${String(duplicateOf)}.`;
 }
 function why(run2) {
-  return run2.rationale !== null && run2.rationale.length > 0 ? ["", `> ${run2.rationale}`] : [];
+  if (run2.rationale === null || run2.rationale.length === 0) return [];
+  return ["", `> ${run2.rationale.replace(/\s+/g, " ").trim()}`];
 }
 function withheld(run2) {
   if (run2.withheld.length === 0) return "";
@@ -33872,7 +33882,7 @@ async function judge(request2) {
   const messages = prompt2(request2);
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, messages),
+    (model) => answer2(provider, model, messages),
     weather
   );
   if (!rotation.success) {
@@ -33886,10 +33896,22 @@ async function judge(request2) {
     model: rotation.success.model
   };
 }
-function parseVerdict(answer2, candidates) {
+async function answer2(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function parseVerdict(answer3, candidates) {
   let parsed;
   try {
-    parsed = JSON.parse(unwrapped2(answer2));
+    parsed = JSON.parse(unwrapped2(answer3));
   } catch {
     return null;
   }
@@ -33911,10 +33933,10 @@ function parseVerdict(answer2, candidates) {
     rationale: rationale.trim()
   };
 }
-function unwrapped2(answer2) {
-  const parts = segments(answer2.trim());
+function unwrapped2(answer3) {
+  const parts = segments(answer3.trim());
   const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer3;
   const lines = only.text.split("\n");
   return lines.slice(1, -1).join("\n");
 }
@@ -34034,6 +34056,7 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
     );
     const acted = await act(api, at, outcome, settings.dryRun);
     acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
+    if (starved(settings.models, weather)) acc.starvedRun = true;
   }
 }
 function remainingOf(acc) {
@@ -34125,10 +34148,10 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
       `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. The narrower of the two wins.`
     );
   }
-  const nothing = (language2, rankInfo2, pivotInfo2, note2) => ({
+  const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence = 0) => ({
     language: language2,
     duplicateOf: null,
-    confidence: 0,
+    confidence,
     lexicalScore: 0,
     permitted,
     withheld: withheld2,
@@ -34207,7 +34230,9 @@ ${draft.body}`);
   }
   const note = judged.unreadable !== null ? "the verdict did not parse" : judged.model === null ? "every model failed" : null;
   const verdict2 = judged.verdict;
-  if (verdict2.duplicateOf === null) return nothing(language, rankInfo, pivotInfo, note);
+  if (verdict2.duplicateOf === null) {
+    return nothing(language, rankInfo, pivotInfo, note, verdict2.confidence);
+  }
   const matched = ranked.find((entry) => entry.candidate.number === verdict2.duplicateOf);
   if (matched === void 0) {
     warning(
@@ -34301,10 +34326,10 @@ async function act(api, at, outcome, dryRun) {
     return { done: { commented: false }, posted: posted2 };
   }
   const posted = await postOrReplace(api, at, outcome.proposal, outcome.fingerprint);
-  return { done: { commented: true }, posted };
+  return { done: { commented: posted !== "withheld" }, posted };
 }
-function excerpt3(answer2) {
-  const flat = answer2.replace(/\s+/g, " ").trim();
+function excerpt3(answer3) {
+  const flat = answer3.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
 function report(outcome, done, rosterStarved) {

@@ -164,11 +164,17 @@ export interface CommentApi {
 /**
  * How many comments one run will look at when searching for its own marker.
  *
- * Mirrors `core/forge.ts`'s `REPLY_PAGE` — a single page, newest ceiling
- * GitHub allows per request — for the same reason and the same accepted
- * tradeoff: a marker on a thread with more than a hundred replies might sit
- * past this page and go unfound, which costs a stacked comment on a thread
- * active enough that one more comment is the smaller problem.
+ * The same page size `core/forge.ts`'s `REPLY_PAGE` reads — the newest
+ * ceiling GitHub allows per request — but not, on its own, the same accepted
+ * tradeoff. `listReplies` can afford to silently work only the newest page
+ * because every reply it reads is judged on its own terms; missing an older
+ * one costs that one reply, nothing else. A marker search is different: it
+ * exists to answer one yes/no question — did a previous run already comment
+ * here — and a `false` reached only because the true answer was sitting past
+ * this page is not a smaller version of the right answer, it is the wrong
+ * one, and it manufactures the very duplicate comment this duty exists to
+ * prevent. See `findMarked`'s own doc comment for the fail-closed answer to
+ * that gap on a thread carrying more than one page of comments.
  */
 const COMMENT_PAGE = 100;
 
@@ -180,7 +186,22 @@ export interface Marked {
 }
 
 /**
- * This duty's own comment on the thread, if a previous run left one.
+ * What one search of a thread's comments found.
+ *
+ * `uncertain` is true only when the search came up empty *and* the page it
+ * searched was completely full — GitHub's own signal that more comments may
+ * exist beyond it. A search that found the marker never needs to ask whether
+ * there might be more: it already has the one comment this duty cares about,
+ * whatever else the thread carries past this page.
+ */
+interface Search {
+  readonly marked: Marked | null;
+  readonly uncertain: boolean;
+}
+
+/**
+ * This duty's own comment on the thread, if a previous run left one — and
+ * whether that answer can actually be trusted.
  *
  * `marker.split` is generic over any text carrying the marker, not
  * specifically a thread body — see its own doc comment — which is what makes
@@ -196,8 +217,19 @@ export interface Marked {
  * guard alone is enough: a bot's *other* comment could still carry the marker
  * merely quoted, and a human's comment opening with the exact tag text is a
  * forgery worth refusing regardless of who is credited with typing it.
+ *
+ * **A full page with no marker on it is not "no comment" — it is "unknown".**
+ * This only ever reads one page (`COMMENT_PAGE`), so a thread with more
+ * comments than that can hide this duty's own past comment on a page this
+ * search never reaches. Reporting `marked: null` in that case would tell
+ * `classify` to post a fresh one, next to a comment already saying the same
+ * thing — the exact failure a marker exists to prevent, caused by the search
+ * meant to guard it. So this reports `uncertain: true` instead whenever the
+ * page came back full and empty-handed, and leaves acting on that honestly to
+ * the caller rather than guessing which of "no comment" and "comment I could
+ * not see" is more likely true.
  */
-export async function findMarked(api: CommentApi, at: Location): Promise<Marked | null> {
+export async function findMarked(api: CommentApi, at: Location): Promise<Search> {
   const { data } = await api.rest.issues.listComments({
     owner: at.owner,
     repo: at.repo,
@@ -208,16 +240,26 @@ export async function findMarked(api: CommentApi, at: Location): Promise<Marked 
   for (const comment of data) {
     if (!isBot(comment.user)) continue;
     const { official, fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null && official === "") return { id: comment.id, fingerprint: found };
+    if (found !== null && official === "")
+      return { marked: { id: comment.id, fingerprint: found }, uncertain: false };
     // No marker at all, a marker embedded mid-body, or a non-bot author is
     // never this duty's to touch, so the search keeps going rather than
     // stopping here.
   }
-  return null;
+  return { marked: null, uncertain: data.length === COMMENT_PAGE };
 }
 
-/** What the write step did, for the summary and for the `commented` output. */
-export type Posted = "posted" | "replaced" | "unchanged";
+/**
+ * What the write step did, for the summary and for the `commented` output.
+ *
+ * `withheld` is the fail-closed answer to `findMarked`'s `uncertain` case: a
+ * thread carrying more than one page of comments, none of the first page
+ * bearing this duty's marker. Whether this duty already commented could not
+ * actually be told, and posting on that unknown risks the exact duplicate
+ * comment the marker exists to prevent, so nothing is written and this says
+ * so rather than reading as an ordinary `posted`.
+ */
+export type Posted = "posted" | "replaced" | "unchanged" | "withheld";
 
 /** What a write would do, decided without writing anything — the read half `postOrReplace` and `rehearse` share. */
 interface Classification {
@@ -228,9 +270,9 @@ interface Classification {
 
 /**
  * Reads whatever `postOrReplace` would need to decide `posted`/`replaced`/
- * `unchanged`, without writing anything — the same lookup either way, so a
- * rehearsal under `dry-run` and a real run can never disagree about which of
- * the three a given proposal would produce.
+ * `unchanged`/`withheld`, without writing anything — the same lookup either
+ * way, so a rehearsal under `dry-run` and a real run can never disagree about
+ * which of the four a given proposal would produce.
  */
 async function classify(
   api: CommentApi,
@@ -240,7 +282,12 @@ async function classify(
 ): Promise<Classification> {
   const payload = payloadFor(fp, proposal.duplicateOf);
   const body = [marker.render(payload), render(proposal)].join("\n\n");
-  const existing = await findMarked(api, at);
+  const { marked: existing, uncertain } = await findMarked(api, at);
+
+  if (existing === null && uncertain) {
+    return { disposition: "withheld", body, existing: null };
+  }
+
   const disposition: Posted =
     existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
   return { disposition, body, existing };
@@ -251,7 +298,11 @@ async function classify(
  * comment when the fingerprint moved and leaving it alone when it did not.
  *
  * Never touches a comment without this duty's marker on it — a maintainer's
- * own comment, or anybody else's, is never a candidate for replacement.
+ * own comment, or anybody else's, is never a candidate for replacement. Never
+ * writes at all when `classify` came back `withheld` either — see `Posted`'s
+ * own doc comment for why an uncertain search is treated the same as a
+ * search that found this duty's own comment, not the same as one that found
+ * nothing.
  */
 export async function postOrReplace(
   api: CommentApi,
@@ -260,6 +311,8 @@ export async function postOrReplace(
   fp: string,
 ): Promise<Posted> {
   const { disposition, body, existing } = await classify(api, at, proposal, fp);
+
+  if (disposition === "withheld") return disposition;
 
   if (existing === null) {
     await api.rest.issues.createComment({

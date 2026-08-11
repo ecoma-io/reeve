@@ -247,9 +247,13 @@ outputs:
   score:
     description: >-
       How sure the verdict was, to two decimal places. `0.00` when there was
-      no verdict. Distinct from the `confidence` input, which is the floor
-      this number is checked against before anything is applied. Unset on a
-      `sweep` run, the same as `duplicate-of`.
+      no verdict at all — no candidate reached the judge, every model failed,
+      or the answer could not be read. A verdict that named no duplicate is
+      still a real answer and carries its own confidence here, so a confident
+      "not a duplicate" reads differently from a judge that was never
+      actually asked. Distinct from the `confidence` input, which is the
+      floor this number is checked against before anything is applied. Unset
+      on a `sweep` run, the same as `duplicate-of`.
 
   language:
     description: >-

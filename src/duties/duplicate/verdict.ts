@@ -27,7 +27,7 @@
  */
 import { enclose } from "../../core/enclose.js";
 import { segments } from "../../core/markdown.js";
-import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
+import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import type { Candidate } from "./rank.js";
 
@@ -98,7 +98,7 @@ export async function judge(request: JudgeRequest): Promise<Judged> {
   const messages = prompt(request);
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, messages),
+    (model) => answer(provider, model, messages),
     weather,
   );
   if (!rotation.success) {
@@ -112,6 +112,35 @@ export async function judge(request: JudgeRequest): Promise<Judged> {
     unreadable: verdict === null ? rotation.success.content : null,
     model: rotation.success.model,
   };
+}
+
+/**
+ * One completion, with a truncated answer reported as the failure it is —
+ * the same rule `core/pivot.ts`'s own `answer` follows and for the same
+ * reason. `finish_reason: length` means the model ran out of room before the
+ * JSON closed, which is unparseable the same as a malformed body, not merely
+ * a short verdict — a truncated `{"duplicate_of": 7, "confid` could still
+ * happen to satisfy `parseVerdict` on a shorter field or a lucky cutoff, and
+ * "best-effort parsed" is exactly the leniency this duty's own doc comment
+ * refuses everywhere else. Caught here, before `rotateModels` ever calls this
+ * a success, so rotation's next model gets the same chance a capacity failure
+ * gives it, and the caller never has to check `finishReason` itself.
+ */
+async function answer(
+  provider: Provider,
+  model: string,
+  messages: readonly Message[],
+): Promise<Completion> {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished",
+    };
+  }
+  return completion;
 }
 
 /**

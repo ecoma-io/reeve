@@ -137,6 +137,64 @@ describe("summarize", () => {
     expect(page).not.toContain("Both describe the same login failure on Safari.");
   });
 
+  it("does not repeat the rationale on a real run that replaced its own comment, either", () => {
+    const page = summarize(
+      run({
+        posted: "replaced",
+        dryRun: false,
+        rationale: "Both describe the same login failure on Safari.",
+      }),
+    );
+
+    expect(page).not.toContain("Both describe the same login failure on Safari.");
+  });
+
+  it("shows the rationale when this run reached the same fingerprint as a standing comment", () => {
+    // The fingerprint covers the thread's own text and the shortlist, not
+    // the rationale sentence — a rerun can conclude something new even while
+    // leaving an old comment untouched, and the standing comment on the
+    // thread never gets to say so.
+    const page = summarize(
+      run({
+        posted: "unchanged",
+        dryRun: false,
+        rationale: "Both describe the same login failure on Safari.",
+      }),
+    );
+
+    expect(page).toContain("> Both describe the same login failure on Safari.");
+  });
+
+  it("shows the rationale when the comment was withheld for an uncertain search", () => {
+    const page = summarize(
+      run({
+        posted: "withheld",
+        dryRun: false,
+        rationale: "Both describe the same login failure on Safari.",
+      }),
+    );
+
+    expect(page).toContain("> Both describe the same login failure on Safari.");
+  });
+
+  it("flattens a multiline rationale so it cannot escape its own blockquote", () => {
+    // Only the physical line right after `> ` is quoted by Markdown — a
+    // rationale carrying a blank line and something that reads as a heading
+    // would otherwise open a live `#` heading in the job summary, straight
+    // out of a sentence the model wrote.
+    const page = summarize(
+      run({
+        posted: null,
+        rationale: "Same root cause.\n\n# Not a real heading, just what the model wrote",
+      }),
+    );
+
+    const lines = page.split("\n");
+    const quoted = lines.find((line) => line.startsWith(">"));
+    expect(quoted).toBe("> Same root cause. # Not a real heading, just what the model wrote");
+    expect(lines).not.toContain("# Not a real heading, just what the model wrote");
+  });
+
   it("says nothing extra when there is no rationale to show", () => {
     const page = summarize(run({ posted: null, rationale: null }));
 
@@ -175,6 +233,14 @@ describe("summarize", () => {
     expect(summarize(run({ posted: "unchanged" }))).toContain(
       "Left its own previous comment unchanged",
     );
+  });
+
+  it("says the comment was withheld, honestly, when the search could not be trusted", () => {
+    const page = summarize(run({ posted: "withheld", dryRun: false }));
+
+    expect(page).toContain("Nothing was posted");
+    expect(page).toContain("could not actually be told");
+    expect(page).not.toMatch(/^Posted|^Replaced|^Left its own/m);
   });
 
   it("says nothing was posted when comment was not asked for", () => {

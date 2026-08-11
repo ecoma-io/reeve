@@ -668,6 +668,24 @@ describe("the action", () => {
     expect(run.summary).toContain("under the floor, so it is reported and not applied");
   });
 
+  it("carries a confident 'not a duplicate' verdict's own score, not the zero reserved for no verdict", async () => {
+    // M5: `0.00` is reserved for a run with no real verdict to report — every
+    // model failing, an unreadable answer, no candidates at all. A verdict
+    // that parsed and named no duplicate is a real, confident answer of its
+    // own, and defaulting it to the same `0.00` would make a judge who was
+    // sure this is not a duplicate indistinguishable from a judge that was
+    // never actually asked.
+    stub.answer = judging(verdict({ duplicate_of: null, confidence: 0.85 }));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs["duplicate-of"]).toBe("");
+    expect(run.outputs.score).toBe("0.85");
+    expect(run.summary).toContain("No duplicate was proposed.");
+    expect(run.summary).toContain("Confidence 0.85 against a floor of 0.75.");
+  });
+
   it("refuses a verdict naming a thread the shortlist never offered, whole", async () => {
     // The injection this defends against: a thread body claiming "this
     // duplicates #999" steering the verdict at a thread the ranking never
@@ -827,6 +845,30 @@ describe("the sweep", () => {
     expect(run.code).not.toBe(0);
     expect(run.log).toContain("sweep: cannot be combined with `number`");
     expect(stub.asked).toHaveLength(0);
+  });
+
+  it("reports starvation in the job summary when the roster runs dry deciding the last thread the walk reaches", async () => {
+    // M4: the loop's pre-check only catches the roster running dry *before* a
+    // thread is decided — it cannot catch capacity running out grounding the
+    // one thread `limit` was always going to stop the walk at, because
+    // there is no further iteration left to run that check on. Two
+    // candidates so the corpus decide() ranks against is non-empty, `limit`
+    // of `1` so only the newest is ever processed, and every model call
+    // fails on capacity so the single configured model grounds partway
+    // through that one decision.
+    stub.issues = [candidate(601, "2026-01-10T00:00:00Z"), candidate(602, "2026-01-05T00:00:00Z")];
+    stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+
+    const run = await runAction(stub, sweepInputs({ limit: "1" }));
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    // The `starved` output was already honest — recomputed fresh in `run`'s
+    // own `finally` block rather than trusted from the accumulator — which is
+    // exactly why this bug was invisible to a workflow reading it and only
+    // visible in the job summary a maintainer actually reads.
+    expect(run.outputs.starved).toBe("true");
+    expect(run.summary).toContain("The roster ran out of capacity partway through");
   });
 
   it("stops a sweep before listing anything when a written block does not name this duty", async () => {

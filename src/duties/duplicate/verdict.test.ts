@@ -80,6 +80,62 @@ describe("judge", () => {
     expect(judged.model).toBe("gpt-4o-mini");
   });
 
+  it("discards a length-truncated answer as the model's failure, even one that looks parseable", async () => {
+    // A cutoff mid-object can still leave a prefix `JSON.parse` or even
+    // `parseVerdict` would accept on a lucky truncation point — this is the
+    // one place that still knows the answer was cut off before it finished,
+    // so it has to refuse before that prefix ever reaches the parser, not
+    // trust that a malformed shape will always give the truncation away.
+    const provider: Provider = {
+      complete: (model: string): Promise<Completion> =>
+        Promise.resolve({
+          ok: true,
+          model,
+          content: '{"duplicate_of": 7, "confidence": 0.9, "rationale": "same b',
+          finishReason: "length",
+        }),
+    };
+
+    const judged = await judge(baseRequest({ provider }));
+
+    expect(judged.verdict).toEqual(NOTHING);
+    // Treated the same as any other model failure — recorded in `failures`,
+    // never surfaced as `unreadable`, because no model is ever credited with
+    // having actually answered here.
+    expect(judged.failures).toHaveLength(1);
+    expect(judged.failures[0]?.reason).toContain("cut off");
+    expect(judged.unreadable).toBeNull();
+    expect(judged.model).toBeNull();
+  });
+
+  it("rotates past a length-truncated answer to a model with room to finish", async () => {
+    let calls = 0;
+    const provider: Provider = {
+      complete: (model: string): Promise<Completion> => {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.resolve({
+            ok: true,
+            model,
+            content: '{"duplicate_of": 7, "confid',
+            finishReason: "length",
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          model,
+          content: '{"duplicate_of": 9, "confidence": 0.8, "rationale": "same crash"}',
+          finishReason: null,
+        });
+      },
+    };
+
+    const judged = await judge(baseRequest({ provider, models: ["a", "b"] }));
+
+    expect(judged.verdict).toEqual({ duplicateOf: 9, confidence: 0.8, rationale: "same crash" });
+    expect(judged.model).toBe("b");
+  });
+
   it("rotates capacity failures into weather rather than failing the run", async () => {
     let calls = 0;
     const provider: Provider = {

@@ -34,10 +34,17 @@ function stubOf(initial: readonly StoredComment[] = []): {
   const api: CommentApi = {
     rest: {
       issues: {
-        listComments: () =>
-          Promise.resolve({
-            data: comments.map(({ id, body, user }) => ({ id, body, user: user ?? null })),
-          }),
+        listComments: (params) => {
+          // A real page has a ceiling — `per_page` — so a stub seeded with
+          // more comments than that has to actually stop there too, the same
+          // way GitHub's own listing would, for the pagination tests below.
+          const perPage = params.per_page ?? comments.length;
+          return Promise.resolve({
+            data: comments
+              .slice(0, perPage)
+              .map(({ id, body, user }) => ({ id, body, user: user ?? null })),
+          });
+        },
         createComment: (params) => {
           // Whatever this stub posts is Reeve's own — the same as a real
           // token authenticated as the workflow's bot identity.
@@ -93,12 +100,12 @@ describe("proposalFingerprint", () => {
 describe("findMarked", () => {
   it("finds nothing on a thread with no comments", async () => {
     const { api } = stubOf([]);
-    expect(await findMarked(api, AT)).toBeNull();
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: false });
   });
 
   it("finds nothing among comments that carry no marker", async () => {
     const { api } = stubOf([{ id: 1, body: "just a comment" }]);
-    expect(await findMarked(api, AT)).toBeNull();
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: false });
   });
 
   it("finds this duty's own marked comment and reads its fingerprint", async () => {
@@ -111,7 +118,10 @@ describe("findMarked", () => {
       },
     ]);
 
-    expect(await findMarked(api, AT)).toEqual({ id: 2, fingerprint: "abc123 duplicate-of=7" });
+    expect(await findMarked(api, AT)).toEqual({
+      marked: { id: 2, fingerprint: "abc123 duplicate-of=7" },
+      uncertain: false,
+    });
   });
 
   it("ignores another duty's marker", async () => {
@@ -119,7 +129,7 @@ describe("findMarked", () => {
       { id: 1, body: "<!-- reeve:translate source=abc123 -->\n\ntext", user: BOT },
     ]);
 
-    expect(await findMarked(api, AT)).toBeNull();
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: false });
   });
 
   it("ignores a comment carrying the marker when its author is not a bot", async () => {
@@ -134,7 +144,7 @@ describe("findMarked", () => {
       },
     ]);
 
-    expect(await findMarked(api, AT)).toBeNull();
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: false });
   });
 
   it('recognises a `[bot]`-suffixed login the same as `type: "Bot"`', async () => {
@@ -146,7 +156,10 @@ describe("findMarked", () => {
       },
     ]);
 
-    expect(await findMarked(api, AT)).toEqual({ id: 1, fingerprint: "abc123 duplicate-of=7" });
+    expect(await findMarked(api, AT)).toEqual({
+      marked: { id: 1, fingerprint: "abc123 duplicate-of=7" },
+      uncertain: false,
+    });
   });
 
   it("ignores a bot comment where the marker is quoted mid-body rather than opening it", async () => {
@@ -161,7 +174,46 @@ describe("findMarked", () => {
       },
     ]);
 
-    expect(await findMarked(api, AT)).toBeNull();
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: false });
+  });
+
+  it("reports `uncertain` when a full page carries no marker — there may be one past it", async () => {
+    // Exactly `COMMENT_PAGE` (100) comments, none of them this duty's own —
+    // GitHub's own signal that a search stopping here cannot tell "no
+    // comment" from "a comment on a page this search never reached".
+    const filler: StoredComment[] = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${String(index + 1)}`,
+      user: HUMAN,
+    }));
+    const { api } = stubOf(filler);
+
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: true });
+  });
+
+  it("is certain, not `uncertain`, when a short page carries no marker", async () => {
+    const { api } = stubOf([{ id: 1, body: "just a comment", user: HUMAN }]);
+
+    expect(await findMarked(api, AT)).toEqual({ marked: null, uncertain: false });
+  });
+
+  it("is certain even on a full page, once the marker is actually found on it", async () => {
+    const filler: StoredComment[] = Array.from({ length: 99 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${String(index + 1)}`,
+      user: HUMAN,
+    }));
+    const marked: StoredComment = {
+      id: 100,
+      body: `${marker.render("abc123 duplicate-of=7")}\n\nPossible duplicate of #7.`,
+      user: BOT,
+    };
+    const { api } = stubOf([...filler, marked]);
+
+    expect(await findMarked(api, AT)).toEqual({
+      marked: { id: 100, fingerprint: "abc123 duplicate-of=7" },
+      uncertain: false,
+    });
   });
 });
 
@@ -331,6 +383,24 @@ describe("postOrReplace", () => {
     expect(comments[0]?.body).toContain("Both describe the same failure as #7.");
     expect(comments[0]?.body).not.toContain("`#7`");
   });
+
+  it("withholds the comment on a full page carrying no marker, rather than risk a duplicate", async () => {
+    // B1's fail-closed answer to a thread this duty cannot fully search: a
+    // hundred comments, none this duty's own within reach, so whether it
+    // already commented is genuinely unknown. Posting on that unknown would
+    // risk exactly the stacked-comment failure the marker exists to prevent.
+    const filler: StoredComment[] = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${String(index + 1)}`,
+      user: HUMAN,
+    }));
+    const { api, comments } = stubOf(filler);
+
+    const result = await postOrReplace(api, AT, proposal(), "fp1");
+
+    expect(result).toBe("withheld");
+    expect(comments).toHaveLength(100);
+  });
 });
 
 describe("rehearse", () => {
@@ -375,5 +445,19 @@ describe("rehearse", () => {
     const { api } = stubOf([{ id: 1, body: stray, user: HUMAN }]);
 
     expect(await rehearse(api, AT, proposal(), "fp1")).toBe("posted");
+  });
+
+  it("reads `withheld` on a full page carrying no marker, the same fail-closed answer a real run reaches", async () => {
+    const filler: StoredComment[] = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      body: `comment ${String(index + 1)}`,
+      user: HUMAN,
+    }));
+    const { api, comments } = stubOf(filler);
+
+    const result = await rehearse(api, AT, proposal(), "fp1");
+
+    expect(result).toBe("withheld");
+    expect(comments).toHaveLength(100);
   });
 });

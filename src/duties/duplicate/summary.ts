@@ -145,11 +145,20 @@ function verdict(run: Run): string {
       lines.push(...why(run));
     } else {
       lines.push("", disposition(run, run.duplicateOf));
-      // A dry run, or a real run `apply`/the warrant never let write —
-      // `posted === null` — never lands this rationale on the thread itself,
-      // so this is the only place a reader ever sees it. A run that actually
-      // posted skips this: the comment already carries the same sentence.
-      if (run.dryRun || run.posted === null) lines.push(...why(run));
+      // Shown here unless a real, non-dry write just put the identical
+      // sentence on the thread itself — `posted`/`replaced` outside a dry
+      // run, the only two dispositions that actually wrote this rationale
+      // where a reader can already see it. Every other disposition owes it
+      // here instead: `null` (`apply`/the warrant never let this write at
+      // all), `withheld` (B1's fail-closed refusal — nothing was written),
+      // and `unchanged` (this run reached the same fingerprint as a standing
+      // comment, but a fingerprint covers the thread's own text and the
+      // shortlist, not the rationale sentence — a rerun can carry a new one
+      // the standing comment does not, and the reader still deserves to see
+      // what this run itself concluded). A dry run never wrote anything
+      // regardless of `posted`, so it always shows.
+      const echoedOnThread = !run.dryRun && (run.posted === "posted" || run.posted === "replaced");
+      if (!echoedOnThread) lines.push(...why(run));
     }
   }
 
@@ -172,6 +181,15 @@ function disposition(run: Run, duplicateOf: number): string {
     return "Nothing was posted — `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
   }
 
+  if (run.posted === "withheld") {
+    return (
+      "Nothing was posted — this thread carries more comments than one run reads, and none of " +
+      "the ones read were this duty's own, so whether it already commented could not actually be " +
+      `told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so ` +
+      "this run left the thread alone rather than guess."
+    );
+  }
+
   const verb =
     run.posted === "posted"
       ? run.dryRun
@@ -186,9 +204,24 @@ function disposition(run: Run, duplicateOf: number): string {
   return `${verb} a comment naming #${String(duplicateOf)}.`;
 }
 
-/** The rationale line, when there is one to show — see `Run.rationale`'s own doc comment for when. */
+/**
+ * The rationale line, when there is one to show — see `Run.rationale`'s own
+ * doc comment for when.
+ *
+ * `sanitize` defangs `@mentions` and `#references` in the rationale, but
+ * never touches whitespace — it has no reason to, everywhere else the
+ * sanitised text lands is a Markdown document of its own. Here it is spliced
+ * after a single leading `> `, which only quotes its first physical line: a
+ * rationale carrying a blank line and a `#` a model wrote as a heading rather
+ * than an issue reference would open that heading right underneath the quote,
+ * live in the job summary, the moment the model's own text contained one.
+ * Flattened to one line first, the same one-sentence shape `verdict.ts` asks
+ * the model for in the first place, so there is no line break left for a
+ * later line to escape the quote on.
+ */
 function why(run: Run): string[] {
-  return run.rationale !== null && run.rationale.length > 0 ? ["", `> ${run.rationale}`] : [];
+  if (run.rationale === null || run.rationale.length === 0) return [];
+  return ["", `> ${run.rationale.replace(/\s+/g, " ").trim()}`];
 }
 
 /**

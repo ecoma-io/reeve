@@ -78,15 +78,15 @@ would have proposed.
 
 ## Outputs
 
-| Output         | Value                                                                                                                                                                            |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `comment`.                                                                     |
-| `score`        | The judge's own confidence, to two decimal places. Distinct from the `confidence` input, which is the floor it is checked against.                                               |
-| `language`     | The detected language of the thread, or empty for none of the configured ones.                                                                                                   |
-| `commented`    | `true` when this run leaves its comment standing — posted, replaced, or already there and left unchanged. `false` on every other path, including one under the confidence floor. |
-| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, not a failure.                                                                                         |
-| `processed`    | How many issues a sweep processed. `0` outside `sweep`.                                                                                                                          |
-| `remaining`    | Candidates a sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                          |
+| Output         | Value                                                                                                                                                                                                                                                                            |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `comment`.                                                                                                                                                                     |
+| `score`        | The judge's own confidence, to two decimal places. Distinct from the `confidence` input, which is the floor it is checked against.                                                                                                                                               |
+| `language`     | The detected language of the thread, or empty for none of the configured ones.                                                                                                                                                                                                   |
+| `commented`    | `true` when this run leaves its comment standing — posted, replaced, or already there and left unchanged. Unset — never `false` — on `sweep`, the same as `duplicate-of`. `false` on every other single-thread path, including one under the confidence floor and every dry run. |
+| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, not a failure.                                                                                                                                                                                         |
+| `processed`    | How many issues a sweep processed. `0` outside `sweep`.                                                                                                                                                                                                                          |
+| `remaining`    | Candidates a sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                                                                                          |
 
 **`score` and `confidence` are not the same axis.** `score` is what the judge
 actually answered; `confidence` is the floor it has to clear before anything

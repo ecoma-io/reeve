@@ -326,6 +326,16 @@ async function runSweep(
     );
     const acted = await act(api, at, outcome, settings.dryRun);
     acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
+
+    // The pre-loop check above only catches the roster running dry *before*
+    // a thread is decided. `decide` and `act` are exactly where a model
+    // actually gets asked anything, so the roster can just as easily run out
+    // grounding the last thread this walk was ever going to reach — the one
+    // iteration after which the loop simply ends rather than looping back to
+    // ask again. Checked here too, every iteration, so that case still marks
+    // `starvedRun` rather than leaving the job summary silent about a
+    // starvation the `starved` output already reported.
+    if (starved(settings.models, weather)) acc.starvedRun = true;
   }
 }
 
@@ -489,16 +499,30 @@ async function decide(
     );
   }
 
-  /** A run that reached no proposal: the guardrails still reported, nothing else is. */
+  /**
+   * A run that reached no proposal: the guardrails still reported, nothing
+   * else is.
+   *
+   * `confidence` defaults to `0`, which is the honest answer for every caller
+   * that has no real verdict to report — no candidates reached the judge,
+   * every model failed, the answer did not parse, or the answer named a
+   * candidate outside the shortlist it was shown. But a verdict that *did*
+   * parse and named no duplicate is a real, confident answer of its own — a
+   * model sure this is not a duplicate is a different outcome from a judge
+   * that was never actually asked, and `0` would make the two indistinguishable
+   * to a reader of `score`. Callers that have a real verdict in hand pass its
+   * `confidence` through explicitly instead of taking this default.
+   */
   const nothing = (
     language: string | null,
     rankInfo: RankInfo,
     pivotInfo: PivotInfo,
     note: string | null,
+    confidence = 0,
   ): Outcome => ({
     language,
     duplicateOf: null,
-    confidence: 0,
+    confidence,
     lexicalScore: 0,
     permitted,
     withheld,
@@ -606,7 +630,14 @@ async function decide(
         : null;
 
   const verdict = judged.verdict;
-  if (verdict.duplicateOf === null) return nothing(language, rankInfo, pivotInfo, note);
+  // A real verdict, not the absence of one — the judge was asked, answered,
+  // and its answer parsed. `0` is reserved for when there is no verdict to
+  // report at all, so this confident "not a duplicate" carries its own
+  // `confidence` through rather than defaulting to the same number a run
+  // that never got an answer would show.
+  if (verdict.duplicateOf === null) {
+    return nothing(language, rankInfo, pivotInfo, note, verdict.confidence);
+  }
 
   // `parseVerdict` already refuses a `duplicate_of` that does not name one of
   // the `candidates` it was given — that is what makes an injected "this
@@ -806,7 +837,11 @@ async function act(
   }
 
   const posted = await postOrReplace(api, at, outcome.proposal, outcome.fingerprint);
-  return { done: { commented: true }, posted };
+  // `withheld` (B1's fail-closed answer to a search that could not tell "no
+  // comment" from "a comment past the page it read") never wrote anything —
+  // `commented` answers whether Reeve's comment stands on the thread after
+  // this run, and on that path it does not.
+  return { done: { commented: posted !== "withheld" }, posted };
 }
 
 /** Enough of an unreadable answer to recognise it, on one line. */
