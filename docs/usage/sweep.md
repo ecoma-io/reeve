@@ -1,0 +1,141 @@
+# The sweep
+
+Working a backlog that already exists, on a schedule, instead of one thread at
+a time — and what it looks like when a free provider cannot finish it in one
+run.
+
+> [!IMPORTANT]
+> Reeve is on a `0.x` line. This page describes [Stage 2](../north-star.md#7-roadmap)
+> of [the roadmap](../north-star.md#7-roadmap) and is not built yet. Nothing on
+> this page runs today — see
+> [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here)
+> for what "normative but not yet built" means on these pages.
+
+## What `sweep`, `since` and `limit` are
+
+Every duty gains three workflow-level inputs — not warrant authority, because
+what a sweep may touch is still bounded by the same taxonomy and the same
+capabilities a single-thread run answers to. A sweep decides **how much work a
+run looks for**, never **what it is allowed to do to it**:
+
+```yaml
+with:
+  sweep: true
+  since: 2026-01-01
+  limit: 200
+```
+
+`sweep: true` turns a run from "the one thread this event named" into "every
+open thread this duty has not already handled." `since` bounds it by date, and
+`limit` bounds it by count — both exist for the same reason: a scheduled run
+has to end, and ending with an honest partial is the entire point of this
+page.
+
+## Why a sweep exists at all: weather
+
+[D12](../north-star.md#d12--capacity-is-weather-authority-is-configuration)
+is the doctrine; this is what it looks like from the outside. A 429, a 5xx or
+a timeout is **weather** — a provider could not serve this particular request
+right now, and that says nothing about whether Reeve is allowed near your
+repository. A run that meets one rotates to the next model on the list, and
+when the list runs out, it does not fail. It **delivers what it finished**,
+says exactly what is left in its outputs, and ends in a warning — yellow,
+never red.
+
+That is a deliberately unfinished-looking result, and it is the correct one.
+The repositories a keyless, IP-rate-limited provider serves see 429s that do
+not clear inside a single job no matter how long the job waits — they clear on
+the provider's own schedule, which a GitHub Actions runner does not control
+and should not try to. Waiting them out is a runner-minute bill with no floor.
+**The sweep is what comes back for whatever the weather left undone.**
+
+A 401 or a 403 gets the opposite treatment, on purpose: that is
+**configuration**, not conditions, and it fails the run red immediately,
+because no amount of scheduling repairs a key that was never going to work. A
+scheduled sweep does not paper over a broken credential by trying again later
+— it would just fail the same way, quietly, forever, and a repository that
+never gets served is worse than one that visibly stopped.
+
+## Idempotency by observation
+
+A sweep does not need a state file to know what it already did, because
+nothing about the duty pipeline changed to make room for it — [the same
+fingerprint marker](cost.md#2-idempotency) that makes re-running one thread
+free is exactly what makes a sweep converge. A thread whose marker already
+carries the fingerprint of what a run would produce is skipped before a
+provider is ever constructed: one API read, nothing else. A thread the last
+sweep left half-done — some languages translated, some still on a provider's
+naughty list — is picked back up from where the fingerprint says it stopped,
+not redone from the start.
+
+That is the whole mechanism. There is no ledger of "threads the sweep has
+seen" anywhere in this repository, because the marker already committed to
+each thread is that ledger, and it is checked the same way whether a thread
+arrived through an event or through a sweep listing it.
+
+## A complete scheduled-sweep workflow
+
+```yaml
+name: Reeve sweep
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # once a day; a keyless provider earns a gentler cron
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: ecoma-io/reeve/triage@v0.1
+        with:
+          sweep: true
+          limit: 200
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          models: |
+            gpt-5-mini
+            gpt-5
+```
+
+Nothing here differs from an event-triggered workflow except the trigger
+itself and the three sweep inputs. The warrant, the provider list, the
+rotation, the fingerprint — every guardrail that applies to one thread applies
+to all two hundred.
+
+## The free-tier, IP-rate-limited story
+
+This is the configuration the sweep was built for. A keyless provider caps
+requests by IP rather than by key, a runner's IP is shared and its quota
+resets on nobody's schedule Reeve can read, and a single scheduled run against
+a four-thousand-issue backlog is going to spend most of its list rotating
+through 429s. **That is not a failure of this design — it is the exact
+condition it was designed around.** One run gets through as many threads as
+the weather allowed, ends yellow, and says how many are left. The next
+scheduled run picks up from there, for free, on the threads the fingerprint
+says are still untouched. Given enough scheduled runs, the backlog finishes —
+not because any single run got lucky, but because the combination of
+weather-not-error and free-skip-by-fingerprint means nothing is ever lost
+between runs, only deferred.
+
+## `since` for a mid-flight integration
+
+Installing Reeve on a repository with three years of history does not mean
+committing to translate or sort three years of history. `since` bounds a
+sweep to threads opened or updated after a date, so the first sweep can be
+scoped to "everything from the day I installed this" and a backfill of
+everything older stays a deliberate, separate decision — run once, by hand,
+with `limit` set to whatever you are willing to spend finding out what it
+costs.
+
+## What this replaces
+
+Today, before this stage lands, working through an existing backlog means the
+[`number`](installation.md#a-backfill-or-one-thread-on-purpose) input, one
+thread at a time, from a `workflow_dispatch` you trigger by hand. `sweep`
+does not remove that path — a single thread on purpose is still exactly that
+— it adds the scheduled, unattended one next to it.

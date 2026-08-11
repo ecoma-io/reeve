@@ -7,6 +7,31 @@ and enforced against the file rather than against anything a model said.
 > Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
 > see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
+## Where the warrant sits on the ladder
+
+[The ladder](../north-star.md#3-the-ladder) is climbed almost entirely inside
+this file. Write nothing, and a duty runs at level 0 — the narrowest authority
+Reeve defines in code, built from the labels and the descriptions your
+repository already has, with nothing typed twice. Write `.github/reeve.yml`
+with a taxonomy and no `capabilities:` block, and every duty stays on that
+same narrow default — a taxonomy sharpens what gets decided, never what is
+allowed to act, and a taxonomy-only file is level 1 on its own, complete and
+worth stopping at for as long as it serves you. **Only once you write a
+`capabilities:` block does enumeration become total:** a duty the block does
+not name is then granted nothing at all, not its old default, because once
+you begin enumerating who may act, the enumeration is the whole answer, and
+the file's mere existence never was. That block — with `owner` and
+`exclusive_with` alongside it — is level 2 of the ladder, reviewed the same
+way, in the same file, for as long as you use Reeve.
+
+**Level 0 arrives with [Stage 1](../north-star.md#7-roadmap), and the
+corrected reading of the `capabilities:` block above arrives with [Stage
+3](../north-star.md#7-roadmap).** Until Stage 1, an absent warrant is not an
+implicit authority — it is a failed run. Until Stage 3, a duty left out of an
+already-written `capabilities:` block still quietly keeps its own default
+rather than being granted nothing — [the capabilities reference
+below](#capabilities) says where that gap is today.
+
 ## Why this is a file and not a setting
 
 A reeve acted on the owner's behalf under an authority the owner had granted and
@@ -26,8 +51,13 @@ it was permitted to do. That is the single property that makes injected text
 unable to invent an authority: text can persuade a model, and it cannot edit a
 file it is not in.
 
-**Deleting it deletes the authority.** `rm .github/reeve.yml` and every duty
-refuses to act. There is no second copy anywhere.
+**Deleting it withdraws what you wrote, not more than that — eventually.**
+`rm .github/reeve.yml` is meant to take a duty back down to level 0 of the
+ladder rather than to no authority at all, once
+[Stage 1](../north-star.md#7-roadmap) lands. **Today, before that stage,
+deletion is stricter than the doctrine: every duty refuses to act**, and the
+rest of this page is written against that current behaviour. There is no
+second copy of the file anywhere, either way.
 
 ## Where it lives
 
@@ -139,6 +169,17 @@ at all.
 | `assign`    | Assign the `owner` the taxonomy names for a label.   | off                |
 | `none`      | Run everything, write every output, change nothing.  | —                  |
 
+**A duty left out of the block entirely keeps its own default, for as long as
+no `capabilities:` block exists at all** — that is level 1 of
+[the ladder](../north-star.md#3-the-ladder), and a taxonomy-only warrant stays
+there for as long as that is all you want. Write a `capabilities:` block at
+all, though, and enumeration is meant to become total: a duty you left out of
+it is granted nothing, not its old default, because naming who may act is
+supposed to be the whole answer once you start. **This is
+[Stage 3](../north-star.md#7-roadmap) work, not yet built.** Today, a duty
+left out of an already-written block still quietly keeps its default — write
+every duty you use into the block once one exists, and do not lean on the gap.
+
 **The default is the capability whose failure is cheapest, and nothing else.**
 Labels-only for triage is not caution for its own sake — it is where the projects
 running this at scale independently converged. A wrong label costs a maintainer
@@ -172,7 +213,7 @@ These are not defaults. There is no input, no file key and no flag:
 - **Writing code, opening a pull request, or running your tests.**
 
 The last one is a product boundary rather than a safety one, and it is argued in
-[the north star](../north-star.md#7-non-goals).
+[the north star](../north-star.md#8-non-goals).
 
 ## Validation
 
@@ -207,8 +248,8 @@ Corrections a maintainer has already made, kept as newline-delimited JSON under
 Reading ships. A duty ranks the store against the thread in front of it and puts
 the nearest few corrections in the prompt, lexically and for nothing — no
 provider, no extra request. The ranking is a seam: a similarity that crosses
-languages goes in behind the same interface, and that is Stage 3 in
-[the roadmap](../north-star.md#6-roadmap).
+languages, by translating to a pivot language first, goes in behind the same
+interface, and that is Stage 4 in [the roadmap](../north-star.md#7-roadmap).
 
 **Writing does not ship yet.** Recording a correction is a commit, it needs
 `contents: write`, and it is opt-in for that reason. Until then the store is a

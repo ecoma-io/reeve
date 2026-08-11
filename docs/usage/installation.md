@@ -7,6 +7,47 @@ the version to pin.
 > Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
 > see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
+## The five-minute version
+
+```yaml
+name: Reeve
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+
+concurrency:
+  group: reeve-issue-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: ecoma-io/reeve/triage@v0.1
+        with:
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          models: gpt-5-mini
+```
+
+No `.github/reeve.yml`, and nothing else written down anywhere. This is level 0
+of [the ladder](../north-star.md#3-the-ladder) — the narrowest authority Reeve
+defines in code, built entirely from the labels and the label descriptions your
+repository already has, so a first run costs you nothing typed twice: `triage`
+may only `label`, against the taxonomy sitting in your repository settings
+already.
+
+**This arrives with [Stage 1](../north-star.md#7-roadmap). Until then, a
+warrant is required, and its absence fails the run rather than granting the
+implicit one described above** — see [The warrant](warrant.md) for what to
+write today. Everything from here down is what you configure once a rung below
+stops being enough; read it the day you need it, not before.
+
 ## 1. Pick a provider
 
 Reeve talks to one thing: an endpoint speaking the OpenAI chat-completions
@@ -218,6 +259,7 @@ jobs:
           languages: en, vi
 ```
 
-Two duties, one version line, one provider. Next: decide what they are allowed to
-do — [The warrant](warrant.md) — and who reads what —
-[Languages](languages.md).
+Two duties, one version line, one provider — level 0 with an extra duty added,
+nothing more. **Climbing the ladder from here means writing things down, not
+switching anything on:** decide what each duty is allowed to do —
+[The warrant](warrant.md) — and who reads what — [Languages](languages.md).

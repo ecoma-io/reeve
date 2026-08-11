@@ -92,7 +92,7 @@ rejects most proposals on purpose. The work has to:
 4. **be harder on a project whose contributors do not share a language.**
 
 If it fails (4) it might still be a good idea. It is not a good idea _here_, and
-[the non-goals](../north-star.md#7-non-goals) are where that gets argued.
+[the non-goals](../north-star.md#8-non-goals) are where that gets argued.
 
 ### 2. Write the evaluation first
 

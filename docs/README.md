@@ -24,7 +24,7 @@ it changes first.
 
 Reeve is on a `0.x` line. The doctrine and the shape are settled; the code is
 landing behind them, stage by stage, and **the version number is read off
-[the roadmap](north-star.md#6-roadmap)** — `0.x` while a stage is still open,
+[the roadmap](north-star.md#7-roadmap)** — `0.x` while a stage is still open,
 `1.0` when every one of them is done
 ([the rule](development/releasing.md#what-0x-and-10-mean-here)).
 

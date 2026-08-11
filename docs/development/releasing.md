@@ -40,7 +40,7 @@ which is what keeps Reeve out of a premature `1.0`.
 ## What `0.x` and `1.0` mean here
 
 Not a feeling about maturity. The two numbers are read off
-[the roadmap](../north-star.md#6-roadmap), and that is the whole rule:
+[the roadmap](../north-star.md#7-roadmap), and that is the whole rule:
 
 - **`0.x` — every release while a stage is still open.** Usable, dogfooded on
   this repository, and free to break its own input surface between minors. An
@@ -50,7 +50,7 @@ Not a feeling about maturity. The two numbers are read off
 - **`1.0` — every stage done and every number published.** From there the input
   surface is under semver's promise and a rename costs a major.
 
-This is why `1.0` is not something to reach for early. Stage 2 alone collapses
+This is why `1.0` is not something to reach for early. Stage 3 alone collapses
 per-duty inputs into the warrant, which is a breaking change to every workflow
 in the wild; doing that under a `1.x` promise would mean `2.0` almost
 immediately, and a major version that means "we changed our minds" teaches

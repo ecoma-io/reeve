@@ -124,6 +124,24 @@ you double a free tier's daily call count by accident.
 Give a keyless configuration more models than you think it needs. The list is the
 budget.
 
+## `limit`, and the sweep
+
+**Not built yet — arrives with [Stage 2](../north-star.md#7-roadmap).** A
+backlog swept on a schedule rather than read one thread at a time needs a
+different kind of cost control than a single run does: not "which model," but
+"how much of the backlog does this run even attempt." `limit` is that control
+— it bounds a sweep by count, so a scheduled run against a four-thousand-issue
+backlog spends a predictable amount and stops, rather than running until the
+job's own timeout cuts it off mid-list.
+
+Combined with the fingerprint that already makes a re-run free, `limit` turns
+an unbounded backlog into a bounded, repeatable bill: the first scheduled run
+costs `limit` threads' worth of calls, and every run after it costs only the
+threads that changed, because everything already matching its fingerprint is
+skipped before a provider is constructed. [The sweep](sweep.md) covers the
+whole mechanism, including what a run that did not finish looks like and why
+that is the correct outcome rather than a failure to budget for.
+
 ## A worked estimate
 
 **Estimated**, on assumptions worth arguing with. A repository receiving 300

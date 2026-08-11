@@ -90,8 +90,14 @@ The layer is only worth having if duties actually consume it. Concretely:
   least interesting consumer: it turns author language into reader languages
   while keeping the original byte-for-byte.
 - **`duplicate`** is the hard one. Matching happens across languages, which
-  means comparison cannot be lexical. Two reports of the same crash, one in
-  Vietnamese and one in English, have to land in the same place.
+  means comparison cannot be lexical on its own. **Decided:** the common
+  representation is a pivot — translate both sides into the project's working
+  language, then rank lexically over that, the same machinery already used
+  within one language. See
+  [the settled pivot decision](../north-star.md#9-settled-questions) for the
+  argument against multilingual embeddings instead. Two reports of the same
+  crash, one in Vietnamese and one in English, land in the same place because
+  both get read in the same language before anything ranks them.
 - **`respond`** writes to the author, in the author's language, about a project
   whose documentation is in the project's.
 
@@ -110,18 +116,12 @@ measured.
 These are unresolved and marked so a reader does not mistake a sketch for a
 decision.
 
-1. **The pivot for cross-language comparison.** Matching Vietnamese against
-   English requires a common representation. Translating both to a pivot
-   language is simple and lossy and costs a model call per item; embedding both
-   in a multilingual vector space is cheaper per comparison and introduces a
-   dependency Reeve has so far avoided. Neither has been chosen, and the choice
-   shapes Stage 4.
-2. **Multi-language threads.** A body in Vietnamese with an English title, or a
+1. **Multi-language threads.** A body in Vietnamese with an English title, or a
    thread where the author switches after a maintainer replies. Per-item
    detection handles the common case and does not describe this one.
-3. **Reader languages beyond two.** See open question 2 in the north star: the
+2. **Reader languages beyond two.** See open question 2 in the north star: the
    author/project two-pole model is a simplification, and a project with
    maintainers in three countries will break it.
-4. **Script versus language.** Simplified and traditional Chinese, and the
+3. **Script versus language.** Simplified and traditional Chinese, and the
    several Serbian and Punjabi cases, are one language and two scripts. Whether
    the warrant expresses script separately is undecided.

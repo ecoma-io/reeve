@@ -171,5 +171,5 @@ Honest gaps, tracked rather than papered over:
 - **Many maintainers, many project languages** — the project language is
   currently one value.
 
-Both are in [the north star](../north-star.md#9-open-questions). Neither has a
+Both are in [the north star](../north-star.md#10-open-questions). Neither has a
 workaround worth documenting as though it were a design.
