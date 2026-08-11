@@ -285,6 +285,14 @@ outputs:
       the roster ran out of capacity. The next sweep starts here. `0` outside
       `sweep`, and `0` when a sweep finished its whole backlog.
 
+  recorded:
+    description: >-
+      `true` when a labelled or unlabelled event from a human, with `record`
+      granted, wrote (or under `dry-run`, would have written) this thread's
+      current labels to the corrections store. `false` on every other run —
+      including an ordinary verdict, a sweep, and a labelled event where
+      `record` is not granted — never unset.
+
 runs:
   using: node24
   main: dist/index.js

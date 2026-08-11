@@ -164,14 +164,15 @@ Vietnamese. Say what the boundary _is_, not what it sounds like.
 The second half of the warrant: not what the labels mean, but what a duty may do
 at all.
 
-| Capability  | What it permits                                      | Default            |
-| ----------- | ---------------------------------------------------- | ------------------ |
-| `label`     | Add a label from the taxonomy. Never remove one.     | on for `triage`    |
-| `edit-body` | Append Reeve's own block below its marker in a body. | on for `translate` |
-| `comment`   | Post a rationale as a new comment.                   | off                |
-| `close`     | Close as not planned, with a comment saying why.     | off                |
-| `assign`    | Assign the `owner` the taxonomy names for a label.   | off                |
-| `none`      | Run everything, write every output, change nothing.  | —                  |
+| Capability  | What it permits                                                                                                                                    | Default            |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `label`     | Add a label from the taxonomy. Never remove one.                                                                                                   | on for `triage`    |
+| `edit-body` | Append Reeve's own block below its marker in a body.                                                                                               | on for `translate` |
+| `comment`   | Post a rationale as a new comment.                                                                                                                 | off                |
+| `close`     | Close as not planned, with a comment saying why.                                                                                                   | off                |
+| `assign`    | Assign the `owner` the taxonomy names for a label.                                                                                                 | off                |
+| `record`    | Commit the thread's current labels to the corrections store, on a labelled or unlabelled event from a human. Needs `contents: write` on the token. | off                |
+| `none`      | Run everything, write every output, change nothing.                                                                                                | —                  |
 
 **A duty left out of the block entirely keeps its own default, for as long as
 no `capabilities:` block exists at all** — that is level 1 of
@@ -284,13 +285,26 @@ Corrections a maintainer has already made, kept as newline-delimited JSON under
 
 Reading ships. A duty ranks the store against the thread in front of it and puts
 the nearest few corrections in the prompt, lexically and for nothing — no
-provider, no extra request. The ranking is a seam: a similarity that crosses
-languages, by translating to a pivot language first, goes in behind the same
-interface, and that is Stage 4 in [the roadmap](../north-star.md#7-roadmap).
+provider, no extra request in the ordinary, same-language case.
 
-**Writing does not ship yet.** Recording a correction is a commit, it needs
-`contents: write`, and it is opt-in for that reason. Until then the store is a
-directory you fill in yourself, one JSON object per line, or leave empty.
+**Writing ships too, behind `record`.** Grant it and a labelled or unlabelled
+event from a human — never a re-triage, never a bot — commits that thread's
+taxonomy-filtered current labels to the store, replacing any earlier entry for
+the same thread. It needs `contents: write` on the token, which is why it is
+opt-in rather than a duty default: a project decides to keep a memory at all.
+No checkout happens for this — the commit goes through the Contents API — and
+a token without the scope fails the run the way any other authentication
+problem does, plainly.
+
+**The pivot language is what makes the store cross-language.** The first
+language `triage` resolves — from `languages:` here, or from the `languages`
+input — is the pivot. A correction recorded in another language is also
+translated into the pivot and stored alongside the original; recalling for a
+thread in yet another language translates the query into the pivot too, and
+the two renderings meet there. A correction already in the pivot language, or
+a store that only ever sees one language, spends no extra request on any of
+this — the bridge is only built when there is a language gap for it to cross.
+This is [Stage 4](../north-star.md#7-roadmap), landed.
 
 **An empty store is the cold-start case, not an error.** Every duty works with no
 memory. It works better with one.

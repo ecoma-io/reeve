@@ -91,15 +91,16 @@ what tells it.
 
 ## Outputs
 
-| Output         | Value                                                                                                                                 |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `labels`       | JSON array of the labels actually applied. Empty when none were.                                                                      |
-| `proposed`     | JSON array of every label the verdict proposed, **including the ones the guardrails refused.**                                        |
-| `confidence`   | The verdict's own confidence, as a decimal string.                                                                                    |
-| `language`     | The author language detected for this thread, or empty for `unknown`.                                                                 |
-| `duplicate-of` | Issue number this one appears to duplicate, empty when none was found. Reported, never acted on unless `apply` names `close`.         |
-| `screened-out` | Why the cheap pass stopped the run before an expensive model saw it. Empty when the issue went through in full.                       |
-| `applied`      | JSON object recording what was actually done. Empty of actions under `dry-run`, which is how a workflow tells a rehearsal from a run. |
+| Output         | Value                                                                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `labels`       | JSON array of the labels actually applied. Empty when none were.                                                                                                                     |
+| `proposed`     | JSON array of every label the verdict proposed, **including the ones the guardrails refused.**                                                                                       |
+| `confidence`   | The verdict's own confidence, as a decimal string.                                                                                                                                   |
+| `language`     | The author language detected for this thread, or empty for `unknown`.                                                                                                                |
+| `duplicate-of` | Issue number this one appears to duplicate, empty when none was found. Reported, never acted on unless `apply` names `close`.                                                        |
+| `screened-out` | Why the cheap pass stopped the run before an expensive model saw it. Empty when the issue went through in full.                                                                      |
+| `applied`      | JSON object recording what was actually done. Empty of actions under `dry-run`, which is how a workflow tells a rehearsal from a run.                                                |
+| `recorded`     | `true` when this run wrote (or under `dry-run`, would have written) the thread's current labels to the corrections store. `false` on every other run, including an ordinary verdict. |
 
 **The difference between `proposed` and `labels` is what the guardrails
 stopped.** That is the output to watch while you are tuning `confidence` or a
@@ -178,15 +179,26 @@ as the thread.
 
 Cross-language retrieval is the part nothing else in this category has: a
 correction a maintainer made on an English report should inform the verdict on the
-Vietnamese one describing the same thing. Lexical ranking cannot do that, and the
-retrieval seam is pluggable for exactly that reason — a similarity that crosses
-languages, by translating to a pivot language first, goes in behind the same
-interface. That is Stage 4 in [the roadmap](../../north-star.md#7-roadmap).
+Vietnamese one describing the same thing. Lexical ranking cannot do that on its
+own, so recall asks the store twice when it might help — once in the thread's
+own language, once translated into the pivot language — and merges the two
+rankings. A thread and a store that already share one language never pay for
+the second query: the pivot bridge is built only when there is a language gap
+worth crossing.
 
-**Nothing writes to the store yet.** Corrections are read; recording one is a
-commit, it needs `contents: write`, and it is opt-in for that reason. Until it
-ships, the store is a directory you fill in by hand or not at all — and an empty
-one is the cold start rather than an error.
+**Writing ships too, behind the `record` capability.** Grant it (it needs
+`contents: write` on the token, so it is off by default) and a labelled or
+unlabelled event from a human — never a re-triage, never a bot — commits that
+thread's taxonomy-filtered current labels to the store, replacing any earlier
+entry for the same thread. This does not ask for a fresh verdict: a label
+change already is the maintainer's decision, and `record` writes down what
+stands rather than second-guessing it. When the thread's own language is not
+the pivot, its title and excerpt are also translated into the pivot and stored
+alongside the original — best effort: a translation that could not be
+produced this run still leaves the correction recorded, without that
+rendering. No checkout happens for any of this; the commit goes through
+GitHub's Contents API. See [the warrant's capability
+table](../warrant.md#capabilities) for what grants it.
 
 **Triage.** Ask for a verdict: labels from the taxonomy, a confidence, an optional
 duplicate reference, a rationale. Three properties are non-negotiable:

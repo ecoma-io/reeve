@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { Spend } from "../../core/meter.js";
 
-import { summarize, summarizeSweep, type Run, type SweepRun } from "./summary.js";
+import {
+  summarize,
+  summarizeRecord,
+  summarizeSweep,
+  type RecordRun,
+  type Run,
+  type SweepRun,
+} from "./summary.js";
 
 // This page is read by the person who configured the run, and the question they
 // open it with is never "what did it apply" — that is visible on the thread. It
@@ -25,7 +32,7 @@ function run(over: Partial<Run> = {}): Run {
     permitted: ["label"],
     withheld: [],
     done: { labels: ["bug"], commented: false, assigned: [], closed: false },
-    memory: { size: 0, recalled: 0 },
+    memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     note: null,
     implicit: false,
     excludedLabels: [],
@@ -132,11 +139,17 @@ describe("summarize", () => {
   });
 
   it("reports what memory contributed, including that it contributed nothing", () => {
-    expect(summarize(run({ memory: { size: 12, recalled: 3 } }))).toContain(
+    expect(summarize(run({ memory: { size: 12, recalled: 3, pivotRecalled: 0 } }))).toContain(
       "Memory: 3 of 12 corrections reached the prompt",
     );
-    expect(summarize(run({ memory: { size: 1, recalled: 0 } }))).toContain(
+    expect(summarize(run({ memory: { size: 1, recalled: 0, pivotRecalled: 0 } }))).toContain(
       "Memory: 0 of 1 correction reached the prompt",
+    );
+  });
+
+  it("reports how many of the recalled corrections crossed a language", () => {
+    expect(summarize(run({ memory: { size: 12, recalled: 3, pivotRecalled: 2 } }))).toContain(
+      "2 of them found across languages",
     );
   });
 
@@ -259,6 +272,119 @@ describe("summarize", () => {
     expect(page).toContain("No expensive model was asked anything. This is a real answer");
     // No table of refusals — nothing was ever proposed for one to hold.
     expect(page).not.toContain("### What the verdict proposed");
+  });
+});
+
+/**
+ * A `record` run never asks for a verdict, so this page carries none of
+ * `Run`'s guardrail fields — only what was written to the store, and whether
+ * a pivot rendering came with it.
+ */
+function recordRun(over: Partial<RecordRun> = {}): RecordRun {
+  return {
+    thread: 42,
+    dryRun: false,
+    recorded: true,
+    language: "English",
+    decided: ["bug"],
+    pivot: false,
+    pivotNote: null,
+    corrections: ".reeve/corrections",
+    spent: [],
+    modelNames: new Map(),
+    screenNames: new Map(),
+    ...over,
+  };
+}
+
+describe("summarizeRecord", () => {
+  it("names the thread and what was recorded", () => {
+    const page = summarizeRecord(recordRun());
+
+    expect(page).toContain("## Reeve · triage — record");
+    expect(page).toContain("Thread #42");
+    expect(page).toContain("Recorded to `.reeve/corrections` as `bug`, in English.");
+  });
+
+  it("says a real answer when nothing was decided, rather than an empty list", () => {
+    expect(summarizeRecord(recordRun({ decided: [] }))).toContain(
+      "Recorded to `.reeve/corrections` as no labels, in English.",
+    );
+  });
+
+  it("says the language is unidentified rather than naming none", () => {
+    expect(summarizeRecord(recordRun({ language: null }))).toContain(
+      "Recorded to `.reeve/corrections` as `bug`, in an unidentified language.",
+    );
+  });
+
+  it("says a dry run rehearsed rather than committed, at the top", () => {
+    expect(summarizeRecord(recordRun({ dryRun: true }))).toContain(
+      "Thread #42 — **dry run**, nothing was committed.",
+    );
+  });
+
+  it("says plainly when nothing was recorded", () => {
+    // Not a shape `main.ts` produces today — `recordCorrection` always answers
+    // `recorded: true` — but the page has to be honest about the field it
+    // reads regardless of who is calling it.
+    expect(summarizeRecord(recordRun({ recorded: false }))).toContain("Nothing was recorded.");
+  });
+
+  it("says a pivot rendering was stored alongside the correction", () => {
+    expect(summarizeRecord(recordRun({ pivot: true }))).toContain(
+      "A pivot-language rendering was translated and stored alongside it.",
+    );
+  });
+
+  it("says why a pivot rendering is missing, when one was attempted and was not produced", () => {
+    const page = summarizeRecord(
+      recordRun({
+        pivot: false,
+        pivotNote:
+          "A pivot-language rendering could not be produced this run, so the correction was " +
+          "recorded without one.",
+      }),
+    );
+
+    expect(page).toContain(
+      "A pivot-language rendering could not be produced this run, so the correction was " +
+        "recorded without one.",
+    );
+  });
+
+  it("says nothing about a pivot rendering when none was attempted", () => {
+    const page = summarizeRecord(recordRun({ pivot: false, pivotNote: null }));
+
+    expect(page).not.toContain("pivot");
+  });
+
+  it("bills the pivot translation and the language detection as separate rows", () => {
+    const page = summarizeRecord(
+      recordRun({
+        spent: [
+          spend({ purpose: "detect", model: "small", requests: 1, prompt: 10, completion: 2 }),
+          spend({ purpose: "pivot", model: "big" }),
+        ],
+        modelNames: new Map([
+          ["small", "Quick"],
+          ["big", "Careful"],
+        ]),
+      }),
+    );
+
+    expect(page).toContain("| Detection | Quick |");
+    expect(page).toContain("| Pivot translation | Careful |");
+  });
+
+  it("says plainly when a run cost nothing", () => {
+    expect(summarizeRecord(recordRun())).toContain(
+      "No model was asked anything this run — every decision was made by code.",
+    );
+  });
+
+  it("ends with exactly one newline, whatever the last section was", () => {
+    expect(summarizeRecord(recordRun())).toMatch(/[^\n]\n$/);
   });
 });
 

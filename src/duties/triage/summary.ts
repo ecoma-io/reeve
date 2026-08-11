@@ -45,8 +45,16 @@ export interface Run {
   readonly permitted: readonly Capability[];
   readonly withheld: readonly Capability[];
   readonly done: Done;
-  /** How large the store was and how much of it reached the prompt. */
-  readonly memory: { readonly size: number; readonly recalled: number };
+  /**
+   * How large the store was, how much of it reached the prompt, and how many
+   * of those arrived through the pivot bridge rather than the thread's own
+   * language.
+   */
+  readonly memory: {
+    readonly size: number;
+    readonly recalled: number;
+    readonly pivotRecalled: number;
+  };
   /**
    * Why there is no verdict, when there is none. Every model failing and an
    * answer nobody could read are different configurations with the same
@@ -84,6 +92,62 @@ export function summarize(run: Run): string {
       shown(spend.purpose === "screen" ? run.screenNames : run.modelNames, spend.model),
     ),
   ];
+
+  return `${parts.join("\n").trimEnd()}\n`;
+}
+
+/** What a `record` run decided, for its own page. */
+export interface RecordRun {
+  readonly thread: number;
+  readonly dryRun: boolean;
+  readonly recorded: boolean;
+  /** The detected author language, or null for `unknown`. */
+  readonly language: string | null;
+  /** The taxonomy-filtered labels standing on the thread at the moment it was recorded. */
+  readonly decided: readonly string[];
+  /** Whether a pivot-language rendering was produced and stored alongside the correction. */
+  readonly pivot: boolean;
+  /** Why a pivot rendering was not produced, when one was attempted and was not. */
+  readonly pivotNote: string | null;
+  readonly corrections: string;
+  readonly spent: readonly Spend[];
+  readonly modelNames: Names;
+  readonly screenNames: Names;
+}
+
+/**
+ * A `record` run's own page, deliberately short: this pipeline never asks for
+ * a verdict, so there is no confidence, no proposal and no guardrail table to
+ * report — only what was written to the store, and whether a pivot rendering
+ * came with it.
+ */
+export function summarizeRecord(run: RecordRun): string {
+  const parts = [
+    "## Reeve · triage — record",
+    "",
+    `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was committed" : ""}.`,
+    "",
+    run.recorded
+      ? `Recorded to \`${run.corrections}\` as ` +
+        (run.decided.length > 0
+          ? run.decided.map((name) => `\`${name}\``).join(", ")
+          : "no labels") +
+        `${run.language !== null ? `, in ${run.language}` : ", in an unidentified language"}.`
+      : "Nothing was recorded.",
+  ];
+
+  if (run.pivot) {
+    parts.push("", "A pivot-language rendering was translated and stored alongside it.");
+  } else if (run.pivotNote !== null) {
+    parts.push("", run.pivotNote);
+  }
+
+  parts.push(
+    "",
+    cost(run.spent, (spend) =>
+      shown(spend.purpose === "screen" ? run.screenNames : run.modelNames, spend.model),
+    ),
+  );
 
   return `${parts.join("\n").trimEnd()}\n`;
 }
@@ -147,7 +211,10 @@ function verdict(run: Run): string {
     "",
     `Confidence ${run.confidence.toFixed(2)} against a floor of ${run.floor.toFixed(2)}. ` +
       `Author language: ${language}. ` +
-      `Memory: ${String(run.memory.recalled)} of ${String(run.memory.size)} correction${run.memory.size === 1 ? "" : "s"} reached the prompt.`,
+      `Memory: ${String(run.memory.recalled)} of ${String(run.memory.size)} correction${run.memory.size === 1 ? "" : "s"} reached the prompt` +
+      (run.memory.pivotRecalled > 0
+        ? `, ${String(run.memory.pivotRecalled)} of ${run.memory.pivotRecalled === 1 ? "it" : "them"} found across languages.`
+        : "."),
   );
 
   if (run.confidence < run.floor && run.proposed.length > 0) {

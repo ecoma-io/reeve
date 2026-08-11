@@ -33,7 +33,7 @@ import type { Completion, Message, Provider, Usage } from "./provider.js";
  * expensive one over what got through. One number covering both would hide
  * exactly the ratio a maintainer tunes.
  */
-export type Purpose = "detect" | "draft" | "judge" | "screen" | "triage";
+export type Purpose = "detect" | "draft" | "judge" | "screen" | "triage" | "pivot";
 
 /**
  * The stage names a reader of the documentation already knows.
@@ -49,6 +49,7 @@ export const STAGE: Record<Purpose, string> = {
   judge: "Judging",
   screen: "Screening",
   triage: "Triage",
+  pivot: "Pivot translation",
 };
 
 /** One model's spend on one purpose. */

@@ -33058,7 +33058,8 @@ var STAGE = {
   draft: "Drafting",
   judge: "Judging",
   screen: "Screening",
-  triage: "Triage"
+  triage: "Triage",
+  pivot: "Pivot translation"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();
@@ -33191,7 +33192,8 @@ var CAPABILITIES = [
   "edit-body",
   "comment",
   "close",
-  "assign"
+  "assign",
+  "record"
 ];
 var VERSION7 = 1;
 var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;

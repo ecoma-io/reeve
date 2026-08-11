@@ -66,17 +66,31 @@ import {
 } from "../../core/enforce.js";
 import {
   createEffects,
+  listCorrectionFiles,
   listOpenThreads,
   listRepositoryLabels,
+  readContentsFile,
   readStanding,
+  writeContentsFile,
+  type ContentsApi,
   type Effects,
+  type Location,
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
 import { counted, fraction, readShared, whole } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
-import { createMemory, readStore } from "../../core/memory.js";
+import {
+  createMemory,
+  formatCorrection,
+  parseCorrection,
+  readStore,
+  EXCERPT,
+  type Correction,
+  type WeightedQuery,
+} from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
+import { translateToPivot } from "../../core/pivot.js";
 import {
   createProvider,
   createWeather,
@@ -100,7 +114,14 @@ import {
 } from "../../core/warrant.js";
 
 import { sift } from "./spam.js";
-import { summarize, summarizeSweep, type Done, type Run, type SweptThread } from "./summary.js";
+import {
+  summarize,
+  summarizeRecord,
+  summarizeSweep,
+  type Done,
+  type Run,
+  type SweptThread,
+} from "./summary.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 
 /**
@@ -195,6 +216,8 @@ interface Stages {
   readonly detect: Provider;
   readonly screen: Provider;
   readonly triage: Provider;
+  /** The roster that translates into the pivot language, for `record` and for cross-language recall. */
+  readonly pivot: Provider;
 }
 
 /** Everything the run concluded, whatever path it took to conclude it. */
@@ -209,7 +232,11 @@ interface Outcome {
   readonly withheld: readonly Capability[];
   /** Why there is no verdict, when there is none. */
   readonly note: string | null;
-  readonly memory: { readonly size: number; readonly recalled: number };
+  readonly memory: {
+    readonly size: number;
+    readonly recalled: number;
+    readonly pivotRecalled: number;
+  };
   /** True when there was no warrant file, and this ran at the narrowest authority instead. */
   readonly implicit: boolean;
   /** Repository labels the implicit warrant left out for carrying no description. */
@@ -341,6 +368,7 @@ export async function run(): Promise<void> {
   let settings: Settings | null = null;
   let single: { readonly number: number; readonly outcome: Outcome; readonly done: Done } | null =
     null;
+  let recorded: { readonly number: number; readonly outcome: RecordOutcome } | null = null;
   let bulk: SweepAccumulator | null = null;
 
   try {
@@ -352,6 +380,7 @@ export async function run(): Promise<void> {
       detect: metered(provider, meter, "detect"),
       screen: metered(provider, meter, "screen"),
       triage: metered(provider, meter, "triage"),
+      pivot: metered(provider, meter, "pivot"),
     };
 
     // The authority first, and before anything is spent. A file that does not
@@ -392,7 +421,8 @@ export async function run(): Promise<void> {
       // sits here, as early as the answer is already certain, and before the
       // thread, the taxonomy check, or a single model call spends anything on
       // a decision that could never be applied.
-      let outcome: Outcome;
+      let outcome: Outcome | null = null;
+      let recordOutcome: RecordOutcome | null = null;
       if (authority.warrant.unnamed("triage")) {
         outcome = notGranted(authority.warrant);
       } else {
@@ -408,13 +438,41 @@ export async function run(): Promise<void> {
             (await listRepositoryLabels(api, at)).map((label) => label.name),
           );
         }
-        outcome = await decide(authority, standing, settings, stages, weather);
+
+        // `record` takes a labelled/unlabelled event, from a human, and only
+        // when both the file and the workflow's `apply` grant it — the same
+        // narrowing every other capability goes through. Every other event,
+        // or the capability simply not granted, is today's behaviour: a
+        // verdict, not a recording.
+        const trigger = recordTrigger();
+        const { permitted } = narrow(
+          authority.warrant.granted("triage", DEFAULT_CAPABILITIES),
+          settings.apply,
+        );
+
+        if (trigger.eligible && permitted.includes("record")) {
+          recordOutcome = await recordCorrection(
+            api,
+            at,
+            standing,
+            authority,
+            settings,
+            stages,
+            weather,
+          );
+        } else {
+          outcome = await decide(authority, standing, settings, stages, weather);
+        }
       }
 
-      const done = settings.dryRun
-        ? NOTHING_DONE
-        : await act(createEffects(api, at), authority.warrant, outcome);
-      single = { number, outcome, done };
+      if (recordOutcome !== null) {
+        recorded = { number, outcome: recordOutcome };
+      } else if (outcome !== null) {
+        const done = settings.dryRun
+          ? NOTHING_DONE
+          : await act(createEffects(api, at), authority.warrant, outcome);
+        single = { number, outcome, done };
+      }
     }
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
@@ -437,6 +495,9 @@ export async function run(): Promise<void> {
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
         await writeSummary(sweepPage(settings, bulk, meter.spent()));
+      } else if (!settings.sweep && recorded !== null) {
+        reportRecordRun(recorded.outcome, rosterStarved);
+        await writeSummary(recordPage(settings, recorded.number, recorded.outcome, meter.spent()));
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
@@ -493,7 +554,7 @@ async function decide(
     permitted,
     withheld,
     note: null,
-    memory: { size: 0, recalled: 0 },
+    memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: authority.implicit,
     excludedLabels: authority.excludedLabels,
     ungranted: null,
@@ -550,10 +611,54 @@ async function decide(
     core.warning(`corrections: ${line}`);
   }
   const memory = createMemory(store.corrections);
-  const recalled = memory.recall(`${standing.title}\n${body}`, RECALLED);
+
+  const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
+
+  // The pivot bridge is worth a request only when it could change the answer:
+  // the thread's own language has to be known, a pivot language has to be
+  // configured, and the store has to hold at least one correction that is not
+  // already in the thread's own language. A store that shares one language
+  // with the thread has nothing a translated query would reach that the plain
+  // one above does not already reach — so that case, the common one, spends
+  // no provider call here at all.
+  const pivotLanguage = settings.languages[0] ?? null;
+  const threadLanguage = detection.language;
+  const worthBridging =
+    threadLanguage !== null &&
+    pivotLanguage !== null &&
+    store.corrections.some((correction) => correction.language !== threadLanguage.code);
+
+  if (worthBridging) {
+    const draft = await translateToPivot({
+      provider: stages.pivot,
+      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      title: standing.title,
+      body,
+      to: pivotLanguage,
+      weather,
+    });
+    if (draft !== null) {
+      queries.push({ text: `${draft.title}\n${draft.body}`, against: "pivot" });
+    } else {
+      core.info(
+        "Cross-language recall could not translate this thread into the pivot language this run " +
+          "— recall used the thread's own language only.",
+      );
+    }
+  }
+
+  const recalled = memory.recallAcrossQueries(queries, RECALLED);
+  const pivotRecalled =
+    threadLanguage === null
+      ? 0
+      : recalled.filter(
+          (correction) =>
+            correction.language !== null && correction.language !== threadLanguage.code,
+        ).length;
   core.info(
     `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) ` +
-      `from \`${settings.corrections}\`.`,
+      `from \`${settings.corrections}\`` +
+      (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them found across languages.` : "."),
   );
 
   const triaged = await triage({
@@ -594,7 +699,7 @@ async function decide(
     permitted,
     withheld,
     note,
-    memory: { size: memory.size, recalled: recalled.length },
+    memory: { size: memory.size, recalled: recalled.length, pivotRecalled },
     implicit: authority.implicit,
     excludedLabels: authority.excludedLabels,
     ungranted: null,
@@ -628,6 +733,249 @@ async function decide(
 }
 
 /**
+ * Whether the event that triggered this run is one `record` fires on, and why
+ * not when it is not.
+ *
+ * `labeled`/`unlabeled` on `issues`, from a human. Not `opened`, not
+ * `edited`, not a re-triage — `record` never re-triages, it takes a label
+ * change as a maintainer's word for what a thread is and writes that down.
+ * And not a bot: a label another automation applied is not a correction, and
+ * recording it would teach recall a category no maintainer ever chose.
+ */
+interface RecordTrigger {
+  readonly eligible: boolean;
+  /** Said in the log on the branches that matter; empty on the one that fires. */
+  readonly reason: string;
+}
+
+function recordTrigger(): RecordTrigger {
+  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
+  if (eventName !== "issues") {
+    return {
+      eligible: false,
+      reason: `the triggering event was \`${eventName.length > 0 ? eventName : "unknown"}\`, not \`issues\``,
+    };
+  }
+
+  const payload = context.payload as {
+    action?: string;
+    sender?: { login?: string; type?: string };
+  };
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
+    return {
+      eligible: false,
+      reason: `the \`issues\` action was \`${String(payload.action)}\`, not \`labeled\` or \`unlabeled\``,
+    };
+  }
+
+  const sender = payload.sender;
+  if (sender?.type === "Bot" || (sender?.login ?? "").endsWith("[bot]")) {
+    return { eligible: false, reason: "the label change came from a bot" };
+  }
+
+  return { eligible: true, reason: "" };
+}
+
+/** The human who made the label change this run is recording — a handle, without the `@`. */
+function senderLogin(): string {
+  const payload = context.payload as { sender?: { login?: string } };
+  return payload.sender?.login ?? "";
+}
+
+/** What a `record` run concluded — a mirror of `Outcome`, sized for the much smaller pipeline it took. */
+interface RecordOutcome {
+  readonly recorded: boolean;
+  readonly language: string | null;
+  readonly decided: readonly string[];
+  readonly pivot: boolean;
+  /** Why a pivot rendering was not produced, when one was attempted and it was not. */
+  readonly pivotNote: string | null;
+}
+
+/**
+ * Records the current state of a thread as a correction — the taxonomy-
+ * filtered labels standing on it now, its title and body, its language —
+ * rather than asking for a fresh verdict. `record` never re-triages: a label
+ * event already carries the maintainer's decision, and asking a model to
+ * reproduce it would be asking it to guess at something already known.
+ *
+ * `dry-run` runs every step below except the commit itself, so the log and
+ * the `recorded` output both say what a real run would have done.
+ */
+async function recordCorrection(
+  contentsApi: ContentsApi,
+  at: Location,
+  standing: Standing,
+  authority: Authority,
+  settings: Settings,
+  stages: Stages,
+  weather: Weather,
+): Promise<RecordOutcome> {
+  const warrant = authority.warrant;
+  const body = standing.body.slice(0, settings.maxBodyChars);
+
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+    ),
+  );
+  // The code, because that is what the store and the pivot comparison below
+  // both compare against — the same convention `decide`'s recall path reads
+  // corrections by. The output-facing `language` a maintainer reads on this
+  // run's page is a different value, further down: the same label the
+  // ordinary `decide` path reports, so a workflow reading this action's
+  // `language` output sees the same shape whichever path produced it.
+  const code = detection.language?.code ?? null;
+
+  // Taxonomy-filtered: a label some other tool or automation applied is not a
+  // maintainer correcting this duty's taxonomy, and recording it would teach
+  // recall a category triage was never asked to propose.
+  const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== undefined);
+
+  const pivotLanguage = settings.languages[0] ?? null;
+  let pivot: Correction["pivot"] = null;
+  let pivotNote: string | null = null;
+  if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
+    const draft = await translateToPivot({
+      provider: stages.pivot,
+      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      title: standing.title,
+      body,
+      to: pivotLanguage,
+      weather,
+    });
+    if (draft !== null) {
+      pivot = {
+        language: pivotLanguage.code,
+        title: draft.title,
+        excerpt: draft.body.slice(0, EXCERPT),
+      };
+    } else {
+      // Weather, not a broken configuration — the write below still happens.
+      // A correction without a pivot rendering is still a correction; a run
+      // that refused to record over a starved translation would be trading a
+      // sure thing for a nice-to-have.
+      pivotNote =
+        "A pivot-language rendering could not be produced this run, so the correction was " +
+        "recorded without one.";
+      core.info(pivotNote);
+    }
+  }
+
+  const correction: Correction = {
+    thread: at.number,
+    at: new Date().toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed: [],
+    decided: decidedLabels,
+    by: senderLogin(),
+    note: null,
+    pivot,
+  };
+
+  if (settings.dryRun) {
+    core.info(
+      `Would record #${String(at.number)} as ` +
+        (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") +
+        `${pivot !== null ? ", with a pivot rendering" : ""} — dry run, nothing committed.`,
+    );
+  } else {
+    await writeCorrection(contentsApi, at, settings.corrections, correction);
+  }
+
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+  };
+}
+
+/**
+ * Commits `correction` to the store at `path` — replacing the line for this
+ * thread wherever it already lives, appending a fresh one when it does not.
+ *
+ * No checkout, no git binary: every shard already committed is read through
+ * the Contents API to look for an existing entry for this thread, the same
+ * way a maintainer opening the store by hand would look — one file at a time,
+ * because there is no index to consult instead. `contents: write` is what
+ * this needs on the token, and its absence is left to fail the way any other
+ * authentication problem does: loud, and uncaught.
+ */
+async function writeCorrection(
+  contentsApi: ContentsApi,
+  at: Location,
+  path: string,
+  correction: Correction,
+): Promise<void> {
+  const files = await listCorrectionFiles(contentsApi, at, path);
+
+  for (const file of files) {
+    const read = await readContentsFile(contentsApi, at, file.path);
+    if (read === null) continue;
+
+    const lines = read.text.split("\n");
+    const index = lines.findIndex((line) => {
+      if (line.trim().length === 0) return false;
+      const existing = parseCorrection(line);
+      return existing !== null && existing.thread === correction.thread;
+    });
+
+    if (index !== -1) {
+      lines[index] = formatCorrection(correction);
+      await writeContentsFile(
+        contentsApi,
+        at,
+        file.path,
+        `${lines.join("\n").replace(/\n*$/, "")}\n`,
+        commitMessage(correction),
+        file.sha,
+      );
+      return;
+    }
+  }
+
+  // Not found in any existing shard: append to this month's, the same
+  // sharding a store filled in by hand already uses — small enough that two
+  // maintainers correcting different threads the same week append to the same
+  // file and git resolves it, rather than every correction becoming a
+  // conflict on one file that never rolls over.
+  const shard = `${path.replace(/\/+$/, "")}/${monthShard()}.ndjson`;
+  const existing = await readContentsFile(contentsApi, at, shard);
+  const text =
+    existing === null
+      ? `${formatCorrection(correction)}\n`
+      : `${existing.text.replace(/\n*$/, "")}\n${formatCorrection(correction)}\n`;
+  await writeContentsFile(
+    contentsApi,
+    at,
+    shard,
+    text,
+    commitMessage(correction),
+    existing?.sha ?? null,
+  );
+}
+
+/** This run's shard name — the store rolls over by calendar month. */
+function monthShard(): string {
+  const now = new Date();
+  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** The commit message a recorded correction lands with. House voice: plain about what changed. */
+function commitMessage(correction: Correction): string {
+  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
+  return `memory: record #${String(correction.thread)} as ${decided}`;
+}
+
+/**
  * The outcome of a run this duty was never going to be allowed to act on.
  *
  * Green, not red — enumerating who may act is a maintainer's decision, and a
@@ -646,7 +994,7 @@ function notGranted(warrant: Warrant): Outcome {
     permitted: [],
     withheld: [],
     note: null,
-    memory: { size: 0, recalled: 0 },
+    memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: false,
     excludedLabels: [],
     ungranted:
@@ -770,6 +1118,10 @@ function report(outcome: Outcome, done: Done, dryRun: boolean, rosterStarved: bo
   core.setOutput("processed", "0");
   core.setOutput("skipped", "0");
   core.setOutput("remaining", "0");
+  // `false` here always: this is the ordinary decide/act pipeline, which
+  // never writes to the corrections store. `recorded` only ever reads `true`
+  // from the dedicated record path below.
+  core.setOutput("recorded", "false");
 }
 
 /**
@@ -782,6 +1134,30 @@ function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
   core.setOutput("starved", String(rosterStarved));
+  // A sweep never records either — `record` fires on a single labelled event,
+  // never on a backlog walk — so this is `false` on every sweep run too.
+  core.setOutput("recorded", "false");
+}
+
+/**
+ * Every output, on a `record` run — the full contract every path answers, so
+ * a workflow that reads `labels` or `confidence` on every run of this action
+ * finds the neutral values a run that never triaged actually produced, rather
+ * than an output some other path simply never set.
+ */
+function reportRecordRun(outcome: RecordOutcome, rosterStarved: boolean): void {
+  core.setOutput("labels", JSON.stringify([]));
+  core.setOutput("proposed", JSON.stringify([]));
+  core.setOutput("confidence", "0.00");
+  core.setOutput("language", outcome.language ?? "");
+  core.setOutput("duplicate-of", "");
+  core.setOutput("screened-out", "");
+  core.setOutput("applied", JSON.stringify(NOTHING_DONE));
+  core.setOutput("starved", String(rosterStarved));
+  core.setOutput("processed", "0");
+  core.setOutput("skipped", "0");
+  core.setOutput("remaining", "0");
+  core.setOutput("recorded", String(outcome.recorded));
 }
 
 function page(
@@ -811,6 +1187,27 @@ function page(
     implicit: outcome.implicit,
     excludedLabels: outcome.excludedLabels,
     ungranted: outcome.ungranted,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames,
+  });
+}
+
+function recordPage(
+  settings: Settings,
+  thread: number,
+  outcome: RecordOutcome,
+  spent: Run["spent"],
+): string {
+  return summarizeRecord({
+    thread,
+    dryRun: settings.dryRun,
+    recorded: outcome.recorded,
+    language: outcome.language,
+    decided: outcome.decided,
+    pivot: outcome.pivot,
+    pivotNote: outcome.pivotNote,
+    corrections: settings.corrections,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames,

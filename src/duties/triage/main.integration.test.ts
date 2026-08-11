@@ -119,6 +119,19 @@ interface State {
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
   readonly effects: { applied: string[]; comments: string[]; assigned: string[]; closed: boolean };
+  /**
+   * The repository's committed files, as `record` sees them through the
+   * Contents API — keyed by repo-relative path, with a sha the stub mints
+   * fresh on every write, the same way GitHub does.
+   */
+  readonly contentsFiles: Map<string, { content: string; sha: string }>;
+  /** Every commit `record` made, in order — what a maintainer would see in the log. */
+  readonly contentsWrites: { path: string; message: string; content: string }[];
+  /**
+   * When true, every `createOrUpdateFileContents` call answers 403 — the read-
+   * only token this duty's own docs describe, simulated without a real one.
+   */
+  contentsForbidden: boolean;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -161,6 +174,9 @@ async function startStub(): Promise<Stub> {
     answer: triaging(verdict()),
     asked: [],
     effects: { applied: [], comments: [], assigned: [], closed: false },
+    contentsFiles: new Map(),
+    contentsWrites: [],
+    contentsForbidden: false,
   };
 
   const server = createServer((request, response) => {
@@ -283,6 +299,62 @@ async function route(
     stub.asked.push(ask);
     const answered = stub.answer(ask);
     send(response, answered.status, answered.payload);
+    return;
+  }
+
+  // The Contents API `record` writes through — no checkout, no git binary, so
+  // this is the only place a committed correction is visible to a case. The
+  // path arrives percent-encoded (Octokit encodes every `/` in it), which is
+  // what `%2F` below is undoing.
+  const contents = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(path);
+  if (method === "GET" && contents) {
+    const at = decodeURIComponent(contents[1] ?? "");
+    const file = stub.contentsFiles.get(at);
+    if (file !== undefined) {
+      send(response, 200, {
+        name: at.split("/").pop(),
+        path: at,
+        sha: file.sha,
+        content: Buffer.from(file.content, "utf8").toString("base64"),
+        encoding: "base64",
+      });
+      return;
+    }
+
+    const prefix = `${at.replace(/\/+$/, "")}/`;
+    const children = [...stub.contentsFiles.entries()].filter(([entry]) =>
+      entry.startsWith(prefix),
+    );
+    if (children.length > 0) {
+      send(
+        response,
+        200,
+        children.map(([entry, entryFile]) => ({
+          name: entry.slice(prefix.length),
+          path: entry,
+          sha: entryFile.sha,
+        })),
+      );
+      return;
+    }
+
+    send(response, 404, { message: "Not Found" });
+    return;
+  }
+
+  if (method === "PUT" && contents) {
+    if (stub.contentsForbidden) {
+      send(response, 403, { message: "Resource not accessible by integration" });
+      return;
+    }
+
+    const at = decodeURIComponent(contents[1] ?? "");
+    const payload = parsed(raw) as { message?: string; content?: string; sha?: string };
+    const text = Buffer.from(payload.content ?? "", "base64").toString("utf8");
+    const sha = `sha-${String(stub.contentsWrites.length + 1)}`;
+    stub.contentsFiles.set(at, { content: text, sha });
+    stub.contentsWrites.push({ path: at, message: payload.message ?? "", content: text });
+    send(response, 200, { content: { name: at.split("/").pop(), path: at, sha } });
     return;
   }
 
@@ -453,6 +525,27 @@ async function remember(correction: Record<string, unknown>): Promise<void> {
   );
 }
 
+/**
+ * The `issues` event payload `record` reads — just enough of it to decide
+ * whether to fire and who the change came from. Written to a file rather than
+ * handed over as an object, because that is how a runner actually delivers
+ * it: `@actions/github`'s `Context` reads `GITHUB_EVENT_PATH` off disk.
+ */
+async function labelEvent(
+  action: "labeled" | "unlabeled" = "labeled",
+  sender: { login: string; type?: string } = { login: "ana", type: "User" },
+): Promise<string> {
+  const path = join(scratch, "event.json");
+  await writeFile(path, JSON.stringify({ action, sender }));
+  return path;
+}
+
+/** This calendar month's shard name, exactly as `main.ts`'s own `monthShard` computes it. */
+function currentShard(): string {
+  const now = new Date();
+  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 // ---------------------------------------------------------------------------
 
 let stub: Stub;
@@ -494,6 +587,7 @@ describe("the action", () => {
       processed: "0",
       skipped: "0",
       remaining: "0",
+      recorded: "false",
     });
   });
 
@@ -932,6 +1026,337 @@ describe("the action", () => {
     expect(run.code).toBe(1);
     expect(run.log).toContain("this event (schedule) names no issue or pull request");
   });
+});
+
+describe("record", () => {
+  // A warrant granting `record` explicitly — never a duty default, and never
+  // implied by `triage: [label]` alone. Decision 1's whole point.
+  const RECORDING_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record]");
+  // A repository-relative path, unlike `correctionsPath` above: `record` never
+  // touches the filesystem, so this is free to look like what a maintainer
+  // would actually commit under, rather than an absolute scratch directory.
+  const CORRECTIONS = ".reeve/corrections";
+
+  function shardPath(): string {
+    return `${CORRECTIONS}/${currentShard()}.ndjson`;
+  }
+
+  it("records a human's labelled event, without asking a model for a fresh verdict", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // `record` takes the label change as the maintainer's word for it — it
+    // never re-triages, so no request is ever sent.
+    expect(stub.asked).toHaveLength(0);
+
+    const shard = stub.contentsFiles.get(shardPath());
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as {
+      thread: number;
+      decided: string[];
+      by: string;
+    };
+    expect(written).toMatchObject({ thread: 42, decided: ["bug"], by: "ana" });
+    expect(stub.contentsWrites[0]?.message).toBe("memory: record #42 as bug");
+    expect(run.summary).toContain("## Reeve · triage — record");
+    expect(run.summary).toContain("Recorded to `.reeve/corrections` as `bug`, in English.");
+  });
+
+  it("ignores a bot actor, and falls through to an ordinary verdict instead of recording", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const event = await labelEvent("labeled", { login: "reeve-triage[bot]", type: "Bot" });
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    // The ordinary pipeline ran instead — a label change from a bot is still a
+    // thread worth triaging, just not a correction worth learning from.
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
+  it("replaces the prior entry for this thread rather than duplicating it", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const previous = JSON.stringify({
+      thread: 42,
+      at: "2026-07-01T00:00:00Z",
+      title: "Old title",
+      excerpt: "old excerpt",
+      language: "en",
+      proposed: [],
+      decided: ["docs"],
+      by: "ana",
+      note: null,
+      pivot: null,
+    });
+    const other = JSON.stringify({
+      thread: 99,
+      at: "2026-07-01T00:00:00Z",
+      title: "Someone else's thread",
+      excerpt: "unrelated",
+      language: "en",
+      proposed: [],
+      decided: ["bug"],
+      by: "ana",
+      note: null,
+      pivot: null,
+    });
+    stub.contentsFiles.set(shardPath(), { content: `${previous}\n${other}\n`, sha: "sha-seed" });
+    stub.labels = ["docs"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    const shard = stub.contentsFiles.get(shardPath());
+    const lines = (shard?.content.trim().split("\n") ?? []).map(
+      (line) => JSON.parse(line) as { thread: number; title: string; decided: string[] },
+    );
+    // One line for #42, rewritten — not a second one appended alongside it —
+    // and #99's own line untouched.
+    expect(lines).toHaveLength(2);
+    expect(lines.find((line) => line.thread === 42)).toMatchObject({ decided: ["docs"] });
+    expect(lines.find((line) => line.thread === 42)?.title).not.toBe("Old title");
+    expect(lines.find((line) => line.thread === 99)?.title).toBe("Someone else's thread");
+  });
+
+  it("does not record when the capability is not granted, even though the workflow asked for it", async () => {
+    // `warrantPath` still carries the plain `WARRANT` — `triage: [label]`, no
+    // `record` — from this suite's own `beforeEach`.
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    expect(run.log).toContain(
+      "`apply` asks for `record`, which " + `\`${warrantPath}\` does not grant to triage`,
+    );
+    // The narrower of the two still ran the ordinary pipeline underneath it.
+    expect(stub.asked.length).toBeGreaterThan(0);
+  });
+
+  it("fails red, plainly, when the token cannot write — the permission error it is", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.contentsForbidden = true;
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("Resource not accessible by integration");
+  });
+
+  it("records without a pivot rendering when the pivot roster starves, and says why", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.title = "Không thể đăng nhập";
+    stub.body = VIETNAMESE_REPORT;
+    stub.answer = () => ({ status: 429, payload: { error: { message: "out of quota" } } });
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    const shard = stub.contentsFiles.get(shardPath());
+    const written = JSON.parse(shard?.content.trim() ?? "") as {
+      language: string | null;
+      pivot: unknown;
+    };
+    expect(written.language).toBe("vi");
+    expect(written.pivot).toBeNull();
+    expect(run.summary).toContain(
+      "A pivot-language rendering could not be produced this run, so the correction was " +
+        "recorded without one.",
+    );
+  });
+
+  it("taxonomy-filters the labels it records, dropping any name the warrant does not define", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug", "wontfix"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    const shard = stub.contentsFiles.get(shardPath());
+    const written = JSON.parse(shard?.content.trim() ?? "") as { decided: string[] };
+    expect(written.decided).toEqual(["bug"]);
+  });
+
+  it("rehearses on a dry run: nothing committed, still reporting `recorded`", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS, "dry-run": "true" },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    expect(stub.contentsWrites).toEqual([]);
+    expect(run.log).toContain("Would record #42 as bug — dry run, nothing committed.");
+    expect(run.summary).toContain("— **dry run**, nothing was committed");
+  });
+
+  it("falls back to an ordinary verdict on any `issues` action besides a label change", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const path = join(scratch, "event.json");
+    await writeFile(
+      path,
+      JSON.stringify({ action: "opened", sender: { login: "ana", type: "User" } }),
+    );
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: path },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
+  it("falls back to an ordinary verdict on any event besides `issues`", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_NAME: "issue_comment", GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+  });
+});
+
+describe("cross-language recall", () => {
+  it(
+    "spends no provider call on the pivot bridge when the store and the thread already " +
+      "share one language",
+    async () => {
+      // `remember`'s default correction is English, the same as `REPORT` — the
+      // common case, and the one this guard exists for.
+      await remember({});
+
+      const run = await runAction(stub);
+
+      expect(run.code).toBe(0);
+      // The one call this run makes at all is the verdict itself.
+      expect(stub.asked).toHaveLength(1);
+      expect(stub.asked[0]?.system).not.toContain("Translate the title and body");
+    },
+  );
+
+  it("reaches a correction recorded in another language through its pivot rendering", async () => {
+    await remember({});
+    stub.title = "Không thể đăng nhập";
+    stub.body = VIETNAMESE_REPORT;
+    stub.answer = (ask) =>
+      ask.system.includes("Translate the title and body")
+        ? saying(
+            JSON.stringify({
+              title: "Dark mode setting is lost between sessions",
+              body: "It forgets the toggle.",
+            }),
+          )
+        : saying(verdict());
+
+    const run = await runAction(stub, { languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    const triaging = stub.asked.find((ask) => !ask.system.includes("Translate the title and body"));
+    expect(triaging?.user).toContain("Dark mode setting is lost between sessions");
+    expect(run.summary).toContain("found across languages");
+  });
+
+  it(
+    "a correction a maintainer made on an English thread changes the verdict on the " +
+      "Vietnamese one describing the same thing",
+    async () => {
+      stub.title = "Không thể đăng nhập";
+      stub.body = VIETNAMESE_REPORT;
+
+      // Nothing recorded yet: the model has no reason to disagree with itself.
+      const before = await runAction(stub, { languages: "en, vi" });
+      expect(before.code).toBe(0);
+      expect(before.outputs.labels).toBe(JSON.stringify(["bug"]));
+
+      // The maintainer decision this project already recorded on the English
+      // thread describing the same fault — reached this time through the pivot.
+      await remember({
+        language: "en",
+        decided: ["docs"],
+        note: "Documented behaviour: the toggle setting is intentionally not persisted.",
+      });
+      stub.answer = (ask) => {
+        if (ask.system.includes("Translate the title and body")) {
+          return saying(
+            JSON.stringify({
+              title: "Dark mode setting is lost between sessions",
+              body: "It forgets the toggle.",
+            }),
+          );
+        }
+        return saying(
+          ask.user.includes(
+            "Documented behaviour: the toggle setting is intentionally not persisted.",
+          )
+            ? verdict({ labels: ["docs"], rationale: "Already documented as intended behaviour." })
+            : verdict(),
+        );
+      };
+
+      const after = await runAction(stub, { languages: "en, vi" });
+
+      expect(after.code).toBe(0);
+      expect(after.outputs.labels).toBe(JSON.stringify(["docs"]));
+      expect(after.outputs.labels).not.toBe(before.outputs.labels);
+    },
+  );
 });
 
 describe("the action contract", () => {
