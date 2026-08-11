@@ -50,17 +50,31 @@ import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { createEffects, listReplies, readStanding, type Location } from "../../core/forge.js";
-import { bounded, fraction, threadNumber, whole } from "../../core/inputs.js";
+import {
+  bounded,
+  checkApiKeysDeclared,
+  fraction,
+  parseApiKeys,
+  parseEndpoints,
+  parseTemperature,
+  parseTimeout,
+  resolveEndpoints,
+  threadNumber,
+  whole,
+  type ApiKeySpec,
+  type EndpointSpec,
+} from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import { createMemory, readStore, type WeightedQuery } from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { parseApply, narrow } from "../../core/enforce.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createProvider,
+  createRoutedProvider,
   createWeather,
   parseModels,
   parseSeats,
+  settleAuth,
   shown,
   starved,
   type Names,
@@ -141,6 +155,10 @@ interface Settings {
   readonly screenNames: Names;
   /** What this repository is about, in the maintainer's own words — the same input triage reads. */
   readonly about: string;
+  readonly endpoints: readonly EndpointSpec[];
+  readonly apiKeys: readonly ApiKeySpec[];
+  readonly requestTimeoutMs: number;
+  readonly temperature: number | undefined;
 }
 
 /**
@@ -172,6 +190,14 @@ function readSettings(): Omit<Settings, "languages"> {
   const panel = parseSeats(core.getInput("judge-models"));
   const cheap = parseModels(core.getInput("screen-models"));
 
+  // The same `endpoints`/`api-keys` parsing and cross-check `readShared` does
+  // for every other duty, called directly rather than gained through it —
+  // this function's own doc comment already explains why `respond` builds its
+  // settings by hand instead of going through `readShared`.
+  const endpoints = parseEndpoints(core.getInput("endpoints"));
+  const apiKeys = parseApiKeys(core.getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+
   return {
     token: core.getInput("github-token", { required: true }),
     number: threadNumber(),
@@ -192,6 +218,10 @@ function readSettings(): Omit<Settings, "languages"> {
     screenModels: cheap.models,
     screenNames: cheap.names,
     about: core.getInput("about"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", core.getInput("request-timeout")),
+    temperature: parseTemperature(core.getInput("temperature")),
   };
 }
 
@@ -338,6 +368,7 @@ async function decide(
     body,
     about: settings.about,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -356,7 +387,7 @@ async function decide(
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather),
+    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
   );
   const language = detection.language;
   core.info(
@@ -398,6 +429,7 @@ async function decide(
       body,
       to: pivotLanguage,
       weather,
+      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
     });
     for (const failure of pivot.failures) {
       core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
@@ -436,6 +468,7 @@ async function decide(
     guidance,
     drafts: settings.drafts,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   const modelName = (id: string) => shown(settings.modelNames, id);
@@ -467,6 +500,7 @@ async function decide(
     body,
     attempts: drafted.attempts,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   const judgeName = (id: string) => shown(settings.judgeNames, id);
   for (const failure of verdict.failures)
@@ -609,7 +643,11 @@ export async function run(): Promise<void> {
   // Declared out here, and written in `finally`, so a run that fails halfway
   // still reports what it decided and what it spent.
   const meter = createMeter();
-  const weather = createWeather();
+  // Reassigned once `readSettings` has answered, inside the `try` below —
+  // `endpoints` is not known until then. Left at its empty-alias default if
+  // reading the settings themselves is what fails, which is fine: nothing
+  // below that point ever runs.
+  let weather = createWeather();
   let settings: Settings | null = null;
   let authority: Authority | null = null;
   let outcome: Outcome | null = null;
@@ -617,8 +655,9 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)));
     const api = getOctokit(base.token);
-    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
+    const provider = createRoutedProvider(resolveEndpoints(base));
 
     const stages: Stages = {
       screen: metered(provider, meter, "screen"),
@@ -647,6 +686,12 @@ export async function run(): Promise<void> {
       const at: Location = { ...context.repo, number: settings.number };
       outcome = await decide(api, at, authority.warrant, settings, stages, weather);
     }
+
+    // Deferred half of the multi-endpoint amendment to D12: a single-endpoint
+    // run never reaches this with anything to say — `reckon` already threw
+    // the moment its one endpoint answered unauthenticated. Only fires once
+    // every endpoint configured turned out to be misconfigured the same way.
+    settleAuth(weather);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
