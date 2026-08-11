@@ -114,11 +114,17 @@ inputs:
   apply:
     description: >-
       What this run may do, comma separated: any of `label`, `comment`,
-      `close`, `assign`, or `none` for a run that decides and touches nothing.
+      `close`, `assign`, `record`, or `none` for a run that decides and
+      touches nothing.
 
       The narrower of this and the warrant file wins, always. This is the
       workflow's half of the answer — useful for turning one effect off on one
       trigger without editing the file — and the file remains the authority.
+
+      `record` needs naming here as well as in the file: a labelled or
+      unlabelled event only records when both halves grant it, and with the
+      default of `label` alone a labelled event re-triages instead — see
+      `docs/usage/duties/triage.md`.
     required: false
     default: label
 
@@ -284,6 +290,14 @@ outputs:
       Candidates this sweep did not reach — past `limit`, or left behind when
       the roster ran out of capacity. The next sweep starts here. `0` outside
       `sweep`, and `0` when a sweep finished its whole backlog.
+
+  recorded:
+    description: >-
+      `true` when a labelled or unlabelled event from a human, with `record`
+      granted, wrote (or under `dry-run`, would have written) this thread's
+      current labels to the corrections store. `false` on every other run —
+      including an ordinary verdict, a sweep, and a labelled event where
+      `record` is not granted — never unset.
 
 runs:
   using: node24

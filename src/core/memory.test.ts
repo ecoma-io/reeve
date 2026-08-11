@@ -30,6 +30,7 @@ function correction(over: Partial<Correction> = {}): Correction {
     decided: ["bug", "needs reproduction"],
     by: "maintainer",
     note: null,
+    pivot: null,
     ...over,
   };
 }
@@ -195,6 +196,210 @@ describe("createMemory", () => {
   });
 });
 
+describe("recallAcrossQueries", () => {
+  it("with one query, answers exactly what `recall` would", () => {
+    const memory = createMemory([
+      correction({ thread: 1, title: "Export produces an empty file" }),
+      correction({ thread: 2, title: "Dark mode for the settings panel", excerpt: "" }),
+    ]);
+
+    expect(
+      memory.recallAcrossQueries([{ text: "the export is empty", against: "own" }], 2),
+    ).toEqual(memory.recall("the export is empty", 2));
+  });
+
+  it("reaches a correction through its pivot rendering that its own text does not share", () => {
+    // The English query below shares nothing with the Vietnamese correction's
+    // own title and excerpt — this is the whole reason a pivot rendering
+    // exists rather than relying on the store's own text to bridge the gap.
+    const bridged = correction({
+      thread: 30,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: {
+        language: "en",
+        title: "The dark mode toggle",
+        excerpt: "does not persist after a page reload",
+      },
+    });
+    const memory = createMemory([bridged]);
+
+    expect(memory.recall("dark mode toggle reload", 3)).toEqual([]);
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "dark mode toggle reload", against: { pivot: "en" } }],
+        3,
+      ),
+    ).toEqual([bridged]);
+  });
+
+  it("compares pivot language codes case-insensitively, the way codes read everywhere else", () => {
+    // A warrant spelling the pivot `EN` and a store recorded under `en` are
+    // the same configuration — `findLanguage` already reads codes that way,
+    // and a case-only difference silently emptying cross-language recall
+    // would be the kind of miss nobody can see in a log.
+    const bridged = correction({
+      thread: 31,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: {
+        language: "en",
+        title: "The dark mode toggle",
+        excerpt: "does not persist after a page reload",
+      },
+    });
+    const memory = createMemory([bridged]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "dark mode toggle reload", against: { pivot: "EN" } }],
+        3,
+      ),
+    ).toEqual([bridged]);
+  });
+
+  it("does not rank a rendering in a language the query is not asking for", () => {
+    // The rendering below is in English, left over from before this project's
+    // configured first language moved to French. A French-pivot query has to
+    // miss it — matching on whatever the two languages happen to share by
+    // accident is worse than missing it outright, because it looks like a
+    // real bridge and is not one.
+    const stale = correction({
+      thread: 33,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: {
+        language: "en",
+        title: "The dark mode toggle",
+        excerpt: "does not persist after a page reload",
+      },
+    });
+    const memory = createMemory([stale]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "the dark mode toggle does not persist", against: { pivot: "fr" } }],
+        3,
+      ),
+    ).toEqual([]);
+  });
+
+  it("stays unreachable through its own text even when that text lexically matches the query", () => {
+    // The trap the earlier fallback fell into: this correction's *own* text
+    // happens to be written in English, and the query below is its exact
+    // words — a perfect lexical match, if own text were ever consulted here.
+    // But the correction was recorded in English, not French, and its only
+    // rendering is Spanish — neither is the French this query names, so it
+    // has to come back empty rather than matching on the coincidence.
+    const staleOwnText = correction({
+      thread: 34,
+      title: "The dark mode toggle",
+      excerpt: "does not persist after reload",
+      language: "en",
+      pivot: {
+        language: "es",
+        title: "El interruptor de modo oscuro",
+        excerpt: "no persiste después de recargar",
+      },
+    });
+    const memory = createMemory([staleOwnText]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "the dark mode toggle does not persist after reload", against: { pivot: "fr" } }],
+        3,
+      ),
+    ).toEqual([]);
+  });
+
+  it("matches on its own text when it was recorded in the pivot query's target language", () => {
+    // No rendering at all, but this correction's own `language` already IS
+    // the language the query is asking for — recorded before a pivot switch,
+    // say. That is a legitimate lexical match, not the noise case 3 exists
+    // to keep out.
+    const recordedInTarget = correction({
+      thread: 35,
+      title: "Le bouton du mode sombre",
+      excerpt: "ne persiste pas après le rechargement",
+      language: "fr",
+      pivot: null,
+    });
+    const memory = createMemory([recordedInTarget]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "le bouton du mode sombre ne persiste pas", against: { pivot: "fr" } }],
+        3,
+      ),
+    ).toEqual([recordedInTarget]);
+  });
+
+  it("a pivot-null correction in a foreign language is unreachable via a pivot query, only via its own", () => {
+    const foreignNoPivot = correction({
+      thread: 36,
+      title: "Nút chuyển chế độ tối",
+      excerpt: "không lưu lại sau khi tải lại trang",
+      language: "vi",
+      pivot: null,
+    });
+    const memory = createMemory([foreignNoPivot]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "Nút chuyển chế độ tối không lưu lại", against: { pivot: "en" } }],
+        3,
+      ),
+    ).toEqual([]);
+    expect(
+      memory.recallAcrossQueries(
+        [{ text: "Nút chuyển chế độ tối không lưu lại", against: "own" }],
+        3,
+      ),
+    ).toEqual([foreignNoPivot]);
+  });
+
+  it("keeps a correction once when two queries both reach it, at its best score", () => {
+    const bridged = correction({
+      thread: 31,
+      title: "export empty file",
+      excerpt: "",
+      pivot: { language: "en", title: "export empty file", excerpt: "" },
+    });
+    const memory = createMemory([bridged]);
+
+    const recalled = memory.recallAcrossQueries(
+      [
+        { text: "export empty file", against: "own" },
+        { text: "export empty file", against: { pivot: "en" } },
+      ],
+      3,
+    );
+
+    expect(recalled).toEqual([bridged]);
+  });
+
+  it("recalls nothing when there are no queries to run", () => {
+    const memory = createMemory([correction({ thread: 1 })]);
+
+    expect(memory.recallAcrossQueries([], 3)).toEqual([]);
+  });
+
+  it("falls back to a correction's own text when it has no pivot rendering", () => {
+    // `pivot: null` is either "already in the pivot language" or "translation
+    // was starved" — both read the same document, so the `own`-language query
+    // still finds it even when asked against `"pivot"`.
+    const unrendered = correction({ thread: 32, title: "export empty file", excerpt: "" });
+    const memory = createMemory([unrendered]);
+
+    expect(
+      memory.recallAcrossQueries([{ text: "export empty file", against: { pivot: "en" } }], 3),
+    ).toEqual([unrendered]);
+  });
+});
+
 describe("parseCorrection", () => {
   it("round-trips what `formatCorrection` writes", () => {
     const original = correction({ note: "the steps were there" });
@@ -206,6 +411,43 @@ describe("parseCorrection", () => {
     const long = correction({ excerpt: "x".repeat(900) });
 
     expect(parseCorrection(formatCorrection(long))?.excerpt).toHaveLength(500);
+  });
+
+  it("round-trips a pivot rendering alongside the correction's own text", () => {
+    const original = correction({
+      language: "vi",
+      pivot: { language: "en", title: "The dark mode toggle", excerpt: "does not persist" },
+    });
+
+    expect(parseCorrection(formatCorrection(original))).toEqual(original);
+  });
+
+  it("cuts a pivot rendering's excerpt at 500 characters too", () => {
+    const long = correction({
+      pivot: { language: "en", title: "x", excerpt: "x".repeat(900) },
+    });
+
+    expect(parseCorrection(formatCorrection(long))?.pivot?.excerpt).toHaveLength(500);
+  });
+
+  it("reads a line written before `pivot` existed as `pivot: null`, not a corrupt record", () => {
+    const parsed = parseCorrection(
+      '{"thread":7,"at":"2026-01-01T00:00:00Z","title":"x","excerpt":"","language":"en","proposed":[],"decided":["bug"],"by":"ana","note":null}',
+    );
+
+    expect(parsed?.pivot).toBeNull();
+  });
+
+  it.each([
+    ["a bare string", '"not an object"'],
+    ["missing the language", '{"title":"x","excerpt":"y"}'],
+    ["missing the title", '{"language":"en","excerpt":"y"}'],
+    ["an empty language", '{"language":"","title":"x","excerpt":"y"}'],
+    ["a whitespace-only title", '{"language":"en","title":"   ","excerpt":"y"}'],
+  ])("reads a %s pivot value as null rather than trusting it", (_label, pivot) => {
+    const parsed = parseCorrection(`{"thread":7,"decided":["bug"],"pivot":${pivot}}`);
+
+    expect(parsed?.pivot).toBeNull();
   });
 
   it("fills in what a hand-written record left out", () => {
@@ -221,6 +463,7 @@ describe("parseCorrection", () => {
       decided: ["bug"],
       by: "",
       note: null,
+      pivot: null,
     });
   });
 

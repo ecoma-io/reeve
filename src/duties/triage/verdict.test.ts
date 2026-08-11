@@ -53,6 +53,7 @@ function correction(over: Partial<Correction> = {}): Correction {
     decided: ["bug", "mobile"],
     by: "maintainer",
     note: null,
+    pivot: null,
     ...over,
   };
 }

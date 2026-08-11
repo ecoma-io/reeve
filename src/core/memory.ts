@@ -68,6 +68,25 @@ export interface Correction {
   readonly by: string;
   /** Why, in their words. The highest-value field and the one most often absent. */
   readonly note: string | null;
+  /**
+   * This correction's title and excerpt, rendered into the run's pivot
+   * language — the first language named in `languages` (or the warrant's own
+   * `languages:`), which is what a store built by several projects in several
+   * languages converges on as a common tongue.
+   *
+   * `null` when no rendering was produced: the correction's own `language`
+   * already is the pivot, so there is nothing to translate into, or a
+   * translation was attempted and every model rotated past it. Either reading
+   * of `null` is safe — recall falls back to the correction's own text, which
+   * is exactly right in the first case and merely misses a cross-language
+   * match in the second, never breaking on a store written before this field
+   * existed.
+   */
+  readonly pivot: {
+    readonly language: string;
+    readonly title: string;
+    readonly excerpt: string;
+  } | null;
 }
 
 /** How much of a body is kept. Enough to match on, far short of a copy of the tracker. */
@@ -82,6 +101,40 @@ export const EXCERPT = 500;
  */
 export type Similarity = (query: string, documents: readonly string[]) => readonly number[];
 
+/**
+ * One query in a cross-language recall — the text to rank with, and which
+ * rendering of the store it should be ranked against.
+ *
+ * `"own"` is a correction's own title and excerpt, in whatever language it
+ * was recorded in. `{ pivot: code }` picks, per correction, whichever of
+ * three documents is actually written in `code` — the only ones a query in
+ * `code` can honestly match:
+ *
+ *   1. a pivot rendering in `code` — the bridge itself, when it exists;
+ *   2. failing that, the correction's own text, when the correction was
+ *      *recorded* in `code` — nothing lost in translation, because there was
+ *      nothing to translate: this is the case a correction recorded before a
+ *      pivot-language switch still legitimately matches a query in the new
+ *      pivot language, on its own words rather than a rendering it never got;
+ *   3. failing both, an empty document — this correction is written in
+ *      neither the language the query names nor any rendering of it, and
+ *      ranking it anyway on whatever tokens happen to be shared is not a
+ *      bridge, it is noise with a plausible-looking score.
+ *
+ * **The language travels with the query rather than being assumed from the
+ * store, and that is the whole point of carrying it at all.** A project that
+ * changes its configured first language part-way through a store's life
+ * leaves old renderings behind in the language it used to pivot through — a
+ * Vietnamese correction rendered into English before the switch to French. A
+ * French-pivot query has no business matching that English text just because
+ * both happen to share a few tokens with the French query — case 3 above is
+ * exactly what keeps that from happening.
+ */
+export interface WeightedQuery {
+  readonly text: string;
+  readonly against: "own" | { readonly pivot: string };
+}
+
 export interface Memory {
   /** How many corrections are in the store. `0` is the cold start. */
   readonly size: number;
@@ -92,6 +145,20 @@ export interface Memory {
    * because a model will find a way to use it.
    */
   recall(text: string, count: number): readonly Correction[];
+  /**
+   * `recall`, run once per query and merged — each correction kept at the
+   * best score any query found it with, deduplicated so a correction two
+   * queries agree on is shown once rather than twice.
+   *
+   * This is the cross-language seam: one query in the thread's own language
+   * reaches a correction recorded in that language directly; a second query,
+   * the thread's text translated into the pivot language and matched against
+   * `"pivot"`, reaches a correction recorded in a third language through the
+   * pivot rendering stored alongside it. A caller with only one query in hand
+   * gets exactly `recall`'s answer back — the merge of one ranking is that
+   * ranking.
+   */
+  recallAcrossQueries(queries: readonly WeightedQuery[], count: number): readonly Correction[];
 }
 
 export function createMemory(
@@ -101,32 +168,66 @@ export function createMemory(
   // Assembled once. The store is read at the start of a run and asked at most
   // once per thread, but a backfill loops, and re-tokenising the whole store
   // per thread is the kind of cost nobody notices until the store is large.
-  const documents = corrections.map(searchable);
+  // The pivot side cannot be precomputed the same way: which document a
+  // correction contributes depends on the pivot language a query names, not
+  // on the store alone, so it is built fresh per query instead — cheap,
+  // because a run asks at most a couple of these.
+  const ownDocuments = corrections.map(searchable);
+
+  function ranked(text: string, against: WeightedQuery["against"]): Map<number, number> {
+    if (corrections.length === 0) return new Map();
+    const documents =
+      against === "own"
+        ? ownDocuments
+        : corrections.map((correction) => searchablePivot(correction, against.pivot));
+    const scores = similarity(text, documents);
+    const scored = new Map<number, number>();
+    scores.forEach((score, index) => {
+      if (score > 0) scored.set(index, score);
+    });
+    return scored;
+  }
+
+  function topOf(scored: Map<number, number>, count: number): readonly Correction[] {
+    return [...scored.entries()]
+      .sort(
+        ([leftIndex, leftScore], [rightIndex, rightScore]) =>
+          rightScore - leftScore || compareAt(corrections[leftIndex], corrections[rightIndex]),
+      )
+      .slice(0, count)
+      .map(([index]) => corrections[index])
+      .filter((correction): correction is Correction => correction !== undefined);
+  }
 
   return {
     size: corrections.length,
 
     recall(text, count) {
       if (corrections.length === 0 || count <= 0) return [];
+      return topOf(ranked(text, "own"), count);
+    },
 
-      const scores = similarity(text, documents);
-      return (
-        corrections
-          .map((correction, index) => ({ correction, score: scores[index] ?? 0 }))
-          .filter((ranked) => ranked.score > 0)
-          // Ties broken by recency, because two equally similar decisions are
-          // best represented by the more recent one — a taxonomy moves, and the
-          // older reading of a boundary is the one that has been superseded.
-          .sort((left, right) => right.score - left.score || compareAt(left, right))
-          .slice(0, count)
-          .map((ranked) => ranked.correction)
-      );
+    recallAcrossQueries(queries, count) {
+      if (corrections.length === 0 || count <= 0 || queries.length === 0) return [];
+
+      const best = new Map<number, number>();
+      for (const query of queries) {
+        for (const [index, score] of ranked(query.text, query.against)) {
+          const current = best.get(index);
+          if (current === undefined || score > current) best.set(index, score);
+        }
+      }
+      return topOf(best, count);
     },
   };
 }
 
-function compareAt(left: { correction: Correction }, right: { correction: Correction }): number {
-  return right.correction.at.localeCompare(left.correction.at);
+// Ties broken by recency, because two equally similar decisions are best
+// represented by the more recent one — a taxonomy moves, and the older
+// reading of a boundary is the one that has been superseded. `left`/`right`
+// here are already in "more recent first" candidate order.
+function compareAt(left: Correction | undefined, right: Correction | undefined): number {
+  return (right?.at ?? "").localeCompare(left?.at ?? "");
 }
 
 /**
@@ -139,6 +240,31 @@ function compareAt(left: { correction: Correction }, right: { correction: Correc
  */
 function searchable(correction: Correction): string {
   return [correction.title, correction.excerpt, correction.note ?? ""].join("\n");
+}
+
+/**
+ * The one document, of three candidates, that is actually written in
+ * `target` — see `WeightedQuery`'s doc comment for the full three-way rule
+ * this implements. In order: the pivot rendering, when it is in `target`;
+ * failing that, the correction's own text, when the correction was recorded
+ * in `target`; failing both, an empty string, so `similarity` scores it `0`
+ * and this query can never surface it — not "falls back to its own text
+ * regardless of language", which is exactly the false-match noise this rule
+ * exists to keep out.
+ *
+ * Codes compare case-insensitively, the same way `findLanguage` reads them
+ * everywhere else — a store recorded under `vi` stays reachable from a
+ * warrant that spells the pivot `VI`.
+ */
+function searchablePivot(correction: Correction, target: string): string {
+  const wanted = target.toLowerCase();
+  if (correction.pivot?.language.toLowerCase() === wanted) {
+    return [correction.pivot.title, correction.pivot.excerpt, correction.note ?? ""].join("\n");
+  }
+  if (correction.language?.toLowerCase() === wanted) {
+    return searchable(correction);
+  }
+  return "";
 }
 
 /**
@@ -361,12 +487,36 @@ export function parseCorrection(line: string): Correction | null {
     by: typeof record.by === "string" ? record.by : "",
     note:
       typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
+    pivot: readPivot(record.pivot),
   };
 }
 
 function strings(raw: unknown): readonly string[] | null {
   if (!Array.isArray(raw)) return null;
   return raw.every((entry) => typeof entry === "string") ? raw : null;
+}
+
+/**
+ * A correction's pivot rendering, or `null` for anything that is not one —
+ * including a store line written before this field existed, which has no
+ * `pivot` key at all and reads exactly the same as one written with
+ * `pivot: null`.
+ *
+ * A blank or whitespace-only title fails the whole pivot the same way
+ * `pivot.ts`'s `readAnswer` refuses one at record time — it is the shape an
+ * injected answer produces, not an ordinary translation. The excerpt is not
+ * held to the same rule: an empty pivot body is what a genuinely empty thread
+ * body translates to, and that is meaningful rather than suspicious.
+ */
+function readPivot(raw: unknown): Correction["pivot"] {
+  if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  if (typeof record.language !== "string" || record.language.length === 0) return null;
+  if (typeof record.title !== "string" || typeof record.excerpt !== "string") return null;
+  if (record.title.trim().length === 0) return null;
+  return { language: record.language, title: record.title, excerpt: record.excerpt };
 }
 
 /**
@@ -387,5 +537,13 @@ export function formatCorrection(correction: Correction): string {
     decided: correction.decided,
     by: correction.by,
     note: correction.note,
+    pivot:
+      correction.pivot === null
+        ? null
+        : {
+            language: correction.pivot.language,
+            title: correction.pivot.title,
+            excerpt: correction.pivot.excerpt.slice(0, EXCERPT),
+          },
   });
 }

@@ -464,13 +464,19 @@ an explicit, top-rung capability for exactly that reason. Retrieval starts
 crossing the language boundary, using [the pivot](#9-settled-questions) rather
 than staying lexical.
 
-**Standing:** retrieval is a core service rather than one duty's feature,
-ranks lexically for nothing — no provider, no request — and an empty store is
-the cold start rather than an error.
-
-**Missing:** nothing writes to the store yet. And retrieval is lexical only,
-which matches within one language — the half that makes memory worth having on
-a project that does not share one.
+**Standing:** retrieval is a core service rather than one duty's feature, ranks
+lexically for nothing in the ordinary case — no provider, no request — and an
+empty store is the cold start rather than an error. Writing ships behind
+`record`, a top-rung capability that needs `contents: write` for the reason
+above: a labelled or unlabelled event from a human commits that thread's
+taxonomy-filtered current labels to the store, through the Contents API and
+with no checkout, replacing any earlier entry for the same thread rather than
+piling up duplicates. Retrieval crosses the language boundary using [the
+pivot](#9-settled-questions): a correction recorded in another language is
+translated into the store's pivot language and kept alongside the original,
+and a query in a third language is translated the same way before the two
+renderings are ranked and merged — spending no extra request at all when the
+thread and the store already share one language.
 
 **Done when:** a correction a maintainer made on an English thread changes the
 verdict on the Vietnamese one describing the same thing.

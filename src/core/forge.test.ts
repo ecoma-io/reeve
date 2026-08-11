@@ -4,10 +4,16 @@ import {
   createEffects,
   createReply,
   createThread,
+  isMissing,
+  listCorrectionFiles,
   listOpenThreads,
   listReplies,
   listRepositoryLabels,
+  readContentsFile,
   readStanding,
+  writeContentsFile,
+  UnreadableContentsFile,
+  type ContentsApi,
   type GitHubApi,
   type TrackerApi,
 } from "./forge.js";
@@ -507,5 +513,213 @@ describe("createEffects", () => {
 
     await createEffects(api, AT).closeAsNotPlanned();
     expect(update).toHaveBeenCalledWith({ ...issue, state: "closed", state_reason: "not_planned" });
+  });
+});
+
+/** A hand-built Contents API, the same style as `apiOf` above but over `repos` rather than `issues`. */
+function contentsOf(getContent: ReturnType<typeof vi.fn>) {
+  const createOrUpdateFileContents = vi.fn((_params: Record<string, unknown>) =>
+    Promise.resolve({}),
+  );
+  return {
+    api: { rest: { repos: { getContent, createOrUpdateFileContents } } } as ContentsApi,
+    createOrUpdateFileContents,
+  };
+}
+
+/** The shape GitHub answers a 404 with — the one status `isMissing` treats as "not there yet". */
+function notFound(): Promise<never> {
+  return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
+}
+
+describe("isMissing", () => {
+  it("is true only for a 404", () => {
+    expect(isMissing({ status: 404 })).toBe(true);
+    expect(isMissing({ status: 403 })).toBe(false);
+    expect(isMissing({ status: 500 })).toBe(false);
+  });
+
+  it("is false for anything that is not a status-bearing object", () => {
+    expect(isMissing(null)).toBe(false);
+    expect(isMissing("boom")).toBe(false);
+    expect(isMissing(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("listCorrectionFiles", () => {
+  it("lists only the `.ndjson` shards, ignoring anything else the directory holds", async () => {
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: [
+          { name: "2026-08.ndjson", path: ".reeve/corrections/2026-08.ndjson", sha: "a" },
+          { name: "README.md", path: ".reeve/corrections/README.md", sha: "b" },
+        ],
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    const files = await listCorrectionFiles(api, AT, ".reeve/corrections");
+    expect(files).toEqual([{ path: ".reeve/corrections/2026-08.ndjson", sha: "a" }]);
+  });
+
+  it("is empty, not a failure, when the store directory does not exist yet", async () => {
+    const getContent = vi.fn(notFound);
+    const { api } = contentsOf(getContent);
+
+    await expect(listCorrectionFiles(api, AT, ".reeve/corrections")).resolves.toEqual([]);
+  });
+
+  it("is empty when the path names a file rather than a directory", async () => {
+    const getContent = vi.fn(() =>
+      Promise.resolve({ data: { name: "corrections", content: "e30=", encoding: "base64" } }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(listCorrectionFiles(api, AT, ".reeve/corrections")).resolves.toEqual([]);
+  });
+
+  it("lets anything other than a 404 propagate, the way any other authentication problem does", async () => {
+    const getContent = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("Forbidden"), { status: 403 })),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(listCorrectionFiles(api, AT, ".reeve/corrections")).rejects.toThrow("Forbidden");
+  });
+});
+
+describe("readContentsFile", () => {
+  it("decodes the base64 GitHub answers a file's content with", async () => {
+    const text = '{"thread":7}\n';
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: {
+          content: Buffer.from(text, "utf8").toString("base64"),
+          encoding: "base64",
+          sha: "abc",
+        },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(readContentsFile(api, AT, ".reeve/corrections/2026-08.ndjson")).resolves.toEqual({
+      text,
+      sha: "abc",
+    });
+  });
+
+  it("is null, not a failure, for a shard that is not there yet", async () => {
+    const { api } = contentsOf(vi.fn(notFound));
+
+    await expect(
+      readContentsFile(api, AT, ".reeve/corrections/2026-08.ndjson"),
+    ).resolves.toBeNull();
+  });
+
+  it("is null for a path that answers with a directory listing instead of a file", async () => {
+    const getContent = vi.fn(() => Promise.resolve({ data: [{ name: "x" }] }));
+    const { api } = contentsOf(getContent);
+
+    await expect(readContentsFile(api, AT, ".reeve/corrections")).resolves.toBeNull();
+  });
+
+  it("throws, rather than reading it as a cold start, for a shard too large for the API to inline", async () => {
+    // GitHub's own shape for a file over 1 MB: present, with a real `sha`,
+    // but `content: ""` and `encoding: "none"` instead of the base64 body —
+    // reading that as `null` would look exactly like the shard never
+    // existed, and `writeCorrection` would append a duplicate beside history
+    // it could not see.
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: {
+          content: "",
+          encoding: "none",
+          sha: "big-sha",
+          path: ".reeve/corrections/2026-08.ndjson",
+        },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(readContentsFile(api, AT, ".reeve/corrections/2026-08.ndjson")).rejects.toThrow(
+      /\.reeve\/corrections\/2026-08\.ndjson.*1 MB/s,
+    );
+  });
+
+  it("throws its own error class, naming the path, so a caller can skip past it by kind", async () => {
+    // `writeCorrection` catches exactly this class to skip an oversized shard
+    // rather than failing the whole write — a generic `Error` would leave it
+    // no way to tell this apart from a network failure or a missing scope.
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: { content: "", encoding: "none", sha: "big-sha", path: "shard.ndjson" },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(readContentsFile(api, AT, "shard.ndjson")).rejects.toMatchObject({
+      constructor: UnreadableContentsFile,
+      path: "shard.ndjson",
+    });
+  });
+});
+
+describe("writeContentsFile", () => {
+  it("base64-encodes the text and sends the sha it was given, to replace a known shard", async () => {
+    const { api, createOrUpdateFileContents } = contentsOf(vi.fn(notFound));
+
+    await writeContentsFile(
+      api,
+      AT,
+      ".reeve/corrections/2026-08.ndjson",
+      "line\n",
+      "memory: record #7",
+      "abc",
+    );
+    expect(createOrUpdateFileContents).toHaveBeenCalledWith({
+      owner: AT.owner,
+      repo: AT.repo,
+      path: ".reeve/corrections/2026-08.ndjson",
+      message: "memory: record #7",
+      content: Buffer.from("line\n", "utf8").toString("base64"),
+      sha: "abc",
+    });
+  });
+
+  it("omits `sha` to create a shard that has never been committed before", async () => {
+    const { api, createOrUpdateFileContents } = contentsOf(vi.fn(notFound));
+
+    await writeContentsFile(
+      api,
+      AT,
+      ".reeve/corrections/2026-08.ndjson",
+      "line\n",
+      "memory: record #7",
+      null,
+    );
+    const call = createOrUpdateFileContents.mock.calls[0]?.[0];
+    expect(call).not.toHaveProperty("sha");
+  });
+
+  it("lets a read-only token's refusal propagate as the authentication failure it is", async () => {
+    const createOrUpdateFileContents = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("Resource not accessible by integration"), { status: 403 }),
+      ),
+    );
+    const api = {
+      rest: { repos: { getContent: vi.fn(notFound), createOrUpdateFileContents } },
+    } as ContentsApi;
+
+    await expect(
+      writeContentsFile(
+        api,
+        AT,
+        ".reeve/corrections/2026-08.ndjson",
+        "line\n",
+        "memory: record #7",
+        null,
+      ),
+    ).rejects.toThrow("Resource not accessible by integration");
   });
 });

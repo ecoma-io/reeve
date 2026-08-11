@@ -50,8 +50,18 @@ import type { Location, TrackerApi } from "./forge.js";
 import { listRepositoryLabels } from "./forge.js";
 import { parseLanguages, type Language } from "./languages.js";
 
-/** What a duty may do to a thread. The closed set; a name outside it is refused. */
-export type Capability = "label" | "edit-body" | "comment" | "close" | "assign";
+/**
+ * What a duty may do to a thread. The closed set; a name outside it is refused.
+ *
+ * `record` is unlike the rest of this set. Every other capability changes the
+ * thread a run is deciding about; `record` changes a file in the repository
+ * instead — a commit to the corrections store — and that needs `contents:
+ * write` on the token rather than `issues: write`. It has no duty default and
+ * cannot be implied by an implicit warrant: writing to the store is a
+ * project's decision to keep a memory at all, and only an explicit
+ * `capabilities:` block can make it.
+ */
+export type Capability = "label" | "edit-body" | "comment" | "close" | "assign" | "record";
 
 export const CAPABILITIES: readonly Capability[] = [
   "label",
@@ -59,6 +69,7 @@ export const CAPABILITIES: readonly Capability[] = [
   "comment",
   "close",
   "assign",
+  "record",
 ];
 
 /** The only version this reader understands. */

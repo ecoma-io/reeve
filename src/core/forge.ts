@@ -444,6 +444,188 @@ export interface Effects {
   closeAsNotPlanned(): Promise<void>;
 }
 
+/**
+ * The part of an Octokit client `record` uses to commit a correction — the
+ * Contents API, and nothing else.
+ *
+ * This is not `Effects`. `Effects` is every way Reeve changes the *thread*,
+ * four methods that all add and none of which touch a file; recording a
+ * correction changes a *file in the repository* instead, through a
+ * completely different endpoint family, and it needs a token scoped with
+ * `contents: write` rather than `issues: write`. Keeping the two ports apart
+ * keeps that distinction visible in the types: a duty holding only `Effects`
+ * cannot commit, and a reviewer does not have to read the call sites to know
+ * it.
+ *
+ * **No checkout, no git binary.** Every read and every write goes through
+ * these two calls, which is what lets `record` run in a job that never
+ * fetched the repository onto disk.
+ */
+export interface ContentsApi {
+  readonly rest: {
+    readonly repos: {
+      getContent(params: { owner: string; repo: string; path: string }): Promise<{ data: unknown }>;
+      createOrUpdateFileContents(params: {
+        owner: string;
+        repo: string;
+        path: string;
+        message: string;
+        content: string;
+        sha?: string;
+      }): Promise<unknown>;
+    };
+  };
+}
+
+/** One `.ndjson` shard, as the directory listing named it. */
+export interface CorrectionFile {
+  readonly path: string;
+  readonly sha: string;
+}
+
+/** Whether a Contents API failure means "not there" rather than something worth failing a run over. */
+export function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 404;
+}
+
+/**
+ * Every `.ndjson` shard already committed under `path`, or empty when the
+ * directory is not there yet.
+ *
+ * A missing directory is the same cold start `readStore` treats it as — a
+ * repository that has never recorded a correction is not a broken one.
+ */
+export async function listCorrectionFiles(
+  api: ContentsApi,
+  at: Pick<Location, "owner" | "repo">,
+  path: string,
+): Promise<readonly CorrectionFile[]> {
+  let data: unknown;
+  try {
+    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+  } catch (error) {
+    if (isMissing(error)) return [];
+    throw error;
+  }
+  // A file at this path rather than a directory answers with a single object,
+  // not an array. That is not the shape `corrections` is meant to be, and the
+  // honest answer is "no shards", not a crash on the array methods below.
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .filter(
+      (entry): entry is { name: string; path: string; sha: string } =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as { name?: unknown }).name === "string" &&
+        (entry as { name: string }).name.endsWith(".ndjson"),
+    )
+    .map((entry) => ({ path: entry.path, sha: entry.sha }));
+}
+
+/**
+ * One shard's text and current sha, read through the API rather than the
+ * filesystem.
+ *
+ * `null` means exactly one thing: nothing is there yet, the cold start
+ * `writeCorrection` is entitled to treat as "append a fresh shard". A 404
+ * from `getContent` is that. A response shaped like a directory listing —
+ * an array, checked below — is that too, the same shape mismatch
+ * `listCorrectionFiles` already treats as "no shards".
+ *
+ * **A file that exists is never folded into that same `null`,** even when
+ * this function cannot read its text. GitHub answers a file over the 1 MB
+ * the Contents API can inline with `content: "", encoding: "none"` rather
+ * than a body byte for byte — still a file, with a real `sha`, simply not
+ * one this call can decode. Reading that as "not there yet" is the failure
+ * this distinction exists to prevent: `writeCorrection` would append a
+ * second entry beside one it could not see, or overwrite a shard's history
+ * with a fresh one under the same name — silent store corruption, not a
+ * cold start. So a present file this call cannot decode throws instead,
+ * naming the path and the likely cause, which is worth failing a run over.
+ */
+export async function readContentsFile(
+  api: ContentsApi,
+  at: Pick<Location, "owner" | "repo">,
+  path: string,
+): Promise<{ readonly text: string; readonly sha: string } | null> {
+  let data: unknown;
+  try {
+    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
+
+  const file = data as { content?: unknown; encoding?: unknown; sha?: unknown };
+  // No `sha` at all is not a recognisable file entry — the shape mismatch a
+  // directory or a genuinely unexpected response already reads as "nothing
+  // here", same as the array case above.
+  if (typeof file.sha !== "string") return null;
+
+  if (typeof file.content === "string" && file.encoding === "base64") {
+    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
+  }
+
+  throw new UnreadableContentsFile(path);
+}
+
+/**
+ * A file the Contents API answered but `readContentsFile` could not decode as
+ * text — a shard over the 1 MB that endpoint can inline, almost always. Its
+ * own class, the same reason `AuthenticationFailure` has one: a caller that
+ * wants to treat this specific failure differently from a network error or a
+ * missing scope — `writeCorrection` skips past it and keeps searching rather
+ * than failing the whole write over one oversized shard — needs to catch it
+ * by name rather than by parsing a message.
+ */
+export class UnreadableContentsFile extends Error {
+  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
+  readonly path: string;
+
+  constructor(path: string) {
+    super(
+      `\`${path}\` could not be read as text — the Contents API answered without base64 content, ` +
+        "which is what it sends for a file over the 1 MB that endpoint can inline. Split the " +
+        "corrections store into smaller shards.",
+    );
+    this.name = "UnreadableContentsFile";
+    this.path = path;
+  }
+}
+
+/**
+ * Commits `text` to `path` — creating it fresh when `sha` is `null`, replacing
+ * the shard at `sha` otherwise.
+ *
+ * A stale or missing `sha` on an existing file is refused by GitHub, not
+ * silently overwritten — which is the platform's own defence against a
+ * commit stepping on a concurrent one, and one this function makes no attempt
+ * to work around.
+ *
+ * Every failure here — a read-only token most of all — is left to propagate.
+ * It is a configuration problem, not a run's to recover from, and it fails
+ * the job the same way any other authentication failure does.
+ */
+export async function writeContentsFile(
+  api: ContentsApi,
+  at: Pick<Location, "owner" | "repo">,
+  path: string,
+  text: string,
+  message: string,
+  sha: string | null,
+): Promise<void> {
+  await api.rest.repos.createOrUpdateFileContents({
+    owner: at.owner,
+    repo: at.repo,
+    path,
+    message,
+    content: Buffer.from(text, "utf8").toString("base64"),
+    ...(sha === null ? {} : { sha }),
+  });
+}
+
 export function createEffects(api: TrackerApi, at: Location): Effects {
   const issue = { owner: at.owner, repo: at.repo, issue_number: at.number };
 
