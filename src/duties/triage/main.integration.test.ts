@@ -454,6 +454,10 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     sweep: "false",
     since: "",
     limit: "50",
+    endpoints: "",
+    "api-keys": "",
+    "request-timeout": "120s",
+    temperature: "",
   };
 }
 
