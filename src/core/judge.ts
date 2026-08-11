@@ -62,7 +62,8 @@
  * The worst a successful injection achieves is a worse-ranked admitted answer,
  * never unadmitted text and never an action outside this choice.
  */
-import type { Completion, Failure, Message, Provider } from "./provider.js";
+import type { Completion, Failure, Message, Provider, Weather } from "./provider.js";
+import { reckon, weatherFailure } from "./provider.js";
 
 /** One judge's usable answer. */
 export interface Vote {
@@ -104,10 +105,16 @@ export interface JudgeRequest<T> {
   readonly by: (candidate: T) => string;
   /** The duty's ballot, given the candidates in the order this judge sees them. */
   readonly ballot: (shown: readonly T[]) => readonly Message[];
+  /**
+   * This run's memory of capacity failures. A seat's chain is filtered through
+   * it the same way `rotateModels` filters a rotation, so a model that ran out
+   * of room drafting is not asked to judge either.
+   */
+  readonly weather?: Weather;
 }
 
 export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
-  const { provider, judges, candidates, by, ballot } = request;
+  const { provider, judges, candidates, by, ballot, weather } = request;
 
   // One candidate is already the answer, and none means the work was skipped
   // before this. Asking which of one is best spends a request on a foregone
@@ -137,7 +144,7 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
     // every ballot. The order is this seat's alone, and the number its judge
     // answers with is read back through the same order.
     const shown = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown, ballot, by);
+    const cast = await fill(provider, order, shown, ballot, by, weather);
 
     for (const failure of cast.failures) {
       spent.add(failure.model);
@@ -187,12 +194,19 @@ async function fill<T>(
   shown: readonly T[],
   ballot: (shown: readonly T[]) => readonly Message[],
   by: (candidate: T) => string,
+  weather?: Weather,
 ): Promise<Cast> {
   const failures: Failure[] = [];
 
   for (const model of order) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
+
     const counted = read(await provider.complete(model, ballot(shown)), shown, by);
     if (counted.ok) return { vote: { model, pick: counted.pick }, failures };
+    reckon(counted, weather);
     failures.push(counted);
   }
 
@@ -214,6 +228,7 @@ function exhausted(chain: readonly string[]): Failure | null {
   return {
     ok: false,
     model: primary,
+    kind: "protocol",
     reason:
       "seat cast nothing — every model it names had already been asked by an earlier seat, " +
       "so counting it again would be one model voting twice",
@@ -266,6 +281,7 @@ function read<T>(
     return {
       ok: false,
       model: answer.model,
+      kind: "protocol",
       reason: `answered with no candidate number — ${excerpt(answer.content)}`,
     };
   }
@@ -273,6 +289,7 @@ function read<T>(
     return {
       ok: false,
       model: answer.model,
+      kind: "protocol",
       reason: `named more than one candidate — ${excerpt(answer.content)}`,
     };
   }
