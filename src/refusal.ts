@@ -2,12 +2,12 @@
  * What the root action says, and why it says anything at all.
  *
  * Reeve ships one action per duty, from a subdirectory: a workflow writes
- * `uses: ecoma-io/reeve/triage@v1`, never `uses: ecoma-io/reeve@v1`. The root
+ * `uses: ecoma-io/reeve/triage@v0.1`, never `uses: ecoma-io/reeve@v0.1`. The root
  * `action.yml` exists because GitHub reads a Marketplace listing from the
  * repository root and from nowhere else — so the root is a listing, and it is
  * not a duty.
  *
- * That leaves a real hazard: `uses: ecoma-io/reeve@v1` is the obvious thing to
+ * That leaves a real hazard: `uses: ecoma-io/reeve@v0.1` is the obvious thing to
  * write, it resolves, and it runs this. The one behaviour that is not allowed
  * is for it to quietly succeed. A run that cannot do its job fails red, and
  * this one cannot do any job — so it fails, names what the consumer asked for,
@@ -25,7 +25,7 @@
  * built the answer is a corrected `uses:` line. Both are below, and both are
  * exercised by tests.
  */
-export const DUTIES: readonly string[] = ["translate"];
+export const DUTIES: readonly string[] = ["translate", "triage"];
 
 /**
  * Duties with a documented contract and no code at this ref.
@@ -34,9 +34,26 @@ export const DUTIES: readonly string[] = ["translate"];
  * moves from here to `DUTIES` in the pull request that builds it rather than in
  * a follow-up.
  */
-export const PLANNED: readonly string[] = ["triage", "duplicate", "respond"];
+export const PLANNED: readonly string[] = ["duplicate", "respond"];
 
 const ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#6-roadmap";
+
+/**
+ * The ref to write in the corrected line: the one the consumer already pinned.
+ *
+ * Never a version written down here. A constant would be a second place the
+ * current release line is recorded, it would go stale on the next minor, and it
+ * would go stale silently — telling somebody pinned to one line to write
+ * another. The runner sets `GITHUB_ACTION_REF` to the ref this action was
+ * resolved from, which is by construction the ref they wrote.
+ *
+ * Off a runner there is no such ref and no pin either, so the placeholder is
+ * the honest answer rather than a guess at what they meant.
+ */
+function pinned(): string {
+  const ref = process.env.GITHUB_ACTION_REF ?? "";
+  return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
+}
 
 /**
  * Normalises what a consumer wrote in the `duty` input.
@@ -68,7 +85,7 @@ export function refusal(raw: string, built: readonly string[] = DUTIES): string 
   if (duty.length > 0 && built.includes(duty)) {
     return [
       `\`${duty}\` is a duty, but it is not this action.`,
-      `Write \`uses: ecoma-io/reeve/${duty}@v1\` instead of \`uses: ecoma-io/reeve@v1\`.`,
+      `Write \`uses: ecoma-io/reeve/${duty}@${pinned()}\` instead of \`uses: ecoma-io/reeve@${pinned()}\`.`,
     ].join("\n");
   }
 
@@ -92,5 +109,5 @@ function available(built: readonly string[]): string {
   if (built.length === 0) {
     return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
   }
-  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@v1`).join(", ")}`;
+  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@${pinned()}`).join(", ")}`;
 }

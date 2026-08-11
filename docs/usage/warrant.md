@@ -4,7 +4,8 @@ What Reeve is allowed to do to your repository, written down in your repository,
 and enforced against the file rather than against anything a model said.
 
 > [!IMPORTANT]
-> Reeve is before `v1`. This page is the contract Stage 0 ships against.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## Why this is a file and not a setting
 

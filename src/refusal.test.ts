@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DUTIES, PLANNED, normalise, refusal } from "./refusal.js";
 
@@ -13,10 +13,37 @@ describe("normalise", () => {
 });
 
 describe("refusal", () => {
+  // Every corrected line repeats the ref the consumer pinned, which the runner
+  // hands over in `GITHUB_ACTION_REF`. Set here so the assertions below read as
+  // the message a real consumer sees rather than as the off-runner placeholder.
+  const REF = process.env.GITHUB_ACTION_REF;
+  beforeEach(() => {
+    process.env.GITHUB_ACTION_REF = "v0.1";
+  });
+  afterEach(() => {
+    if (REF === undefined) delete process.env.GITHUB_ACTION_REF;
+    else process.env.GITHUB_ACTION_REF = REF;
+  });
+
   it("names no duty at all when the input was empty", () => {
     const message = refusal("");
     expect(message).toContain("is not a duty");
-    expect(message).toContain("ecoma-io/reeve/translate@v1");
+    expect(message).toContain("ecoma-io/reeve/translate@v0.1");
+  });
+
+  it("repeats the ref the consumer pinned rather than a version of its own", () => {
+    // The whole point: somebody pinned to a tag is told to write that same tag.
+    process.env.GITHUB_ACTION_REF = "a1b2c3d";
+    expect(refusal("triage", ["triage"])).toContain("uses: ecoma-io/reeve/triage@a1b2c3d");
+  });
+
+  it("says so plainly when there is no ref to repeat", () => {
+    // Off a runner — someone running the bundle by hand — there is no pin, and
+    // a guess would be worse than a blank to fill in.
+    delete process.env.GITHUB_ACTION_REF;
+    expect(refusal("triage", ["triage"])).toContain(
+      "uses: ecoma-io/reeve/triage@<the ref you pinned>",
+    );
   });
 
   it("points a bare `uses:` at the roadmap while a ref carries nothing", () => {
@@ -26,21 +53,19 @@ describe("refusal", () => {
   });
 
   it("points at the roadmap for a duty that is documented and not built", () => {
-    const message = refusal("triage", []);
+    const message = refusal("duplicate", []);
     expect(message).toContain("documented contract but no code");
     expect(message).toContain("docs/north-star.md#6-roadmap");
   });
 
   it("gives the corrected `uses:` line for a duty this ref carries", () => {
-    // The branch that matters on the day `DUTIES` stops being empty. Written
-    // now so it does not arrive untested with the first duty.
-    expect(refusal("triage", ["triage"])).toContain("uses: ecoma-io/reeve/triage@v1");
+    expect(refusal("triage", ["triage"])).toContain("uses: ecoma-io/reeve/triage@v0.1");
   });
 
   it("lists what a ref carries when the duty asked for is not one of them", () => {
     const message = refusal("nonsense", ["triage", "translate"]);
     expect(message).toContain("no duty called `nonsense`");
-    expect(message).toContain("ecoma-io/reeve/triage@v1, ecoma-io/reeve/translate@v1");
+    expect(message).toContain("ecoma-io/reeve/triage@v0.1, ecoma-io/reeve/translate@v0.1");
   });
 
   it("says nothing is built when nothing is, rather than listing an empty set", () => {
@@ -54,7 +79,7 @@ describe("refusal", () => {
   it("prefers what is built over what is planned", () => {
     // A duty can be in both lists during the release that builds it, and the
     // useful answer is the one the consumer can act on today.
-    expect(refusal("triage", ["triage"])).toContain("uses: ecoma-io/reeve/triage@v1");
+    expect(refusal("duplicate", ["duplicate"])).toContain("uses: ecoma-io/reeve/duplicate@v0.1");
   });
 });
 
@@ -65,8 +90,9 @@ describe("the duty lists", () => {
     );
   });
 
-  it("carries `translate`, which this ref builds", () => {
+  it("carries both duties this ref builds", () => {
     expect(DUTIES).toContain("translate");
+    expect(DUTIES).toContain("triage");
   });
 
   it("never lists the same duty as both built and planned", () => {

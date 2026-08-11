@@ -22,15 +22,18 @@ it changes first.
 
 ## Status
 
-Reeve is before `v1`. The doctrine and the shape are settled; the code is
-landing behind them, stage by stage.
+Reeve is on a `0.x` line. The doctrine and the shape are settled; the code is
+landing behind them, stage by stage, and **the version number is read off
+[the roadmap](north-star.md#6-roadmap)** — `0.x` while a stage is still open,
+`1.0` when every one of them is done
+([the rule](development/releasing.md#what-0x-and-10-mean-here)).
 
 So the documents here are **normative rather than descriptive**: they state what
 a stage must do, and each stage lands as the pull request that makes its section
 true. Where a document describes something not yet built, it says so in that
 section rather than in a global disclaimer you would have to remember.
 
-The two Stage 0 duties — [`triage`](usage/duties/triage.md) and
+The two duties that ship — [`triage`](usage/duties/triage.md) and
 [`translate`](usage/duties/translate.md) — have their contracts written in full,
 because writing a stranger's configuration page first is how you find out that
 two of your inputs mean the same thing. `duplicate` and `respond` have no pages,

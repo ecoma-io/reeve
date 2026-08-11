@@ -130,8 +130,8 @@ The platform resolves an action from a subdirectory, so one core and one version
 line do not cost callers their ergonomics:
 
 ```yaml
-- uses: ecoma-io/reeve/triage@v1
-- uses: ecoma-io/reeve/translate@v1
+- uses: ecoma-io/reeve/triage@v0.1
+- uses: ecoma-io/reeve/translate@v0.1
 ```
 
 Each subdirectory holds a thin `action.yml` naming that duty's inputs and
@@ -151,7 +151,7 @@ There is an `action.yml` at the repository root as well, and it runs no duty.
 
 It exists because GitHub reads a Marketplace listing from the root and from
 nowhere else. That leaves a hazard worth handling rather than tolerating:
-`uses: ecoma-io/reeve@v1` is the obvious thing for a consumer to write, it
+`uses: ecoma-io/reeve@v0.1` is the obvious thing for a consumer to write, it
 resolves, and it runs. So the root action **fails red and says what to write
 instead** — `src/refusal.ts`, with the message shaped by what the ref actually
 carries.

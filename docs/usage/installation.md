@@ -4,7 +4,8 @@ Adding a duty to a repository: the trigger, the permissions, the provider, and
 the version to pin.
 
 > [!IMPORTANT]
-> Reeve is before `v1`. This page is the contract Stage 0 ships against.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## 1. Pick a provider
 
@@ -107,7 +108,7 @@ jobs:
   reeve:
     runs-on: ubuntu-latest
     steps:
-      - uses: ecoma-io/reeve/translate@v1
+      - uses: ecoma-io/reeve/translate@v0.1
         with:
           number: ${{ inputs.number }}
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -147,15 +148,22 @@ behaviours that shaped the design are in
 ## 4. Pin a version
 
 ```yaml
-- uses: ecoma-io/reeve/triage@v1 # floating major — fixes, no breaking changes
-- uses: ecoma-io/reeve/triage@v1.4 # floating minor — narrower
+- uses: ecoma-io/reeve/triage@v0.1 # floating minor — fixes only
+- uses: ecoma-io/reeve/triage@v0.1.3 # an exact release
 - uses: ecoma-io/reeve/triage@9c0f… # a commit SHA — cannot move at all
 ```
 
-`@v1` moves within its major line, so it picks up fixes and not surprises. Pin a
-SHA when you want something that cannot move. Both work: the built bundle is
-committed to this repository, so every duty resolves without a build step on your
-runner.
+**`@v0.1` is the widest ref worth pinning today, and there is deliberately no
+`v0`.** Reeve is on a `0.x` line, where a breaking change lands on the minor
+digit ([why](../development/releasing.md#what-0x-and-10-mean-here)) — so a `v0`
+tag would hand you one silently, and the repository does not publish one. `v0.1`
+can only ever move forward by a patch. When the roadmap is finished and `1.0`
+arrives, `v1` becomes the floating ref and behaves the way a major line is
+supposed to.
+
+Pin a SHA when you want something that cannot move at all. Every form works: the
+built bundle is committed to this repository, so a duty resolves without a build
+step on your runner.
 
 ## 5. Rehearse before you arm it
 
@@ -194,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: ecoma-io/reeve/triage@v1
+      - uses: ecoma-io/reeve/triage@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -203,7 +211,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: ecoma-io/reeve/translate@v1
+      - uses: ecoma-io/reeve/translate@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini

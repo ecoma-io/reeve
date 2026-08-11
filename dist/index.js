@@ -19287,9 +19287,13 @@ function error(message, properties = {}) {
 }
 
 // src/refusal.ts
-var DUTIES = ["translate"];
-var PLANNED = ["triage", "duplicate", "respond"];
+var DUTIES = ["translate", "triage"];
+var PLANNED = ["duplicate", "respond"];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#6-roadmap";
+function pinned() {
+  const ref = process.env.GITHUB_ACTION_REF ?? "";
+  return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
+}
 function normalise(raw) {
   return raw.trim().toLowerCase();
 }
@@ -19298,7 +19302,7 @@ function refusal(raw, built = DUTIES) {
   if (duty.length > 0 && built.includes(duty)) {
     return [
       `\`${duty}\` is a duty, but it is not this action.`,
-      `Write \`uses: ecoma-io/reeve/${duty}@v1\` instead of \`uses: ecoma-io/reeve@v1\`.`
+      `Write \`uses: ecoma-io/reeve/${duty}@${pinned()}\` instead of \`uses: ecoma-io/reeve@${pinned()}\`.`
     ].join("\n");
   }
   if (duty.length > 0 && PLANNED.includes(duty)) {
@@ -19314,7 +19318,7 @@ function available(built) {
   if (built.length === 0) {
     return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
   }
-  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@v1`).join(", ")}`;
+  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@${pinned()}`).join(", ")}`;
 }
 
 // src/main.ts

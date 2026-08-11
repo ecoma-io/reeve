@@ -60,7 +60,7 @@ labels:
       decision, and that is `enhancement`.
     examples:
       - "docs/usage/warrant.md lists a capability no duty defines"
-      - "The installation page pins @v1 but the tag does not exist yet"
+      - "The installation page pins @v0.1 but the tag does not exist yet"
 
   - name: question
     description: >-

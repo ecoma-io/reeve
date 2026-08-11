@@ -5,7 +5,8 @@ English, or it is a bug. The easy majority is decided by code for nothing, and
 only what survives that reaches a model.
 
 > [!IMPORTANT]
-> Reeve is before `v1`. This page is the contract Stage 0 ships against.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../../development/releasing.md#what-0x-and-10-mean-here).
 
 ## What it is for
 
@@ -40,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: ecoma-io/reeve/triage@v1
+      - uses: ecoma-io/reeve/triage@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini

@@ -4,7 +4,8 @@ Who wrote in what, who reads in what, and how Reeve works out the first without
 spending anything.
 
 > [!IMPORTANT]
-> Reeve is before `v1`. This page is the contract Stage 0 ships against.
+> Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
+> see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## The three roles
 
@@ -146,7 +147,7 @@ The common case: contributors write in several languages, maintainers all read
 one.
 
 ```yaml
-- uses: ecoma-io/reeve/translate@v1
+- uses: ecoma-io/reeve/translate@v0.1
   with:
     languages: en, vi, zh, ja
     api-key: ${{ secrets.OPENAI_API_KEY }}
