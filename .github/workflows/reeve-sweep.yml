@@ -27,6 +27,13 @@ on:
     - cron: "0 4 * * 1"
   workflow_dispatch: {}
 
+# Nothing, at the top. A job's own `permissions` block replaces this rather
+# than adding to it, so the two jobs below are unaffected — this line exists
+# for the job that does not have one yet. Without it, a future job added
+# without its own block would inherit the repository's default token grants;
+# with it, that job starts from nothing and has to claim what it uses.
+permissions: {}
+
 jobs:
   triage:
     name: Sweep — triage
