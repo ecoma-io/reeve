@@ -32762,11 +32762,12 @@ var CAPABILITIES = [
 ];
 var VERSION7 = 1;
 var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
-async function readWarrant(path) {
+async function readWarrant(path, options) {
   let source;
   try {
     source = await readFile(path, "utf8");
   } catch (error2) {
+    if (path === options.defaultPath && isNotFound(error2)) return null;
     const reason = error2 instanceof Error ? error2.message : String(error2);
     throw new Error(
       `warrant: \`${path}\` could not be read, so this run has no authority \u2014 ${reason}. Write one, or point \`warrant\` at where yours lives.`,
@@ -32774,6 +32775,9 @@ async function readWarrant(path) {
     );
   }
   return parseWarrant(path, source);
+}
+function isNotFound(error2) {
+  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
 }
 function parseWarrant(path, source) {
   const document2 = load(path, source);
@@ -32784,7 +32788,7 @@ function parseWarrant(path, source) {
     );
   }
   const labels = readLabels(path, document2.labels);
-  const capabilities = readCapabilities(path, document2.capabilities);
+  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -32799,7 +32803,8 @@ function parseWarrant(path, source) {
   return {
     path,
     labels,
-    granted: (duty, fallback) => capabilities.get(duty) ?? fallback,
+    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
 }
@@ -32810,6 +32815,36 @@ function checkLabelsExist(warrant, existing) {
   throw new Error(
     `warrant: \`${warrant.path}\` names ${missing.length === 1 ? "a label" : "labels"} this repository does not have \u2014 ${missing.map((name) => `\`${name}\``).join(", ")}. Create them, or correct the taxonomy.`
   );
+}
+function implicitWarrant(path, repositoryLabels) {
+  const labels = [];
+  const excluded = [];
+  for (const label of repositoryLabels) {
+    const description = label.description?.trim() ?? "";
+    if (description.length === 0) {
+      excluded.push(label.name);
+      continue;
+    }
+    labels.push({
+      name: label.name,
+      description,
+      not: null,
+      examples: [],
+      owner: null,
+      exclusiveWith: []
+    });
+  }
+  const byName = new Map(labels.map((label) => [label.name, label]));
+  return {
+    warrant: {
+      path,
+      labels,
+      granted: (_duty, fallback) => fallback,
+      unnamed: () => false,
+      labelNamed: (name) => byName.get(name)
+    },
+    excluded
+  };
 }
 function load(path, source) {
   let document2;
@@ -32865,7 +32900,7 @@ function readLabels(path, raw) {
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
-  if (raw === void 0 || raw === null) return granted;
+  if (raw === void 0 || raw === null) return { declared: false, granted };
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
       `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
@@ -32895,7 +32930,7 @@ function readCapabilities(path, raw) {
     }
     granted.set(duty, permitted);
   }
-  return granted;
+  return { declared: true, granted };
 }
 function text(at, key, raw, options) {
   if (raw === void 0 || raw === null) {
@@ -33038,7 +33073,7 @@ async function readStanding(api, at) {
 var LABEL_PAGE = 100;
 var LABEL_PAGES = 10;
 async function listRepositoryLabels(api, at) {
-  const names = [];
+  const labels = [];
   for (let page2 = 1; page2 <= LABEL_PAGES; page2 += 1) {
     const { data } = await api.rest.issues.listLabelsForRepo({
       owner: at.owner,
@@ -33046,10 +33081,12 @@ async function listRepositoryLabels(api, at) {
       per_page: LABEL_PAGE,
       page: page2
     });
-    names.push(...data.map((label) => label.name));
+    labels.push(
+      ...data.map((label) => ({ name: label.name, description: label.description ?? null }))
+    );
     if (data.length < LABEL_PAGE) break;
   }
-  return names;
+  return labels;
 }
 function createEffects(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
@@ -33479,6 +33516,7 @@ function summarize(run2) {
     "",
     `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was applied" : ""}.`,
     "",
+    ...run2.implicit ? [authority(run2), ""] : [],
     verdict(run2),
     "",
     decisions(run2),
@@ -33491,8 +33529,28 @@ function summarize(run2) {
   return `${parts.join("\n").trimEnd()}
 `;
 }
+function authority(run2) {
+  const lines = [
+    `No \`${run2.warrant}\` \u2014 ran at the narrowest authority: labels only, from this repository's own label descriptions.`
+  ];
+  if (run2.excludedLabels.length > 0) {
+    lines.push(
+      "",
+      `${run2.excludedLabels.map((name) => `\`${name}\``).join(", ")} \u2014 these labels have no description on GitHub, so they were not offered to the model \u2014 add a description there, or write a taxonomy in \`${run2.warrant}\`.`
+    );
+  }
+  return lines.join("\n");
+}
 function verdict(run2) {
   const lines = ["### Verdict", ""];
+  if (run2.ungranted !== null) {
+    lines.push(
+      run2.ungranted,
+      "",
+      "No expensive model was asked anything. This is a real answer rather than a failure."
+    );
+    return lines.join("\n");
+  }
   if (run2.screenedOut !== null) {
     lines.push(
       `Screened out as \`${run2.screenedOut.reason}\` \u2014 ${run2.screenedOut.note}.`,
@@ -33525,7 +33583,7 @@ function verdict(run2) {
   return lines.join("\n");
 }
 function decisions(run2) {
-  if (run2.screenedOut !== null) return withheld(run2);
+  if (run2.screenedOut !== null || run2.ungranted !== null) return withheld(run2);
   const refusals = new Map(run2.refused.map((refusal) => [refusal.what, refusal.why]));
   const rows = run2.proposed.map((name) => {
     const why = refusals.get(name);
@@ -33690,6 +33748,7 @@ function differs(correction) {
 
 // src/duties/triage/main.ts
 var DEFAULT_CAPABILITIES = ["label"];
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
 function readSettings() {
   const shared = readShared();
@@ -33708,6 +33767,12 @@ function readSettings() {
     maxBodyChars: whole("max-body-chars", getInput("max-body-chars"))
   };
 }
+async function resolveAuthority(read2, path, api, at) {
+  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
+  const repositoryLabels = await listRepositoryLabels(api, at);
+  const built = implicitWarrant(path, repositoryLabels);
+  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 async function run() {
   const meter = createMeter();
@@ -33724,12 +33789,22 @@ async function run() {
       screen: metered(provider, meter, "screen"),
       triage: metered(provider, meter, "triage")
     };
-    const warrant = await readWarrant(settings.warrant);
-    const standing = await readStanding(api, at);
-    checkLabelsExist(warrant, await listRepositoryLabels(api, at));
-    outcome = await decide(warrant, standing, settings, stages);
+    const read2 = await readWarrant(settings.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
+    const authority2 = await resolveAuthority(read2, settings.warrant, api, at);
+    if (authority2.warrant.unnamed("triage")) {
+      outcome = notGranted(authority2.warrant);
+    } else {
+      const standing = await readStanding(api, at);
+      if (!authority2.implicit) {
+        checkLabelsExist(
+          authority2.warrant,
+          (await listRepositoryLabels(api, at)).map((label) => label.name)
+        );
+      }
+      outcome = await decide(authority2, standing, settings, stages);
+    }
     if (!settings.dryRun) {
-      done = await act(createEffects(api, at), warrant, outcome);
+      done = await act(createEffects(api, at), authority2.warrant, outcome);
     }
     report(outcome, done, settings.dryRun);
   } catch (error2) {
@@ -33740,7 +33815,8 @@ async function run() {
     }
   }
 }
-async function decide(warrant, standing, settings, stages) {
+async function decide(authority2, standing, settings, stages) {
+  const warrant = authority2.warrant;
   const body = standing.body.slice(0, settings.maxBodyChars);
   if (standing.body.length > settings.maxBodyChars) {
     warning(
@@ -33765,7 +33841,10 @@ async function decide(warrant, standing, settings, stages) {
     permitted,
     withheld: withheld2,
     note: null,
-    memory: { size: 0, recalled: 0 }
+    memory: { size: 0, recalled: 0 },
+    implicit: authority2.implicit,
+    excludedLabels: authority2.excludedLabels,
+    ungranted: null
   });
   const free = screen({ title: standing.title, body, minimum: settings.minBodyChars });
   if (free !== null) {
@@ -33839,7 +33918,10 @@ ${body}`, RECALLED);
     permitted,
     withheld: withheld2,
     note,
-    memory: { size: memory.size, recalled: recalled.length }
+    memory: { size: memory.size, recalled: recalled.length },
+    implicit: authority2.implicit,
+    excludedLabels: authority2.excludedLabels,
+    ungranted: null
   };
   if (verdict2.confidence < settings.confidence) {
     if (verdict2.labels.length > 0) {
@@ -33859,6 +33941,22 @@ ${body}`, RECALLED);
     // may do and a rehearsal rehearses the same narrowing a real run has.
     applied: permitted.includes("label") ? decision.applied : [],
     refused: decision.refused
+  };
+}
+function notGranted(warrant) {
+  return {
+    language: null,
+    screenedOut: null,
+    verdict: NOTHING,
+    applied: [],
+    refused: [],
+    permitted: [],
+    withheld: [],
+    note: null,
+    memory: { size: 0, recalled: 0 },
+    implicit: false,
+    excludedLabels: [],
+    ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block exists it is the whole answer, so add \`triage: [label]\` to it (or remove the block to return to defaults).`
   };
 }
 async function act(effects, warrant, outcome) {
@@ -33946,6 +34044,9 @@ function page(settings, outcome, done, spent) {
     done,
     memory: outcome.memory,
     note: outcome.note,
+    implicit: outcome.implicit,
+    excludedLabels: outcome.excludedLabels,
+    ungranted: outcome.ungranted,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames

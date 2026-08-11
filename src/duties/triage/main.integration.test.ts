@@ -89,6 +89,12 @@ interface State {
   labels: string[];
   /** The repository's own label list, which the warrant is checked against. */
   repositoryLabels: string[];
+  /**
+   * What each of those labels is described as on GitHub, by name. A name
+   * absent from here is a label with no description — the shape the implicit
+   * warrant leaves out of the taxonomy it builds.
+   */
+  labelDescriptions: Record<string, string>;
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
@@ -130,6 +136,7 @@ async function startStub(): Promise<Stub> {
     body: REPORT,
     labels: [],
     repositoryLabels: ["bug", "docs", "question"],
+    labelDescriptions: {},
     answer: triaging(verdict()),
     asked: [],
     effects: { applied: [], comments: [], assigned: [], closed: false },
@@ -193,7 +200,10 @@ async function route(
     send(
       response,
       200,
-      (page === 1 ? stub.repositoryLabels : []).map((name) => ({ name })),
+      (page === 1 ? stub.repositoryLabels : []).map((name) => ({
+        name,
+        description: stub.labelDescriptions[name] ?? null,
+      })),
     );
     return;
   }
@@ -308,10 +318,18 @@ let scratch: string;
 let warrantPath: string;
 let correctionsPath: string;
 
+/**
+ * `cwd` defaults to this repository's own root, where the default warrant
+ * path resolves to the real `.github/reeve.yml` sitting there. A case about
+ * the *absence* of that file needs a working directory with no such file in
+ * it, which is what the `scratch` directory this suite already makes per
+ * case is for.
+ */
 async function runAction(
   stub: Stub,
   inputs: Record<string, string> = {},
   extra: NodeJS.ProcessEnv = {},
+  cwd: string = ROOT,
 ): Promise<Run> {
   const outputFile = join(scratch, "outputs");
   const summaryFile = join(scratch, "summary.md");
@@ -333,7 +351,7 @@ async function runAction(
   }
 
   const child = spawn(process.execPath, [BUNDLE], {
-    cwd: ROOT,
+    cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -859,5 +877,85 @@ describe("the action contract", () => {
     const text = await readFile(join(DUTY, "action.yml"), "utf8");
 
     expect(text).toContain("main: dist/index.js");
+  });
+});
+
+describe("zero config", () => {
+  /**
+   * `.github/reeve.yml`, exactly as `warrant`'s own default names it and
+   * exactly as `main.ts`'s `DEFAULT_WARRANT_PATH` names it. Passed as an
+   * input rather than left to `action.yml`'s default, because this file never
+   * goes through a runner that would supply it — but the value has to be the
+   * same string, or the run would see it as a path a consumer chose and fail
+   * loudly on it instead of running at the narrowest authority.
+   */
+  const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+
+  it("runs on labels alone, taken from this repository's own descriptions, when no warrant exists", async () => {
+    stub.repositoryLabels = ["bug", "docs", "question"];
+    stub.labelDescriptions = {
+      bug: "Something that used to work and does not.",
+      docs: "The documentation is wrong or missing.",
+      // `question` deliberately carries no description, and is the one this
+      // taxonomy has to leave out.
+    };
+    stub.title = "Dark mode toggle forgets its setting";
+
+    const run = await runAction(stub, { warrant: DEFAULT_WARRANT_PATH }, {}, scratch);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual(["bug"]);
+    expect(run.summary).toContain(
+      `No \`${DEFAULT_WARRANT_PATH}\` — ran at the narrowest authority: labels only, ` +
+        "from this repository's own label descriptions.",
+    );
+    expect(run.summary).toContain(
+      "`question` — these labels have no description on GitHub, so they were not offered " +
+        "to the model — add a description there, or write a taxonomy in " +
+        `\`${DEFAULT_WARRANT_PATH}\`.`,
+    );
+  });
+
+  it("fails loudly when a path a consumer chose is missing, even though the default would not be", async () => {
+    // The default path reads its own absence as silence; a path somebody
+    // pointed at deliberately does not get that benefit — naming a file that
+    // is not there is a configuration mistake, not an absence.
+    const run = await runAction(
+      stub,
+      { warrant: join(scratch, "somewhere-else.yml") },
+      {},
+      scratch,
+    );
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("this run has no authority");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("grants triage nothing, spends no model call, and says why, when a written block does not name it", async () => {
+    await writeFile(
+      warrantPath,
+      [
+        "version: 1",
+        "labels:",
+        "  - name: bug",
+        "    description: Something that used to work and does not.",
+        "capabilities:",
+        "  translate: [comment]",
+      ].join("\n"),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.asked).toHaveLength(0);
+    expect(stub.effects.applied).toEqual([]);
+    expect(run.outputs.labels).toBe(JSON.stringify([]));
+    expect(run.summary).toContain(
+      `\`${warrantPath}\`'s \`capabilities:\` block does not name \`triage\`; once that block ` +
+        "exists it is the whole answer, so add `triage: [label]` to it (or remove the block to " +
+        "return to defaults).",
+    );
+    expect(run.summary).toContain("No expensive model was asked anything.");
   });
 });

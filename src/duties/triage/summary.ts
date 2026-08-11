@@ -54,6 +54,16 @@ export interface Run {
    * agreed with nothing.
    */
   readonly note: string | null;
+  /** True when there was no warrant file, and this ran at the narrowest authority instead. */
+  readonly implicit: boolean;
+  /** Repository labels the implicit warrant left out for carrying no description. */
+  readonly excludedLabels: readonly string[];
+  /**
+   * Why this duty was granted nothing, when a written `capabilities:` block
+   * simply does not name it — distinct from every other reason nothing was
+   * applied, because here nothing was even attempted.
+   */
+  readonly ungranted: string | null;
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly screenNames: Names;
@@ -65,6 +75,7 @@ export function summarize(run: Run): string {
     "",
     `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was applied" : ""}.`,
     "",
+    ...(run.implicit ? [authority(run), ""] : []),
     verdict(run),
     "",
     decisions(run),
@@ -77,9 +88,43 @@ export function summarize(run: Run): string {
   return `${parts.join("\n").trimEnd()}\n`;
 }
 
+/**
+ * Said once, at the top, when this run had nothing written to read.
+ *
+ * The difference between a warrant a maintainer wrote and the narrowest one
+ * this build assumed in its place is the first thing a reader needs — before
+ * a single label, because it changes how every line after it should be read.
+ */
+function authority(run: Run): string {
+  const lines = [
+    `No \`${run.warrant}\` — ran at the narrowest authority: labels only, from this ` +
+      "repository's own label descriptions.",
+  ];
+
+  if (run.excludedLabels.length > 0) {
+    lines.push(
+      "",
+      `${run.excludedLabels.map((name) => `\`${name}\``).join(", ")} — these labels have no ` +
+        "description on GitHub, so they were not offered to the model — add a description " +
+        `there, or write a taxonomy in \`${run.warrant}\`.`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
 /** The headline: what happened to this thread, in the fewest lines that are true. */
 function verdict(run: Run): string {
   const lines = ["### Verdict", ""];
+
+  if (run.ungranted !== null) {
+    lines.push(
+      run.ungranted,
+      "",
+      "No expensive model was asked anything. This is a real answer rather than a failure.",
+    );
+    return lines.join("\n");
+  }
 
   if (run.screenedOut !== null) {
     lines.push(
@@ -133,7 +178,7 @@ function verdict(run: Run): string {
  * a reader can see which guardrail it was.
  */
 function decisions(run: Run): string {
-  if (run.screenedOut !== null) return withheld(run);
+  if (run.screenedOut !== null || run.ungranted !== null) return withheld(run);
 
   const refusals = new Map(run.refused.map((refusal) => [refusal.what, refusal.why]));
   const rows = run.proposed.map((name) => {
