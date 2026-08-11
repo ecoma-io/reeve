@@ -23,3 +23,6 @@ pnpm-debug.log*
 
 # Claude Code local overrides — the shared settings.json IS tracked.
 .claude/settings.local.json
+
+# Agent worktrees
+.claude/worktrees/

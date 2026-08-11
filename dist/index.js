@@ -19289,7 +19289,7 @@ function error(message, properties = {}) {
 // src/refusal.ts
 var DUTIES = ["translate", "triage"];
 var PLANNED = ["duplicate", "respond"];
-var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#6-roadmap";
+var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#7-roadmap";
 function pinned() {
   const ref = process.env.GITHUB_ACTION_REF ?? "";
   return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
