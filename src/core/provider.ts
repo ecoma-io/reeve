@@ -19,6 +19,20 @@
  * Nothing in this module logs. The api key is masked by the entry point, but a
  * module that returns its failures lets the caller decide what is worth a
  * warning and what is ordinary rotation.
+ *
+ * **A third rule governs the rotation itself, not one request:** [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * splits every failure into `kind`, and the two kinds do not fail the same way.
+ * A `capacity` failure — 429, 5xx, a timeout, a socket that never connected —
+ * is weather: `rotateModels` returns it like any other, the caller carries on,
+ * and `Weather` remembers it for the rest of the run so the next thread does
+ * not pay for a request the first thread already learned would not answer. An
+ * `auth` failure — 401, 403 — is not weather, and the rule above bends for it
+ * on purpose: no amount of rotation repairs a key that was never going to
+ * work, so `rotateModels` throws an `AuthenticationFailure` the moment it sees
+ * one, past every remaining model on the list. This is the one place that
+ * doctrine has to be enforced, because it is the one function every duty's
+ * every stage calls to ask a provider anything — enforcing it here means no
+ * stage has to remember to.
  */
 import { parseList } from "./list.js";
 
@@ -72,6 +86,23 @@ export interface Failure {
    * a ledger that only counted the answers it liked would understate the run.
    */
   readonly usage?: Usage | null;
+  /**
+   * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)'s
+   * distinction, decided once, here, so every caller reads the same answer
+   * instead of re-deriving it from a reason string:
+   *
+   * - `"auth"` — 401 or 403. Configuration, not conditions. `rotateModels`
+   *   never returns one of these; it throws instead, which is what makes this
+   *   case narrower to handle everywhere else than the other two.
+   * - `"capacity"` — 429, any 5xx, a timeout, or a network failure that never
+   *   reached a status at all. Weather: this run's `Weather` remembers it, and
+   *   nothing about it is this model's fault.
+   * - `"protocol"` — everything else. A body that was not JSON, a 4xx that was
+   *   not auth or the rate limit, an answer with no usable content. A model or
+   *   a gateway behaving outside the contract, on a request that could
+   *   otherwise have been served.
+   */
+  readonly kind: "auth" | "capacity" | "protocol";
 }
 
 export type Completion = Success | Failure;
@@ -285,7 +316,16 @@ export function createProvider(config: ProviderConfig): Provider {
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {
-        return { ok: false, model, usage: null, reason: describeRequestError(error, timeoutMs) };
+        // Never a status at all — a timeout, a DNS failure, a connection
+        // refused. There is no 401 hiding in a request that never reached the
+        // provider, so this is weather by construction, not a guess.
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          reason: describeRequestError(error, timeoutMs),
+        };
       }
 
       let text: string;
@@ -296,6 +336,7 @@ export function createProvider(config: ProviderConfig): Provider {
           ok: false,
           model,
           usage: null,
+          kind: "capacity",
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error, timeoutMs)})`,
         };
       }
@@ -311,12 +352,19 @@ export function createProvider(config: ProviderConfig): Provider {
  */
 function readCompletion(model: string, status: number, text: string): Completion {
   const at = `HTTP ${String(status)}`;
+  const kind = classifyStatus(status);
 
   let payload: unknown;
   try {
     payload = JSON.parse(text);
   } catch {
-    return { ok: false, model, usage: null, reason: `${at}: body was not JSON — ${excerpt(text)}` };
+    return {
+      ok: false,
+      model,
+      usage: null,
+      kind,
+      reason: `${at}: body was not JSON — ${excerpt(text)}`,
+    };
   }
 
   // Read before any verdict, because a response Reeve refuses was still paid
@@ -325,10 +373,10 @@ function readCompletion(model: string, status: number, text: string): Completion
   const usage = readUsage(payload);
 
   const reported = readErrorMessage(payload);
-  if (reported !== null) return { ok: false, model, usage, reason: `${at}: ${reported}` };
+  if (reported !== null) return { ok: false, model, usage, kind, reason: `${at}: ${reported}` };
 
   if (status < 200 || status >= 300) {
-    return { ok: false, model, usage, reason: `${at}: ${excerpt(text)}` };
+    return { ok: false, model, usage, kind, reason: `${at}: ${excerpt(text)}` };
   }
 
   const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
@@ -337,6 +385,7 @@ function readCompletion(model: string, status: number, text: string): Completion
       ok: false,
       model,
       usage,
+      kind,
       reason: `${at}: no choices in the response — ${excerpt(text)}`,
     };
   }
@@ -346,10 +395,10 @@ function readCompletion(model: string, status: number, text: string): Completion
     // A provider whose `content` is an array of parts, or a reasoning model
     // that put everything in `reasoning_content` and left this empty. Both are
     // outside the protocol Reeve speaks; rotation is the answer.
-    return { ok: false, model, usage, reason: `${at}: message content was not a string` };
+    return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
   }
   if (content.trim().length === 0) {
-    return { ok: false, model, usage, reason: `${at}: answered with empty content` };
+    return { ok: false, model, usage, kind, reason: `${at}: answered with empty content` };
   }
 
   const finishReason = choice.finish_reason;
@@ -360,6 +409,22 @@ function readCompletion(model: string, status: number, text: string): Completion
     content,
     finishReason: typeof finishReason === "string" ? finishReason : null,
   };
+}
+
+/**
+ * D12's classification, read off the one signal it is defined in terms of.
+ *
+ * A 2xx never lands on `"auth"` or `"capacity"` — both are ranges below 200 or
+ * at or above 400 — so a 2xx whose body turns out to carry a real error stays
+ * `"protocol"` without this needing a special case for it: body before status
+ * only ever *adds* a failure a 2xx status would otherwise have hidden, and
+ * this function is asked only what the status means, never whether there was
+ * a failure at all.
+ */
+function classifyStatus(status: number): Failure["kind"] {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429 || (status >= 500 && status < 600)) return "capacity";
+  return "protocol";
 }
 
 /**
@@ -394,8 +459,127 @@ function asCount(value: unknown): number | null {
 export interface Rotation {
   /** The first usable answer, or null when every model was rotated past. */
   readonly success: Success | null;
-  /** Each model that failed before it, in the order tried. */
+  /**
+   * Each model that failed before it, in the order tried. Never carries an
+   * `"auth"` failure — `rotateModels` throws one the moment it sees it, rather
+   * than returning it for a caller to notice or not.
+   */
   readonly failures: readonly Failure[];
+}
+
+/**
+ * Thrown by `rotateModels` on the first `"auth"` failure, past every other
+ * model still on the list.
+ *
+ * A thrown exception rather than a returned one, and deliberately the one
+ * exception to "no request failure throws" at the top of this file: that rule
+ * is about a single request, where the caller's next move is always the same
+ * — try the next model — and returning keeps that decision the caller's. An
+ * `"auth"` failure has no next move; every duty's answer to it is identical
+ * (stop, and say which key), so making it an exception here means every
+ * caller gets that answer for free, by doing nothing, rather than by
+ * remembering to check for it at every one of the five places a duty asks a
+ * provider something.
+ */
+export class AuthenticationFailure extends Error {
+  readonly failure: Failure;
+
+  constructor(failure: Failure) {
+    super(`${failure.model}: ${failure.reason}`);
+    this.name = "AuthenticationFailure";
+    this.failure = failure;
+  }
+}
+
+/**
+ * What this run has already learned about capacity, one model id at a time.
+ *
+ * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * says a model's capacity does not clear inside a run — not inside one call to
+ * `rotateModels`, which was already true before this existed, but across every
+ * call the run makes, including the ones a sweep makes for threads two, three
+ * and forty. One `Weather` is created once, at the top of `run()`, and threaded
+ * through every stage that can reach a provider, so a model that ran out of
+ * room triaging the first thread is never asked to draft the second.
+ *
+ * Deliberately blind to `"protocol"` failures: a bad answer from one thread's
+ * prompt says nothing about whether the same model would answer a different
+ * prompt well, so only `"capacity"` — a fact about the model's account, not
+ * about what was asked — earns a model a place here.
+ */
+export interface Weather {
+  /** True once `model` has already failed here with `"capacity"` this run. */
+  grounded(model: string): boolean;
+  /** Records a capacity failure. A model already grounded is left as it was. */
+  ground(model: string): void;
+  /** Every model grounded so far, in the order it happened. */
+  readonly starved: readonly string[];
+}
+
+export function createWeather(): Weather {
+  const order: string[] = [];
+  const dead = new Set<string>();
+
+  return {
+    grounded: (model) => dead.has(model),
+    ground: (model) => {
+      if (dead.has(model)) return;
+      dead.add(model);
+      order.push(model);
+    },
+    get starved() {
+      return order;
+    },
+  };
+}
+
+/**
+ * True once every model on `models` has been grounded — the roster this list
+ * names has nothing left to try for the rest of the run, and asking again
+ * would not spend a request so much as narrate one that was already spent.
+ *
+ * Empty lists are not starved: `screen-models` left unset is turned off, not
+ * exhausted, and reporting the two the same way would make "nobody configured
+ * a cheap roster" and "the cheap roster ran dry" the same sentence when a
+ * maintainer needs to tell them apart.
+ */
+export function starved(models: readonly string[], weather: Weather): boolean {
+  return models.length > 0 && models.every((model) => weather.grounded(model));
+}
+
+/**
+ * A grounded model, reported as the failure asking it again would produce.
+ *
+ * Exported for the one caller that keeps its own loop instead of going
+ * through `rotateModels` — a judge's panel stops on a usable *vote*, not a
+ * usable *completion*, which is a stricter stop `rotateModels` cannot express
+ * — and needs the same sentence for the same reason.
+ */
+export function weatherFailure(model: string): Failure {
+  return {
+    ok: false,
+    model,
+    kind: "capacity",
+    usage: null,
+    reason:
+      "already rotated past for capacity earlier in this run — a provider's limit does not " +
+      "clear inside one job, so it was not asked again",
+  };
+}
+
+/**
+ * What every failure means for the rest of the run, applied once wherever a
+ * provider is asked something: an `"auth"` failure is not this run's to carry
+ * on past, so it throws; a `"capacity"` failure is remembered in `weather` so
+ * the next model asked, on the next thread, does not repeat it.
+ *
+ * The one piece of D12 every call site shares, factored out so `rotateModels`
+ * and a panel's own loop enforce it identically rather than by two readings of
+ * the same rule.
+ */
+export function reckon(failure: Failure, weather?: Weather): void {
+  if (failure.kind === "auth") throw new AuthenticationFailure(failure);
+  if (failure.kind === "capacity") weather?.ground(failure.model);
 }
 
 /**
@@ -407,15 +591,27 @@ export interface Rotation {
  *
  * Failures are returned rather than logged so a caller that recovers can stay
  * quiet, and one that ends up with nothing can report every attempt at once.
+ *
+ * `weather`, when given, is consulted before every attempt and updated after
+ * every `"capacity"` failure — this is what makes a model's exhaustion outlive
+ * the single call that discovered it. Left unset, rotation still behaves
+ * exactly as it always has: this parameter is additive, not a second mode.
  */
 export async function rotateModels(
   models: readonly string[],
   attempt: (model: string) => Promise<Completion>,
+  weather?: Weather,
 ): Promise<Rotation> {
   const failures: Failure[] = [];
   for (const model of models) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
+
     const completion = await attempt(model);
     if (completion.ok) return { success: completion, failures };
+    reckon(completion, weather);
     failures.push(completion);
   }
   return { success: null, failures };

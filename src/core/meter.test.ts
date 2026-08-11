@@ -8,7 +8,7 @@ function answering(model: string, usage: Usage | null = null): Completion {
 }
 
 function failing(model: string, usage: Usage | null = null): Completion {
-  return { ok: false, model, reason: "out of quota", usage };
+  return { ok: false, model, reason: "out of quota", kind: "capacity", usage };
 }
 
 /** A provider that answers whatever it is handed, one queued answer per call. */

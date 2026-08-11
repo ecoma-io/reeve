@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseList } from "./list.js";
 import {
+  AuthenticationFailure,
   createProvider,
+  createWeather,
   parseModels,
   parseSeats,
+  reckon,
   rotateModels,
   shown,
+  starved,
+  weatherFailure,
   type Completion,
   type Failure,
   type Provider,
@@ -372,7 +377,7 @@ describe("createProvider", () => {
 
       const failure = expectFailure(await subject().complete("free-model", HELLO));
 
-      expect(failure).toMatchObject({ model: "free-model" });
+      expect(failure).toMatchObject({ model: "free-model", kind: "protocol" });
       expect(failure.reason).toContain("rate limit exceeded");
       expect(failure.reason).toContain("HTTP 200");
     });
@@ -380,9 +385,9 @@ describe("createProvider", () => {
     it("refuses an error reported as a bare string", async () => {
       fetchMock.mockResolvedValue(json({ error: "model_not_found" }));
 
-      expect(expectFailure(await subject().complete("m", HELLO)).reason).toContain(
-        "model_not_found",
-      );
+      const failure = expectFailure(await subject().complete("m", HELLO));
+      expect(failure.reason).toContain("model_not_found");
+      expect(failure.kind).toBe("protocol");
     });
 
     it("still says something useful when the error carries no message", async () => {
@@ -392,14 +397,17 @@ describe("createProvider", () => {
 
       expect(failure.reason).toContain("provider reported an error");
       expect(failure.reason).toContain("429");
+      // The `429` is a code inside the body, not the HTTP status — the actual
+      // status here is 200, so this stays protocol rather than capacity.
+      expect(failure.kind).toBe("protocol");
     });
 
     it("prefers the body's message over the status when both say something", async () => {
       fetchMock.mockResolvedValue(json({ error: { message: "context length exceeded" } }, 400));
 
-      expect(expectFailure(await subject().complete("m", HELLO)).reason).toContain(
-        "context length exceeded",
-      );
+      const failure = expectFailure(await subject().complete("m", HELLO));
+      expect(failure.reason).toContain("context length exceeded");
+      expect(failure.kind).toBe("protocol");
     });
 
     it("refuses a non-2xx that carries no error field, quoting the body", async () => {
@@ -409,6 +417,7 @@ describe("createProvider", () => {
 
       expect(failure.reason).toContain("HTTP 503");
       expect(failure.reason).toContain("upstream unavailable");
+      expect(failure.kind).toBe("capacity");
     });
 
     it("refuses a body that is not JSON, quoting what arrived", async () => {
@@ -421,6 +430,7 @@ describe("createProvider", () => {
 
       expect(failure.reason).toContain("body was not JSON");
       expect(failure.reason).toContain("502 Bad Gateway");
+      expect(failure.kind).toBe("capacity");
     });
 
     it("truncates a long body rather than pouring it into the log", async () => {
@@ -447,7 +457,9 @@ describe("createProvider", () => {
     ])("refuses a 200 with %s", async (_case, payload) => {
       fetchMock.mockResolvedValue(json(payload));
 
-      expect(expectFailure(await subject().complete("m", HELLO)).reason).toContain("no choices");
+      const failure = expectFailure(await subject().complete("m", HELLO));
+      expect(failure.reason).toContain("no choices");
+      expect(failure.kind).toBe("protocol");
     });
 
     it("refuses content that is not a string", async () => {
@@ -468,7 +480,39 @@ describe("createProvider", () => {
       // announcing a translation.
       fetchMock.mockResolvedValue(answering("   \n  "));
 
-      expect(expectFailure(await subject().complete("m", HELLO)).reason).toContain("empty content");
+      const failure = expectFailure(await subject().complete("m", HELLO));
+      expect(failure.reason).toContain("empty content");
+      expect(failure.kind).toBe("protocol");
+    });
+  });
+
+  describe("classifying a failure's kind", () => {
+    // The classification this whole entry is for: it decides whether a failure
+    // rotates quietly, grounds a model for the rest of the run, or ends it red.
+    it.each([
+      ["401", 401, "auth"],
+      ["403", 403, "auth"],
+      ["429", 429, "capacity"],
+      ["500", 500, "capacity"],
+      ["503", 503, "capacity"],
+      ["599", 599, "capacity"],
+      ["400", 400, "protocol"],
+      ["404", 404, "protocol"],
+      ["418", 418, "protocol"],
+    ])("classifies HTTP %s as %s", async (_case, status, kind) => {
+      fetchMock.mockResolvedValue(json({ detail: "no" }, status));
+
+      expect(expectFailure(await subject().complete("m", HELLO)).kind).toBe(kind);
+    });
+
+    it("keeps a 2xx whose body carries a real error as protocol, never auth or capacity", async () => {
+      // "Body before status" doctrine: a provider that answers 200 with an
+      // `error` field describing a quota problem has not sent a 401 or a 429,
+      // and classification by status only applies once the status itself is
+      // the non-2xx signal.
+      fetchMock.mockResolvedValue(json({ error: { message: "unauthorized", code: 401 } }, 200));
+
+      expect(expectFailure(await subject().complete("m", HELLO)).kind).toBe("protocol");
     });
   });
 
@@ -497,6 +541,9 @@ describe("createProvider", () => {
 
       expect(failure.reason).toContain("request failed");
       expect(failure.reason).toContain("ENOTFOUND");
+      // Never a status at all — there is no 401 hiding in a request that never
+      // reached the provider, so this is weather by construction.
+      expect(failure.kind).toBe("capacity");
     });
 
     it("names the timeout as a timeout, with the budget it exceeded", async () => {
@@ -539,6 +586,7 @@ describe("createProvider", () => {
       const failure = expectFailure(await subject().complete("m", HELLO));
 
       expect(failure.reason).toContain("could not be read");
+      expect(failure.kind).toBe("capacity");
     });
   });
 });
@@ -550,7 +598,12 @@ describe("rotateModels", () => {
     content: "answer",
     finishReason: "stop",
   });
-  const failed = (model: string): Failure => ({ ok: false, model, reason: `${model} said no` });
+  const failed = (model: string, kind: Failure["kind"] = "protocol"): Failure => ({
+    ok: false,
+    model,
+    reason: `${model} said no`,
+    kind,
+  });
 
   it("returns the first usable answer and stops there", async () => {
     const attempt = vi.fn((model: string) => Promise.resolve<Completion>(succeeded(model)));
@@ -613,5 +666,118 @@ describe("rotateModels", () => {
 
     await expect(rotateModels([], attempt)).resolves.toEqual({ success: null, failures: [] });
     expect(attempt).not.toHaveBeenCalled();
+  });
+
+  describe("an auth failure", () => {
+    it("throws AuthenticationFailure the instant one model reports it, trying no others", async () => {
+      const tried: string[] = [];
+      const attempt = (model: string): Promise<Completion> => {
+        tried.push(model);
+        return Promise.resolve<Completion>(model === "a" ? failed("a", "auth") : succeeded(model));
+      };
+
+      await expect(rotateModels(["a", "b", "c"], attempt)).rejects.toThrow(AuthenticationFailure);
+      // "b" would have worked, and rotation never gets to find that out — auth
+      // is red from wherever it is first seen, with no exception for it.
+      expect(tried).toEqual(["a"]);
+    });
+
+    it("names the model and the reason on the thrown failure", async () => {
+      const attempt = (): Promise<Completion> =>
+        Promise.resolve<Completion>(failed("gpt-x", "auth"));
+
+      const caught = await rotateModels(["gpt-x"], attempt).catch((error: unknown) => error);
+
+      expect(caught).toBeInstanceOf(AuthenticationFailure);
+      expect((caught as AuthenticationFailure).failure).toMatchObject({
+        model: "gpt-x",
+        kind: "auth",
+      });
+    });
+
+    it("still throws when a weather instance is passed, rather than grounding the model", async () => {
+      // Auth is not weather. Grounding it would make the next model in the
+      // roster get a turn, and the whole point of this kind is that nothing
+      // does.
+      const weather = createWeather();
+      const attempt = (): Promise<Completion> => Promise.resolve<Completion>(failed("m", "auth"));
+
+      await expect(rotateModels(["m"], attempt, weather)).rejects.toThrow(AuthenticationFailure);
+      expect(weather.grounded("m")).toBe(false);
+    });
+  });
+
+  describe("weather", () => {
+    it("skips a model already grounded this run, without calling it again", async () => {
+      const weather = createWeather();
+      weather.ground("a");
+      const attempt = vi.fn((model: string) => Promise.resolve<Completion>(succeeded(model)));
+
+      const rotation = await rotateModels(["a", "b"], attempt, weather);
+
+      expect(rotation.success?.model).toBe("b");
+      expect(attempt).toHaveBeenCalledExactlyOnceWith("b");
+      // The skip is still reported, so a summary of "what was tried" stays
+      // truthful without spending a real request on a model known to be dead.
+      expect(rotation.failures).toHaveLength(1);
+      expect(rotation.failures[0]).toMatchObject({ model: "a", kind: "capacity" });
+    });
+
+    it("grounds a model on a capacity failure so a later call in the same run skips it", async () => {
+      const weather = createWeather();
+      const attempt = vi.fn((model: string) =>
+        Promise.resolve<Completion>(failed(model, "capacity")),
+      );
+
+      await rotateModels(["a"], attempt, weather);
+      expect(weather.grounded("a")).toBe(true);
+
+      const second = vi.fn((model: string) => Promise.resolve<Completion>(succeeded(model)));
+      await rotateModels(["a", "b"], second, weather);
+
+      expect(second).toHaveBeenCalledExactlyOnceWith("b");
+    });
+
+    it("does not ground a model on a protocol failure", async () => {
+      const weather = createWeather();
+      const attempt = (model: string): Promise<Completion> =>
+        Promise.resolve<Completion>(failed(model, "protocol"));
+
+      await rotateModels(["a"], attempt, weather);
+
+      expect(weather.grounded("a")).toBe(false);
+    });
+
+    it("reports starved only once every listed model is grounded, and never for an empty list", () => {
+      const weather = createWeather();
+      expect(starved([], weather)).toBe(false);
+      expect(starved(["a", "b"], weather)).toBe(false);
+
+      weather.ground("a");
+      expect(starved(["a", "b"], weather)).toBe(false);
+
+      weather.ground("b");
+      expect(starved(["a", "b"], weather)).toBe(true);
+    });
+
+    it("reckon grounds on capacity and throws on auth, leaving protocol untouched", () => {
+      const weather = createWeather();
+
+      reckon(failed("a", "protocol"), weather);
+      expect(weather.grounded("a")).toBe(false);
+
+      reckon(failed("b", "capacity"), weather);
+      expect(weather.grounded("b")).toBe(true);
+
+      expect(() => {
+        reckon(failed("c", "auth"), weather);
+      }).toThrow(AuthenticationFailure);
+    });
+
+    it("synthesises a weatherFailure that explains a model was skipped, not merely absent", () => {
+      const failure = weatherFailure("a");
+      expect(failure).toMatchObject({ ok: false, model: "a", kind: "capacity" });
+      expect(failure.reason).toContain("capacity");
+    });
   });
 });
