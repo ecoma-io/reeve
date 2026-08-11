@@ -333,6 +333,27 @@ place it is received, because a 429 misread as configuration fails a run that
 would have finished on the next scheduled sweep, and a 401 misread as weather
 runs a repository's whole queue against a key that will never work.
 
+**Amendment — many endpoints changes when "immediately" fires, not what
+counts as configuration.** A run with more than one `endpoints` roster
+configured is not one credential; it is several relationships with several
+providers, and a wrong key on one endpoint says nothing about the key on
+another. Failing the whole run red the moment the first endpoint's 401 or 403
+arrives would punish rotation for exactly the case rotation exists to
+survive: a stranger's free tier misconfigured, a paid key rotated at the
+wrong time, one endpoint down while the rest are fine. So once more than one
+endpoint is configured, an auth failure is recorded rather than thrown
+immediately — the run keeps going, and every other endpoint is still tried —
+and the run fails red only once **every** configured endpoint has ended up
+auth-failed, checked once at the end of the run rather than on the first
+miss. A single-endpoint run is unchanged by this: one endpoint auth-failing
+is every endpoint auth-failing, so the original immediate failure still
+fires, on the first model that reports it, exactly as before.
+
+_Costs us:_ a run that would have failed fast on a single bad key now runs as
+long as its slowest endpoint's rotation before it can say so, and every
+duty's summary has to name which endpoints failed, not just that the run
+did.
+
 ## 6. Shape
 
 ```
