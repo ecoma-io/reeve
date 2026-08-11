@@ -675,17 +675,23 @@ async function decide(
     store.corrections.some((correction) => correction.language !== threadLanguage.code);
 
   if (worthBridging) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames =
+      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const pivot = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather,
     });
-    if (draft !== null) {
+    for (const failure of pivot.failures) {
+      core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
       queries.push({
-        text: `${draft.title}\n${draft.body}`,
+        text: `${pivot.draft.title}\n${pivot.draft.body}`,
         against: { pivot: pivotLanguage.code },
       });
     } else {
@@ -892,19 +898,25 @@ async function recordCorrection(
   let pivot: Correction["pivot"] = null;
   let pivotNote: string | null = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames =
+      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const rendered = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather,
     });
-    if (draft !== null) {
+    for (const failure of rendered.failures) {
+      core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+    }
+    if (rendered.draft !== null) {
       pivot = {
         language: pivotLanguage.code,
-        title: draft.title,
-        excerpt: draft.body.slice(0, EXCERPT),
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT),
       };
     } else {
       // Weather, not a broken configuration — the write below still happens.

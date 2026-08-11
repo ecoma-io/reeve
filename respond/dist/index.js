@@ -33539,10 +33539,13 @@ async function translateToPivot(request2) {
     (model) => answer(provider, model, messages),
     weather
   );
-  if (!rotation.success) return null;
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
   const draft2 = readAnswer(unwrapped(rotation.success.content));
-  if (draft2 === null) return null;
-  return { title: sanitize(draft2.title), body: sanitize(draft2.body) };
+  if (draft2 === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft2.title), body: sanitize(draft2.body) },
+    failures: rotation.failures
+  };
 }
 async function answer(provider, model, messages) {
   const completion = await provider.complete(model, messages);
@@ -34368,22 +34371,23 @@ ${body}`, against: "own" }];
   const pivotLanguage = settings.languages[0] ?? null;
   const worthBridging = language !== null && pivotLanguage !== null && language.code !== pivotLanguage.code && store.corrections.some((correction) => correction.language !== language.code);
   if (worthBridging) {
-    const bridged = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const pivot = await translateToPivot({
       provider: stages.pivot,
-      // The cheap roster, same as triage's own bridge — a mechanical
-      // translation for recall does not need the roster a first reply is
-      // drafted with, and falls back to it only when `screen-models` was
-      // never configured.
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather
     });
-    if (bridged !== null) {
+    for (const failure of pivot.failures) {
+      warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
       queries.push({
-        text: `${bridged.title}
-${bridged.body}`,
+        text: `${pivot.draft.title}
+${pivot.draft.body}`,
         against: { pivot: pivotLanguage.code }
       });
     } else {

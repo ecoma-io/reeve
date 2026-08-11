@@ -33393,10 +33393,13 @@ async function translateToPivot(request2) {
     (model) => answer(provider, model, messages),
     weather
   );
-  if (!rotation.success) return null;
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
   const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return null;
-  return { title: sanitize(draft.title), body: sanitize(draft.body) };
+  if (draft === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures
+  };
 }
 async function answer(provider, model, messages) {
   const completion = await provider.complete(model, messages);
@@ -34195,7 +34198,7 @@ ${body}`];
   const pivotLanguage = settings.languages[0] ?? null;
   const threadLanguage = detection.language;
   if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache)) {
-    const draft = await translateToPivot({
+    const pivot = await translateToPivot({
       provider: stages.pivot,
       models: settings.models,
       title: standing.title,
@@ -34203,9 +34206,12 @@ ${body}`];
       to: pivotLanguage,
       weather
     });
-    if (draft !== null) {
-      queries.push(`${draft.title}
-${draft.body}`);
+    for (const failure of pivot.failures) {
+      warning(`match: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
+      queries.push(`${pivot.draft.title}
+${pivot.draft.body}`);
       pivotUsed = true;
       pivotNote = `Bridged the query into ${pivotLanguage.label} to compare against candidates written in other languages.`;
       info(pivotNote);

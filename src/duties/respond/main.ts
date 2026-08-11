@@ -374,10 +374,9 @@ async function decide(
   const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
   // The same pivot bridge triage uses: the first configured language is this
   // project's pivot, and a store with corrections in other languages is worth
-  // bridging into it before recalling — see `core/pivot.ts`. The language
-  // mismatch check is `duplicate`'s own addition to this bridge: a thread
-  // already written in the pivot language has nothing to gain from being
-  // translated into itself, so that case spends no provider call here either.
+  // bridging into it before recalling — see `core/pivot.ts`. A thread already
+  // written in the pivot language has nothing to gain from being translated
+  // into itself, so that case spends no provider call here either.
   const pivotLanguage = settings.languages[0] ?? null;
   const worthBridging =
     language !== null &&
@@ -385,21 +384,27 @@ async function decide(
     language.code !== pivotLanguage.code &&
     store.corrections.some((correction) => correction.language !== language.code);
   if (worthBridging) {
-    const bridged = await translateToPivot({
+    // The cheap roster, same as triage's own bridge — a mechanical
+    // translation for recall does not need the roster a first reply is
+    // drafted with, and falls back to it only when `screen-models` was
+    // never configured.
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames =
+      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const pivot = await translateToPivot({
       provider: stages.pivot,
-      // The cheap roster, same as triage's own bridge — a mechanical
-      // translation for recall does not need the roster a first reply is
-      // drafted with, and falls back to it only when `screen-models` was
-      // never configured.
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather,
     });
-    if (bridged !== null) {
+    for (const failure of pivot.failures) {
+      core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
       queries.push({
-        text: `${bridged.title}\n${bridged.body}`,
+        text: `${pivot.draft.title}\n${pivot.draft.body}`,
         against: { pivot: pivotLanguage.code },
       });
     } else {

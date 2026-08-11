@@ -33728,10 +33728,13 @@ async function translateToPivot(request2) {
     (model) => answer(provider, model, messages),
     weather
   );
-  if (!rotation.success) return null;
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
   const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return null;
-  return { title: sanitize(draft.title), body: sanitize(draft.body) };
+  if (draft === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures
+  };
 }
 async function answer(provider, model, messages) {
   const completion = await provider.complete(model, messages);
@@ -34505,18 +34508,23 @@ ${body}`, against: "own" }];
   const threadLanguage = detection.language;
   const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
   if (worthBridging) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const pivot = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather
     });
-    if (draft !== null) {
+    for (const failure of pivot.failures) {
+      warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (pivot.draft !== null) {
       queries.push({
-        text: `${draft.title}
-${draft.body}`,
+        text: `${pivot.draft.title}
+${pivot.draft.body}`,
         against: { pivot: pivotLanguage.code }
       });
     } else {
@@ -34619,19 +34627,24 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
   let pivot = null;
   let pivotNote = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const draft = await translateToPivot({
+    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+    const rendered = await translateToPivot({
       provider: stages.pivot,
-      models: settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      models: pivotModels,
       title: standing.title,
       body,
       to: pivotLanguage,
       weather
     });
-    if (draft !== null) {
+    for (const failure of rendered.failures) {
+      warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+    }
+    if (rendered.draft !== null) {
       pivot = {
         language: pivotLanguage.code,
-        title: draft.title,
-        excerpt: draft.body.slice(0, EXCERPT)
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT)
       };
     } else {
       pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";

@@ -25,6 +25,7 @@ import type { Language } from "./languages.js";
 import {
   rotateModels,
   type Completion,
+  type Failure,
   type Message,
   type Provider,
   type Weather,
@@ -35,6 +36,19 @@ import { sanitize } from "./sanitize.js";
 export interface PivotDraft {
   readonly title: string;
   readonly body: string;
+}
+
+/**
+ * What one call produced: a rendering, when one survived, and every failure
+ * rotation hit along the way — including a model `weather` already had
+ * grounded, which surfaces here as the same synthetic failure `rotateModels`
+ * always reports for one. Reported rather than logged here, so the caller
+ * decides how to attribute it: this module has no stage name of its own to
+ * prefix a warning with.
+ */
+export interface PivotResult {
+  readonly draft: PivotDraft | null;
+  readonly failures: readonly Failure[];
 }
 
 export interface PivotRequest {
@@ -48,7 +62,8 @@ export interface PivotRequest {
 }
 
 /**
- * Translates `title` and `body` into `to`, or answers `null`.
+ * Translates `title` and `body` into `to`, alongside every failure rotation
+ * hit reaching that answer or giving up on it.
  *
  * The output passes through `sanitize` before it is returned, the same as
  * every other piece of model-generated prose this codebase stores or
@@ -56,7 +71,7 @@ export interface PivotRequest {
  * and a translated `@mention` or `#123` in it is exactly as live as one
  * `draft.ts` produces.
  */
-export async function translateToPivot(request: PivotRequest): Promise<PivotDraft | null> {
+export async function translateToPivot(request: PivotRequest): Promise<PivotResult> {
   const { provider, models, title, body, to, weather } = request;
 
   const messages = prompt(title, body, to);
@@ -65,12 +80,15 @@ export async function translateToPivot(request: PivotRequest): Promise<PivotDraf
     (model) => answer(provider, model, messages),
     weather,
   );
-  if (!rotation.success) return null;
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
 
   const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return null;
+  if (draft === null) return { draft: null, failures: rotation.failures };
 
-  return { title: sanitize(draft.title), body: sanitize(draft.body) };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures,
+  };
 }
 
 /**
