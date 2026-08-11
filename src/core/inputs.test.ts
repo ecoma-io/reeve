@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { counted, fraction, readShared, threadNumber, whole } from "./inputs.js";
+import { counted, fraction, parseSince, readShared, threadNumber, whole } from "./inputs.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is exactly what a workflow file becomes: `INPUT_MODELS` is what
@@ -24,6 +24,9 @@ const COMPLETE = {
   "api-key": "sk-secret",
   models: "gpt-4o-mini, gpt-4o",
   "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
 };
 
 /** The workflow file as the runner hands it over. */
@@ -57,6 +60,9 @@ describe("readShared", () => {
       baseUrl: "https://api.openai.com/v1",
       apiKey: "sk-secret",
       dryRun: false,
+      sweep: false,
+      since: null,
+      limit: 50,
     });
   });
 
@@ -120,6 +126,80 @@ describe("readShared", () => {
       expect(() => readShared()).toThrow(/required/i);
     },
   );
+
+  it("names no thread under `sweep` — a sweep works the backlog, not one issue", () => {
+    given({ ...COMPLETE, sweep: "true" });
+
+    expect(readShared().number).toBeNull();
+  });
+
+  it("refuses `sweep` combined with `number` — a workflow has to pick one", () => {
+    given({ ...COMPLETE, sweep: "true", number: "42" });
+
+    expect(() => readShared()).toThrow(/sweep: cannot be combined with `number`/);
+  });
+
+  it("reads `since` as no bound when it is empty, the default", () => {
+    given({ ...COMPLETE, sweep: "true" });
+
+    expect(readShared().since).toBeNull();
+  });
+
+  it("reads `since` as a calendar date", () => {
+    given({ ...COMPLETE, sweep: "true", since: "2026-01-01" });
+
+    expect(readShared().since).toEqual(new Date("2026-01-01T00:00:00Z"));
+  });
+
+  it("reads `since` as a duration", () => {
+    given({ ...COMPLETE, sweep: "true", since: "90d" });
+
+    const now = Date.now();
+    const since = readShared().since;
+
+    expect(since).not.toBeNull();
+    // A duration is resolved against the moment it was read, not pinned to a
+    // fixture, so this pins the arithmetic to within a second of `now` instead.
+    expect(now - (since?.getTime() ?? 0)).toBeCloseTo(90 * 24 * 60 * 60 * 1000, -3);
+  });
+
+  it("reads `limit`, the most a sweep will actually process", () => {
+    given({ ...COMPLETE, sweep: "true", limit: "200" });
+
+    expect(readShared().limit).toBe(200);
+  });
+
+  it("refuses a `limit` of zero — a sweep that processes nothing is a typo", () => {
+    given({ ...COMPLETE, sweep: "true", limit: "0" });
+
+    expect(() => readShared()).toThrow(/limit: expected a whole number of 1 or more/);
+  });
+});
+
+describe("parseSince", () => {
+  it("reads an empty input as no bound", () => {
+    expect(parseSince("")).toBeNull();
+  });
+
+  it("reads a calendar date", () => {
+    expect(parseSince("2026-01-01")).toEqual(new Date("2026-01-01T00:00:00Z"));
+  });
+
+  it("reads a duration in days", () => {
+    const now = Date.now();
+
+    expect(now - (parseSince("90d")?.getTime() ?? 0)).toBeCloseTo(90 * 24 * 60 * 60 * 1000, -3);
+  });
+
+  it("refuses a duration of zero days — no bound at all is what empty already means", () => {
+    expect(() => parseSince("0d")).toThrow(/since: `0d` names no days at all/);
+  });
+
+  it("refuses anything that is neither a date nor a duration", () => {
+    expect(() => parseSince("last week")).toThrow(
+      /since: expected empty, `YYYY-MM-DD`, or a duration like `90d`/,
+    );
+  });
 });
 
 describe("threadNumber", () => {

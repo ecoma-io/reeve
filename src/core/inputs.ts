@@ -20,8 +20,11 @@ import { parseModels, type Names } from "./provider.js";
 /** What every duty gets, whatever else its own `action.yml` declares. */
 export interface Shared {
   readonly token: string;
-  /** The thread to work on. */
-  readonly number: number;
+  /**
+   * The thread to work on, or null in `sweep` — a sweep does not name one
+   * thread, it works the backlog.
+   */
+  readonly number: number | null;
   /** Model ids in preference order. Never empty. */
   readonly models: readonly string[];
   /**
@@ -35,6 +38,25 @@ export interface Shared {
   /** Empty for a keyless provider, which is a supported configuration. */
   readonly apiKey: string;
   readonly dryRun: boolean;
+  /** Whether this run works the backlog instead of the one thread the event named. */
+  readonly sweep: boolean;
+  /**
+   * The oldest thread a sweep will consider, by creation date — never null once
+   * `sweep` narrowed it down, `null` means "no bound".
+   *
+   * Bounds by creation and not by update deliberately: the tracker's own
+   * `since` filter bounds by `updated_at`, which creeps forward the moment this
+   * duty starts labelling or translating a thread, so a filter built on it
+   * would silently exclude what the previous sweep just touched. Creation date
+   * does not move, and it is what "no archaeology on threads before Reeve
+   * adoption" actually means.
+   */
+  readonly since: Date | null;
+  /**
+   * The most threads a sweep will actually process in one run. A skip costs
+   * nothing and does not count against it.
+   */
+  readonly limit: number;
 }
 
 export function readShared(): Shared {
@@ -49,15 +71,62 @@ export function readShared(): Shared {
     throw new Error("models: no entries. Expected at least one model id.");
   }
 
+  const sweep = core.getBooleanInput("sweep");
+  const configuredNumber = core.getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` — a sweep works the whole backlog and " +
+        "`number` names one thread. Set one or the other.",
+    );
+  }
+
   return {
     token: core.getInput("github-token", { required: true }),
-    number: threadNumber(),
+    number: sweep ? null : threadNumber(),
     models: roster.models,
     modelNames: roster.names,
     baseUrl: core.getInput("base-url", { required: true }),
     apiKey,
     dryRun: core.getBooleanInput("dry-run"),
+    sweep,
+    since: parseSince(core.getInput("since")),
+    limit: whole("limit", core.getInput("limit")),
   };
+}
+
+/**
+ * `since`, as a sweep's `action.yml` documents it: empty, a calendar date, or a
+ * duration.
+ *
+ * A calendar date is the unambiguous choice for a maintainer who knows exactly
+ * when this project started using Reeve. A duration (`90d`) is the one for
+ * everybody else, who would otherwise have to compute a date and keep updating
+ * it every week this workflow runs. Both mean the same thing to `listOpenThreads`
+ * — a lower bound on `created_at` — so both collapse to one `Date` here.
+ */
+export function parseSince(raw: string): Date | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  }
+
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`,
+  );
 }
 
 /**
