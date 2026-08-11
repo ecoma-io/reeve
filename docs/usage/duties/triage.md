@@ -47,11 +47,11 @@ jobs:
           models: gpt-5-mini
 ```
 
-**Until [Stage 1](../../north-star.md#7-roadmap) lands, this needs a warrant —
-`.github/reeve.yml` — before it does anything**, and an absent file fails the
-run rather than granting the narrowest implicit authority
-[the ladder](../../north-star.md#3-the-ladder) promises at level 0. Write one
-first: [The warrant](../warrant.md).
+No warrant needed to start: an absent `.github/reeve.yml` grants the
+narrowest implicit authority [the ladder](../../north-star.md#3-the-ladder)
+promises at level 0, built from the labels and label descriptions this
+repository already has. Write one when a rung below stops being enough:
+[The warrant](../warrant.md).
 
 Then run it with `dry-run: true` over a month of your own history before you let
 it label anything.

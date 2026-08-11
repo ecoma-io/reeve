@@ -77,9 +77,7 @@ only `label`, against a taxonomy it did not have to be told, because it is the
 labels the repository already has and the descriptions its own maintainers
 already wrote for them in GitHub's own UI — data that exists before Reeve is
 ever installed, so nobody types anything twice to get a sorted backlog on day
-one. `translate` may only `edit-body`. Nothing else runs. This arrives with
-[Stage 1](#7-roadmap); until then the file is required and its absence fails
-the run.
+one. `translate` may only `edit-body`. Nothing else runs.
 
 **Level 1 — the taxonomy.** The maintainer writes `.github/reeve.yml` and puts
 the boundary between two labels into words a stranger's report can be checked
@@ -386,59 +384,44 @@ and the state layer. They do: one client with model rotation, one nonce
 boundary, one warrant reader, one summary. Each ships from its own directory
 with its own `action.yml`, and this repository runs both on its own threads.
 
-### Stage 1 — The bottom rung
+### Stage 1 — The bottom rung · **landed**
 
-Zero config becomes real. No `.github/reeve.yml` stops being an error and
-becomes [level 0 of the ladder](#3-the-ladder) — the narrowest authority Reeve
+Zero config became real. No `.github/reeve.yml` stopped being an error and
+became [level 0 of the ladder](#3-the-ladder) — the narrowest authority Reeve
 knows how to grant, enumerated in code rather than left to a duty's own
 defaults: `triage` may only `label`, against a taxonomy built from the
 repository's own labels and the descriptions their own maintainers already
 wrote for them on GitHub. `translate` may only `edit-body`.
 
-**Standing:** the warrant reader already treats an absent `labels:` block as
-an empty taxonomy rather than an error, and label existence is already checked
-against the repository's real labels over the API before anything is applied
-— both of which this stage reuses rather than rebuilding.
-
-**Missing:** the code path that runs with no warrant file at all still fails
-the job red, naming the missing file as a missing authority. That has to
-become the level-0 path instead: read the repository's own labels and their
-descriptions, build the implicit taxonomy from them, and cap capabilities at
-`label` and `edit-body` with nothing configurable about either.
-
-**Done when:** a repository with no `.github/reeve.yml` gets its backlog
+**Was done when:** a repository with no `.github/reeve.yml` gets its backlog
 sorted against its own labels by adding two lines of workflow — one
-`uses: ecoma-io/reeve/triage@v0.1`, a provider, and nothing else.
+`uses: ecoma-io/reeve/triage@v0.1`, a provider, and nothing else. It does: an
+absent warrant file builds the implicit taxonomy from the repository's own
+labels and their descriptions over the API, and caps capabilities at `label`
+and `edit-body` with nothing configurable about either.
 
-### Stage 2 — Weather, and the sweep
+### Stage 2 — Weather, and the sweep · **landed**
 
-[D12](#d12--capacity-is-weather-authority-is-configuration) stops being a
-paragraph and becomes behaviour: a 429, a 5xx or a timeout rotates to the next
+[D12](#d12--capacity-is-weather-authority-is-configuration) stopped being a
+paragraph and became behaviour: a 429, a 5xx or a timeout rotates to the next
 model and, when the list runs out, delivers what finished and warns naming the
 remainder, rather than failing red over conditions nobody configured. A 401 or
-a 403 still fails red immediately — that half does not change. Every duty
-gains `sweep:`, `since:` and `limit:` so a scheduled run can work through open
+a 403 still fails red immediately — that half never changed. Every duty gained
+`sweep:`, `since:` and `limit:` so a scheduled run can work through open
 threads instead of one, bounded to what a run is willing to pay for, and a
 thread it already handled is skipped for free the same way a re-run of one
-thread already is.
+thread already was.
 
-**Standing:** a model is already rotated past and never retried
-([D7](#d7--any-endpoint-including-the-free-ones)), and the idempotency
-fingerprint that makes re-running one thread free
-([D9](#d9--re-running-is-cheap-and-safe)) is exactly the mechanism a sweep
-needs to converge without a state file of its own — this stage wires listing
-and scheduling around a mechanism that already exists rather than inventing a
-second one.
-
-**Missing:** nothing yet distinguishes a starvation failure from a
-configuration one in the outputs a workflow can branch on; there is no
-`sweep`, `since` or `limit` input on any duty; and nothing lists open threads
-on a schedule — every run today still needs a single thread named by an event
-or by `number`.
-
-**Done when:** a four-thousand-issue backlog on a keyless provider finishes
-over scheduled runs without a single red run and without a single duplicated
-action.
+**Was done when:** a four-thousand-issue backlog on a keyless provider
+finishes over scheduled runs without a single red run and without a single
+duplicated action. It does: the roster a sweep starves against is shared
+run-wide across every thread it processes, so a `Weather` object exhausted on
+thread one stops thread two from spending a call rather than retrying the
+same dead end; `since` bounds by creation date, never by update, so a sweep's
+own labelling or translating cannot push its own bound forward under it; and
+[`.github/workflows/reeve-sweep.yml`](../.github/workflows/reeve-sweep.yml)
+runs both duties on a weekly schedule against this repository's own backlog,
+the same dogfooding the per-thread workflows already did for Stage 0.
 
 ### Stage 3 — The warrant is the whole answer
 

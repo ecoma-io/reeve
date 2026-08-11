@@ -24,13 +24,13 @@ the file's mere existence never was. That block — with `owner` and
 `exclusive_with` alongside it — is level 2 of the ladder, reviewed the same
 way, in the same file, for as long as you use Reeve.
 
-**Level 0 arrives with [Stage 1](../north-star.md#7-roadmap), and the
-corrected reading of the `capabilities:` block above arrives with [Stage
-3](../north-star.md#7-roadmap).** Until Stage 1, an absent warrant is not an
-implicit authority — it is a failed run. Until Stage 3, a duty left out of an
-already-written `capabilities:` block still quietly keeps its own default
-rather than being granted nothing — [the capabilities reference
-below](#capabilities) says where that gap is today.
+**Level 0 is [Stage 1](../north-star.md#7-roadmap), landed: an absent warrant
+is an implicit authority, not a failed run.** The corrected reading of the
+`capabilities:` block above is [Stage 3](../north-star.md#7-roadmap) work,
+not yet built. Until Stage 3, a duty left out of an already-written
+`capabilities:` block still quietly keeps its own default rather than being
+granted nothing — [the capabilities reference below](#capabilities) says
+where that gap is today.
 
 ## Why this is a file and not a setting
 
@@ -51,13 +51,10 @@ it was permitted to do. That is the single property that makes injected text
 unable to invent an authority: text can persuade a model, and it cannot edit a
 file it is not in.
 
-**Deleting it withdraws what you wrote, not more than that — eventually.**
-`rm .github/reeve.yml` is meant to take a duty back down to level 0 of the
-ladder rather than to no authority at all, once
-[Stage 1](../north-star.md#7-roadmap) lands. **Today, before that stage,
-deletion is stricter than the doctrine: every duty refuses to act**, and the
-rest of this page is written against that current behaviour. There is no
-second copy of the file anywhere, either way.
+**Deleting it withdraws what you wrote, not more than that.**
+`rm .github/reeve.yml` takes a duty back down to level 0 of the ladder rather
+than to no authority at all. There is no second copy of the file anywhere,
+either way.
 
 ## Where it lives
 

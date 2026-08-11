@@ -126,13 +126,14 @@ budget.
 
 ## `limit`, and the sweep
 
-**Not built yet — arrives with [Stage 2](../north-star.md#7-roadmap).** A
-backlog swept on a schedule rather than read one thread at a time needs a
+A backlog swept on a schedule rather than read one thread at a time needs a
 different kind of cost control than a single run does: not "which model," but
 "how much of the backlog does this run even attempt." `limit` is that control
 — it bounds a sweep by count, so a scheduled run against a four-thousand-issue
 backlog spends a predictable amount and stops, rather than running until the
-job's own timeout cuts it off mid-list.
+job's own timeout cuts it off mid-list. It defaults to `50`, modest enough to
+protect a free tier's own rate limit; raise it for a paid provider or a
+deliberate backfill.
 
 Combined with the fingerprint that already makes a re-run free, `limit` turns
 an unbounded backlog into a bounded, repeatable bill: the first scheduled run
