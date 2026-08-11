@@ -30,7 +30,7 @@ permissions:
 jobs:
   duplicate:
     name: Duplicate check
-    if: github.event.issue.user.type != 'Bot'
+    if: github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
