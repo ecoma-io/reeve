@@ -1,0 +1,217 @@
+# The `triage` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/triage@v1`.
+name: Reeve - triage
+description: Label an issue from your own taxonomy, in your own words, checked in code against a warrant file that says what the run is allowed to do.
+author: Ecoma
+
+branding:
+  icon: tag
+  color: purple
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read the thread and apply what the warrant permits.
+      `GITHUB_TOKEN` is enough. `issues: write` is one indivisible scope — a
+      token that can label can also comment, close and assign — which is why the
+      warrant file exists: what this run may actually do is decided in code,
+      against a file in your repository, and not by what the token can reach.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The issue to triage. Defaults to the thread that triggered the workflow,
+      and is what a backfill sets to name an old one.
+
+      An event that carries no thread — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for issue `NaN`.
+    required: false
+    default: ""
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. The order is
+      preference and not last resort: the first one that answers is used, and a
+      model that fails is never asked again in the same run.
+
+      `id = Name` gives a model a display name, and everything a person reads
+      shows the name instead of the id. A model nobody named shows its id.
+    required: true
+
+  screen-models:
+    description: >-
+      A cheaper roster, asked two questions the expensive one should not be paid
+      for: which language the thread was written in, and whether it is spam or
+      about something else entirely. Empty is the default and turns the spam
+      screen off — the free screens still run, and language detection falls back
+      to `models` for the rare thread that script and profile cannot settle.
+
+      This stage fails open in every direction. Every model failing, an answer
+      nobody can read, and an answer that hedges all mean carry on: passing junk
+      through costs one request, and dropping a real report costs a contributor
+      the answer they came for.
+    required: false
+    default: ""
+
+  languages:
+    description: >-
+      The languages your contributors write in, comma or newline separated.
+      Detection narrows by script, then by profile, and only then asks a model —
+      so a list of two costs nothing on most threads.
+
+      The verdict prompt is told what it is reading rather than left to infer
+      it, which is the whole reason this is configured here.
+    required: false
+    default: en, vi, zh
+
+  warrant:
+    description: >-
+      Where the taxonomy and the permissions live. Every label this duty may
+      apply is named in this file, in your own words, with the cases it does not
+      cover — and every effect is checked against the parsed file rather than
+      against the model's account of what it was allowed to do.
+
+      A file that cannot be read fails the run red. Deleting it is the supported
+      way to withdraw what Reeve may do, and a run that read the absence as "no
+      restrictions" would make deletion the widest setting available.
+    required: false
+    default: .github/reeve.yml
+
+  apply:
+    description: >-
+      What this run may do, comma separated: any of `label`, `comment`,
+      `close`, `assign`, or `none` for a run that decides and touches nothing.
+
+      The narrower of this and the warrant file wins, always. This is the
+      workflow's half of the answer — useful for turning one effect off on one
+      trigger without editing the file — and the file remains the authority.
+    required: false
+    default: label
+
+  confidence:
+    description: >-
+      How sure the verdict has to be before anything is applied, between 0 and
+      1. Under the floor the labels are still reported on `proposed` and in the
+      job summary, which is how a maintainer tunes this against real threads
+      before letting it write anything.
+
+      Refused rather than clamped: `75` is a typo that would otherwise mean
+      `1`, and a duty that silently stopped labelling anything is worse than a
+      red run.
+    required: false
+    default: "0.75"
+
+  corrections:
+    description: >-
+      A directory of `.ndjson` files recording labels a maintainer changed after
+      a run. The nearest few are shown to the model as examples of decisions this
+      project has already made, which is how a taxonomy's edges get learned
+      without anybody rewriting the taxonomy.
+
+      A directory that is not there is the cold start and reads as an empty
+      store. Retrieval is lexical and runs in the action, so this costs no
+      embedding calls and nothing leaves your repository.
+    required: false
+    default: .reeve/corrections
+
+  min-body-chars:
+    description: >-
+      How much authored text is enough to be worth a model, in characters.
+      Template scaffolding and quoted code are stripped before the count, and a
+      body carrying a stack trace, a link or a command passes whatever its
+      length — evidence beats size. `0` turns the rule off, which is right for a
+      tracker whose reports are routinely terse.
+    required: false
+    default: "40"
+
+  max-body-chars:
+    description: >-
+      How much of the author's own text one run reads. A longer body has its
+      tail left behind and the job summary says so rather than pretending
+      otherwise.
+    required: false
+    default: "6000"
+
+  about:
+    description: >-
+      What this repository is about, in one sentence and in your own words. Used
+      only by the spam screen, to tell a real request about something else from
+      a real request about this. Empty is allowed and makes that half of the
+      screen a question answered from the title alone, which is why it is worth
+      writing.
+    required: false
+    default: ""
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and change nothing. The
+      rehearsal takes the same path a real run does — the same screens, the same
+      floor, the same warrant — so what it reports is what a real run would do.
+    required: false
+    default: "false"
+
+outputs:
+  labels:
+    description: >-
+      JSON array of the labels that were applied. `[]` is the ordinary answer on
+      a thread nobody could label, never unset.
+
+  proposed:
+    description: >-
+      JSON array of every label the verdict named, including the ones that were
+      refused. The difference between this and `labels` is the guardrails, and
+      the job summary says which guardrail it was for each one.
+
+  confidence:
+    description: How sure the verdict was, to two decimal places. `0.00` when there was no verdict.
+
+  language:
+    description: >-
+      The detected language of the thread, or empty — empty means none of the
+      configured languages wrote it, which is an answer rather than a failure.
+
+  duplicate-of:
+    description: >-
+      The issue number the verdict thinks this repeats, or empty. Reported
+      whether or not `apply` names `close`, so a workflow can act on it without
+      granting this duty the ability to close anything.
+
+  screened-out:
+    description: >-
+      Why the run stopped before reaching the expensive model — `empty`,
+      `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.
+      A screened-out thread is a green run that applied nothing.
+
+  applied:
+    description: >-
+      What actually changed, as JSON: `labels`, `commented`, `assigned`,
+      `closed`. `{}` under `dry-run`, which is a shape no real run produces — a
+      real run always reports all four keys, whether or not it did anything with
+      them.
+
+runs:
+  using: node24
+  main: dist/index.js
