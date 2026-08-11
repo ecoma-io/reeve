@@ -157,7 +157,7 @@ function trackerOf(
     state?: string;
     labels?: (string | { name?: string })[];
   } = {},
-  pages: { name: string }[][] = [[]],
+  pages: { name: string; description?: string | null }[][] = [[]],
 ) {
   const get = vi.fn(() => Promise.resolve({ data: issue }));
   const update = vi.fn(() => Promise.resolve({}));
@@ -245,10 +245,25 @@ describe("listRepositoryLabels", () => {
   const where = { owner: "ecoma-io", repo: "reeve" };
 
   it("reads the taxonomy the warrant will be checked against", async () => {
-    const { api, listLabelsForRepo } = trackerOf({}, [[{ name: "bug" }, { name: "performance" }]]);
+    const { api, listLabelsForRepo } = trackerOf({}, [
+      [{ name: "bug", description: "Something broke." }, { name: "performance" }],
+    ]);
 
-    await expect(listRepositoryLabels(api, where)).resolves.toEqual(["bug", "performance"]);
+    await expect(listRepositoryLabels(api, where)).resolves.toEqual([
+      { name: "bug", description: "Something broke." },
+      { name: "performance", description: null },
+    ]);
     expect(listLabelsForRepo).toHaveBeenCalledWith({ ...where, per_page: 100, page: 1 });
+  });
+
+  it("reads a label GitHub gave no description as one with none", async () => {
+    // `null` and an absent field are both what GitHub can send, and both mean
+    // the same thing to whatever builds a taxonomy from these.
+    const { api } = trackerOf({}, [[{ name: "bug", description: null }]]);
+
+    await expect(listRepositoryLabels(api, where)).resolves.toEqual([
+      { name: "bug", description: null },
+    ]);
   });
 
   it("reads past the first page, so label 101 is not reported as missing", async () => {

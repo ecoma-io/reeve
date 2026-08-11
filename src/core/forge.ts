@@ -211,7 +211,7 @@ export interface TrackerApi {
         repo: string;
         per_page?: number;
         page?: number;
-      }): Promise<{ data: { name: string }[] }>;
+      }): Promise<{ data: { name: string; description?: string | null }[] }>;
     };
   };
 }
@@ -269,12 +269,27 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
 const LABEL_PAGE = 100;
 const LABEL_PAGES = 10;
 
-/** Every label this repository has, which is what the warrant is checked against. */
+/** A label as this repository's own tracker reports it. */
+export interface RepositoryLabel {
+  readonly name: string;
+  readonly description: string | null;
+}
+
+/**
+ * Every label this repository has, name and description both.
+ *
+ * The names are what a written taxonomy is checked against. The descriptions
+ * exist for a second reason a repository with no warrant at all depends on:
+ * they are what the implicit taxonomy is built from when `.github/reeve.yml`
+ * was never written, because a maintainer who already explained a label in
+ * GitHub's own field explained it without knowing a warrant would ever read
+ * that field back.
+ */
 export async function listRepositoryLabels(
   api: TrackerApi,
   at: Pick<Location, "owner" | "repo">,
-): Promise<readonly string[]> {
-  const names: string[] = [];
+): Promise<readonly RepositoryLabel[]> {
+  const labels: RepositoryLabel[] = [];
 
   for (let page = 1; page <= LABEL_PAGES; page += 1) {
     const { data } = await api.rest.issues.listLabelsForRepo({
@@ -283,11 +298,13 @@ export async function listRepositoryLabels(
       per_page: LABEL_PAGE,
       page,
     });
-    names.push(...data.map((label) => label.name));
+    labels.push(
+      ...data.map((label) => ({ name: label.name, description: label.description ?? null })),
+    );
     if (data.length < LABEL_PAGE) break;
   }
 
-  return names;
+  return labels;
 }
 
 /**
