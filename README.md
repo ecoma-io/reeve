@@ -22,14 +22,14 @@
 <p align="center">
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="#what-it-refuses-to-do"><b>What it refuses to do</b></a> ·
-  <a href="docs/north-star.md"><b>North star</b></a> ·
+  <a href="docs/doctrine/north-star.md"><b>North star</b></a> ·
   <a href="docs/"><b>Documentation</b></a>
 </p>
 
 > [!IMPORTANT]
 > **Reeve is being assembled, not announced.** It is on a `0.x` line: four
 > duties ship, two of them — `triage` and `translate` — dogfooded on this
-> repository, and the rest of [the roadmap](docs/north-star.md#7-roadmap) is
+> repository, and the rest of [the roadmap](docs/doctrine/north-star.md#7-roadmap) is
 > still open. `1.0` is the
 > release where all of it is done — until then an input can still be renamed on
 > a minor, and the release notes will say so.
@@ -48,7 +48,7 @@ vaguer one in English.
 
 Reeve treats language as something the core knows and every duty consumes, not
 as one feature bolted on beside the others. That is the whole thesis, and
-[`docs/north-star.md`](docs/north-star.md) is where it is argued properly.
+[`docs/doctrine/north-star.md`](docs/doctrine/north-star.md) is where it is argued properly.
 
 ## Quick start
 
@@ -96,7 +96,7 @@ That is the whole product. Everything below follows from it.
 ## Duties, and the ladder they sit on
 
 A **duty** is one job Reeve does, and none of them is switched on by a mode —
-they sit on [a ladder](docs/north-star.md#3-the-ladder), and what runs is
+they sit on [a ladder](docs/doctrine/north-star.md#3-the-ladder), and what runs is
 exactly as much as you wrote down. The `uses:` line alone gets you the bottom
 rung: the narrowest authority Reeve knows how to grant, built from the labels
 your repository already has. Write a taxonomy and you climb one rung; write
@@ -118,7 +118,7 @@ what it decides:
 What comes after them is decided by one test, and it is a strict one: the work
 has to recur, be uniformly expensive today, already be work a maintainer stopped
 doing, and be harder on a project whose contributors do not share a language.
-[Doctrine D10](docs/north-star.md#d10--a-duty-must-earn-its-place) rejects most
+[Doctrine D10](docs/doctrine/north-star.md#d10--a-duty-must-earn-its-place) rejects most
 feature requests, on purpose.
 
 ## What it refuses to do
@@ -155,13 +155,13 @@ deterministically cost calls instead of money.
 
 | Document                                         | For                                                                      |
 | ------------------------------------------------ | ------------------------------------------------------------------------ |
-| [North star](docs/north-star.md)                 | What Reeve is for, the doctrine, the roadmap, and what it will never be. |
-| [Installation](docs/usage/installation.md)       | Adding a duty to a workflow — triggers, permissions, versions.           |
-| [The warrant](docs/usage/warrant.md)             | Writing down what Reeve is allowed to do to your repository.             |
-| [Languages](docs/usage/languages.md)             | Who writes in what, who reads in what, and what detection costs.         |
-| [The sweep](docs/usage/sweep.md)                 | Working a whole backlog on a schedule instead of one thread at a time.   |
-| [Cost](docs/usage/cost.md)                       | What a backlog costs before you point it at one — including at zero.     |
-| [Troubleshooting](docs/usage/troubleshooting.md) | A run went red, or went green and did nothing.                           |
+| [North star](docs/doctrine/north-star.md)                 | What Reeve is for, the doctrine, the roadmap, and what it will never be. |
+| [Installation](docs/getting-started/installation.md)       | Adding a duty to a workflow — triggers, permissions, versions.           |
+| [The warrant](docs/guides/warrant.md)             | Writing down what Reeve is allowed to do to your repository.             |
+| [Languages](docs/guides/languages.md)             | Who writes in what, who reads in what, and what detection costs.         |
+| [The sweep](docs/guides/sweep.md)                 | Working a whole backlog on a schedule instead of one thread at a time.   |
+| [Cost](docs/guides/cost.md)                       | What a backlog costs before you point it at one — including at zero.     |
+| [Troubleshooting](docs/guides/troubleshooting.md) | A run went red, or went green and did nothing.                           |
 | [Architecture](docs/development/architecture.md) | The pipeline, the boundaries, and how to change it.                      |
 | [Threat model](docs/development/security.md)     | What holds when the model does what the attacker asked.                  |
 | [Contributing](CONTRIBUTING.md)                  | How to work on it.                                                       |

@@ -12,11 +12,11 @@ to move.
 
 | Where                                   | Who it is for                                                                      |
 | --------------------------------------- | ---------------------------------------------------------------------------------- |
-| [`north-star.md`](north-star.md)        | Everyone. What Reeve is for, the doctrine, the roadmap, and what it will never be. |
+| [`doctrine/north-star.md`](doctrine/north-star.md)        | Everyone. What Reeve is for, the doctrine, the roadmap, and what it will never be. |
 | [`usage/`](usage/README.md)             | People installing and running Reeve on their own project.                          |
 | [`development/`](development/README.md) | People changing Reeve: architecture, boundaries, evaluation, threat model.         |
 
-[`north-star.md`](north-star.md) comes first, and not as a courtesy. It is the
+[`doctrine/north-star.md`](doctrine/north-star.md) comes first, and not as a courtesy. It is the
 document the others answer to — a change that contradicts it is not merged until
 it changes first.
 
@@ -24,7 +24,7 @@ it changes first.
 
 Reeve is on a `0.x` line. The doctrine and the shape are settled; the code is
 landing behind them, stage by stage, and **the version number is read off
-[the roadmap](north-star.md#7-roadmap)** — `0.x` while a stage is still open,
+[the roadmap](doctrine/north-star.md#7-roadmap)** — `0.x` while a stage is still open,
 `1.0` when every one of them is done
 ([the rule](development/releasing.md#what-0x-and-10-mean-here)).
 

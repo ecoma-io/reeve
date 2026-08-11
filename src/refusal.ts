@@ -36,7 +36,7 @@ export const DUTIES: readonly string[] = ["translate", "triage"];
  */
 export const PLANNED: readonly string[] = ["duplicate", "respond"];
 
-const ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/north-star.md#7-roadmap";
+const ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
 
 /**
  * The ref to write in the corrected line: the one the consumer already pinned.

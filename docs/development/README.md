@@ -3,7 +3,7 @@
 For people changing Reeve. If you are installing it, [`../usage/`](../usage/README.md)
 is the directory you want.
 
-Everything here is downstream of [`../north-star.md`](../north-star.md). Where
+Everything here is downstream of [`../doctrine/north-star.md`](../doctrine/north-star.md). Where
 this directory explains _how_ something is built, the north star explains why it
 is allowed to exist at all, and it wins any disagreement.
 
@@ -18,7 +18,7 @@ is allowed to exist at all, and it wins any disagreement.
 | [`releasing.md`](releasing.md)             | How a version is cut, why `dist/` is committed, and what the floating tag is allowed to deliver.                             |
 
 These are normative and written ahead of the code, like
-[`../north-star.md`](../north-star.md). Where an implementation disagrees with a
+[`../doctrine/north-star.md`](../doctrine/north-star.md). Where an implementation disagrees with a
 page here, one of the two is a bug — and which one is a conversation, not an
 assumption.
 

@@ -15,7 +15,7 @@ export default {
       "always",
       [
         // The core — shared by every duty. Doctrine D-numbers in
-        // docs/north-star.md govern these.
+        // docs/doctrine/north-star.md govern these.
         "action", // the per-duty action.yml contracts: inputs, outputs, defaults
         "provider", // the OpenAI-compatible client and model rotation
         "language", // detection, and the author/project/reader language roles

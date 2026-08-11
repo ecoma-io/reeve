@@ -40,7 +40,7 @@ which is what keeps Reeve out of a premature `1.0`.
 ## What `0.x` and `1.0` mean here
 
 Not a feeling about maturity. The two numbers are read off
-[the roadmap](../north-star.md#7-roadmap), and that is the whole rule:
+[the roadmap](../doctrine/north-star.md#7-roadmap), and that is the whole rule:
 
 - **`0.x` — every release while a stage is still open.** Usable, dogfooded on
   this repository, and free to break its own input surface between minors. An
@@ -172,7 +172,7 @@ adding both is a step in [the duty checklist](duties.md).
    from commit subjects — a subject nobody could read in a changelog is a subject
    to fix before merging, not after.
 4. If a duty changed, put its evaluation numbers in the release notes
-   ([D11](../north-star.md#d11--every-duty-ships-with-an-evaluation)).
+   ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)).
 5. Merge. The rest runs on its own.
 6. Verify: the release exists, `reeve-action.tar.gz` and
    `reeve-action.intoto.jsonl` are attached, and the floating tag moved.

@@ -19,7 +19,7 @@ So the interesting question is never "does it work". It is **what does it do whe
 the model does what the attacker asked instead of what we asked**.
 
 Everything below answers that. The design assumption is
-[D8](../north-star.md#d8--every-thread-is-hostile): every thread is hostile, and
+[D8](../doctrine/north-star.md#d8--every-thread-is-hostile): every thread is hostile, and
 the defences hold whether or not any particular one is.
 
 ## The load-bearing idea
