@@ -180,5 +180,5 @@ The tooling is the same and the method is:
 
 That loop is worth more than any `confidence` value copied from a document. It is
 also the only way to pick one honestly:
-[the input's default](../usage/duties/triage.md#inputs) is a starting point, not
+[the input's default](../reference/duties/triage.md#configuration) is a starting point, not
 a recommendation.

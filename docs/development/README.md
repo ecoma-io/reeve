@@ -1,24 +1,28 @@
 # Development documentation
 
-For people changing Reeve. If you are installing it, [`../usage/`](../usage/README.md)
-is the directory you want.
+_Portal for people changing Reeve. Prerequisites: [North star](../doctrine/north-star.md)._
 
-Everything here is downstream of [`../north-star.md`](../north-star.md). Where
+For people changing Reeve. If you are installing it,
+[Getting started](../getting-started/README.md) is the directory you want.
+For the concepts behind this repository's design — the boundary, the
+authority model, the language layer — see [`../concepts/`](../concepts/).
+For the full input/output contract of a duty, see [`../reference/`](../reference/).
+
+Everything here is downstream of [North star](../doctrine/north-star.md). Where
 this directory explains _how_ something is built, the north star explains why it
 is allowed to exist at all, and it wins any disagreement.
 
-| Document                                   | The question it answers                                                                                                      |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| [`architecture.md`](architecture.md)       | The pipeline stage by stage, what each stage is forbidden from doing, and where the line between core and duty runs.         |
-| [`language.md`](language.md)               | The language layer: how the author's language, the project's language and the reader's languages are resolved and carried.   |
-| [`duties.md`](duties.md)                   | How to add a duty: what the core supplies, what a duty supplies, and what it may never reach for.                            |
-| [`security.md`](security.md)               | The threat model. Prompt injection from a stranger's thread, the write authority Reeve asks for, and the invariants.         |
-| [`evaluation.md`](evaluation.md)           | How a duty proves it works — the fixture set, the harness, and why the headline number is the worst language.                |
-| [`platform-limits.md`](platform-limits.md) | The platform behaviours that shape the design rather than being worked around, each marked documented, measured or inferred. |
-| [`releasing.md`](releasing.md)             | How a version is cut, why `dist/` is committed, and what the floating tag is allowed to deliver.                             |
+| Document                               | The question it answers                                                                                              |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [`architecture.md`](architecture.md)   | The pipeline stage by stage, what each stage is forbidden from doing, and where the line between core and duty runs. |
+| [`duties.md`](duties.md)               | The mechanics of adding a duty: earning it, evaluating it, wiring it in.                                             |
+| [`language.md`](language.md)           | Evaluating a duty's language handling, and what is still unresolved about the language layer.                        |
+| [`evaluation.md`](evaluation.md)       | How a duty proves it works — the fixture set, the harness, and why the headline number is the worst language.        |
+| [`releasing.md`](releasing.md)         | How a version is cut, why `dist/` is committed, and what the floating tag is allowed to deliver.                     |
+| [`agent-runtime.md`](agent-runtime.md) | Direction for a bounded agent runtime in Reeve 2.x. Nothing on that page ships today — read the banner first.        |
 
 These are normative and written ahead of the code, like
-[`../north-star.md`](../north-star.md). Where an implementation disagrees with a
+[North star](../doctrine/north-star.md). Where an implementation disagrees with a
 page here, one of the two is a bug — and which one is a conversation, not an
 assumption.
 
@@ -38,3 +42,9 @@ rather than taste:
 
 [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) covers the mechanics —
 branches, commit scopes, hooks, and what CI will reject.
+
+---
+
+**Related:** [North star](../doctrine/north-star.md) ·
+[Concepts](../concepts/) · [Reference](../reference/) ·
+[Threat model](../security/threat-model.md)
