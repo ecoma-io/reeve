@@ -20,7 +20,7 @@
  * module that returns its failures lets the caller decide what is worth a
  * warning and what is ordinary rotation.
  *
- * **A third rule governs the rotation itself, not one request:** [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * **A third rule governs the rotation itself, not one request:** [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
  * splits every failure into `kind`, and the two kinds do not fail the same way.
  * A `capacity` failure — 429, 5xx, a timeout, a socket that never connected —
  * is weather: `rotateModels` returns it like any other, the caller carries on,
@@ -87,7 +87,7 @@ export interface Failure {
    */
   readonly usage?: Usage | null;
   /**
-   * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)'s
+   * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)'s
    * distinction, decided once, here, so every caller reads the same answer
    * instead of re-deriving it from a reason string:
    *
@@ -494,7 +494,7 @@ export class AuthenticationFailure extends Error {
 /**
  * What this run has already learned about capacity, one model id at a time.
  *
- * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
  * says a model's capacity does not clear inside a run — not inside one call to
  * `rotateModels`, which was already true before this existed, but across every
  * call the run makes, including the ones a sweep makes for threads two, three

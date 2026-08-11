@@ -41,7 +41,7 @@ what happens when the model behaves. -->
 ## Generality
 
 <!-- Reeve is general; it is not designed around the repository that maintains
-it. And the core belongs to every duty — see docs/north-star.md. -->
+it. And the core belongs to every duty — see docs/doctrine/north-star.md. -->
 
 - [ ] Nothing here special-cases the repository that maintains it, and any project-specific rule is derived from a file the consumer wrote
 - [ ] Nothing here assumes a strong model, a paid tier, or a specific provider beyond the OpenAI chat-completions protocol
