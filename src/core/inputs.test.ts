@@ -1,7 +1,7 @@
 import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readShared, threadNumber, whole } from "./inputs.js";
+import { counted, fraction, readShared, threadNumber, whole } from "./inputs.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is exactly what a workflow file becomes: `INPUT_MODELS` is what
@@ -180,5 +180,56 @@ describe("whole", () => {
 
   it("names the input it refused, so the message points at a line to fix", () => {
     expect(() => whole("max-body-chars", "lots")).toThrow(/^max-body-chars:/);
+  });
+});
+
+describe("counted", () => {
+  it("reads a count", () => {
+    expect(counted("min-body-chars", "40")).toBe(40);
+  });
+
+  it("reads zero, which is how a threshold is turned off", () => {
+    // The difference from `whole`. A minimum of nothing is a documented setting
+    // for a tracker whose reports are routinely terse.
+    expect(counted("min-body-chars", "0")).toBe(0);
+  });
+
+  it.each([
+    ["an empty input", ""],
+    ["a value with a unit", "40 chars"],
+    ["a negative count", "-1"],
+    ["a fraction", "1.5"],
+  ])("refuses %s", (_case, raw) => {
+    expect(() => counted("min-body-chars", raw)).toThrow(
+      `min-body-chars: expected a whole number of 0 or more, got \`${raw}\`.`,
+    );
+  });
+});
+
+describe("fraction", () => {
+  it("reads a threshold", () => {
+    expect(fraction("confidence", "0.75")).toBe(0.75);
+  });
+
+  it.each([
+    ["0", 0],
+    ["1", 1],
+  ])("reads %s, which is a setting rather than an edge case", (raw, expected) => {
+    expect(fraction("confidence", raw)).toBe(expected);
+  });
+
+  it("ignores surrounding space, which a folded YAML value leaves behind", () => {
+    expect(fraction("confidence", " 0.5\n")).toBe(0.5);
+  });
+
+  it.each([
+    ["a percentage, which would clamp to certainty and stop labelling anything", "75"],
+    ["a negative threshold", "-0.1"],
+    ["text", "high"],
+    ["nothing at all", "  "],
+  ])("refuses %s", (_case, raw) => {
+    expect(() => fraction("confidence", raw)).toThrow(
+      /confidence: expected a number between 0 and 1/,
+    );
   });
 });

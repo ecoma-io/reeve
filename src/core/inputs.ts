@@ -93,3 +93,41 @@ export function whole(name: string, raw: string): number {
   }
   return value;
 }
+
+/**
+ * The same, where zero is a setting rather than a mistake.
+ *
+ * Separate from `whole` rather than a flag on it, because the two are different
+ * contracts and one of them has a trap in it: for a limit like `drafts`, zero
+ * means "do nothing" and is always a typo; for a threshold like a minimum
+ * length, zero means "do not apply this rule" and is a documented way to turn a
+ * screen off. A shared function taking a floor would let a call site pass the
+ * wrong one silently.
+ */
+export function counted(name: string, raw: string): number {
+  const value = Number(raw);
+  // The empty check has to be explicit here in a way it does not in `whole`:
+  // `Number("")` is 0, and 0 is a value this function accepts — so an input
+  // nobody filled in would otherwise arrive as a deliberate setting.
+  if (raw.trim().length === 0 || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${name}: expected a whole number of 0 or more, got \`${raw}\`.`);
+  }
+  return value;
+}
+
+/**
+ * A threshold between 0 and 1, refused rather than clamped.
+ *
+ * Clamping would make `75` mean `1` — every verdict below certainty rejected,
+ * on a workflow whose author plainly meant 0.75 and would see a duty that
+ * silently stopped labelling anything. Both ends are inclusive: `0` is "apply
+ * whatever the model said", which is a legitimate thing to measure with, and
+ * `1` is "apply nothing short of certainty".
+ */
+export function fraction(name: string, raw: string): number {
+  const value = Number(raw.trim());
+  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
+  }
+  return value;
+}
