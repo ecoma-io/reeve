@@ -1,7 +1,15 @@
 import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { counted, fraction, parseSince, readShared, threadNumber, whole } from "./inputs.js";
+import {
+  bounded,
+  counted,
+  fraction,
+  parseSince,
+  readShared,
+  threadNumber,
+  whole,
+} from "./inputs.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is exactly what a workflow file becomes: `INPUT_MODELS` is what
@@ -282,6 +290,32 @@ describe("counted", () => {
   ])("refuses %s", (_case, raw) => {
     expect(() => counted("min-body-chars", raw)).toThrow(
       `min-body-chars: expected a whole number of 0 or more, got \`${raw}\`.`,
+    );
+  });
+});
+
+describe("bounded", () => {
+  it("reads a count", () => {
+    expect(bounded("corpus-limit", "500")).toBe(500);
+  });
+
+  it("reads `none` as no bound at all", () => {
+    expect(bounded("corpus-limit", "none")).toBeNull();
+  });
+
+  it("reads `none` case-insensitively and past surrounding space", () => {
+    expect(bounded("corpus-limit", "  None\n")).toBeNull();
+  });
+
+  it.each([
+    ["an empty input", ""],
+    ["zero — the only spelling of unbounded here is `none`", "0"],
+    ["a negative count", "-1"],
+    ["a fraction", "1.5"],
+    ["a value with a unit", "500 issues"],
+  ])("refuses %s", (_case, raw) => {
+    expect(() => bounded("corpus-limit", raw)).toThrow(
+      `corpus-limit: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`,
     );
   });
 });

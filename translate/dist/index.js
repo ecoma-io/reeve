@@ -33059,7 +33059,8 @@ var STAGE = {
   judge: "Judging",
   screen: "Screening",
   triage: "Triage",
-  pivot: "Pivot translation"
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();
