@@ -212,6 +212,24 @@ export interface TrackerApi {
         per_page?: number;
         page?: number;
       }): Promise<{ data: { name: string; description?: string | null }[] }>;
+      listForRepo(params: {
+        owner: string;
+        repo: string;
+        state?: "open" | "closed" | "all";
+        sort?: "created" | "updated" | "comments";
+        direction?: "asc" | "desc";
+        per_page?: number;
+        page?: number;
+      }): Promise<{
+        data: {
+          number: number;
+          title?: string;
+          body?: string | null;
+          labels?: (string | { name?: string })[];
+          created_at: string;
+          pull_request?: unknown;
+        }[];
+      }>;
     };
   };
 }
@@ -305,6 +323,94 @@ export async function listRepositoryLabels(
   }
 
   return labels;
+}
+
+/**
+ * How many threads one page of a sweep's listing carries, and how many pages a
+ * single run will turn.
+ *
+ * The page mirrors `LABEL_PAGE` for the same reason: GitHub caps it at 100
+ * regardless of what is asked for. The page count is generous on purpose —
+ * `since` narrows what is kept but not what has to be walked to find it, and a
+ * backlog can be old — while still being a hard ceiling a misconfigured `since`
+ * cannot turn into an unbounded crawl of a repository's whole history.
+ */
+const SWEEP_PAGE = 100;
+const SWEEP_PAGES = 10;
+
+/** One open thread as a sweep found it, before this duty decided anything about it. */
+export interface Listed {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  /** Every label on the thread now, whoever put it there. */
+  readonly labels: readonly string[];
+  readonly createdAt: Date;
+  /** Whether this entry is a pull request — the listing endpoint returns both. */
+  readonly isPullRequest: boolean;
+}
+
+/**
+ * Every open thread a sweep will consider, newest created first.
+ *
+ * **Newest-first, not the tracker's default of newest-*updated*-first.** A
+ * sweep's `limit` is a budget, and the threads most worth spending it on are
+ * the ones a maintainer is still likely to care about — an issue opened
+ * yesterday, not one from three years ago that happened to get a comment
+ * today. Sorting by creation also makes `since` a true prefix of the listing:
+ * once one page's oldest entry falls before the bound, every later page would
+ * too, so the walk stops there instead of reading the rest of the repository's
+ * history to confirm it.
+ *
+ * **`since` bounds `created_at`, checked here rather than left to the API.**
+ * GitHub's own `since` query parameter filters by `updated_at` — which this
+ * duty itself moves forward the moment it labels or translates a thread, so a
+ * server-side filter on it would start excluding the very backlog a repeat
+ * sweep exists to keep working. Creation date never moves, which is what makes
+ * it the honest boundary for "no archaeology on threads before Reeve
+ * adoption".
+ */
+export async function listOpenThreads(
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+  since: Date | null,
+): Promise<readonly Listed[]> {
+  const listed: Listed[] = [];
+
+  for (let page = 1; page <= SWEEP_PAGES; page += 1) {
+    const { data } = await api.rest.issues.listForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      sort: "created",
+      direction: "desc",
+      per_page: SWEEP_PAGE,
+      page,
+    });
+
+    let stop = false;
+    for (const entry of data) {
+      const createdAt = new Date(entry.created_at);
+      if (since !== null && createdAt < since) {
+        stop = true;
+        break;
+      }
+      listed.push({
+        number: entry.number,
+        title: entry.title ?? "",
+        body: entry.body ?? "",
+        labels: (entry.labels ?? [])
+          .map((label) => (typeof label === "string" ? label : (label.name ?? "")))
+          .filter((name) => name.length > 0),
+        createdAt,
+        isPullRequest: entry.pull_request !== undefined,
+      });
+    }
+
+    if (stop || data.length < SWEEP_PAGE) break;
+  }
+
+  return listed;
 }
 
 /**

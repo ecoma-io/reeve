@@ -4,6 +4,7 @@ import {
   createEffects,
   createReply,
   createThread,
+  listOpenThreads,
   listReplies,
   listRepositoryLabels,
   readStanding,
@@ -297,6 +298,164 @@ describe("listRepositoryLabels", () => {
 
   it("reads a repository with no labels as no labels", async () => {
     await expect(listRepositoryLabels(trackerOf({}, [[]]).api, where)).resolves.toEqual([]);
+  });
+});
+
+/**
+ * An entry the way the listing endpoint sends one — issue and pull request
+ * both, since that endpoint returns both and `isPullRequest` is how a caller
+ * tells them apart.
+ */
+function entry(
+  number: number,
+  createdAt: string,
+  over: {
+    title?: string | null;
+    body?: string | null;
+    labels?: (string | { name?: string })[];
+    pull_request?: unknown;
+  } = {},
+) {
+  return { number, created_at: createdAt, title: "A thread", body: "Some text", ...over };
+}
+
+/** A tracker whose `issues.listForRepo` answers one page per call, in order. */
+function sweepOf(pages: ReturnType<typeof entry>[][]) {
+  const listForRepo = vi.fn((params: { page?: number }) =>
+    Promise.resolve({ data: pages[(params.page ?? 1) - 1] ?? [] }),
+  );
+  return { api: { rest: { issues: { listForRepo } } } as unknown as TrackerApi, listForRepo };
+}
+
+describe("listOpenThreads", () => {
+  const where = { owner: "ecoma-io", repo: "reeve" };
+
+  it("asks for open threads newest-created-first, not the tracker's own default", async () => {
+    // The tracker's own ordering — and its own `since` — is by `updated_at`,
+    // which this duty's own writes move forward. Sorting by creation instead is
+    // what makes `since` a true prefix of the listing, checked below.
+    const { api, listForRepo } = sweepOf([[entry(3, "2026-03-01T00:00:00Z")]]);
+
+    await listOpenThreads(api, where, null);
+
+    expect(listForRepo).toHaveBeenCalledWith({
+      ...where,
+      state: "open",
+      sort: "created",
+      direction: "desc",
+      per_page: 100,
+      page: 1,
+    });
+  });
+
+  it("reads a thread's number, text and labels off the listing", async () => {
+    const { api } = sweepOf([
+      [entry(3, "2026-03-01T00:00:00Z", { title: "Bug", body: "It broke.", labels: ["bug"] })],
+    ]);
+
+    await expect(listOpenThreads(api, where, null)).resolves.toEqual([
+      {
+        number: 3,
+        title: "Bug",
+        body: "It broke.",
+        labels: ["bug"],
+        createdAt: new Date("2026-03-01T00:00:00Z"),
+        isPullRequest: false,
+      },
+    ]);
+  });
+
+  it("reads labels given as bare names and as objects alike", async () => {
+    const { api } = sweepOf([
+      [entry(1, "2026-03-01T00:00:00Z", { labels: ["bug", { name: "docs" }, { name: "" }] })],
+    ]);
+
+    await expect(listOpenThreads(api, where, null)).resolves.toMatchObject([
+      { labels: ["bug", "docs"] },
+    ]);
+  });
+
+  it("reads a title or body GitHub sent as null as an empty string", async () => {
+    const { api } = sweepOf([[entry(1, "2026-03-01T00:00:00Z", { title: null, body: null })]]);
+
+    await expect(listOpenThreads(api, where, null)).resolves.toMatchObject([
+      { title: "", body: "" },
+    ]);
+  });
+
+  it("tells a pull request from an issue by the field only a pull request carries", async () => {
+    const { api } = sweepOf([
+      [
+        entry(1, "2026-03-01T00:00:00Z"),
+        entry(2, "2026-03-01T00:00:00Z", { pull_request: { url: "..." } }),
+      ],
+    ]);
+
+    await expect(listOpenThreads(api, where, null)).resolves.toMatchObject([
+      { number: 1, isPullRequest: false },
+      { number: 2, isPullRequest: true },
+    ]);
+  });
+
+  it("reads past the first page when a page came back full", async () => {
+    const first = Array.from({ length: 100 }, (_, index) =>
+      entry(200 - index, "2026-03-01T00:00:00Z"),
+    );
+    const second = [entry(50, "2026-02-01T00:00:00Z")];
+    const { api, listForRepo } = sweepOf([first, second]);
+
+    await expect(listOpenThreads(api, where, null)).resolves.toHaveLength(101);
+    expect(listForRepo).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops on a short page rather than asking for one more that is empty", async () => {
+    const { api, listForRepo } = sweepOf([[entry(1, "2026-03-01T00:00:00Z")]]);
+
+    await listOpenThreads(api, where, null);
+    expect(listForRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops at the ceiling rather than walking a repository's whole history", async () => {
+    const full = Array.from({ length: 100 }, (_, index) => entry(index, "2026-03-01T00:00:00Z"));
+    const { api, listForRepo } = sweepOf(Array.from({ length: 20 }, () => full));
+
+    await expect(listOpenThreads(api, where, null)).resolves.toHaveLength(1000);
+    expect(listForRepo).toHaveBeenCalledTimes(10);
+  });
+
+  it("keeps a thread created on the bound and excludes one created before it", async () => {
+    const since = new Date("2026-01-01T00:00:00Z");
+    const { api } = sweepOf([
+      [
+        entry(1, "2026-01-01T00:00:00Z"),
+        entry(2, "2025-12-31T23:59:59Z"),
+        entry(3, "2025-01-01T00:00:00Z"),
+      ],
+    ]);
+
+    await expect(listOpenThreads(api, where, since)).resolves.toEqual([
+      expect.objectContaining({ number: 1 }),
+    ]);
+  });
+
+  it("stops paging the moment a page's oldest entry falls before `since`", async () => {
+    // Newest-first plus a bound on creation makes `since` a true prefix: once
+    // one entry is too old, everything the tracker would answer next is too,
+    // and reading further pages would only confirm that at the cost of a
+    // request nobody needed.
+    const since = new Date("2026-02-01T00:00:00Z");
+    const first = [entry(2, "2026-03-01T00:00:00Z"), entry(1, "2026-01-01T00:00:00Z")];
+    const second = [entry(0, "2025-01-01T00:00:00Z")];
+    const { api, listForRepo } = sweepOf([first, second]);
+
+    await expect(listOpenThreads(api, where, since)).resolves.toEqual([
+      expect.objectContaining({ number: 2 }),
+    ]);
+    expect(listForRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a repository with no open threads as none", async () => {
+    await expect(listOpenThreads(sweepOf([[]]).api, where, null)).resolves.toEqual([]);
   });
 });
 
