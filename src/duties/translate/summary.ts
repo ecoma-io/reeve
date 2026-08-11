@@ -10,10 +10,10 @@
  * duty's: a language, a draft's score, a panel's votes. What the core owns is
  * the page it is written to and the arithmetic on the bill.
  */
-import { total, type Purpose, type Spend } from "../../core/meter.js";
+import type { Spend } from "../../core/meter.js";
 import type { Language } from "../../core/languages.js";
 import { shown, type Names } from "../../core/provider.js";
-import { cell, count, table } from "../../core/summary.js";
+import { cell, cost, table } from "../../core/summary.js";
 
 import type { Posted } from "./publish.js";
 
@@ -51,7 +51,9 @@ export function summarize(run: Run): string {
     "",
     translations(run.looked),
     "",
-    cost(run),
+    cost(run.spent, (spend) =>
+      shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model),
+    ),
   ];
 
   return `${parts.join("\n").trimEnd()}\n`;
@@ -113,69 +115,3 @@ function translations(looked: readonly Looked[]): string {
         : ` Source language — ${detected.join("; ")}.`),
   ].join("\n");
 }
-
-/** What the run spent, per stage and model, and what it adds up to. */
-function cost(run: Run): string {
-  const sum = total(run.spent);
-  const rows = run.spent.map((spend) => [
-    STAGE[spend.purpose],
-    cell(shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model)),
-    count(spend.requests),
-    spend.failed === 0 ? "—" : count(spend.failed),
-    count(spend.prompt),
-    count(spend.completion),
-    count(spend.prompt + spend.completion),
-  ]);
-
-  if (rows.length === 0) {
-    return [
-      "### Cost",
-      "",
-      "No model was asked anything this run — every decision was made by code.",
-    ].join("\n");
-  }
-
-  rows.push([
-    "**Total**",
-    "",
-    `**${count(sum.requests)}**`,
-    sum.failed === 0 ? "—" : `**${count(sum.failed)}**`,
-    `**${count(sum.prompt)}**`,
-    `**${count(sum.completion)}**`,
-    `**${count(sum.prompt + sum.completion)}**`,
-  ]);
-
-  const lines = [
-    "### Cost",
-    "",
-    table(["Stage", "Model", "Requests", "Failed", "Prompt", "Completion", "Tokens"], rows),
-  ];
-
-  // Said plainly, because the alternative is a reader treating a floor as a
-  // total. Many OpenAI-compatible gateways send no `usage` at all, and a run
-  // against one of those reports every request and no tokens — which is the
-  // truth, and is only misleading if it goes unlabelled.
-  if (sum.unreported > 0) {
-    lines.push(
-      "",
-      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} ` +
-        "came back without a `usage` field, so the token counts above are a floor rather than a total.",
-    );
-  }
-  if (sum.failed > 0) {
-    lines.push(
-      "",
-      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. ` +
-        "That is what rotation costs, and it is in the totals because the provider counted it too.",
-    );
-  }
-
-  return lines.join("\n");
-}
-
-/** The stage names a reader of the documentation already knows. */
-const STAGE: Record<Purpose, string> = {
-  detect: "Detection",
-  draft: "Drafting",
-  judge: "Judging",
-};

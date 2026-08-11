@@ -19,8 +19,37 @@
  */
 import type { Completion, Message, Provider, Usage } from "./provider.js";
 
-/** Which stage of the pipeline asked. */
-export type Purpose = "detect" | "draft" | "judge";
+/**
+ * Which stage of the pipeline asked.
+ *
+ * A closed set rather than a free string, and the reason is the table: a run
+ * that spelled a purpose two ways would report two rows for one stage, and the
+ * question the split exists to answer — "what is screening costing me" — would
+ * quietly get half an answer. Adding a stage means adding a name here, which is
+ * a line in a diff rather than a typo in a call site.
+ *
+ * `screen` and `triage` are separate for the reason the tiers are separate.
+ * Screening runs the cheap roster over everything that arrives; triage runs the
+ * expensive one over what got through. One number covering both would hide
+ * exactly the ratio a maintainer tunes.
+ */
+export type Purpose = "detect" | "draft" | "judge" | "screen" | "triage";
+
+/**
+ * The stage names a reader of the documentation already knows.
+ *
+ * Here rather than in each duty's summary, because two duties are two chances
+ * to call the same stage two things, and a maintainer comparing one run's table
+ * against another's should not have to work out that "Judging" and "Judge" are
+ * the same row. A duty spending nothing on a purpose simply has no row for it.
+ */
+export const STAGE: Record<Purpose, string> = {
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging",
+  screen: "Screening",
+  triage: "Triage",
+};
 
 /** One model's spend on one purpose. */
 export interface Spend {
