@@ -46,6 +46,30 @@
  * `score` still answer on every path — a workflow reading them does not need
  * to know which of those reasons produced the empty one.
  *
+ * What is left here, after `proposal.ts` (re-validating a verdict's
+ * `duplicateOf` against the shortlist, computing the fingerprint and
+ * assembling the proposal — step 7's pure half), `outputs.ts` (every
+ * `core.setOutput` call and both job-summary pages) and `corpus.ts` (which
+ * already owned the corpus listing, and now owns `crossLanguageCorpus` too)
+ * each took their own piece, is the wiring above and `readSettings`/
+ * `readAttribution`, which stay here rather than move to a duty-local
+ * `inputs.ts`: `main.integration.test.ts`'s own audit of every
+ * `getInput`/`getBooleanInput` call scans exactly two files — this one and
+ * `core/inputs.ts` — for the call sites it expects, so a function that calls
+ * `core.getInput` directly has to live in one of those two places. Unlike
+ * `translate`, nothing else in this duty's input-reading is a named,
+ * independently pure function — the one candidate (truncating the thread's
+ * own body to `max-body-chars` in `decide`) is two lines inline, next to the
+ * `core.info` call reporting the truncation, not a helper worth a module of
+ * its own.
+ *
+ * **This duty's `dryRun` check lives inside `act`**, one function further
+ * into the pipeline than translate's own placement inside `translateText` —
+ * see `act`'s own doc comment for why `rehearse` reads through `dryRun`
+ * rather than substituting a stand-in. Triage checks it at each call site
+ * instead. Three placements for one knob, an accepted divergence (design
+ * §1.2), not something this wave unifies.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API — see `main.integration.test.ts`.
@@ -86,7 +110,6 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { sanitize } from "../../core/sanitize.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
@@ -98,33 +121,26 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { authorText, listCorpus, type CorpusThread } from "./corpus.js";
+import { authorText, crossLanguageCorpus, listCorpus, type CorpusThread } from "./corpus.js";
+import { page, report, reportSweep, sweepPage } from "./outputs.js";
+import { matchShortlist } from "./proposal.js";
 import {
   postOrReplace,
-  proposalFingerprint,
   rehearse,
   type Attribution,
   type CommentApi,
   type Posted,
   type Proposal,
 } from "./publish.js";
-import { documentOf, rank } from "./rank.js";
-import {
-  summarize,
-  summarizeSweep,
-  type Done,
-  type PivotInfo,
-  type RankInfo,
-  type Run,
-  type SweptThread,
-} from "./summary.js";
+import { rank } from "./rank.js";
+import { type Done, type PivotInfo, type RankInfo, type SweptThread } from "./summary.js";
 import { judge } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
-interface Settings {
+export interface Settings {
   readonly token: string;
   /** The thread to work on, or null in `sweep`. */
   readonly number: number | null;
@@ -207,7 +223,7 @@ interface Stages {
 type Api = TrackerApi & CommentApi;
 
 /** Everything the run concluded, whatever path it took to conclude it. */
-interface Outcome {
+export interface Outcome {
   readonly language: string | null;
   /** The candidate the verdict named, before the confidence floor is checked. Null for no proposal. */
   readonly duplicateOf: number | null;
@@ -245,7 +261,7 @@ interface Outcome {
  * thrown partway down the loop still leaves whatever was already processed
  * readable from `run`'s `finally` block.
  */
-interface SweepAccumulator {
+export interface SweepAccumulator {
   readonly results: SweptThread[];
   starvedRun: boolean;
   candidates: number;
@@ -355,11 +371,6 @@ async function runSweep(
     // starvation the `starved` output already reported.
     if (starved(settings.models, weather)) acc.starvedRun = true;
   }
-}
-
-/** Candidates the walk did not reach — the limit, or the roster running dry. */
-function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length, 0);
 }
 
 /** One sweep row's outcome, in the fewest words that are true. */
@@ -543,22 +554,25 @@ async function decide(
    * A run that reached no proposal: the guardrails still reported, nothing
    * else is.
    *
-   * `confidence` defaults to `0`, which is the honest answer for every caller
-   * that has no real verdict to report — no candidates reached the judge,
-   * every model failed, the answer did not parse, or the answer named a
-   * candidate outside the shortlist it was shown. But a verdict that *did*
-   * parse and named no duplicate is a real, confident answer of its own — a
-   * model sure this is not a duplicate is a different outcome from a judge
-   * that was never actually asked, and `0` would make the two indistinguishable
-   * to a reader of `score`. Callers that have a real verdict in hand pass its
-   * `confidence` through explicitly instead of taking this default.
+   * `confidence` is required, not defaulted, so every call site names its own
+   * answer rather than inheriting one silently. `0` is the honest answer for
+   * every caller that has no real verdict to report — no candidates reached
+   * the judge, every model failed, the answer did not parse, or the answer
+   * named a candidate outside the shortlist it was shown — and those callers
+   * pass it explicitly. A verdict that *did* parse and named no duplicate is
+   * a real, confident answer of its own — a model sure this is not a
+   * duplicate is a different outcome from a judge that was never actually
+   * asked, and a default of `0` would have made the two indistinguishable to
+   * a reader of `score` without a caller ever having to notice it was relying
+   * on one. Callers that have a real verdict in hand pass its `confidence`
+   * through instead.
    */
   const nothing = (
     language: string | null,
     rankInfo: RankInfo,
     pivotInfo: PivotInfo,
     note: string | null,
-    confidence = 0,
+    confidence: number,
   ): Outcome => ({
     language,
     duplicateOf: null,
@@ -643,7 +657,7 @@ async function decide(
   const rankInfo: RankInfo = { corpusSize: corpus.length, offered: ranked.length };
   const pivotInfo: PivotInfo = { used: pivotUsed, note: pivotNote };
 
-  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null);
+  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null, 0);
 
   const judged = await judge({
     provider: stages.duplicate,
@@ -685,19 +699,22 @@ async function decide(
     return nothing(language, rankInfo, pivotInfo, note, verdict.confidence);
   }
 
-  // `parseVerdict` already refuses a `duplicate_of` that does not name one of
-  // the `candidates` it was given — that is what makes an injected "this
-  // duplicates #999" in a thread body unable to steer a verdict at a thread
-  // the ranking never surfaced. This re-checks the same fact against `ranked`
-  // — the exact shortlist this call passed as those `candidates` — on
-  // purpose: the number that reaches `Outcome`, an output, or a published
-  // comment must be traceable to a candidate this run's own ranking offered,
-  // not merely to a candidate `verdict.ts` was trusted to have checked. A
-  // miss here can only mean that invariant broke somewhere upstream, and the
-  // right response to that is the same as an unparseable answer — discard,
-  // never best-effort — not to fall back to a `0` score and publish anyway.
-  const matched = ranked.find((entry) => entry.candidate.number === verdict.duplicateOf);
-  if (matched === undefined) {
+  // Re-validates `duplicateOf` against `ranked` — the exact shortlist the
+  // judge was shown — then computes the fingerprint and assembles the
+  // proposal. See `matchShortlist`'s own `ShortlistMatch` doc comment for the
+  // full argument for why the re-validation exists at all.
+  const match = matchShortlist({
+    duplicateOf: verdict.duplicateOf,
+    confidence: verdict.confidence,
+    rawRationale: verdict.rationale,
+    ranked,
+    query: `${standing.title}\n${body}`,
+    confidenceFloor: settings.confidence,
+    attribution: settings.attribution,
+    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    language: detection.language?.code ?? null,
+  });
+  if (!match.ok) {
     core.warning(
       "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. " +
         "That shape — a number the ranking never offered — is what a thread body trying to steer " +
@@ -709,107 +726,31 @@ async function decide(
       rankInfo,
       pivotInfo,
       "the verdict named a thread outside the shortlist",
+      0,
     );
   }
-  const lexicalScore = matched.score;
-  // Sanitised once, used both by `proposal` below (only when eligible) and by
-  // `Outcome.rationale` (always, once a verdict named a candidate the
-  // shortlist actually offered) — a report-only run under the floor still
-  // owes a reader *why*, which `proposal` alone cannot answer since it is
-  // null there.
-  const rationale = sanitize(verdict.rationale);
-
-  const eligible = verdict.confidence >= settings.confidence;
-  if (!eligible) {
+  if (!match.eligible) {
     core.info(
       `Confidence ${verdict.confidence.toFixed(2)} is under the floor of ` +
         `${settings.confidence.toFixed(2)} — reported, not applied.`,
     );
   }
 
-  // Over the thread's own text and the shortlist the judge was actually
-  // shown — see `proposalFingerprint`'s own doc comment for why that, and not
-  // the static config knobs that produced the shortlist, is what makes a
-  // grown corpus re-ask and an identical rerun stop.
-  const fp = proposalFingerprint(
-    `${standing.title}\n${body}`,
-    ranked.map((entry) => entry.candidate.number),
-  );
-
-  const proposal: Proposal | null = eligible
-    ? {
-        duplicateOf: verdict.duplicateOf,
-        confidence: verdict.confidence,
-        lexicalScore,
-        rationale,
-        model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
-        attribution: settings.attribution,
-        // The judge writes `rationale` in the thread's own language (see
-        // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
-        // same code — not the pivot language `pivotLanguage`/`threadLanguage`
-        // below only use for cross-language corpus matching.
-        language: detection.language?.code ?? null,
-      }
-    : null;
-
   return {
     language,
     duplicateOf: verdict.duplicateOf,
     confidence: verdict.confidence,
-    lexicalScore,
+    lexicalScore: match.lexicalScore,
     permitted,
     withheld,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
-    proposal,
-    // Under the floor, `duplicate-of`/`score` still answer, but there is
-    // nothing eligible to fingerprint against a write that will never happen.
-    fingerprint: eligible ? fp : null,
-    rationale,
+    proposal: match.proposal,
+    fingerprint: match.fingerprint,
+    rationale: match.rationale,
     ungranted: null,
   };
-}
-
-/**
- * Whether at least one corpus candidate is written in the pivot language
- * specifically — not merely in some language other than the thread's own —
- * which is the fact `action.yml`'s own `languages` input promises triggers
- * the bridge, and the fact that makes `translateToPivot` worth a request. A
- * corpus that holds a candidate in a third configured language but none in
- * the pivot would still fail to match after the bridge ran, so checking
- * "not the thread's language" would spend a translation a same-language BM25
- * pass could never have used anyway.
- *
- * Every check here is free: `detectLanguage` is called with no `pick`
- * argument, so it never reaches past script narrowing and the local
- * byte-ngram profile — no model, no request, whatever the size of `corpus`.
- * A candidate `detectLanguage` cannot place at all (`by: "none"`) proves
- * nothing either way and is skipped rather than counted as a match, the same
- * caution `detectLanguage`'s own callers use everywhere else.
- *
- * `cache` memoises a candidate's detected language by its issue number.
- * Cheap on its own, but a sweep offers the same candidate to this function
- * once per thread the walk checks it against, and without this the free
- * detection above would repeat that many times over for no new answer.
- */
-async function crossLanguageCorpus(
-  languages: readonly Language[],
-  pivotLanguage: Language,
-  corpus: readonly CorpusThread[],
-  cache: Map<number, Language | null>,
-): Promise<boolean> {
-  for (const candidate of corpus) {
-    let detected: Language | null;
-    if (cache.has(candidate.number)) {
-      detected = cache.get(candidate.number) ?? null;
-    } else {
-      detected = (await detectLanguage(documentOf(candidate), languages)).language;
-      cache.set(candidate.number, detected);
-    }
-    if (detected !== null && detected.code === pivotLanguage.code) return true;
-  }
-  return false;
 }
 
 /**
@@ -924,87 +865,6 @@ async function act(
 function excerpt(answer: string): string {
   const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}…`;
-}
-
-/**
- * Every output, written on every single-thread path that reaches an answer —
- * including the ones that answer "nothing". A workflow branching on
- * `duplicate-of` needs it to be an empty string rather than an unset output
- * on the run where nothing was proposed.
- */
-function report(outcome: Outcome, done: Done, rosterStarved: boolean): void {
-  core.setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
-  core.setOutput("score", outcome.confidence.toFixed(2));
-  core.setOutput("language", outcome.language ?? "");
-  core.setOutput("commented", String(done.commented));
-  core.setOutput("starved", String(rosterStarved));
-  // `0`, not unset — a single-thread run answers a sweep's own outputs
-  // honestly at zero rather than leaving a workflow that reads them on every
-  // run reading an empty string on this one.
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
-}
-
-/**
- * `processed` and `remaining` — a sweep's own outputs. `starved` is shared
- * vocabulary between the two modes, so it keeps the same name here. The
- * single-thread outputs are left unset on a sweep run, the same choice
- * `triage/main.ts`'s own `reportSweep` makes: none of them name one thread,
- * and a workflow reading `duplicate-of` off a sweep was never going to find
- * one thread's answer there either way.
- */
-function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
-  core.setOutput("processed", String(bulk.results.length));
-  core.setOutput("remaining", String(remainingOf(bulk)));
-  core.setOutput("starved", String(rosterStarved));
-}
-
-function page(
-  settings: Settings,
-  thread: number,
-  outcome: Outcome,
-  done: Done,
-  posted: Posted | null,
-  spent: Run["spent"],
-): string {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    // The code the proposal's own chrome is keyed by, not the label
-    // `language` above carries — only present alongside a real `proposal`,
-    // which is exactly when this duty's chrome renders anything at all.
-    languageCode: outcome.proposal?.language ?? null,
-    ungranted: outcome.ungranted,
-    duplicateOf: outcome.duplicateOf,
-    confidence: outcome.confidence,
-    floor: settings.confidence,
-    lexicalScore: outcome.lexicalScore,
-    rank: outcome.rank,
-    pivot: outcome.pivot,
-    note: outcome.note,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    rationale: outcome.rationale,
-    done,
-    posted,
-    spent,
-    modelNames: settings.modelNames,
-  });
-}
-
-function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    spent,
-    modelNames: settings.modelNames,
-  });
 }
 
 await run();

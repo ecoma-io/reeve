@@ -34201,6 +34201,82 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/core/memory.ts
+var K1 = 1.2;
+var B = 0.75;
+var lexical = (query, documents) => {
+  const asked = new Set(tokenise(query));
+  if (asked.size === 0 || documents.length === 0) return documents.map(() => 0);
+  const tokenised = documents.map(tokenise);
+  const lengths = tokenised.map((tokens) => tokens.length);
+  const average = lengths.reduce((sum, length) => sum + length, 0) / documents.length;
+  const carrying = /* @__PURE__ */ new Map();
+  for (const tokens of tokenised) {
+    for (const term of new Set(tokens)) {
+      if (asked.has(term)) carrying.set(term, (carrying.get(term) ?? 0) + 1);
+    }
+  }
+  return tokenised.map((tokens, index) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of tokens) counts.set(term, (counts.get(term) ?? 0) + 1);
+    const length = lengths[index] ?? 0;
+    const normalised = average === 0 ? 1 : length / average;
+    let score = 0;
+    for (const term of asked) {
+      const frequency = counts.get(term);
+      if (frequency === void 0) continue;
+      const documentsWith = carrying.get(term) ?? 0;
+      const weight = Math.log(1 + (documents.length - documentsWith + 0.5) / (documentsWith + 0.5));
+      score += weight * (frequency * (K1 + 1) / (frequency + K1 * (1 - B + B * normalised)));
+    }
+    return score;
+  });
+};
+var RUN = /[\p{Letter}\p{Number}]+/gu;
+var LETTER = new RegExp("\\p{Letter}", "u");
+var LONGEST_RUN = 40;
+function tokenise(text2) {
+  const terms = [];
+  for (const [run2] of text2.toLowerCase().matchAll(RUN)) {
+    terms.push(run2);
+    if (run2.length < 2 || run2.length > LONGEST_RUN) continue;
+    if (!LETTER.test(run2) || cased(run2)) continue;
+    const characters = Array.from(run2);
+    for (let at = 0; at + 1 < characters.length; at += 1) {
+      terms.push(`${characters[at] ?? ""}${characters[at + 1] ?? ""}`);
+    }
+  }
+  return terms;
+}
+function cased(run2) {
+  return Array.from(run2).some((character) => character.toLowerCase() !== character.toUpperCase());
+}
+
+// src/duties/duplicate/rank.ts
+function documentOf(candidate) {
+  return [candidate.title, candidate.body].join("\n\n");
+}
+function rank(queries, candidates, limit, similarity = lexical) {
+  if (candidates.length === 0 || limit <= 0) return [];
+  const documents = candidates.map(documentOf);
+  const best = /* @__PURE__ */ new Map();
+  for (const query of queries) {
+    if (query.trim().length === 0) continue;
+    const scores = similarity(query, documents);
+    scores.forEach((score, index) => {
+      if (score <= 0) return;
+      const candidate = candidates[index];
+      if (candidate === void 0) return;
+      const current = best.get(index);
+      if (current === void 0 || score > current.score) best.set(index, { candidate, score });
+    });
+  }
+  return [...best.values()].sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    return right.candidate.number - left.candidate.number;
+  }).slice(0, limit);
+}
+
 // src/duties/duplicate/corpus.ts
 var CORPUS_PAGE = 100;
 var ANY_MARKER = /<!-- reeve:[a-z][a-z0-9-]*\ssource=/;
@@ -34243,6 +34319,19 @@ async function listCorpus(api, at, exclude, limit, since, maxBodyChars = null) {
     if (stop || data.length < CORPUS_PAGE) break;
   }
   return corpus;
+}
+async function crossLanguageCorpus(languages, pivotLanguage, corpus, cache) {
+  for (const candidate of corpus) {
+    let detected;
+    if (cache.has(candidate.number)) {
+      detected = cache.get(candidate.number) ?? null;
+    } else {
+      detected = (await detectLanguage(documentOf(candidate), languages)).language;
+      cache.set(candidate.number, detected);
+    }
+    if (detected !== null && detected.code === pivotLanguage.code) return true;
+  }
+  return false;
 }
 
 // src/core/chrome.ts
@@ -34380,175 +34469,6 @@ function chromeFallbackNote(codes) {
   return `${list} \u2014 Reeve's own scaffolding text has no translation for ${missing.size === 1 ? "this language" : "these languages"} yet, so it rendered in English instead. Chrome covers: ${CHROME_LANGUAGES.join(", ")}.`;
 }
 
-// src/duties/duplicate/publish.ts
-var marker = markerFor("duplicate");
-function proposalFingerprint(source, candidates) {
-  return fingerprint(
-    source,
-    candidates.map((number) => String(number))
-  );
-}
-function payloadFor(fp, duplicateOf) {
-  return `${fp} duplicate-of=${String(duplicateOf)}`;
-}
-var COMMENT_PAGE = 100;
-async function findMarked(api, at) {
-  const { data } = await api.rest.issues.listComments({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number,
-    per_page: COMMENT_PAGE
-  });
-  for (const comment of data) {
-    if (!isBotAuthor(comment.user)) continue;
-    const { official, fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null && official === "")
-      return { marked: { id: comment.id, fingerprint: found }, uncertain: false };
-  }
-  return { marked: null, uncertain: data.length === COMMENT_PAGE };
-}
-async function classify(api, at, proposal, fp) {
-  const payload = payloadFor(fp, proposal.duplicateOf);
-  const body = [marker.render(payload), render(proposal)].join("\n\n");
-  const { marked: existing, uncertain } = await findMarked(api, at);
-  if (existing === null && uncertain) {
-    return { disposition: "withheld", body, existing: null };
-  }
-  const disposition2 = existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
-  return { disposition: disposition2, body, existing };
-}
-async function postOrReplace(api, at, proposal, fp) {
-  const { disposition: disposition2, body, existing } = await classify(api, at, proposal, fp);
-  if (disposition2 === "withheld") return disposition2;
-  if (existing === null) {
-    await api.rest.issues.createComment({
-      owner: at.owner,
-      repo: at.repo,
-      issue_number: at.number,
-      body
-    });
-    return disposition2;
-  }
-  if (disposition2 === "unchanged") return disposition2;
-  await api.rest.issues.updateComment({
-    owner: at.owner,
-    repo: at.repo,
-    comment_id: existing.id,
-    body
-  });
-  return disposition2;
-}
-async function rehearse(api, at, proposal, fp) {
-  return (await classify(api, at, proposal, fp)).disposition;
-}
-function render(proposal) {
-  const lines = [
-    chrome("duplicatePossible", proposal.language, { number: String(proposal.duplicateOf) }),
-    ...proposal.rationale.length > 0 ? ["", defang(proposal.rationale, proposal.duplicateOf)] : [],
-    "",
-    footer(proposal)
-  ];
-  return lines.join("\n");
-}
-function defang(text2, allowed) {
-  return text2.replace(
-    /#(\d+)/g,
-    (match, digits) => Number(digits) === allowed ? match : `\`${match}\``
-  );
-}
-function footer(proposal) {
-  const parts = [chrome("duplicateFooterFloor", proposal.language)];
-  if (proposal.attribution !== "none") {
-    parts.push(`Suggested by \`${proposal.model}\`.`);
-  }
-  if (proposal.attribution === "detail") {
-    parts.push(
-      `Confidence ${proposal.confidence.toFixed(2)} of 1.00, lexical match ${proposal.lexicalScore.toFixed(2)}.`
-    );
-  }
-  parts.push(chrome("duplicateFooterEditable", proposal.language));
-  return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
-}
-function escapeHtml(text2) {
-  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// src/core/memory.ts
-var K1 = 1.2;
-var B = 0.75;
-var lexical = (query, documents) => {
-  const asked = new Set(tokenise(query));
-  if (asked.size === 0 || documents.length === 0) return documents.map(() => 0);
-  const tokenised = documents.map(tokenise);
-  const lengths = tokenised.map((tokens) => tokens.length);
-  const average = lengths.reduce((sum, length) => sum + length, 0) / documents.length;
-  const carrying = /* @__PURE__ */ new Map();
-  for (const tokens of tokenised) {
-    for (const term of new Set(tokens)) {
-      if (asked.has(term)) carrying.set(term, (carrying.get(term) ?? 0) + 1);
-    }
-  }
-  return tokenised.map((tokens, index) => {
-    const counts = /* @__PURE__ */ new Map();
-    for (const term of tokens) counts.set(term, (counts.get(term) ?? 0) + 1);
-    const length = lengths[index] ?? 0;
-    const normalised = average === 0 ? 1 : length / average;
-    let score = 0;
-    for (const term of asked) {
-      const frequency = counts.get(term);
-      if (frequency === void 0) continue;
-      const documentsWith = carrying.get(term) ?? 0;
-      const weight = Math.log(1 + (documents.length - documentsWith + 0.5) / (documentsWith + 0.5));
-      score += weight * (frequency * (K1 + 1) / (frequency + K1 * (1 - B + B * normalised)));
-    }
-    return score;
-  });
-};
-var RUN = /[\p{Letter}\p{Number}]+/gu;
-var LETTER = new RegExp("\\p{Letter}", "u");
-var LONGEST_RUN = 40;
-function tokenise(text2) {
-  const terms = [];
-  for (const [run2] of text2.toLowerCase().matchAll(RUN)) {
-    terms.push(run2);
-    if (run2.length < 2 || run2.length > LONGEST_RUN) continue;
-    if (!LETTER.test(run2) || cased(run2)) continue;
-    const characters = Array.from(run2);
-    for (let at = 0; at + 1 < characters.length; at += 1) {
-      terms.push(`${characters[at] ?? ""}${characters[at + 1] ?? ""}`);
-    }
-  }
-  return terms;
-}
-function cased(run2) {
-  return Array.from(run2).some((character) => character.toLowerCase() !== character.toUpperCase());
-}
-
-// src/duties/duplicate/rank.ts
-function documentOf(candidate) {
-  return [candidate.title, candidate.body].join("\n\n");
-}
-function rank(queries, candidates, limit, similarity = lexical) {
-  if (candidates.length === 0 || limit <= 0) return [];
-  const documents = candidates.map(documentOf);
-  const best = /* @__PURE__ */ new Map();
-  for (const query of queries) {
-    if (query.trim().length === 0) continue;
-    const scores = similarity(query, documents);
-    scores.forEach((score, index) => {
-      if (score <= 0) return;
-      const candidate = candidates[index];
-      if (candidate === void 0) return;
-      const current = best.get(index);
-      if (current === void 0 || score > current.score) best.set(index, { candidate, score });
-    });
-  }
-  return [...best.values()].sort((left, right) => {
-    if (right.score !== left.score) return right.score - left.score;
-    return right.candidate.number - left.candidate.number;
-  }).slice(0, limit);
-}
-
 // src/duties/duplicate/summary.ts
 function summarize(run2) {
   const parts = [
@@ -34654,6 +34574,204 @@ function summarizeSweep(run2) {
   );
   return `${parts.join("\n").trimEnd()}
 `;
+}
+
+// src/duties/duplicate/outputs.ts
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length, 0);
+}
+function report(outcome, done, rosterStarved) {
+  setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
+  setOutput("score", outcome.confidence.toFixed(2));
+  setOutput("language", outcome.language ?? "");
+  setOutput("commented", String(done.commented));
+  setOutput("starved", String(rosterStarved));
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function reportSweep(bulk, rosterStarved) {
+  setOutput("processed", String(bulk.results.length));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(rosterStarved));
+}
+function page(settings, thread, outcome, done, posted, spent) {
+  return summarize({
+    thread,
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    language: outcome.language,
+    // The code the proposal's own chrome is keyed by, not the label
+    // `language` above carries — only present alongside a real `proposal`,
+    // which is exactly when this duty's chrome renders anything at all.
+    languageCode: outcome.proposal?.language ?? null,
+    ungranted: outcome.ungranted,
+    duplicateOf: outcome.duplicateOf,
+    confidence: outcome.confidence,
+    floor: settings.confidence,
+    lexicalScore: outcome.lexicalScore,
+    rank: outcome.rank,
+    pivot: outcome.pivot,
+    note: outcome.note,
+    permitted: outcome.permitted,
+    withheld: outcome.withheld,
+    rationale: outcome.rationale,
+    done,
+    posted,
+    spent,
+    modelNames: settings.modelNames
+  });
+}
+function sweepPage(settings, bulk, spent) {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    results: bulk.results,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    ungranted: bulk.ungranted,
+    spent,
+    modelNames: settings.modelNames
+  });
+}
+
+// src/duties/duplicate/publish.ts
+var marker = markerFor("duplicate");
+function proposalFingerprint(source, candidates) {
+  return fingerprint(
+    source,
+    candidates.map((number) => String(number))
+  );
+}
+function payloadFor(fp, duplicateOf) {
+  return `${fp} duplicate-of=${String(duplicateOf)}`;
+}
+var COMMENT_PAGE = 100;
+async function findMarked(api, at) {
+  const { data } = await api.rest.issues.listComments({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number,
+    per_page: COMMENT_PAGE
+  });
+  for (const comment of data) {
+    if (!isBotAuthor(comment.user)) continue;
+    const { official, fingerprint: found } = marker.split(comment.body ?? "");
+    if (found !== null && official === "")
+      return { marked: { id: comment.id, fingerprint: found }, uncertain: false };
+  }
+  return { marked: null, uncertain: data.length === COMMENT_PAGE };
+}
+async function classify(api, at, proposal, fp) {
+  const payload = payloadFor(fp, proposal.duplicateOf);
+  const body = [marker.render(payload), render(proposal)].join("\n\n");
+  const { marked: existing, uncertain } = await findMarked(api, at);
+  if (existing === null && uncertain) {
+    return { disposition: "withheld", body, existing: null };
+  }
+  const disposition2 = existing === null ? "posted" : existing.fingerprint === payload ? "unchanged" : "replaced";
+  return { disposition: disposition2, body, existing };
+}
+async function postOrReplace(api, at, proposal, fp) {
+  const { disposition: disposition2, body, existing } = await classify(api, at, proposal, fp);
+  if (disposition2 === "withheld") return disposition2;
+  if (existing === null) {
+    await api.rest.issues.createComment({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      body
+    });
+    return disposition2;
+  }
+  if (disposition2 === "unchanged") return disposition2;
+  await api.rest.issues.updateComment({
+    owner: at.owner,
+    repo: at.repo,
+    comment_id: existing.id,
+    body
+  });
+  return disposition2;
+}
+async function rehearse(api, at, proposal, fp) {
+  return (await classify(api, at, proposal, fp)).disposition;
+}
+function render(proposal) {
+  const lines = [
+    chrome("duplicatePossible", proposal.language, { number: String(proposal.duplicateOf) }),
+    ...proposal.rationale.length > 0 ? ["", defang(proposal.rationale, proposal.duplicateOf)] : [],
+    "",
+    footer(proposal)
+  ];
+  return lines.join("\n");
+}
+function defang(text2, allowed) {
+  return text2.replace(
+    /#(\d+)/g,
+    (match, digits) => Number(digits) === allowed ? match : `\`${match}\``
+  );
+}
+function footer(proposal) {
+  const parts = [chrome("duplicateFooterFloor", proposal.language)];
+  if (proposal.attribution !== "none") {
+    parts.push(`Suggested by \`${proposal.model}\`.`);
+  }
+  if (proposal.attribution === "detail") {
+    parts.push(
+      `Confidence ${proposal.confidence.toFixed(2)} of 1.00, lexical match ${proposal.lexicalScore.toFixed(2)}.`
+    );
+  }
+  parts.push(chrome("duplicateFooterEditable", proposal.language));
+  return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
+}
+function escapeHtml(text2) {
+  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// src/duties/duplicate/proposal.ts
+function matchShortlist(input) {
+  const {
+    duplicateOf,
+    confidence,
+    rawRationale,
+    ranked,
+    query,
+    confidenceFloor,
+    attribution,
+    model,
+    language
+  } = input;
+  const matched = ranked.find((entry) => entry.candidate.number === duplicateOf);
+  if (matched === void 0) return { ok: false };
+  const lexicalScore = matched.score;
+  const rationale = sanitize(rawRationale);
+  const eligible = confidence >= confidenceFloor;
+  const fp = proposalFingerprint(
+    query,
+    ranked.map((entry) => entry.candidate.number)
+  );
+  const proposal = eligible ? {
+    duplicateOf,
+    confidence,
+    lexicalScore,
+    rationale,
+    model,
+    attribution,
+    // The judge writes `rationale` in the thread's own language (see
+    // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
+    // same code — not the pivot language cross-language corpus matching
+    // uses.
+    language
+  } : null;
+  return {
+    ok: true,
+    lexicalScore,
+    rationale,
+    eligible,
+    // Under the floor, `duplicate-of`/`score` still answer, but there is
+    // nothing eligible to fingerprint against a write that will never happen.
+    fingerprint: eligible ? fp : null,
+    proposal
+  };
 }
 
 // src/duties/duplicate/verdict.ts
@@ -34861,9 +34979,6 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
     if (starved(settings.models, weather)) acc.starvedRun = true;
   }
 }
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length, 0);
-}
 function describeOutcome(outcome, done) {
   if (outcome.ungranted !== null) return "not granted";
   if (outcome.duplicateOf === null) return "no duplicate";
@@ -34955,7 +35070,7 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
       `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. The narrower of the two wins.`
     );
   }
-  const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence = 0) => ({
+  const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence) => ({
     language: language2,
     duplicateOf: null,
     confidence,
@@ -35021,7 +35136,7 @@ ${pivot.draft.body}`);
   const ranked = rank(queries, corpus, settings.candidates);
   const rankInfo = { corpusSize: corpus.length, offered: ranked.length };
   const pivotInfo = { used: pivotUsed, note: pivotNote };
-  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null);
+  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null, 0);
   const judged = await judge({
     provider: stages.duplicate,
     models: settings.models,
@@ -35045,8 +35160,19 @@ ${pivot.draft.body}`);
   if (verdict2.duplicateOf === null) {
     return nothing(language, rankInfo, pivotInfo, note, verdict2.confidence);
   }
-  const matched = ranked.find((entry) => entry.candidate.number === verdict2.duplicateOf);
-  if (matched === void 0) {
+  const match = matchShortlist({
+    duplicateOf: verdict2.duplicateOf,
+    confidence: verdict2.confidence,
+    rawRationale: verdict2.rationale,
+    ranked,
+    query: `${standing.title}
+${body}`,
+    confidenceFloor: settings.confidence,
+    attribution: settings.attribution,
+    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    language: detection.language?.code ?? null
+  });
+  if (!match.ok) {
     warning(
       "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. That shape \u2014 a number the ranking never offered \u2014 is what a thread body trying to steer the verdict at an arbitrary target looks like, and it is refused the same as an answer that failed to parse."
     );
@@ -35054,65 +35180,30 @@ ${pivot.draft.body}`);
       language,
       rankInfo,
       pivotInfo,
-      "the verdict named a thread outside the shortlist"
+      "the verdict named a thread outside the shortlist",
+      0
     );
   }
-  const lexicalScore = matched.score;
-  const rationale = sanitize(verdict2.rationale);
-  const eligible = verdict2.confidence >= settings.confidence;
-  if (!eligible) {
+  if (!match.eligible) {
     info(
       `Confidence ${verdict2.confidence.toFixed(2)} is under the floor of ${settings.confidence.toFixed(2)} \u2014 reported, not applied.`
     );
   }
-  const fp = proposalFingerprint(
-    `${standing.title}
-${body}`,
-    ranked.map((entry) => entry.candidate.number)
-  );
-  const proposal = eligible ? {
-    duplicateOf: verdict2.duplicateOf,
-    confidence: verdict2.confidence,
-    lexicalScore,
-    rationale,
-    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
-    attribution: settings.attribution,
-    // The judge writes `rationale` in the thread's own language (see
-    // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
-    // same code — not the pivot language `pivotLanguage`/`threadLanguage`
-    // below only use for cross-language corpus matching.
-    language: detection.language?.code ?? null
-  } : null;
   return {
     language,
     duplicateOf: verdict2.duplicateOf,
     confidence: verdict2.confidence,
-    lexicalScore,
+    lexicalScore: match.lexicalScore,
     permitted,
     withheld: withheld2,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
-    proposal,
-    // Under the floor, `duplicate-of`/`score` still answer, but there is
-    // nothing eligible to fingerprint against a write that will never happen.
-    fingerprint: eligible ? fp : null,
-    rationale,
+    proposal: match.proposal,
+    fingerprint: match.fingerprint,
+    rationale: match.rationale,
     ungranted: null
   };
-}
-async function crossLanguageCorpus(languages, pivotLanguage, corpus, cache) {
-  for (const candidate of corpus) {
-    let detected;
-    if (cache.has(candidate.number)) {
-      detected = cache.get(candidate.number) ?? null;
-    } else {
-      detected = (await detectLanguage(documentOf(candidate), languages)).language;
-      cache.set(candidate.number, detected);
-    }
-    if (detected !== null && detected.code === pivotLanguage.code) return true;
-  }
-  return false;
 }
 function notGranted(warrant) {
   return {
@@ -35165,59 +35256,6 @@ async function act(api, at, outcome, dryRun) {
 function excerpt3(answer3) {
   const flat = answer3.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
-}
-function report(outcome, done, rosterStarved) {
-  setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
-  setOutput("score", outcome.confidence.toFixed(2));
-  setOutput("language", outcome.language ?? "");
-  setOutput("commented", String(done.commented));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
-}
-function reportSweep(bulk, rosterStarved) {
-  setOutput("processed", String(bulk.results.length));
-  setOutput("remaining", String(remainingOf(bulk)));
-  setOutput("starved", String(rosterStarved));
-}
-function page(settings, thread, outcome, done, posted, spent) {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    // The code the proposal's own chrome is keyed by, not the label
-    // `language` above carries — only present alongside a real `proposal`,
-    // which is exactly when this duty's chrome renders anything at all.
-    languageCode: outcome.proposal?.language ?? null,
-    ungranted: outcome.ungranted,
-    duplicateOf: outcome.duplicateOf,
-    confidence: outcome.confidence,
-    floor: settings.confidence,
-    lexicalScore: outcome.lexicalScore,
-    rank: outcome.rank,
-    pivot: outcome.pivot,
-    note: outcome.note,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    rationale: outcome.rationale,
-    done,
-    posted,
-    spent,
-    modelNames: settings.modelNames
-  });
-}
-function sweepPage(settings, bulk, spent) {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    spent,
-    modelNames: settings.modelNames
-  });
 }
 await run();
 export {
