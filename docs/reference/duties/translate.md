@@ -232,14 +232,14 @@ line: a language nobody could translate does not fail the job.
 
 ## Failure behavior
 
-| What happened                                   | What you get                                                     |
-| ----------------------------------------------- | ---------------------------------------------------------------- |
-| One language had no working model this run      | Warning, that code in `skipped`, the others published, **green** |
-| No language worked                              | Warning per language, `translated: []`, **green**                |
+| What happened                                                     | What you get                                                                                                                                                                            |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One language had no working model this run                        | Warning, that code in `skipped`, the others published, **green**                                                                                                                        |
+| No language worked                                                | Warning per language, `translated: []`, **green**                                                                                                                                       |
 | Another run's write landed between this run's write and its check | Warning naming the race, the write already stands, **green** — see [Installation](../../getting-started/installation.md#2-pick-a-trigger) for the `concurrency:` group that prevents it |
-| The thread cannot be read                       | **Red**                                                          |
-| The configuration is broken                     | **Red**, naming the input                                        |
-| The event names no thread and `number` is empty | **Red**, naming the event                                        |
+| The thread cannot be read                                         | **Red**                                                                                                                                                                                 |
+| The configuration is broken                                       | **Red**, naming the input                                                                                                                                                               |
+| The event names no thread and `number` is empty                   | **Red**, naming the event                                                                                                                                                               |
 
 A skipped language is not in the fingerprint, so the next run tries it
 again rather than reading its own claim and stopping.

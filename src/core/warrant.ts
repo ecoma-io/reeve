@@ -687,7 +687,9 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
 function readPivot(path: string, raw: unknown): string | null {
   if (raw === undefined) return null;
   if (typeof raw !== "string" || raw.trim().length === 0) {
-    throw new Error(`warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`);
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`,
+    );
   }
   return raw.trim();
 }
@@ -843,7 +845,9 @@ function nullable(value: string): string | null {
 function confidenceField(at: string, key: string, raw: unknown): number | null {
   if (raw === undefined || raw === null) return null;
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
-    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`);
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`,
+    );
   }
   return raw;
 }

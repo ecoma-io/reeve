@@ -135,7 +135,7 @@ this page stays on why and how to write one; the schema itself lives there.
 **`confidence` here is a ceiling, not the whole answer.** A verdict still needs
 to clear a floor to apply any label at all — the `confidence` input, above the
 taxonomy in the run's own settings. A label's own `confidence:` only changes
-which floor *that* label is checked against: lower it for a label safe to
+which floor _that_ label is checked against: lower it for a label safe to
 apply on a hunch, raise it above the run's own floor for one costly enough to
 get wrong that a hunch is not enough, without moving the bar for every other
 label in the file to do it. `security` is the usual example:

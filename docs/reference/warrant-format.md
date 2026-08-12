@@ -12,26 +12,26 @@ behind each field, see [The warrant](../guides/warrant.md).
 
 ## Top-level keys
 
-| Key            | Required | Type                                    | What it does                                                                                                                    |
-| -------------- | -------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `version`      | yes      | number                                  | Must be `1`, the only version this build understands.                                                                          |
-| `labels`       | no       | list of label entries                   | The taxonomy. Absent is an empty taxonomy, not an error.                                                                        |
-| `capabilities` | no       | mapping of duty name to capability list | What each duty may do. Absent leaves every duty on its own default.                                                             |
-| `languages`    | no       | list of language entries                | What to translate into. Absent leaves the `languages` input on each duty in charge.                                             |
+| Key            | Required | Type                                    | What it does                                                                                                                                                                  |
+| -------------- | -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`      | yes      | number                                  | Must be `1`, the only version this build understands.                                                                                                                         |
+| `labels`       | no       | list of label entries                   | The taxonomy. Absent is an empty taxonomy, not an error.                                                                                                                      |
+| `capabilities` | no       | mapping of duty name to capability list | What each duty may do. Absent leaves every duty on its own default.                                                                                                           |
+| `languages`    | no       | list of language entries                | What to translate into. Absent leaves the `languages` input on each duty in charge.                                                                                           |
 | `pivot`        | no       | one language code                       | The language corrections bridge through for cross-language recall. Must name one of `languages`. Absent is the first-listed language, unchanged from before this key existed. |
-| `memory`       | no       | mapping — see below                     | How much of the corrections store one run reads. Absent leaves each duty's own default in charge.                               |
-| `about`        | no       | text                                     | What this repository is about, in the maintainer's own words. Absent falls back to the `about` input every duty already reads.  |
+| `memory`       | no       | mapping — see below                     | How much of the corrections store one run reads. Absent leaves each duty's own default in charge.                                                                             |
+| `about`        | no       | text                                    | What this repository is about, in the maintainer's own words. Absent falls back to the `about` input every duty already reads.                                                |
 
 ### `memory` fields
 
-| Field    | Required | What it does                                                                                                                                        |
-| -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field    | Required | What it does                                                                                                                                       |
+| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `recall` | no       | A whole number of corrections put in front of a model. `0` is accepted and turns recall off. Absent leaves the duty's own default (`4`) in charge. |
 
 ## Label fields
 
 | Field            | Required | What it does                                                                                                    |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ---------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
 | `name`           | yes      | Must match a label that exists in the repository, exactly. Verified before anything is applied.                 |
 | `description`    | yes      | When this label applies. Written as a boundary, not as a synonym for the name.                                  |
 | `not`            | no       | When it does **not** apply, against the label it gets confused with most. The highest-value field on this page. |

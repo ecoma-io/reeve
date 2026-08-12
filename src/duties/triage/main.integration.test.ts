@@ -1917,7 +1917,8 @@ describe("the sweep", () => {
         const shard = stub.contentsFiles.get(shardPath());
         expect(shard).toBeDefined();
         const written = (shard?.content.trim().split("\n") ?? []).map(
-          (line) => JSON.parse(line) as { repo: string; thread: number; decided: string[]; by: string },
+          (line) =>
+            JSON.parse(line) as { repo: string; thread: number; decided: string[]; by: string },
         );
         expect(written).toHaveLength(2);
         expect(written.find((line) => line.thread === 701)).toMatchObject({

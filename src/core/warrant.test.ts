@@ -429,11 +429,15 @@ describe("pivot", () => {
   });
 
   it("refuses the key written with nothing under it", () => {
-    expect(() => warrant(`${MINIMAL}pivot:\n`)).toThrow(/`pivot` as empty, expected a language code/);
+    expect(() => warrant(`${MINIMAL}pivot:\n`)).toThrow(
+      /`pivot` as empty, expected a language code/,
+    );
   });
 
   it("refuses a pivot that is not text", () => {
-    expect(() => warrant(`${MINIMAL}pivot: 3\n`)).toThrow(/`pivot` as .+3.+, expected a language code/);
+    expect(() => warrant(`${MINIMAL}pivot: 3\n`)).toThrow(
+      /`pivot` as .+3.+, expected a language code/,
+    );
   });
 });
 
@@ -513,7 +517,10 @@ describe("resolvePivot", () => {
 
 describe("resolveAbout", () => {
   it("lets the warrant's own key win outright, with a notice naming both sources", () => {
-    const resolution = resolveAbout(warrant(`${MINIMAL}about: A database export tool.\n`), "ignored");
+    const resolution = resolveAbout(
+      warrant(`${MINIMAL}about: A database export tool.\n`),
+      "ignored",
+    );
 
     expect(resolution.about).toBe("A database export tool.");
     expect(resolution.notice).toContain(`\`${PATH}\`'s \`about:\` key`);

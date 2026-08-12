@@ -32950,13 +32950,13 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since) {
+async function listOpenThreads(api, at, since, state = "open") {
   const listed = [];
   for (let page2 = 1; ; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
-      state: "open",
+      state,
       sort: "created",
       direction: "desc",
       per_page: SWEEP_PAGE,
@@ -33093,6 +33093,9 @@ function parseWarrant(path, source) {
   }
   const labels = readLabels(path, document2.labels);
   const languages = readLanguages(path, document2.languages);
+  const pivot = readPivot(path, document2.pivot);
+  const memory = readMemory(path, document2.memory);
+  const about = readAbout(path, document2.about);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -33109,6 +33112,9 @@ function parseWarrant(path, source) {
     path,
     labels,
     languages,
+    pivot,
+    memory,
+    about,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -33137,7 +33143,8 @@ function implicitWarrant(path, repositoryLabels) {
       not: null,
       examples: [],
       owner: null,
-      exclusiveWith: []
+      exclusiveWith: [],
+      confidence: null
     });
   }
   const byName = new Map(labels.map((label) => [label.name, label]));
@@ -33146,6 +33153,9 @@ function implicitWarrant(path, repositoryLabels) {
       path,
       labels,
       languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
@@ -33172,6 +33182,32 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function resolvePivot(warrant, languages) {
+  const first = languages[0];
+  if (warrant.pivot === null) {
+    if (first === void 0) {
+      throw new Error("pivot: no languages are configured to choose one from.");
+    }
+    return first;
+  }
+  const named = warrant.pivot.toLowerCase();
+  const found = languages.find((language) => language.code.toLowerCase() === named);
+  if (found === void 0) {
+    throw new Error(
+      `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured languages (${languages.map((language) => language.code).join(", ")}).`
+    );
+  }
+  return found;
+}
+function resolveAbout(warrant, rawInput) {
+  if (warrant.about !== null) {
+    return {
+      about: warrant.about,
+      notice: `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input \u2014 the file is the whole answer once that key is written.`
+    };
+  }
+  return { about: rawInput.trim(), notice: null };
 }
 function load(path, source) {
   let document2;
@@ -33220,7 +33256,8 @@ function readLabels(path, raw) {
       not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
-      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with)
+      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
     });
   }
   return labels;
@@ -33249,6 +33286,40 @@ function readLanguages(path, raw) {
     return entry.trim();
   });
   return parseLanguages(entries);
+}
+function readPivot(path, raw) {
+  if (raw === void 0) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
+    );
+  }
+  return raw.trim();
+}
+function readMemory(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const recall = fields.recall;
+  if (recall === void 0 || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
+    );
+  }
+  return { recall };
+}
+function readAbout(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33317,6 +33388,15 @@ function strings(at, key, raw) {
 function nullable(value) {
   return value.length === 0 ? null : value;
 }
+function confidenceField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
+    );
+  }
+  return raw;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -33355,7 +33435,7 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
-function enforceLabels(warrant, proposed, onThread) {
+function enforceLabels(warrant, proposed, onThread, confidence, floor) {
   const applied = [];
   const refused = [];
   const seen = /* @__PURE__ */ new Set();
@@ -33366,6 +33446,14 @@ function enforceLabels(warrant, proposed, onThread) {
     const entry = warrant.labelNamed(name);
     if (entry === void 0) {
       refused.push({ what: name, why: `\`${warrant.path}\` does not name it` });
+      continue;
+    }
+    const labelFloor = entry.confidence ?? floor;
+    if (confidence < labelFloor) {
+      refused.push({
+        what: name,
+        why: entry.confidence === null ? `confidence ${confidence.toFixed(2)} is under the floor of ${labelFloor.toFixed(2)}` : `confidence ${confidence.toFixed(2)} is under \`${name}\`'s own floor of ${labelFloor.toFixed(2)}`
+      });
       continue;
     }
     if (already.has(name)) {
@@ -33769,6 +33857,7 @@ function parseCorrection(line) {
   const decided = strings2(record.decided);
   if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
   return {
+    repo: typeof record.repo === "string" ? record.repo : "",
     thread,
     at: typeof record.at === "string" ? record.at : "",
     title: typeof record.title === "string" ? record.title : "",
@@ -33778,14 +33867,14 @@ function parseCorrection(line) {
     decided,
     by: typeof record.by === "string" ? record.by : "",
     note: typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
-    pivot: readPivot(record.pivot)
+    pivot: readPivot2(record.pivot)
   };
 }
 function strings2(raw) {
   if (!Array.isArray(raw)) return null;
   return raw.every((entry) => typeof entry === "string") ? raw : null;
 }
-function readPivot(raw) {
+function readPivot2(raw) {
   if (raw === null || raw === void 0 || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
@@ -33797,6 +33886,7 @@ function readPivot(raw) {
 }
 function formatCorrection(correction) {
   return JSON.stringify({
+    repo: correction.repo,
     thread: correction.thread,
     at: correction.at,
     title: correction.title,
@@ -34331,9 +34421,9 @@ function summarizeSweep(run2) {
   const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
   const rendered = table(["Thread", "Outcome"], rows);
   const parts = [
-    "## Reeve \xB7 triage \u2014 sweep",
+    `## Reeve \xB7 triage \u2014 sweep${run2.recording ? " (bulk migration)" : ""}`,
     "",
-    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (already labelled), ${String(run2.remaining)} remaining.`,
+    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (${run2.recording ? "no taxonomy label to import" : "already labelled"}), ${String(run2.remaining)} remaining.`,
     "",
     rendered.length === 0 ? "Nothing was processed this run." : rendered
   ];
@@ -34488,6 +34578,15 @@ function differs(correction) {
 var DEFAULT_CAPABILITIES = ["label"];
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
+var SWEEP_STATES = ["open", "closed", "all"];
+function parseSweepState(raw) {
+  const value = raw.trim().toLowerCase();
+  const match = SWEEP_STATES.find((state) => state === value);
+  if (match === void 0) {
+    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
+  }
+  return match;
+}
 function readSettings() {
   const shared = readShared();
   const cheap = parseModels(getInput("screen-models"));
@@ -34501,12 +34600,20 @@ function readSettings() {
     corrections: getInput("corrections", { required: true }),
     about: getInput("about"),
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars"))
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
+    sweepState: parseSweepState(getInput("sweep-state"))
   };
 }
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+  return {
+    results: [],
+    skipped: 0,
+    starvedRun: false,
+    candidates: 0,
+    ungranted: null,
+    recording: false
+  };
 }
 async function runSweep(acc, api, authority2, settings, stages, weather) {
   if (authority2.warrant.unnamed("triage")) {
@@ -34519,12 +34626,24 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       (await listRepositoryLabels(api, context2.repo)).map((label) => label.name)
     );
   }
-  const listed = await listOpenThreads(api, context2.repo, settings.since);
+  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  const recording = permitted.includes("record");
+  acc.recording = recording;
+  const listed = await listOpenThreads(api, context2.repo, settings.since, settings.sweepState);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
   for (const thread of candidates) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (alreadyTaxonomized(authority2.warrant, thread.labels)) {
+    if (recording) {
+      const decidable = thread.labels.some(
+        (name) => authority2.warrant.labelNamed(name) !== void 0
+      );
+      if (!decidable) {
+        acc.skipped += 1;
+        continue;
+      }
+    } else if (alreadyTaxonomized(authority2.warrant, thread.labels)) {
       acc.skipped += 1;
       continue;
     }
@@ -34543,10 +34662,27 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       // inspected, only `respond`'s bot-author guard reads `author` at all.
       author: { login: "", isBot: false }
     };
-    const outcome = await decide(authority2, standing, settings, stages, weather);
-    const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+    if (recording) {
+      const outcome = await recordCorrection(
+        api,
+        at,
+        standing,
+        authority2,
+        settings,
+        stages,
+        weather,
+        "sweep"
+      );
+      acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+    } else {
+      const outcome = await decide(authority2, standing, settings, stages, weather);
+      const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
+      acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+    }
   }
+}
+function describeRecordOutcome(outcome) {
+  return outcome.decided.length > 0 ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}` : "recorded with no taxonomy labels";
 }
 function remainingOf(acc) {
   return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
@@ -34586,7 +34722,13 @@ async function run() {
     const denied = authority2.warrant.unnamed("triage");
     const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
     if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
-    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
+    const about = resolveAbout(authority2.warrant, base.about);
+    if (about.notice !== null) notice(about.notice);
+    settings = {
+      ...base,
+      languages: resolution === null ? [] : resolution.languages,
+      about: about.about
+    };
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority2, settings, stages, weather);
@@ -34625,7 +34767,8 @@ async function run() {
             authority2,
             settings,
             stages,
-            weather
+            weather,
+            senderLogin()
           );
         } else {
           outcome = await decide(authority2, standing, settings, stages, weather);
@@ -34747,7 +34890,7 @@ async function decide(authority2, standing, settings, stages, weather) {
   const memory = createMemory(store.corrections);
   const queries = [{ text: `${standing.title}
 ${body}`, against: "own" }];
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   const threadLanguage = detection.language;
   const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
   if (worthBridging) {
@@ -34777,7 +34920,7 @@ ${pivot.draft.body}`,
       );
     }
   }
-  const recalled = memory.recallAcrossQueries(queries, RECALLED);
+  const recalled = memory.recallAcrossQueries(queries, warrant.memory?.recall ?? RECALLED);
   const pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
     (correction) => correction.language !== null && correction.language !== threadLanguage.code
   ).length;
@@ -34817,15 +34960,13 @@ ${pivot.draft.body}`,
     excludedLabels: authority2.excludedLabels,
     ungranted: null
   };
-  if (verdict2.confidence < settings.confidence) {
-    if (verdict2.labels.length > 0) {
-      info(
-        `Confidence ${verdict2.confidence.toFixed(2)} is under the floor of ${settings.confidence.toFixed(2)} \u2014 reported, not applied.`
-      );
-    }
-    return { ...decided, applied: [], refused: [] };
-  }
-  const decision = enforceLabels(warrant, verdict2.labels, standing.labels);
+  const decision = enforceLabels(
+    warrant,
+    verdict2.labels,
+    standing.labels,
+    verdict2.confidence,
+    settings.confidence
+  );
   for (const refusal of decision.refused) {
     info(`\`${refusal.what}\` was not applied \u2014 ${refusal.why}.`);
   }
@@ -34853,7 +34994,7 @@ function senderLogin() {
   const payload = context2.payload;
   return payload.sender?.login ?? "";
 }
-async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather) {
+async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather, by) {
   const warrant = authority2.warrant;
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
@@ -34869,7 +35010,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
   );
   const code = detection.language?.code ?? null;
   const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== void 0);
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   let pivot = null;
   let pivotNote = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
@@ -34899,6 +35040,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     }
   }
   const correction = {
+    repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     at: (/* @__PURE__ */ new Date()).toISOString(),
     title: standing.title,
@@ -34906,7 +35048,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     language: code,
     proposed: [],
     decided: decidedLabels,
-    by: senderLogin(),
+    by,
     note: null,
     pivot
   };
@@ -34960,7 +35102,7 @@ async function attemptWrite(contentsApi, at, path, correction) {
     const index = lines.findIndex((line) => {
       if (line.trim().length === 0) return false;
       const existing2 = parseCorrection(line);
-      return existing2 !== null && existing2.thread === correction.thread;
+      return existing2 !== null && existing2.thread === correction.thread && existing2.repo === correction.repo;
     });
     if (index !== -1) {
       lines[index] = formatCorrection(correction);
@@ -35115,7 +35257,7 @@ function reportSweep(bulk, rosterStarved) {
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
-  setOutput("recorded", "false");
+  setOutput("recorded", String(bulk.recording));
 }
 function reportRecordRun(outcome, rosterStarved) {
   setOutput("labels", JSON.stringify([]));
@@ -35181,6 +35323,7 @@ function sweepPage(settings, bulk, spent) {
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
     ungranted: bulk.ungranted,
+    recording: bulk.recording,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames

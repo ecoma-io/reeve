@@ -124,7 +124,7 @@ inputs:
       `record` needs naming here as well as in the file: a labelled or
       unlabelled event only records when both halves grant it, and with the
       default of `label` alone a labelled event re-triages instead — see
-`docs/reference/duties/triage.md`.
+      `docs/reference/duties/triage.md`.
 
       `record` composes with `sweep` too, and means something different
       there: a backlog walk that already carries `record` in both halves

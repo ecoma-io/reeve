@@ -476,9 +476,7 @@ describe("listOpenThreads", () => {
 
     await listOpenThreads(api, where, null, "closed");
 
-    expect(listForRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ state: "closed" }),
-    );
+    expect(listForRepo).toHaveBeenCalledWith(expect.objectContaining({ state: "closed" }));
   });
 
   it("reads a thread's number, text and labels off the listing", async () => {
