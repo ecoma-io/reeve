@@ -35184,7 +35184,8 @@ async function writeCorrection(contentsApi, at, path, correction) {
 async function attemptWrite(contentsApi, at, path, correction) {
   const files = await listCorrectionFiles(contentsApi, at, path);
   const unreadable = [];
-  const shards = [];
+  let provenShared = false;
+  let legacyCandidate = null;
   for (const file of files) {
     let read2;
     try {
@@ -35198,35 +35199,48 @@ async function attemptWrite(contentsApi, at, path, correction) {
       continue;
     }
     if (read2 === null) continue;
-    shards.push({ path: file.path, lines: read2.text.split("\n"), sha: read2.sha });
-  }
-  const singleRepoStore = unreadable.length === 0 && shards.every(
-    (shard2) => shard2.lines.every((line) => {
-      if (line.trim().length === 0) return true;
+    const lines = read2.text.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (line.trim().length === 0) continue;
       const existing2 = parseCorrection(line);
-      return existing2 === null || existing2.repo === "" || existing2.repo === correction.repo;
-    })
-  );
-  for (const shard2 of shards) {
-    const index = shard2.lines.findIndex((line) => {
-      if (line.trim().length === 0) return false;
-      const existing2 = parseCorrection(line);
-      return existing2 !== null && existing2.thread === correction.thread && (existing2.repo === correction.repo || singleRepoStore && existing2.repo === "");
-    });
-    if (index !== -1) {
-      const lines = [...shard2.lines];
-      lines[index] = formatCorrection(correction);
-      await writeContentsFile(
-        contentsApi,
-        at,
-        shard2.path,
-        `${lines.join("\n").replace(/\n*$/, "")}
+      if (existing2 === null) {
+        provenShared = true;
+        continue;
+      }
+      if (existing2.thread === correction.thread && existing2.repo === correction.repo) {
+        const updated = [...lines];
+        updated[index] = formatCorrection(correction);
+        await writeContentsFile(
+          contentsApi,
+          at,
+          file.path,
+          `${updated.join("\n").replace(/\n*$/, "")}
 `,
-        commitMessage(correction),
-        shard2.sha
-      );
-      return;
+          commitMessage(correction),
+          read2.sha
+        );
+        return;
+      }
+      if (existing2.repo !== "" && existing2.repo !== correction.repo) provenShared = true;
+      if (existing2.repo === "" && existing2.thread === correction.thread && legacyCandidate === null) {
+        legacyCandidate = { path: file.path, lines, sha: read2.sha, index };
+      }
     }
+  }
+  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
+    const lines = [...legacyCandidate.lines];
+    lines[legacyCandidate.index] = formatCorrection(correction);
+    await writeContentsFile(
+      contentsApi,
+      at,
+      legacyCandidate.path,
+      `${lines.join("\n").replace(/\n*$/, "")}
+`,
+      commitMessage(correction),
+      legacyCandidate.sha
+    );
+    return;
   }
   if (unreadable.length > 0) {
     throw new Error(

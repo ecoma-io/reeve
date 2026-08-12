@@ -1465,6 +1465,62 @@ describe("record", () => {
     },
   );
 
+  it(
+    "leaves a legacy line alone when the store also holds a line it cannot parse — " +
+      "garbage is not proof the store is single-repository",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      // The malformed line could be anything — including the mangled remains
+      // of another repository's entry, repo field and all. A store carrying
+      // one cannot prove it has only ever seen today's repo, so the legacy
+      // line for #42 is not widened as today's own; it stands, and the write
+      // appends with `correction.repo` explicit, same as any shared store.
+      const legacy = JSON.stringify({
+        repo: "",
+        thread: 42,
+        at: "2026-07-01T00:00:00Z",
+        title: "Old title",
+        excerpt: "old excerpt",
+        language: "en",
+        proposed: [],
+        decided: ["docs"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      const malformed = '{"repo": "other-org/other-repo", "thread": 42, ...truncated';
+      stub.contentsFiles.set(shardPath(), {
+        content: `${legacy}\n${malformed}\n`,
+        sha: "sha-seed",
+      });
+      stub.labels = ["docs"];
+      const event = await labelEvent();
+
+      const run = await runAction(
+        stub,
+        { apply: "label, record", corrections: CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).toBe(0);
+      const shard = stub.contentsFiles.get(shardPath());
+      const rawLines = shard?.content.trim().split("\n") ?? [];
+      // The malformed line survives byte for byte, the legacy line stands
+      // untouched, and today's write is a third line — appended, not merged.
+      expect(rawLines).toHaveLength(3);
+      expect(rawLines).toContain(malformed);
+      const parsed = rawLines
+        .filter((line) => line !== malformed)
+        .map((line) => JSON.parse(line) as { repo: string; thread: number; title: string });
+      expect(parsed.find((line) => line.repo === "" && line.thread === 42)?.title).toBe(
+        "Old title",
+      );
+      const written = parsed.find((line) => line.repo === "ecoma-io/reeve" && line.thread === 42);
+      expect(written).toBeDefined();
+      expect(written?.title).not.toBe("Old title");
+    },
+  );
+
   it("replaces the prior entry in a healthy shard past an oversized sibling, warning rather than failing", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({

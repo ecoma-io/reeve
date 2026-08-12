@@ -1362,11 +1362,49 @@ async function attemptWrite(
   const files = await listCorrectionFiles(contentsApi, at, path);
   const unreadable: string[] = [];
 
-  // Every shard is read up front, rather than stopping at the first match:
-  // the loose `repo === ""` rule below needs to know whether the *whole*
-  // store holds more than one repository's history, and a shard this run
-  // has not looked at yet could always be the one that says so.
-  const shards: { readonly path: string; readonly lines: string[]; readonly sha: string }[] = [];
+  // The walk stops the moment a line carrying this exact (repo, thread) pair
+  // turns up: nothing later in the store can change what an explicit match
+  // means, so the shards past it are never read at all — the common case, a
+  // repeat correction on a thread already recorded, costs the reads it takes
+  // to find the line and not one more. Only a write that finds no explicit
+  // match anywhere has, by then, necessarily read the whole store — which is
+  // exactly the knowledge the loose rule below needs, gathered as a
+  // side-effect of the search rather than as an extra pass. And no shard is
+  // retained past its own visit except the single candidate line the loose
+  // rule might still rewrite, so a store of many large shards is never held
+  // in memory whole.
+  //
+  // The loose rule: `repo` as well as `thread` — the dedup key widened to
+  // the pair once a store could hold more than one repository's history. A
+  // line written before that field existed parses as `repo: ""`, and in a
+  // store that has only ever recorded for today's repo, a stored empty repo
+  // can only mean "written before this field existed" — read as this thread
+  // number's own legacy entry, and rewritten in place with today's repo on
+  // it. That is what lets a single-repo store self-migrate: the first write
+  // a thread sees after the field shipped leaves nothing legacy to match
+  // loosely the next time.
+  //
+  // A store that also carries a *different* explicit repo — the whole reason
+  // `repo` exists — cannot make that same assumption: an empty-repo line for
+  // this thread number could belong to that other repository's own history
+  // from before it, too, recorded when both repositories shared this store
+  // and neither had `repo` yet. Matching it loosely there would let today's
+  // repo silently steal another repository's legacy entry whenever their
+  // thread numbers happened to collide. A shard this run could not read
+  // leaves that unknowable the same way a foreign repo would, and so does a
+  // line this run could not parse — garbage proves nothing about whose
+  // history it was, so it counts against the loose match rather than for
+  // it. In every such case the legacy line is left alone and a fresh line
+  // is appended below with `correction.repo` explicit — the widened key's
+  // ordinary semantics, and nothing lost.
+  let provenShared = false;
+  let legacyCandidate: {
+    readonly path: string;
+    readonly lines: string[];
+    readonly sha: string;
+    readonly index: number;
+  } | null = null;
+
   for (const file of files) {
     let read: { readonly text: string; readonly sha: string } | null;
     try {
@@ -1382,65 +1420,52 @@ async function attemptWrite(
       continue;
     }
     if (read === null) continue;
-    shards.push({ path: file.path, lines: read.text.split("\n"), sha: read.sha });
+    const lines = read.text.split("\n");
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (line.trim().length === 0) continue;
+      const existing = parseCorrection(line);
+      if (existing === null) {
+        provenShared = true;
+        continue;
+      }
+      if (existing.thread === correction.thread && existing.repo === correction.repo) {
+        const updated = [...lines];
+        updated[index] = formatCorrection(correction);
+        await writeContentsFile(
+          contentsApi,
+          at,
+          file.path,
+          `${updated.join("\n").replace(/\n*$/, "")}\n`,
+          commitMessage(correction),
+          read.sha,
+        );
+        return;
+      }
+      if (existing.repo !== "" && existing.repo !== correction.repo) provenShared = true;
+      if (
+        existing.repo === "" &&
+        existing.thread === correction.thread &&
+        legacyCandidate === null
+      ) {
+        legacyCandidate = { path: file.path, lines, sha: read.sha, index };
+      }
+    }
   }
 
-  // `repo` as well as `thread` — the dedup key widened to the pair once a
-  // store could hold more than one repository's history. A line written
-  // before that field existed parses as `repo: ""`, and in a store that has
-  // only ever recorded for today's repo, a stored empty repo can only mean
-  // "written before this field existed" — read as this thread number's own
-  // legacy entry, and matched loosely on today's repo. That is what lets a
-  // single-repo store self-migrate: the first write a thread sees after the
-  // field shipped rewrites the line in place, this time with
-  // `correction.repo` on it, and there is nothing legacy left to match
-  // loosely the next time.
-  //
-  // A store that also carries a *different* explicit repo — the whole reason
-  // `repo` exists — cannot make that same assumption: an empty-repo line for
-  // this thread number could belong to that other repository's own history
-  // from before it, too, recorded when both repositories shared this store
-  // and neither had `repo` yet. Matching it loosely there would let today's
-  // repo silently steal another repository's legacy entry whenever their
-  // thread numbers happened to collide. A shard this run could not read
-  // leaves that unknowable the same way a foreign repo would, so it counts
-  // against the loose match too. In both cases the legacy line is left
-  // alone and a fresh line is appended below with `correction.repo` explicit
-  // — the widened key's ordinary semantics, and nothing lost.
-  const singleRepoStore =
-    unreadable.length === 0 &&
-    shards.every((shard) =>
-      shard.lines.every((line) => {
-        if (line.trim().length === 0) return true;
-        const existing = parseCorrection(line);
-        return existing === null || existing.repo === "" || existing.repo === correction.repo;
-      }),
+  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
+    const lines = [...legacyCandidate.lines];
+    lines[legacyCandidate.index] = formatCorrection(correction);
+    await writeContentsFile(
+      contentsApi,
+      at,
+      legacyCandidate.path,
+      `${lines.join("\n").replace(/\n*$/, "")}\n`,
+      commitMessage(correction),
+      legacyCandidate.sha,
     );
-
-  for (const shard of shards) {
-    const index = shard.lines.findIndex((line) => {
-      if (line.trim().length === 0) return false;
-      const existing = parseCorrection(line);
-      return (
-        existing !== null &&
-        existing.thread === correction.thread &&
-        (existing.repo === correction.repo || (singleRepoStore && existing.repo === ""))
-      );
-    });
-
-    if (index !== -1) {
-      const lines = [...shard.lines];
-      lines[index] = formatCorrection(correction);
-      await writeContentsFile(
-        contentsApi,
-        at,
-        shard.path,
-        `${lines.join("\n").replace(/\n*$/, "")}\n`,
-        commitMessage(correction),
-        shard.sha,
-      );
-      return;
-    }
+    return;
   }
 
   if (unreadable.length > 0) {
