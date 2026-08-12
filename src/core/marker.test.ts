@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  authorHalf,
-  closeMarkerFor,
-  fingerprint,
-  isReeveProposalPr,
-  markerFor,
-} from "./marker.js";
+import { authorHalf, closeMarkerFor, fingerprint, isReeveProposalPr, markerFor } from "./marker.js";
 
 // Nothing is mocked: there is nothing project-internal here. The digest comes
 // from `node:crypto`, which is the platform rather than a collaborator.

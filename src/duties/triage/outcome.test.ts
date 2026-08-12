@@ -26,6 +26,10 @@ function standingOf(over: Partial<Standing> = {}): Standing {
     labels: [],
     closed: false,
     author: { login: "reporter", isBot: false },
+    milestone: null,
+    assignees: [],
+    createdAt: new Date(0),
+    isPullRequest: false,
     ...over,
   };
 }
@@ -64,6 +68,12 @@ function trackerOf(
           throw new Error("not used by outcome.ts");
         },
         listForRepo: () => {
+          throw new Error("not used by outcome.ts");
+        },
+        removeLabel: () => {
+          throw new Error("not used by outcome.ts");
+        },
+        createLabel: () => {
           throw new Error("not used by outcome.ts");
         },
         listEvents: (params: { page?: number }) =>
