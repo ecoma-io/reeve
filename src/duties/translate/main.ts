@@ -97,6 +97,12 @@ import {
 import { createMeter, type Meter } from "../../core/meter.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
+  newAccumulator,
+  remainingOf,
+  sweepThreads,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
   dutyLanguages,
   openAuthority,
   type Authority,
@@ -111,6 +117,9 @@ import { summarize, summarizeSweep, type Run, type SweptThread } from "./summary
 import { processThread, type Report, type ThreadResult } from "./text.js";
 import { marker, type Attribution } from "./publish.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
+
+/** This sweep's progress: the shared accumulator, holding this duty's own rows. */
+type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * `languages`'s own default in `action.yml`, repeated here for the same
@@ -262,32 +271,6 @@ function skippedResult(number: number, reason: string): ThreadResult {
 const RECURSION_GUARD_REASON =
   "This is Reeve's own proposal pull request — every duty skips it, translate included.";
 
-/**
- * A sweep's progress, mutated in place rather than assembled and returned.
- *
- * The reason is the same as triage's: nothing here throws an
- * `AuthenticationFailure` past this point that a `finally` block still needs
- * to report from, but `runSweep` can stop early on capacity starvation, and
- * `run`'s `finally` reports whatever was built up to that point either way.
- */
-interface SweepAccumulator {
-  readonly results: SweptThread[];
-  skipped: number;
-  starvedRun: boolean;
-  candidates: number;
-  /** Set once, before the listing, when the warrant never named this duty at all. */
-  ungranted: string | null;
-}
-
-function newAccumulator(): SweepAccumulator {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-
-/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
-function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
-
 /** One sweep row's outcome, in the fewest words that are true. */
 function describeOutcome(result: ThreadResult): string {
   if (result.translated.note !== null) return result.translated.note;
@@ -339,35 +322,20 @@ async function runSweep(
   }
 
   const listed = await listOpenThreads(api, context.repo, settings.since);
-  acc.candidates = listed.length;
 
-  for (const thread of listed) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-
-    // The idempotent skip: a body already carrying this duty's marker has been
-    // translated at least once before, whatever the exact language set was
-    // that run — the same "already decided about" reading triage's own
-    // marker-carrying skip gives it, and free for the same reason: nothing
-    // here calls the tracker or a model, only `marker.split` on text the
-    // listing already fetched.
-    if (marker.split(thread.body).fingerprint !== null) {
-      acc.skipped += 1;
-      continue;
-    }
-
-    // Recursion guard: Reeve never translates its own proposal pull request
-    // — the listing already carries `isPullRequest` and `body`, so this
-    // costs nothing beyond the marker check just above it.
-    if (isReeveProposalPr(thread)) {
-      acc.skipped += 1;
-      continue;
-    }
-
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-
+  await sweepThreads(acc, listed, settings, weather, {
+    alreadyDone: (thread) =>
+      // The idempotent skip: a body already carrying this duty's marker has
+      // been translated at least once before, whatever the exact language set
+      // was that run — the same "already decided about" reading triage's own
+      // marker-carrying skip gives it, and free for the same reason: nothing
+      // here calls the tracker or a model, only `marker.split` on text the
+      // listing already fetched.
+      //
+      // Recursion guard on the same line: Reeve never translates its own
+      // proposal pull request, and the listing already carries `isPullRequest`
+      // and `body`, so this costs nothing beyond the marker check.
+      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
     // thread it cannot even begin — leaving it for `remaining` is cheaper
@@ -376,21 +344,22 @@ async function runSweep(
     // answer, including when the very last candidate is the one that denies
     // work inside its own per-language or per-reply checkpoint with no
     // further iteration left to notice — `budget` already has it by then.
-    if (budgetExhausted(settings, meter, budget)) break;
-
-    const at = { ...context.repo, number: thread.number };
-    const result = await processThread(
-      api,
-      at,
-      thread.body,
-      settings,
-      stages,
-      weather,
-      meter,
-      budget,
-    );
-    acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
-  }
+    exhausted: () => budgetExhausted(settings, meter, budget),
+    processOne: async (thread) => {
+      const at = { ...context.repo, number: thread.number };
+      const result = await processThread(
+        api,
+        at,
+        thread.body,
+        settings,
+        stages,
+        weather,
+        meter,
+        budget,
+      );
+      return { number: thread.number, outcome: describeOutcome(result) };
+    },
+  });
 }
 
 export async function run(): Promise<void> {
@@ -473,7 +442,7 @@ export async function run(): Promise<void> {
     };
 
     if (settings.sweep) {
-      bulk = newAccumulator();
+      bulk = newAccumulator<SweptThread>();
       await runSweep(bulk, api, authority, settings, stages, weather, meter, budget);
     } else {
       const number = settings.number;

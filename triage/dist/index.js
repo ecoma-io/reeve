@@ -35095,6 +35095,46 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function standingFromListing(thread) {
+  return {
+    title: thread.title,
+    body: thread.body,
+    labels: thread.labels,
+    closed: false,
+    author: { login: "", isBot: false },
+    milestone: null,
+    assignees: [],
+    createdAt: thread.createdAt,
+    isPullRequest: thread.isPullRequest
+  };
+}
+async function sweepThreads(acc, candidates, settings, weather, hooks) {
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (hooks.alreadyDone?.(thread) === true) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    if (hooks.exhausted?.() === true) break;
+    const row = await hooks.processOne(thread);
+    if (row === null) acc.skipped += 1;
+    else acc.results.push(row);
+    hooks.afterEach?.();
+  }
+}
+
 // src/duties/triage/inputs.ts
 var SWEEP_STATES = ["open", "closed", "all"];
 function parseSweepState(raw) {
@@ -35748,9 +35788,6 @@ function summarizeSweep(run2) {
 
 // src/duties/triage/outputs.ts
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
 function writeOutputs(values) {
   setOutput("labels", values.labels);
   setOutput("proposed", values.proposed);
@@ -36667,15 +36704,8 @@ var DEFAULT_CAPABILITIES = ["label"];
 
 // src/duties/triage/main.ts
 var RECALLED = 4;
-function newAccumulator() {
-  return {
-    results: [],
-    skipped: 0,
-    starvedRun: false,
-    candidates: 0,
-    ungranted: null,
-    recording: false
-  };
+function newAccumulator2() {
+  return { ...newAccumulator(), recording: false };
 }
 async function runSweep(acc, api, authority2, settings, stages, weather) {
   if (authority2.warrant.unnamed("triage")) {
@@ -36701,61 +36731,38 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   }
   const listed = await listOpenThreads(api, context2.repo, settings.since, settings.sweepState);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
-  acc.candidates = candidates.length;
   const names = taxonomyNames(settings);
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (recording) {
-      const decidable = thread.labels.some((name) => names.has(name));
-      if (!decidable) {
-        acc.skipped += 1;
-        continue;
+  await sweepThreads(acc, candidates, settings, weather, {
+    // The idempotent skip: free, and counted separately from `processed` so a
+    // rerun over a mostly-triaged backlog reports honestly rather than looking
+    // like it did nothing. Bulk migration's own is the mirror image of it — a
+    // thread the taxonomy never touched has no maintainer decision on it to
+    // import, which is the only thing that sweep is for.
+    alreadyDone: (thread) => {
+      const decided = thread.labels.some((name) => names.has(name));
+      return recording ? !decided : decided;
+    },
+    processOne: async (thread) => {
+      const at = { ...context2.repo, number: thread.number };
+      const standing = standingFromListing(thread);
+      if (recording) {
+        const outcome2 = await recordCorrection(
+          api,
+          at,
+          standing,
+          authority2,
+          settings,
+          stages,
+          weather,
+          "sweep",
+          // A sweep imports whatever labels stand on a thread; there is no
+          // single labelling event to read a before/after delta from, the
+          // same reason `by === "sweep"` skips the S1 enrichment entirely.
+          null
+        );
+        if (outcome2.machineOnly || outcome2.unattributable) return null;
+        return { number: thread.number, outcome: describeRecordOutcome(outcome2) };
       }
-    } else if (thread.labels.some((name) => names.has(name))) {
-      acc.skipped += 1;
-      continue;
-    }
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-    const at = { ...context2.repo, number: thread.number };
-    const standing = {
-      title: thread.title,
-      body: thread.body,
-      labels: thread.labels,
-      closed: false,
-      // A sweep's listing endpoint does not carry the opener's account type,
-      // and triage has no guard that reads it — this placeholder is never
-      // inspected, only `respond`'s bot-author guard reads `author` at all.
-      author: { login: "", isBot: false },
-      // Nor milestone/assignee state — triage never reads either.
-      milestone: null,
-      assignees: [],
-      createdAt: thread.createdAt,
-      isPullRequest: thread.isPullRequest
-    };
-    if (recording) {
-      const outcome = await recordCorrection(
-        api,
-        at,
-        standing,
-        authority2,
-        settings,
-        stages,
-        weather,
-        "sweep",
-        // A sweep imports whatever labels stand on a thread; there is no
-        // single labelling event to read a before/after delta from, the
-        // same reason `by === "sweep"` skips the S1 enrichment entirely.
-        null
-      );
-      if (outcome.machineOnly || outcome.unattributable) {
-        acc.skipped += 1;
-      } else {
-        acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
-      }
-    } else {
       const outcome = await decide(authority2, standing, settings, stages, weather);
       const done = settings.dryRun ? NOTHING_DONE : await act(
         createEffects(api, at),
@@ -36765,9 +36772,9 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
         at,
         settings.corrections
       );
-      acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+      return { number: thread.number, outcome: describeOutcome(outcome, done) };
     }
-  }
+  });
 }
 var EVIDENCE_LISTING_MAX_PAGES = 10;
 async function runProposeSweep(api, authority2, settings) {
@@ -36875,7 +36882,7 @@ async function run() {
       taxonomy
     };
     if (settings.sweep) {
-      bulk = newAccumulator();
+      bulk = newAccumulator2();
       await runSweep(bulk, api, authority2, settings, stages, weather);
       proposeOutcome = await runProposeSweep(api, authority2, settings);
     } else {

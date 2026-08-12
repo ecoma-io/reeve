@@ -34237,6 +34237,46 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function standingFromListing(thread) {
+  return {
+    title: thread.title,
+    body: thread.body,
+    labels: thread.labels,
+    closed: false,
+    author: { login: "", isBot: false },
+    milestone: null,
+    assignees: [],
+    createdAt: thread.createdAt,
+    isPullRequest: thread.isPullRequest
+  };
+}
+async function sweepThreads(acc, candidates, settings, weather, hooks) {
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (hooks.alreadyDone?.(thread) === true) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    if (hooks.exhausted?.() === true) break;
+    const row = await hooks.processOne(thread);
+    if (row === null) acc.skipped += 1;
+    else acc.results.push(row);
+    hooks.afterEach?.();
+  }
+}
+
 // src/core/memory.ts
 var K1 = 1.2;
 var B = 0.75;
@@ -34613,9 +34653,6 @@ function summarizeSweep(run2) {
 }
 
 // src/duties/duplicate/outputs.ts
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length, 0);
-}
 function report(outcome, done, rosterStarved) {
   setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
   setOutput("score", outcome.confidence.toFixed(2));
@@ -34950,9 +34987,6 @@ function readAttribution() {
   if (raw === "none" || raw === "model" || raw === "detail") return raw;
   throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
-function newAccumulator() {
-  return { results: [], starvedRun: false, candidates: 0, ungranted: null };
-}
 async function runSweep(acc, api, authority, settings, stages, weather) {
   if (authority.warrant.unnamed("duplicate")) {
     acc.ungranted = notGranted(authority.warrant).ungranted;
@@ -34960,7 +34994,6 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
   }
   const listed = await listOpenThreads(api, context2.repo, settings.since);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
-  acc.candidates = candidates.length;
   const corpus = await listCorpus(
     api,
     context2.repo,
@@ -34970,45 +35003,35 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
     settings.maxBodyChars
   );
   const languageCache = /* @__PURE__ */ new Map();
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
+  await sweepThreads(acc, candidates, settings, weather, {
+    processOne: async (thread) => {
+      const at = { ...context2.repo, number: thread.number };
+      const outcome = await decide(
+        api,
+        authority,
+        thread.number,
+        standingFromListing(thread),
+        settings,
+        stages,
+        weather,
+        corpus,
+        languageCache
+      );
+      const acted = await act(api, at, outcome, settings.dryRun);
+      return { number: thread.number, outcome: describeOutcome(outcome, acted.done) };
+    },
+    // The walk's own check only catches the roster running dry *before* a
+    // thread is decided. `decide` and `act` are exactly where a model actually
+    // gets asked anything, so the roster can just as easily run out grounding
+    // the last thread this walk was ever going to reach — the one iteration
+    // after which the loop simply ends rather than looping back to ask again.
+    // Checked here too, every iteration, so that case still marks `starvedRun`
+    // rather than leaving the job summary silent about a starvation the
+    // `starved` output already reported.
+    afterEach: () => {
+      if (starved(settings.models, weather)) acc.starvedRun = true;
     }
-    const at = { ...context2.repo, number: thread.number };
-    const standing = {
-      title: thread.title,
-      body: thread.body,
-      labels: thread.labels,
-      closed: false,
-      // The sweep listing this candidate came from does not carry who opened
-      // it — only `readStanding`'s single-thread fetch does — and nothing in
-      // `duplicate`'s own decision reads it: ranking a candidate against the
-      // thread in hand never turns on who either one's author is.
-      author: { login: "", isBot: false },
-      // Nor does it carry milestone/assignee state — `duplicate` never reads
-      // either, so both are left at their honest "unknown" value.
-      milestone: null,
-      assignees: [],
-      createdAt: thread.createdAt,
-      isPullRequest: thread.isPullRequest
-    };
-    const outcome = await decide(
-      api,
-      authority,
-      thread.number,
-      standing,
-      settings,
-      stages,
-      weather,
-      corpus,
-      languageCache
-    );
-    const acted = await act(api, at, outcome, settings.dryRun);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
-    if (starved(settings.models, weather)) acc.starvedRun = true;
-  }
+  });
 }
 function describeOutcome(outcome, done) {
   if (outcome.ungranted !== null) return "not granted";

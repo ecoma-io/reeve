@@ -7,14 +7,20 @@
  */
 import * as core from "@actions/core";
 
+import { remainingOf } from "../../core/sweep.js";
+
 import type { Outcome, Settings, SweepAccumulator } from "./main.js";
 import type { Posted } from "./publish.js";
 import { summarize, summarizeSweep, type Done, type Run } from "./summary.js";
 
-/** Candidates the walk did not reach — the limit, or the roster running dry. */
-export function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length, 0);
-}
+/**
+ * Candidates the walk did not reach — the limit, or the roster running dry.
+ *
+ * Re-exported rather than re-implemented: this duty's sweep has no idempotent
+ * skip to subtract (see `runSweep`), so `skipped` is always zero here and the
+ * shared arithmetic is the same arithmetic.
+ */
+export { remainingOf };
 
 /**
  * Every output, written on every single-thread path that reaches an answer —

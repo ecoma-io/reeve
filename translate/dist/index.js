@@ -33311,6 +33311,33 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+async function sweepThreads(acc, candidates, settings, weather, hooks) {
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (hooks.alreadyDone?.(thread) === true) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    if (hooks.exhausted?.() === true) break;
+    const row = await hooks.processOne(thread);
+    if (row === null) acc.skipped += 1;
+    else acc.results.push(row);
+    hooks.afterEach?.();
+  }
+}
+
 // src/duties/translate/budget.ts
 function createBudget() {
   return { denied: false };
@@ -35457,12 +35484,6 @@ function skippedResult(number, reason) {
   };
 }
 var RECURSION_GUARD_REASON = "This is Reeve's own proposal pull request \u2014 every duty skips it, translate included.";
-function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
 function describeOutcome(result) {
   if (result.translated.note !== null) return result.translated.note;
   const parts = [];
@@ -35484,35 +35505,44 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
     return;
   }
   const listed = await listOpenThreads(api, context2.repo, settings.since);
-  acc.candidates = listed.length;
-  for (const thread of listed) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (marker.split(thread.body).fingerprint !== null) {
-      acc.skipped += 1;
-      continue;
+  await sweepThreads(acc, listed, settings, weather, {
+    alreadyDone: (thread) => (
+      // The idempotent skip: a body already carrying this duty's marker has
+      // been translated at least once before, whatever the exact language set
+      // was that run — the same "already decided about" reading triage's own
+      // marker-carrying skip gives it, and free for the same reason: nothing
+      // here calls the tracker or a model, only `marker.split` on text the
+      // listing already fetched.
+      //
+      // Recursion guard on the same line: Reeve never translates its own
+      // proposal pull request, and the listing already carries `isPullRequest`
+      // and `body`, so this costs nothing beyond the marker check.
+      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread)
+    ),
+    // The same self-imposed ceiling `translateText` and `translateReplies`
+    // check within one thread, checked here as well so a sweep never starts a
+    // thread it cannot even begin — leaving it for `remaining` is cheaper
+    // than starting it and stopping mid-language. `budget.denied` is what
+    // `run`'s `finally` reads back; nothing here needs its own copy of the
+    // answer, including when the very last candidate is the one that denies
+    // work inside its own per-language or per-reply checkpoint with no
+    // further iteration left to notice — `budget` already has it by then.
+    exhausted: () => budgetExhausted(settings, meter, budget),
+    processOne: async (thread) => {
+      const at = { ...context2.repo, number: thread.number };
+      const result = await processThread(
+        api,
+        at,
+        thread.body,
+        settings,
+        stages,
+        weather,
+        meter,
+        budget
+      );
+      return { number: thread.number, outcome: describeOutcome(result) };
     }
-    if (isReeveProposalPr(thread)) {
-      acc.skipped += 1;
-      continue;
-    }
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-    if (budgetExhausted(settings, meter, budget)) break;
-    const at = { ...context2.repo, number: thread.number };
-    const result = await processThread(
-      api,
-      at,
-      thread.body,
-      settings,
-      stages,
-      weather,
-      meter,
-      budget
-    );
-    acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
-  }
+  });
 }
 async function run() {
   const meter = createMeter();

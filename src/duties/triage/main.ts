@@ -112,6 +112,12 @@ import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
+  newAccumulator as newCoreAccumulator,
+  standingFromListing,
+  sweepThreads,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
   checkLabelsExist,
   dutyLanguages,
   openAuthority,
@@ -232,12 +238,7 @@ export interface Outcome {
  * only on success cannot do that — an object mutated as the loop goes can,
  * because the caller already holds the same reference.
  */
-export interface SweepAccumulator {
-  readonly results: SweptThread[];
-  skipped: number;
-  starvedRun: boolean;
-  candidates: number;
-  ungranted: string | null;
+export interface SweepAccumulator extends Accumulator<SweptThread> {
   /**
    * Whether `record` was granted and permitted for this sweep — decided once,
    * before the loop, and read back by `reportSweep` after it. `false` is the
@@ -248,14 +249,7 @@ export interface SweepAccumulator {
 }
 
 function newAccumulator(): SweepAccumulator {
-  return {
-    results: [],
-    skipped: 0,
-    starvedRun: false,
-    candidates: 0,
-    ungranted: null,
-    recording: false,
-  };
+  return { ...newCoreAccumulator<SweptThread>(), recording: false };
 }
 
 /**
@@ -321,7 +315,6 @@ async function runSweep(
   // judgement about an issue, and the listing endpoint returns pull requests
   // too, distinguishable only by this field.
   const candidates = listed.filter((thread) => !thread.isPullRequest);
-  acc.candidates = candidates.length;
 
   // `settings.taxonomy`'s own names, not the warrant's whole one: a sweep
   // scoped to one area's `labels` subset only recognises its own area's
@@ -329,74 +322,44 @@ async function runSweep(
   // is not this sweep's business to skip or to import.
   const names = taxonomyNames(settings);
 
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+  await sweepThreads(acc, candidates, settings, weather, {
+    // The idempotent skip: free, and counted separately from `processed` so a
+    // rerun over a mostly-triaged backlog reports honestly rather than looking
+    // like it did nothing. Bulk migration's own is the mirror image of it — a
+    // thread the taxonomy never touched has no maintainer decision on it to
+    // import, which is the only thing that sweep is for.
+    alreadyDone: (thread) => {
+      const decided = thread.labels.some((name) => names.has(name));
+      return recording ? !decided : decided;
+    },
+    processOne: async (thread) => {
+      const at = { ...context.repo, number: thread.number };
+      const standing = standingFromListing(thread);
 
-    if (recording) {
-      // Bulk migration's own idempotent skip: a thread the taxonomy never
-      // touched has no maintainer decision on it to import — nothing this
-      // sweep is for.
-      const decidable = thread.labels.some((name) => names.has(name));
-      if (!decidable) {
-        acc.skipped += 1;
-        continue;
+      if (recording) {
+        const outcome = await recordCorrection(
+          api,
+          at,
+          standing,
+          authority,
+          settings,
+          stages,
+          weather,
+          "sweep",
+          // A sweep imports whatever labels stand on a thread; there is no
+          // single labelling event to read a before/after delta from, the
+          // same reason `by === "sweep"` skips the S1 enrichment entirely.
+          null,
+        );
+        // The self-training guard's own skip — machine-applied labels, or a
+        // label history too long for this run to attribute — counted the same
+        // way the idempotent skip above is, not added to the results table:
+        // there is nothing this thread contributed to the store to show a row
+        // for.
+        if (outcome.machineOnly || outcome.unattributable) return null;
+        return { number: thread.number, outcome: describeRecordOutcome(outcome) };
       }
-    } else if (thread.labels.some((name) => names.has(name))) {
-      // The idempotent skip: free, and counted separately from `processed` so
-      // a rerun over a mostly-triaged backlog reports honestly rather than
-      // looking like it did nothing.
-      acc.skipped += 1;
-      continue;
-    }
 
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-
-    const at = { ...context.repo, number: thread.number };
-    const standing: Standing = {
-      title: thread.title,
-      body: thread.body,
-      labels: thread.labels,
-      closed: false,
-      // A sweep's listing endpoint does not carry the opener's account type,
-      // and triage has no guard that reads it — this placeholder is never
-      // inspected, only `respond`'s bot-author guard reads `author` at all.
-      author: { login: "", isBot: false },
-      // Nor milestone/assignee state — triage never reads either.
-      milestone: null,
-      assignees: [],
-      createdAt: thread.createdAt,
-      isPullRequest: thread.isPullRequest,
-    };
-
-    if (recording) {
-      const outcome = await recordCorrection(
-        api,
-        at,
-        standing,
-        authority,
-        settings,
-        stages,
-        weather,
-        "sweep",
-        // A sweep imports whatever labels stand on a thread; there is no
-        // single labelling event to read a before/after delta from, the
-        // same reason `by === "sweep"` skips the S1 enrichment entirely.
-        null,
-      );
-      // The self-training guard's own skip — machine-applied labels, or a
-      // label history too long for this run to attribute — counted the same
-      // way the idempotent skip above is, not added to the results table:
-      // there is nothing this thread contributed to the store to show a row
-      // for.
-      if (outcome.machineOnly || outcome.unattributable) {
-        acc.skipped += 1;
-      } else {
-        acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
-      }
-    } else {
       const outcome = await decide(authority, standing, settings, stages, weather);
       const done = settings.dryRun
         ? NOTHING_DONE
@@ -408,9 +371,9 @@ async function runSweep(
             at,
             settings.corrections,
           );
-      acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
-    }
-  }
+      return { number: thread.number, outcome: describeOutcome(outcome, done) };
+    },
+  });
 }
 
 /**

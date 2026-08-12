@@ -47,6 +47,11 @@ import { parseLanguages, type Language } from "../../core/languages.js";
 import { isReeveProposalPr, markerFor } from "../../core/marker.js";
 import { writeSummary } from "../../core/summary.js";
 import {
+  newAccumulator,
+  remainingOf,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
   checkLifecycleLabelsExist,
   openAuthority,
   type Authority,
@@ -376,19 +381,18 @@ interface SweptThread {
   readonly done: Done;
 }
 
-interface SweepAccumulator {
-  readonly results: SweptThread[];
-  candidates: number;
-  /** Pre-filtered before a single per-thread read was spent — `threads:` kind mismatch or the recursion guard. Never counts toward `limit`. */
-  skipped: number;
-  ungranted: string | null;
-  /** GitHub's own capacity ran out mid-sweep (429/5xx/timeout) — see D12. Everything in `results` up to that point is real and already reported; the rest of the backlog waits for the next run. */
-  starved: boolean;
-}
-
-function newSweepAccumulator(): SweepAccumulator {
-  return { results: [], candidates: 0, skipped: 0, ungranted: null, starved: false };
-}
+/**
+ * This sweep's progress: the shared accumulator, holding this duty's own rows.
+ *
+ * `starvedRun` means something different here than it does for the three
+ * duties that sweep with a model roster. They run dry when every model is
+ * grounded, which `starved` can be asked about for free before each thread;
+ * lifecycle asks a model nothing at all, so the only capacity that can run out
+ * on it is GitHub's own — a 429, a 5xx, a timeout — which is a fact only a
+ * failed request can report. That is why this duty keeps its own loop rather
+ * than `sweepThreads`: the check it needs is a `catch`, not a predicate.
+ */
+type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * Mutates `acc` in place rather than building and returning a fresh one, so
@@ -456,7 +460,7 @@ async function runSweep(
       acc.results.push({ number: thread.number, outcome, done });
     } catch (error) {
       if (isCapacityError(error)) {
-        acc.starved = true;
+        acc.starvedRun = true;
         break;
       }
       // Auth errors (401/403) are configuration, not weather — D12 says
@@ -471,7 +475,7 @@ export async function run(): Promise<void> {
   let settings: Settings | null = null;
   let single: { readonly number: number; readonly outcome: Outcome; readonly done: Done } | null =
     null;
-  const bulk = newSweepAccumulator();
+  const bulk = newAccumulator<SweptThread>();
   let ranSweep = false;
 
   try {
@@ -558,7 +562,7 @@ export async function run(): Promise<void> {
             settings.dryRun,
             bulk.results,
             bulk.ungranted,
-            bulk.starved,
+            bulk.starvedRun,
           ),
         );
       } else if (single !== null) {
@@ -601,11 +605,8 @@ function report(bulk: SweepAccumulator): void {
     (row) => row.outcome.ungranted !== null || row.outcome.permanentlyExempt !== null,
   ).length;
   core.setOutput("processed", String(bulk.results.length));
-  core.setOutput(
-    "remaining",
-    String(Math.max(bulk.candidates - bulk.results.length - bulk.skipped, 0)),
-  );
-  core.setOutput("starved", String(bulk.starved));
+  core.setOutput("remaining", String(remainingOf(bulk)));
+  core.setOutput("starved", String(bulk.starvedRun));
   core.setOutput("skipped", String(bulk.skipped + evaluatedSkipped));
   core.setOutput("reminded", String(bulk.results.filter((row) => row.done.commented).length));
   core.setOutput(

@@ -111,6 +111,12 @@ import {
 } from "../../core/provider.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
+  newAccumulator,
+  standingFromListing,
+  sweepThreads,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
   dutyLanguages,
   openAuthority,
   resolvePivot,
@@ -250,22 +256,8 @@ export interface Outcome {
   readonly ungranted: string | null;
 }
 
-/**
- * A sweep's progress, mutated in place rather than assembled and returned —
- * the same reason `triage/main.ts`'s accumulator is: an `AuthenticationFailure`
- * thrown partway down the loop still leaves whatever was already processed
- * readable from `run`'s `finally` block.
- */
-export interface SweepAccumulator {
-  readonly results: SweptThread[];
-  starvedRun: boolean;
-  candidates: number;
-  ungranted: string | null;
-}
-
-function newAccumulator(): SweepAccumulator {
-  return { results: [], starvedRun: false, candidates: 0, ungranted: null };
-}
+/** This sweep's progress: the shared accumulator, holding this duty's own rows. */
+export type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * The whole backlog, one thread at a time, through the identical pipeline a
@@ -295,7 +287,6 @@ async function runSweep(
   // request implementing something is not that, the same exclusion the
   // corpus itself makes.
   const candidates = listed.filter((thread) => !thread.isPullRequest);
-  acc.candidates = candidates.length;
 
   // Listed once for the whole walk, not once per thread this sweep checks —
   // every candidate here is ranked against the same corpus, and re-listing
@@ -317,55 +308,35 @@ async function runSweep(
   // sweep — see `crossLanguageCorpus`.
   const languageCache = new Map<number, Language | null>();
 
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-
-    const at = { ...context.repo, number: thread.number };
-    const standing: Standing = {
-      title: thread.title,
-      body: thread.body,
-      labels: thread.labels,
-      closed: false,
-      // The sweep listing this candidate came from does not carry who opened
-      // it — only `readStanding`'s single-thread fetch does — and nothing in
-      // `duplicate`'s own decision reads it: ranking a candidate against the
-      // thread in hand never turns on who either one's author is.
-      author: { login: "", isBot: false },
-      // Nor does it carry milestone/assignee state — `duplicate` never reads
-      // either, so both are left at their honest "unknown" value.
-      milestone: null,
-      assignees: [],
-      createdAt: thread.createdAt,
-      isPullRequest: thread.isPullRequest,
-    };
-    const outcome = await decide(
-      api,
-      authority,
-      thread.number,
-      standing,
-      settings,
-      stages,
-      weather,
-      corpus,
-      languageCache,
-    );
-    const acted = await act(api, at, outcome, settings.dryRun);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
-
-    // The pre-loop check above only catches the roster running dry *before*
-    // a thread is decided. `decide` and `act` are exactly where a model
-    // actually gets asked anything, so the roster can just as easily run out
-    // grounding the last thread this walk was ever going to reach — the one
-    // iteration after which the loop simply ends rather than looping back to
-    // ask again. Checked here too, every iteration, so that case still marks
-    // `starvedRun` rather than leaving the job summary silent about a
-    // starvation the `starved` output already reported.
-    if (starved(settings.models, weather)) acc.starvedRun = true;
-  }
+  await sweepThreads(acc, candidates, settings, weather, {
+    processOne: async (thread) => {
+      const at = { ...context.repo, number: thread.number };
+      const outcome = await decide(
+        api,
+        authority,
+        thread.number,
+        standingFromListing(thread),
+        settings,
+        stages,
+        weather,
+        corpus,
+        languageCache,
+      );
+      const acted = await act(api, at, outcome, settings.dryRun);
+      return { number: thread.number, outcome: describeOutcome(outcome, acted.done) };
+    },
+    // The walk's own check only catches the roster running dry *before* a
+    // thread is decided. `decide` and `act` are exactly where a model actually
+    // gets asked anything, so the roster can just as easily run out grounding
+    // the last thread this walk was ever going to reach — the one iteration
+    // after which the loop simply ends rather than looping back to ask again.
+    // Checked here too, every iteration, so that case still marks `starvedRun`
+    // rather than leaving the job summary silent about a starvation the
+    // `starved` output already reported.
+    afterEach: () => {
+      if (starved(settings.models, weather)) acc.starvedRun = true;
+    },
+  });
 }
 
 /** One sweep row's outcome, in the fewest words that are true. */
@@ -409,7 +380,7 @@ export async function run(): Promise<void> {
     };
 
     if (settings.sweep) {
-      bulk = newAccumulator();
+      bulk = newAccumulator<SweptThread>();
       await runSweep(bulk, api, authority, settings, stages, weather);
     } else {
       const number = settings.number;
