@@ -88,35 +88,38 @@ touching nothing.
 
 Every page, one row each, for anyone the five paths above didn't fit.
 
-| Page                                                                     | Doc type                        | What it's for                                                                     |
-| ------------------------------------------------------------------------ | ------------------------------- | --------------------------------------------------------------------------------- |
-| [`README.md`](../README.md)                                              | overview                        | Say what Reeve is, prove it with a working quick start, name what it refuses.     |
-| [`doctrine/north-star.md`](doctrine/north-star.md)                       | doctrine                        | Normative doctrine — the document the others answer to. Unchanged.                |
-| [`getting-started/installation.md`](getting-started/installation.md)     | tutorial                        | Get a first workflow running in five minutes.                                     |
-| [`getting-started/first-workflow.md`](getting-started/first-workflow.md) | tutorial                        | Walk a complete two-duty workflow end to end.                                     |
-| [`guides/warrant.md`](guides/warrant.md)                                 | how-to                          | Write and extend a warrant file for your repository.                              |
-| [`guides/languages.md`](guides/languages.md)                             | how-to                          | Configure which languages Reeve recognizes and how detection works in practice.   |
-| [`guides/sweep.md`](guides/sweep.md)                                     | how-to                          | Run Reeve against a backlog instead of one thread.                                |
-| [`guides/cost.md`](guides/cost.md)                                       | how-to                          | Control and predict what a run costs.                                             |
-| [`guides/troubleshooting.md`](guides/troubleshooting.md)                 | how-to                          | Diagnose a run that didn't do what you expected.                                  |
-| [`guides/dry-run.md`](guides/dry-run.md)                                 | how-to                          | Rehearse a run with nothing written.                                              |
-| [`concepts/authority-model.md`](concepts/authority-model.md)             | concept                         | Explain capabilities, the warrant, and the ladder as one coherent model.          |
-| [`concepts/language-layer.md`](concepts/language-layer.md)               | concept                         | Explain the three language roles and how detection reasons about them.            |
-| [`concepts/duties-and-the-core.md`](concepts/duties-and-the-core.md)     | concept                         | Explain the boundary between the core and a duty, and why it's drawn there.       |
-| [`reference/duties/triage.md`](reference/duties/triage.md)               | reference                       | Full contract for the triage duty.                                                |
-| [`reference/duties/translate.md`](reference/duties/translate.md)         | reference                       | Full contract for the translate duty.                                             |
-| [`reference/duties/duplicate.md`](reference/duties/duplicate.md)         | reference                       | Full contract for the duplicate duty.                                             |
-| [`reference/duties/respond.md`](reference/duties/respond.md)             | reference                       | Full contract for the respond duty.                                               |
-| [`reference/warrant-format.md`](reference/warrant-format.md)             | reference                       | Full warrant YAML schema.                                                         |
-| [`reference/platform-limits.md`](reference/platform-limits.md)           | reference                       | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
-| [`reference/root-action.md`](reference/root-action.md)                   | reference                       | Contract for the root signpost action.                                            |
-| [`security/threat-model.md`](security/threat-model.md)                   | security                        | Answer "what can go wrong and what stops it" without reading architecture.        |
-| [`security/security.md`](security/security.md)                           | security                        | Full trust-boundary and sanitising mechanics.                                     |
-| [`security/reporting.md`](security/reporting.md)                         | security                        | How to report a vulnerability.                                                    |
-| [`development/README.md`](development/README.md)                         | overview                        | Route a contributor through the development docs; state the ground rules.         |
-| [`development/architecture.md`](development/architecture.md)             | architecture                    | The pipeline, stage by stage, and its failure semantics.                          |
-| [`development/duties.md`](development/duties.md)                         | how-to                          | Add a new duty.                                                                   |
-| [`development/language.md`](development/language.md)                     | reference                       | Detection's evaluation harness and open questions (contributor-facing remainder). |
-| [`development/evaluation.md`](development/evaluation.md)                 | how-to                          | Build and run a duty's evaluation fixture set.                                    |
-| [`development/releasing.md`](development/releasing.md)                   | how-to                          | Cut a release; what 0.x/1.0 mean.                                                 |
-| [`development/agent-runtime.md`](development/agent-runtime.md)           | architecture (roadmap-flavored) | Direction for the 2.x agent runtime — explicitly not shipped.                     |
+| Page                                                                       | Doc type                 | What it's for                                                                     |
+| -------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| [`README.md`](../README.md)                                                | overview                 | Say what Reeve is, prove it with a working quick start, name what it refuses.     |
+| [`doctrine/north-star.md`](doctrine/north-star.md)                         | doctrine                 | Normative doctrine — the document the others answer to. Unchanged.                |
+| [`getting-started/installation.md`](getting-started/installation.md)       | tutorial                 | Get a first workflow running in five minutes.                                     |
+| [`getting-started/first-workflow.md`](getting-started/first-workflow.md)   | tutorial                 | Walk a complete two-duty workflow end to end.                                     |
+| [`guides/warrant.md`](guides/warrant.md)                                   | how-to                   | Write and extend a warrant file for your repository.                              |
+| [`guides/languages.md`](guides/languages.md)                               | how-to                   | Configure which languages Reeve recognizes and how detection works in practice.   |
+| [`guides/sweep.md`](guides/sweep.md)                                       | how-to                   | Run Reeve against a backlog instead of one thread.                                |
+| [`guides/cost.md`](guides/cost.md)                                         | how-to                   | Control and predict what a run costs.                                             |
+| [`guides/troubleshooting.md`](guides/troubleshooting.md)                   | how-to                   | Diagnose a run that didn't do what you expected.                                  |
+| [`guides/dry-run.md`](guides/dry-run.md)                                   | how-to                   | Rehearse a run with nothing written.                                              |
+| [`concepts/authority-model.md`](concepts/authority-model.md)               | concept                  | Explain capabilities, the warrant, and the ladder as one coherent model.          |
+| [`concepts/language-layer.md`](concepts/language-layer.md)                 | concept                  | Explain the three language roles and how detection reasons about them.            |
+| [`concepts/duties-and-the-core.md`](concepts/duties-and-the-core.md)       | concept                  | Explain the boundary between the core and a duty, and why it's drawn there.       |
+| [`reference/duties/triage.md`](reference/duties/triage.md)                 | reference                | Full contract for the triage duty.                                                |
+| [`reference/duties/translate.md`](reference/duties/translate.md)           | reference                | Full contract for the translate duty.                                             |
+| [`reference/duties/duplicate.md`](reference/duties/duplicate.md)           | reference                | Full contract for the duplicate duty.                                             |
+| [`reference/duties/respond.md`](reference/duties/respond.md)               | reference                | Full contract for the respond duty.                                               |
+| [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
+| [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
+| [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action.                                            |
+| [`security/threat-model.md`](security/threat-model.md)                     | security                 | Answer "what can go wrong and what stops it" without reading architecture.        |
+| [`security/security.md`](security/security.md)                             | security                 | Full trust-boundary and sanitising mechanics.                                     |
+| [`security/reporting.md`](security/reporting.md)                           | security                 | How to report a vulnerability.                                                    |
+| [`development/README.md`](development/README.md)                           | overview                 | Route a contributor through the development docs; state the ground rules.         |
+| [`development/architecture.md`](development/architecture.md)               | architecture             | The pipeline, stage by stage, and its failure semantics.                          |
+| [`development/duties.md`](development/duties.md)                           | how-to                   | Add a new duty.                                                                   |
+| [`development/language.md`](development/language.md)                       | reference                | Detection's evaluation harness and open questions (contributor-facing remainder). |
+| [`development/evaluation.md`](development/evaluation.md)                   | how-to                   | Build and run a duty's evaluation fixture set.                                    |
+| [`development/releasing.md`](development/releasing.md)                     | how-to                   | Cut a release; what 0.x/1.0 mean.                                                 |
+| [`development/agent-runtime.md`](development/agent-runtime.md)             | architecture (direction) | The 2.x agent runtime's architecture, and the entry to the 2.x set — not shipped. |
+| [`development/roadmap-2x.md`](development/roadmap-2x.md)                   | roadmap (direction)      | The dependency-ordered phases from today's duties to Agent Mode.                  |
+| [`development/agent-governance.md`](development/agent-governance.md)       | reference (draft)        | The `.reeve/` governance tree, and how a warrant lifts into it.                   |
+| [`development/agent-compatibility.md`](development/agent-compatibility.md) | contract (direction)     | What every 1.x consumer is promised across the 2.x line.                          |
