@@ -31598,46 +31598,9 @@ function cell(text2) {
   return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
 }
 
-// src/refusal.ts
-var DUTIES = [
-  "translate",
-  "triage",
-  "duplicate",
-  "respond",
-  "lifecycle"
-];
-var PLANNED = [];
-var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
-function pinned() {
-  const ref = process.env.GITHUB_ACTION_REF ?? "";
-  return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
-}
-function normalise(raw) {
-  return raw.trim().toLowerCase();
-}
-function refusal(raw, built = DUTIES, planned = PLANNED) {
-  const duty = normalise(raw);
-  if (duty.length > 0 && built.includes(duty)) {
-    return [
-      `\`${duty}\` is a duty, but it is not this action.`,
-      `Write \`uses: ecoma-io/reeve/${duty}@${pinned()}\` instead of \`uses: ecoma-io/reeve@${pinned()}\`.`
-    ].join("\n");
-  }
-  if (duty.length > 0 && planned.includes(duty)) {
-    return [
-      `\`${duty}\` has a documented contract but no code at this ref.`,
-      `It arrives with the stage that builds it: ${ROADMAP}`
-    ].join("\n");
-  }
-  const opening = duty.length === 0 ? "`ecoma-io/reeve` is not a duty. Reeve ships one action per duty, and a workflow names the one it wants." : `Reeve has no duty called \`${duty}\`.`;
-  return [opening, available(built)].join("\n");
-}
-function available(built) {
-  if (built.length === 0) {
-    return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
-  }
-  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@${pinned()}`).join(", ")}`;
-}
+// src/core/warrant.ts
+import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
 
 // src/core/forge.ts
 var LABEL_PAGE = 100;
@@ -31666,10 +31629,6 @@ function isCapacityError(error2) {
   const message2 = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
   return message2.includes("timeout") || message2.includes("timed out") || message2.includes("network") || message2.includes("econnreset") || message2.includes("etimedout");
 }
-
-// src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
-import { readFile } from "node:fs/promises";
 
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
@@ -31937,6 +31896,7 @@ async function resolveAuthority(read, path, api, at) {
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 function load(path, source) {
   let document;
   try {
@@ -32452,6 +32412,47 @@ function describe(value) {
   return "a value of a kind this file cannot hold";
 }
 
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle"
+];
+var PLANNED = [];
+var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
+function pinned() {
+  const ref = process.env.GITHUB_ACTION_REF ?? "";
+  return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
+}
+function normalise(raw) {
+  return raw.trim().toLowerCase();
+}
+function refusal(raw, built = DUTIES, planned = PLANNED) {
+  const duty = normalise(raw);
+  if (duty.length > 0 && built.includes(duty)) {
+    return [
+      `\`${duty}\` is a duty, but it is not this action.`,
+      `Write \`uses: ecoma-io/reeve/${duty}@${pinned()}\` instead of \`uses: ecoma-io/reeve@${pinned()}\`.`
+    ].join("\n");
+  }
+  if (duty.length > 0 && planned.includes(duty)) {
+    return [
+      `\`${duty}\` has a documented contract but no code at this ref.`,
+      `It arrives with the stage that builds it: ${ROADMAP}`
+    ].join("\n");
+  }
+  const opening = duty.length === 0 ? "`ecoma-io/reeve` is not a duty. Reeve ships one action per duty, and a workflow names the one it wants." : `Reeve has no duty called \`${duty}\`.`;
+  return [opening, available(built)].join("\n");
+}
+function available(built) {
+  if (built.length === 0) {
+    return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
+  }
+  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@${pinned()}`).join(", ")}`;
+}
+
 // src/duties/duplicate/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
@@ -32681,7 +32682,6 @@ function note(row) {
 }
 
 // src/doctor/run.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 async function runDoctor() {
   try {
     const token = getInput("github-token", { required: true });

@@ -48,8 +48,7 @@ import { isReeveProposalPr, markerFor } from "../../core/marker.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   checkLifecycleLabelsExist,
-  readWarrant,
-  resolveAuthority,
+  openAuthority,
   type Authority,
   type Capability,
   type LifecycleExempt,
@@ -69,9 +68,6 @@ import {
   type LifecycleApi,
 } from "./timeline.js";
 import { DEFAULT_CAPABILITIES, LIFECYCLE_CAPABILITIES } from "./capabilities.js";
-
-/** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 const MARKER = markerFor("lifecycle");
 
@@ -482,8 +478,13 @@ export async function run(): Promise<void> {
     const base = readSettings();
     const api = getOctokit(base.token) as unknown as LifecycleApi;
 
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    // `denied` is not read here: unlike the four duties that decide it once up
+    // front, lifecycle asks `unnamed("lifecycle")` per thread inside
+    // `evaluateThread`, because a sweep that is denied still has threads to
+    // report on. And `languages` is resolved leniently — an unconfigured pair
+    // is not refused here, it reads as English — so this is
+    // `resolveThreadLanguages` rather than the strict `dutyLanguages`.
+    const { authority } = await openAuthority(base.warrant, api, context.repo, "lifecycle");
     const languages = resolveThreadLanguages(authority.warrant, core.getInput("languages"));
     settings = { ...base, languages };
 

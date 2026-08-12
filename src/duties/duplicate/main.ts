@@ -111,9 +111,8 @@ import {
 } from "../../core/provider.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
-  readWarrant,
-  resolveAuthority,
-  resolveLanguages,
+  dutyLanguages,
+  openAuthority,
   resolvePivot,
   type Authority,
   type Capability,
@@ -135,9 +134,6 @@ import { rank } from "./rank.js";
 import { type Done, type PivotInfo, type RankInfo, type SweptThread } from "./summary.js";
 import { judge } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-
-/** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 export interface Settings {
   readonly token: string;
@@ -405,15 +401,12 @@ export async function run(): Promise<void> {
 
     // The authority first, and before anything is spent — the same order and
     // the same reason `triage/main.ts` reads it in.
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    const { authority, denied } = await openAuthority(base.warrant, api, context.repo, "duplicate");
 
-    const denied = authority.warrant.unnamed("duplicate");
-    const resolution = denied
-      ? null
-      : resolveLanguages(authority.warrant, core.getInput("languages"));
-    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
-    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
+    settings = {
+      ...base,
+      languages: dutyLanguages(authority.warrant, denied, core.getInput("languages")),
+    };
 
     if (settings.sweep) {
       bulk = newAccumulator();

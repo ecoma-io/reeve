@@ -32991,8 +32991,8 @@ function residue(text2) {
 }
 
 // src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
 
 // src/core/forge.ts
 function isBotAuthor(author) {
@@ -33196,6 +33196,12 @@ async function resolveAuthority(read, path, api, at) {
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority = await resolveAuthority(read, path, api, at);
+  return { authority, denied: authority.warrant.unnamed(duty) };
+}
 function resolveLanguages(warrant, rawInput) {
   if (warrant.languages !== null) {
     return {
@@ -33209,6 +33215,12 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function dutyLanguages(warrant, denied, rawInput) {
+  if (denied) return [];
+  const resolution = resolveLanguages(warrant, rawInput);
+  if (resolution.notice !== null) notice(resolution.notice);
+  return resolution.languages;
 }
 function resolvePivot(warrant, languages) {
   const first = languages[0];
@@ -34910,7 +34922,6 @@ function excerpt2(body) {
 var DEFAULT_CAPABILITIES = [];
 
 // src/duties/duplicate/main.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 function readSettings() {
   const shared = readShared();
   return {
@@ -35008,12 +35019,11 @@ async function run() {
     weather = client.weather;
     const api = getOctokit(base.token);
     const stages = client.stages;
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context2.repo);
-    const denied = authority.warrant.unnamed("duplicate");
-    const resolution = denied ? null : resolveLanguages(authority.warrant, getInput("languages"));
-    if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
-    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
+    const { authority, denied } = await openAuthority(base.warrant, api, context2.repo, "duplicate");
+    settings = {
+      ...base,
+      languages: dutyLanguages(authority.warrant, denied, getInput("languages"))
+    };
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority, settings, stages, weather);

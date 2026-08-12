@@ -97,9 +97,8 @@ import {
 import { createMeter, type Meter } from "../../core/meter.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
-  readWarrant,
-  resolveAuthority,
-  resolveLanguages,
+  dutyLanguages,
+  openAuthority,
   type Authority,
   type Capability,
   type Warrant,
@@ -114,14 +113,10 @@ import { marker, type Attribution } from "./publish.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /**
- * `warrant`'s own default in `action.yml`, repeated here rather than read
- * back out of it — see triage's identical constant for why.
- */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
-
-/**
  * `languages`'s own default in `action.yml`, repeated here for the same
- * reason `DEFAULT_WARRANT_PATH` is. Used only to tell "this is the input
+ * reason `core/warrant.ts` keeps `DEFAULT_WARRANT_PATH`: a default this file
+ * has to compare against is a value this file needs. Used only to tell "this
+ * is the input
  * nobody touched" from "this is what somebody typed, and it happens to match"
  * — the two are not otherwise distinguishable once the input has already
  * been filled in, and the run treats the coincidence as harmless rather than
@@ -428,8 +423,9 @@ export async function run(): Promise<void> {
     const api = getOctokit(base.token);
     const stages: Stages = client.stages;
 
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    const opened = await openAuthority(base.warrant, api, context.repo, "translate");
+    authority = opened.authority;
+    const denied = opened.denied;
 
     // Only now, for the same reason triage waits: whether the warrant or the
     // input answers `languages` is the authority's to decide, and only once it
@@ -437,10 +433,8 @@ export async function run(): Promise<void> {
     // Except when the same authority already denied this duty outright — that
     // run is promised a green no-op, and a duty that will never translate has
     // no business failing red over a `languages` nobody configured for it.
-    const denied = authority.warrant.unnamed("translate");
     const rawLanguages = core.getInput("languages");
-    const resolution = denied ? null : resolveLanguages(authority.warrant, rawLanguages);
-    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+    const languages = dutyLanguages(authority.warrant, denied, rawLanguages);
 
     // Once, and only for the run nobody has configured at all: the warrant
     // never wrote `languages:`, and the input is exactly the default
@@ -449,7 +443,7 @@ export async function run(): Promise<void> {
     // here, and saying so once is cheap next to staying silent forever about
     // a choice nobody actually made.
     if (
-      resolution !== null &&
+      !denied &&
       authority.warrant.languages === null &&
       rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
     ) {
@@ -477,7 +471,7 @@ export async function run(): Promise<void> {
 
     settings = {
       ...base,
-      languages: resolution === null ? [] : resolution.languages,
+      languages,
       permitted,
     };
 

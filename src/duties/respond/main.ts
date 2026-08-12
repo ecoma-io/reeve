@@ -79,10 +79,9 @@ import { assemble } from "../../core/publish.js";
 import { sift } from "../../core/spam.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
-  readWarrant,
+  dutyLanguages,
+  openAuthority,
   resolveAbout,
-  resolveAuthority,
-  resolveLanguages,
   resolvePivot,
   type Authority,
   type Capability,
@@ -102,9 +101,6 @@ import {
 } from "./publish.js";
 import { summarize, type Run } from "./summary.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-
-/** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 /** How many recalled corrections `draft.ts` is handed. Same figure triage uses. */
 const RECALLED = 4;
@@ -608,26 +604,25 @@ export async function run(): Promise<void> {
     const api = getOctokit(base.token);
     const stages: Stages = client.stages;
 
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    const opened = await openAuthority(base.warrant, api, context.repo, "respond");
+    authority = opened.authority;
 
     // A duty the warrant does not name spends nothing deciding what to say,
     // including the request `resolveLanguages` might otherwise need to make
     // sense of a `languages` input a repository that never intended to grant
-    // this duty anything may never have configured at all.
-    const denied = authority.warrant.unnamed("respond");
+    // this duty anything may never have configured at all — which is exactly
+    // what `dutyLanguages` returns `[]` for rather than resolving.
+    const denied = opened.denied;
+    const languages = dutyLanguages(authority.warrant, denied, core.getInput("languages"));
     if (denied) {
       ungranted = notGranted(authority.warrant);
-      settings = { ...base, languages: [] };
+      settings = { ...base, languages };
     } else {
-      const resolution = resolveLanguages(authority.warrant, core.getInput("languages"));
-      if (resolution.notice !== null) core.notice(resolution.notice);
-
       // Same warrant-wins, input-falls-back pattern as `languages` above.
       const about = resolveAbout(authority.warrant, base.about);
       if (about.notice !== null) core.notice(about.notice);
 
-      settings = { ...base, languages: resolution.languages, about: about.about };
+      settings = { ...base, languages, about: about.about };
 
       const at: Location = { ...context.repo, number: settings.number };
       outcome = await decide(api, at, authority.warrant, settings, stages, weather);

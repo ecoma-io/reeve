@@ -106,10 +106,9 @@ import { sift } from "../../core/spam.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
-  readWarrant,
+  dutyLanguages,
+  openAuthority,
   resolveAbout,
-  resolveAuthority,
-  resolveLanguages,
   resolvePivot,
   type Authority,
   type Capability,
@@ -150,18 +149,6 @@ import {
 } from "./propose.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-
-/**
- * `warrant`'s own default in `action.yml`, repeated here rather than read back
- * out of it.
- *
- * `readWarrant` has to be told which path is the default so it can tell a
- * consumer's silence from a consumer's choice — see `ReadOptions` — and this
- * is the one value in that comparison this file is actually responsible for.
- * A workflow that renamed `.github/reeve.yml` to somewhere else set `warrant`
- * to say so, which is exactly the case this constant is not meant to catch.
- */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 /**
  * How many corrections reach the prompt, when the warrant's `memory:` block
@@ -586,13 +573,8 @@ export async function run(): Promise<void> {
     const api = getOctokit(base.token);
     const stages: Stages = client.stages;
 
-    // The authority first, and before anything is spent. A file that does not
-    // parse is a run with no allowlist, and the fail-safe direction is to stop
-    // — but a file that is simply not there, at the path nobody moved it from,
-    // is not that failure. `resolveAuthority` is what turns that absence into
-    // the implicit warrant rather than an error.
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    // The authority first, and before anything is spent.
+    const { authority, denied } = await openAuthority(base.warrant, api, context.repo, "triage");
 
     // Only now, because whether the warrant or the input answers this is the
     // authority's to decide — and once it does, `languages` is complete and
@@ -601,18 +583,14 @@ export async function run(): Promise<void> {
     // run is promised a green no-op, and red-failing it over a `languages`
     // nobody configured would fail it over configuration it was never going
     // to use.
-    const denied = authority.warrant.unnamed("triage");
-    const resolution = denied
-      ? null
-      : resolveLanguages(authority.warrant, core.getInput("languages"));
-    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+    const languages = dutyLanguages(authority.warrant, denied, core.getInput("languages"));
 
     // Same warrant-wins, input-falls-back pattern as `languages` above, on the
     // one field the spam screen reads and nothing else does.
     const about = resolveAbout(authority.warrant, base.about);
     if (about.notice !== null) core.notice(about.notice);
 
-    // Guarded the same way `resolution` is: a denied run is promised a green
+    // Guarded the same way `languages` is: a denied run is promised a green
     // no-op, and `labels` is configuration it was never going to use — a typo
     // in it has no business red-failing a run that could never have reached
     // the taxonomy anyway.
@@ -620,7 +598,7 @@ export async function run(): Promise<void> {
 
     settings = {
       ...base,
-      languages: resolution === null ? [] : resolution.languages,
+      languages,
       about: about.about,
       taxonomy,
     };

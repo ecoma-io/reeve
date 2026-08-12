@@ -33511,8 +33511,8 @@ function residue(text2) {
 }
 
 // src/core/warrant.ts
-var import_yaml2 = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
+var import_yaml2 = __toESM(require_dist2(), 1);
 var CAPABILITIES = [
   "label",
   "edit-body",
@@ -33648,6 +33648,12 @@ async function resolveAuthority(read2, path, api, at) {
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read2 = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority2 = await resolveAuthority(read2, path, api, at);
+  return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
+}
 function resolveLanguages(warrant, rawInput) {
   if (warrant.languages !== null) {
     return {
@@ -33661,6 +33667,12 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function dutyLanguages(warrant, denied, rawInput) {
+  if (denied) return [];
+  const resolution = resolveLanguages(warrant, rawInput);
+  if (resolution.notice !== null) notice(resolution.notice);
+  return resolution.languages;
 }
 function resolvePivot(warrant, languages) {
   const first = languages[0];
@@ -36645,7 +36657,6 @@ function describe2(label) {
 var DEFAULT_CAPABILITIES = ["label"];
 
 // src/duties/triage/main.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
 function newAccumulator() {
   return {
@@ -36843,17 +36854,14 @@ async function run() {
     weather = client.weather;
     const api = getOctokit(base.token);
     const stages = client.stages;
-    const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
-    const denied = authority2.warrant.unnamed("triage");
-    const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
-    if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
+    const { authority: authority2, denied } = await openAuthority(base.warrant, api, context2.repo, "triage");
+    const languages = dutyLanguages(authority2.warrant, denied, getInput("languages"));
     const about = resolveAbout(authority2.warrant, base.about);
     if (about.notice !== null) notice(about.notice);
     const taxonomy = denied ? [] : resolveTaxonomy(authority2.warrant, getInput("labels"));
     settings = {
       ...base,
-      languages: resolution === null ? [] : resolution.languages,
+      languages,
       about: about.about,
       taxonomy
     };

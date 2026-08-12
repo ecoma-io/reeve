@@ -32530,8 +32530,8 @@ function residue(text2) {
 }
 
 // src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
 
 // src/core/forge.ts
 function isBotAuthor(author) {
@@ -32790,6 +32790,12 @@ async function resolveAuthority(read, path, api, at) {
   const repositoryLabels = await listRepositoryLabels(api, at);
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority = await resolveAuthority(read, path, api, at);
+  return { authority, denied: authority.warrant.unnamed(duty) };
 }
 function load(path, source) {
   let document2;
@@ -33973,7 +33979,6 @@ var DEFAULT_CAPABILITIES = ["label", "comment"];
 var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 
 // src/duties/lifecycle/main.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var MARKER2 = markerFor("lifecycle");
 function readSettings() {
   const sweep = getBooleanInput("sweep");
@@ -34201,8 +34206,7 @@ async function run() {
   try {
     const base = readSettings();
     const api = getOctokit(base.token);
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context2.repo);
+    const { authority } = await openAuthority(base.warrant, api, context2.repo, "lifecycle");
     const languages = resolveThreadLanguages(authority.warrant, getInput("languages"));
     settings = { ...base, languages };
     if (authority.warrant.lifecycle !== null) {

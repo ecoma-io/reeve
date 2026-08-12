@@ -33511,8 +33511,8 @@ function readPivot(raw) {
 }
 
 // src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
 var CAPABILITIES = [
   "label",
   "edit-body",
@@ -33635,6 +33635,12 @@ async function resolveAuthority(read3, path, api, at) {
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read3 = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority2 = await resolveAuthority(read3, path, api, at);
+  return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
+}
 function resolveLanguages(warrant, rawInput) {
   if (warrant.languages !== null) {
     return {
@@ -33648,6 +33654,12 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function dutyLanguages(warrant, denied, rawInput) {
+  if (denied) return [];
+  const resolution = resolveLanguages(warrant, rawInput);
+  if (resolution.notice !== null) notice(resolution.notice);
+  return resolution.languages;
 }
 function resolvePivot(warrant, languages) {
   const first = languages[0];
@@ -35097,7 +35109,6 @@ function withheld(run2) {
 var DEFAULT_CAPABILITIES = [];
 
 // src/duties/respond/main.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
 function readSettings() {
   const base = readCore();
@@ -35389,18 +35400,17 @@ async function run() {
     weather = client.weather;
     const api = getOctokit(base.token);
     const stages = client.stages;
-    const read3 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    authority2 = await resolveAuthority(read3, base.warrant, api, context2.repo);
-    const denied = authority2.warrant.unnamed("respond");
+    const opened = await openAuthority(base.warrant, api, context2.repo, "respond");
+    authority2 = opened.authority;
+    const denied = opened.denied;
+    const languages = dutyLanguages(authority2.warrant, denied, getInput("languages"));
     if (denied) {
       ungranted = notGranted(authority2.warrant);
-      settings = { ...base, languages: [] };
+      settings = { ...base, languages };
     } else {
-      const resolution = resolveLanguages(authority2.warrant, getInput("languages"));
-      if (resolution.notice !== null) notice(resolution.notice);
       const about = resolveAbout(authority2.warrant, base.about);
       if (about.notice !== null) notice(about.notice);
-      settings = { ...base, languages: resolution.languages, about: about.about };
+      settings = { ...base, languages, about: about.about };
       const at = { ...context2.repo, number: settings.number };
       outcome2 = await decide(api, at, authority2.warrant, settings, stages, weather);
     }
