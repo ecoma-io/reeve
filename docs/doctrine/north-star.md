@@ -242,7 +242,11 @@ and we inherit other people's vocabulary instead of designing our own.
 ### D3 — The human's work is inviolable
 
 Reeve adds; it does not overrule. It never rewrites a body someone wrote, never
-removes a label a person applied, never reopens or reassigns or closes what a
+removes a label a person applied — with one bounded exception: a label the
+warrant itself names as a lifecycle track's clock-hand is declared, by that
+naming, to be machine-managed state, and `lifecycle` may remove exactly those
+labels, only in the direction of un-staling, and only when its own actor is
+the one who applied it last. It never reopens or reassigns or closes what a
 maintainer decided. Where machine output and human text sit together, the human
 text is kept byte-for-byte and marked as the version the project is answerable
 for.
@@ -638,6 +642,8 @@ Stated so that "why doesn't it..." has an answer that is not a shrug.
   are written in TypeScript and reviewed.
 - **Not a closer.** Closing, locking, and deleting stay off by default,
   permanently. (D3)
+- **Not a self-amending authority.** Reeve proposes warrant changes only by
+  pull request, and no capability merges one. (D2, D3)
 - **Not provider-differentiated.** No feature exists that only works on one
   vendor's endpoint. (D7)
 - **Not a policy standard.** The warrant is a configuration file, not a
