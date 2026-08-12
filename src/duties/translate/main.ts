@@ -59,6 +59,13 @@
  * calls `core.getInput` has to live in one of those two places or that test
  * stops proving what it proves.
  *
+ * **This duty's `dryRun` check lives inside `text.ts`'s `translateText`**,
+ * between drafting and the `edit-body` permission check — not here at the
+ * call site the way triage checks it, and not inside `act` the way duplicate
+ * does. See `translateText`'s own doc comment for why the ordering there is
+ * load-bearing; the three duties' three placements are an accepted
+ * divergence (design §1.2), not something this wave unifies.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API, which is what a runner does — see

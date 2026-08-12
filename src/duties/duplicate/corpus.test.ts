@@ -308,18 +308,16 @@ describe("crossLanguageCorpus", () => {
     expect(await crossLanguageCorpus([en, zh], zh, corpus, new Map())).toBe(false);
   });
 
-  it("memoises a candidate's detected language across calls sharing the same cache", async () => {
-    const cache = new Map<number, Language | null>();
-    const corpus = [candidate(1, "中文报告。")];
+  it("trusts a cached answer rather than re-detecting, even when the text on record disagrees", async () => {
+    // If this read the candidate's own text instead of the cache, an
+    // English-only body would answer `false` for a `zh` pivot — the only way
+    // this comes back `true` is by trusting the cached `zh` and never
+    // re-detecting at all.
+    const corpus = [candidate(1, "English report, no Chinese anywhere in it.")];
+    const cache = new Map<number, Language | null>([[1, zh]]);
 
-    await crossLanguageCorpus([en, zh], zh, corpus, cache);
-
-    expect(cache.get(1)).toEqual(zh);
-
-    // A second call against the same cache does not need to re-detect —
-    // pinned by checking the cached answer still drives the result even for
-    // a pivot language the (now irrelevant) body text does not itself carry.
     const result = await crossLanguageCorpus([en, zh], zh, corpus, cache);
+
     expect(result).toBe(true);
   });
 });

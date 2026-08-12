@@ -73,7 +73,7 @@ function settingsWith(overrides: Partial<Settings> = {}): Settings {
     requestTimeoutMs: 120_000,
     temperature: undefined,
     ...overrides,
-  } as unknown as Settings;
+  };
 }
 
 function meterWith(...requestCounts: number[]): Meter {
@@ -233,7 +233,8 @@ describe("translateText", () => {
     expect(result.skipped).toEqual([vietnamese]);
     expect(result.budgetSkipped).toEqual([vietnamese]);
     expect(core.warning).toHaveBeenCalledWith(
-      expect.stringContaining("was not attempted this run"),
+      "#1: `max-requests` was reached, so vi was not attempted this run. " +
+        "What was already drafted still publishes.",
     );
   });
 
@@ -296,6 +297,41 @@ describe("translateText", () => {
     );
   });
 
+  it("reports a dry run's draft even when edit-body is not permitted — the report gate runs first", async () => {
+    // Pins the ordering `translateText`'s own doc comment states: `dryRun` is
+    // checked before the `edit-body` permission check, not after. Swapping
+    // the two gates would make this run report nothing instead of what it
+    // drafted, and every other test in this file would still pass.
+    const core = await import("@actions/core");
+    const { publish } = await import("../../core/publish.js");
+    const { detectLanguage } = await import("../../core/detect.js");
+    const { translateInto } = await import("./engine.js");
+    vi.mocked(detectLanguage).mockResolvedValue({
+      language: english,
+      by: "script",
+      candidates: [english],
+    });
+    vi.mocked(translateInto).mockResolvedValue({ to: vietnamese, text: "chào", model: "model-a" });
+
+    const result = await translateText(
+      "#1",
+      "hello world",
+      thread,
+      settingsWith({ dryRun: true, permitted: [] }),
+      stages,
+      createWeather(),
+      meterWith(0),
+      createBudget(),
+    );
+
+    expect(core.info).toHaveBeenCalledWith("Dry run — #1 would have become:\nASSEMBLED");
+    expect(core.warning).not.toHaveBeenCalledWith(
+      expect.stringContaining("is not permitted this run"),
+    );
+    expect(result.posted).toHaveLength(1);
+    expect(publish).not.toHaveBeenCalled();
+  });
+
   it("reports nothing achieved in a dry run when every language was skipped", async () => {
     const core = await import("@actions/core");
     const { detectLanguage } = await import("../../core/detect.js");
@@ -350,7 +386,9 @@ describe("translateText", () => {
     expect(result.posted).toEqual([]);
     expect(result.note).toContain("`edit-body` is not permitted this run");
     expect(publish).not.toHaveBeenCalled();
-    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("not published"));
+    expect(core.warning).toHaveBeenCalledWith(
+      "#1: `edit-body` is not permitted this run, so the translation drafted this run was not published.",
+    );
   });
 
   it("withholds nothing untranslated when edit-body is not permitted and there were no drafts", async () => {
@@ -431,7 +469,11 @@ describe("translateText", () => {
       createBudget(),
     );
 
-    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("another write landed"));
+    expect(core.warning).toHaveBeenCalledWith(
+      "#1: another write landed on this thread between this run's write and its check — " +
+        "the body may not be exactly what this run published. Add a `concurrency:` group keyed " +
+        "on the thread (see the installation guide) to stop two runs from racing the same body.",
+    );
   });
 
   it("reports an unchanged publish", async () => {

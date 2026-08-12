@@ -1,12 +1,7 @@
 /**
- * This run's own `max-requests` ceiling, and whether it has been spent.
- *
- * Distinct from `Weather`'s starvation: a roster out of capacity is
- * something that happened to it from the provider's own side, and a budget
- * this run set for itself running out is a ceiling this run chose, working
- * exactly as configured. Conflating the two would have a maintainer
- * watching `starved` for exactly the wrong reason once `max-requests`
- * started tripping it instead of a real outage.
+ * This run's own `max-requests` ceiling, and whether it has been spent — see
+ * `budgetExhausted`'s own doc comment for why this is a different kind of
+ * stop than `Weather`'s starvation.
  */
 import type { Meter } from "../../core/meter.js";
 import { total } from "../../core/meter.js";

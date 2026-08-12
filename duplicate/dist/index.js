@@ -34728,7 +34728,18 @@ function escapeHtml(text2) {
 }
 
 // src/duties/duplicate/proposal.ts
-function matchShortlist(duplicateOf, confidence, rawRationale, ranked, query, confidenceFloor, attribution, model, language) {
+function matchShortlist(input) {
+  const {
+    duplicateOf,
+    confidence,
+    rawRationale,
+    ranked,
+    query,
+    confidenceFloor,
+    attribution,
+    model,
+    language
+  } = input;
   const matched = ranked.find((entry) => entry.candidate.number === duplicateOf);
   if (matched === void 0) return { ok: false };
   const lexicalScore = matched.score;
@@ -35149,18 +35160,18 @@ ${pivot.draft.body}`);
   if (verdict2.duplicateOf === null) {
     return nothing(language, rankInfo, pivotInfo, note, verdict2.confidence);
   }
-  const match = matchShortlist(
-    verdict2.duplicateOf,
-    verdict2.confidence,
-    verdict2.rationale,
+  const match = matchShortlist({
+    duplicateOf: verdict2.duplicateOf,
+    confidence: verdict2.confidence,
+    rawRationale: verdict2.rationale,
     ranked,
-    `${standing.title}
+    query: `${standing.title}
 ${body}`,
-    settings.confidence,
-    settings.attribution,
-    judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
-    detection.language?.code ?? null
-  );
+    confidenceFloor: settings.confidence,
+    attribution: settings.attribution,
+    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    language: detection.language?.code ?? null
+  });
   if (!match.ok) {
     warning(
       "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. That shape \u2014 a number the ranking never offered \u2014 is what a thread body trying to steer the verdict at an arbitrary target looks like, and it is refused the same as an answer that failed to parse."

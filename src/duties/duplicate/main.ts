@@ -63,6 +63,13 @@
  * `core.info` call reporting the truncation, not a helper worth a module of
  * its own.
  *
+ * **This duty's `dryRun` check lives inside `act`**, one function further
+ * into the pipeline than translate's own placement inside `translateText` —
+ * see `act`'s own doc comment for why `rehearse` reads through `dryRun`
+ * rather than substituting a stand-in. Triage checks it at each call site
+ * instead. Three placements for one knob, an accepted divergence (design
+ * §1.2), not something this wave unifies.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API — see `main.integration.test.ts`.
@@ -696,17 +703,17 @@ async function decide(
   // judge was shown — then computes the fingerprint and assembles the
   // proposal. See `matchShortlist`'s own `ShortlistMatch` doc comment for the
   // full argument for why the re-validation exists at all.
-  const match = matchShortlist(
-    verdict.duplicateOf,
-    verdict.confidence,
-    verdict.rationale,
+  const match = matchShortlist({
+    duplicateOf: verdict.duplicateOf,
+    confidence: verdict.confidence,
+    rawRationale: verdict.rationale,
     ranked,
-    `${standing.title}\n${body}`,
-    settings.confidence,
-    settings.attribution,
-    judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
-    detection.language?.code ?? null,
-  );
+    query: `${standing.title}\n${body}`,
+    confidenceFloor: settings.confidence,
+    attribution: settings.attribution,
+    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    language: detection.language?.code ?? null,
+  });
   if (!match.ok) {
     core.warning(
       "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. " +

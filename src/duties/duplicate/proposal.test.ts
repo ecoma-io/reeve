@@ -18,48 +18,59 @@ describe("matchShortlist", () => {
   // makes, re-checked here against the actual candidates this call ranked
   // rather than trusted from upstream.
   it("refuses a duplicateOf the shortlist never offered, however confident", () => {
-    const result = matchShortlist(
-      999,
-      1,
-      "this is definitely a duplicate",
+    const result = matchShortlist({
+      duplicateOf: 999,
+      confidence: 1,
+      rawRationale: "this is definitely a duplicate",
       ranked,
-      "query",
-      0.5,
-      "none",
-      "model-a",
-      "en",
-    );
+      query: "query",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "model-a",
+      language: "en",
+    });
 
     expect(result).toEqual({ ok: false });
   });
 
   it("refuses a shortlist with nothing on it at all", () => {
-    const result = matchShortlist(1, 1, "rationale", [], "query", 0.5, "none", "model-a", "en");
+    const result = matchShortlist({
+      duplicateOf: 1,
+      confidence: 1,
+      rawRationale: "rationale",
+      ranked: [],
+      query: "query",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "model-a",
+      language: "en",
+    });
 
     expect(result).toEqual({ ok: false });
   });
 
   it("matches, sanitises the rationale, and assembles a proposal when confidence clears the floor", () => {
-    const result = matchShortlist(
-      1,
-      0.8,
-      "Same bug as #1 <!-- comment -->",
+    const result = matchShortlist({
+      duplicateOf: 1,
+      confidence: 0.8,
+      rawRationale: "Same bug as #1 <!-- comment -->",
       ranked,
-      "query text",
-      0.5,
-      "detail",
-      "Careful",
-      "en",
-    );
+      query: "query text",
+      confidenceFloor: 0.5,
+      attribution: "detail",
+      model: "Careful",
+      language: "en",
+    });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.eligible).toBe(true);
     expect(result.lexicalScore).toBe(0.9);
-    // Sanitised, not passed through raw — see `core/sanitize.ts`'s own tests
-    // for what defanging a comment marker does; this just pins that
-    // `matchShortlist` actually calls it rather than trusting the verdict.
-    expect(result.rationale).not.toBe("Same bug as #1 <!-- comment -->");
+    // Sanitised, not passed through raw — the exact defanged shape is pinned
+    // by `core/sanitize.ts`'s own tests; this just pins that `matchShortlist`
+    // actually calls it rather than trusting the verdict, and reports what it
+    // produced rather than merely that it changed something.
+    expect(result.rationale).toBe("Same bug as #<!---->1 <!-- ------- -->");
     expect(result.fingerprint).not.toBeNull();
     expect(result.proposal).toEqual({
       duplicateOf: 1,
@@ -73,17 +84,17 @@ describe("matchShortlist", () => {
   });
 
   it("reports the match but withholds the proposal and the fingerprint when confidence is under the floor", () => {
-    const result = matchShortlist(
-      2,
-      0.2,
-      "maybe related",
+    const result = matchShortlist({
+      duplicateOf: 2,
+      confidence: 0.2,
+      rawRationale: "maybe related",
       ranked,
-      "query text",
-      0.5,
-      "none",
-      "model-a",
-      null,
-    );
+      query: "query text",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "model-a",
+      language: null,
+    });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -96,7 +107,17 @@ describe("matchShortlist", () => {
   });
 
   it("matches exactly at the confidence floor", () => {
-    const result = matchShortlist(1, 0.5, "at the floor", ranked, "q", 0.5, "none", "m", null);
+    const result = matchShortlist({
+      duplicateOf: 1,
+      confidence: 0.5,
+      rawRationale: "at the floor",
+      ranked,
+      query: "q",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "m",
+      language: null,
+    });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -104,8 +125,28 @@ describe("matchShortlist", () => {
   });
 
   it("gives the same candidate query and shortlist the same fingerprint across two calls", () => {
-    const first = matchShortlist(1, 0.9, "r", ranked, "same query", 0.5, "none", "m", null);
-    const second = matchShortlist(1, 0.9, "r", ranked, "same query", 0.5, "none", "m", null);
+    const first = matchShortlist({
+      duplicateOf: 1,
+      confidence: 0.9,
+      rawRationale: "r",
+      ranked,
+      query: "same query",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "m",
+      language: null,
+    });
+    const second = matchShortlist({
+      duplicateOf: 1,
+      confidence: 0.9,
+      rawRationale: "r",
+      ranked,
+      query: "same query",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "m",
+      language: null,
+    });
 
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
@@ -113,18 +154,28 @@ describe("matchShortlist", () => {
   });
 
   it("changes the fingerprint when the shortlist itself changes, even for the same query", () => {
-    const withOne = matchShortlist(1, 0.9, "r", ranked, "same query", 0.5, "none", "m", null);
-    const withOnlyOne = matchShortlist(
-      1,
-      0.9,
-      "r",
-      [ranked[0]!],
-      "same query",
-      0.5,
-      "none",
-      "m",
-      null,
-    );
+    const withOne = matchShortlist({
+      duplicateOf: 1,
+      confidence: 0.9,
+      rawRationale: "r",
+      ranked,
+      query: "same query",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "m",
+      language: null,
+    });
+    const withOnlyOne = matchShortlist({
+      duplicateOf: 1,
+      confidence: 0.9,
+      rawRationale: "r",
+      ranked: [ranked[0]!],
+      query: "same query",
+      confidenceFloor: 0.5,
+      attribution: "none",
+      model: "m",
+      language: null,
+    });
 
     expect(withOne.ok && withOnlyOne.ok).toBe(true);
     if (!withOne.ok || !withOnlyOne.ok) return;

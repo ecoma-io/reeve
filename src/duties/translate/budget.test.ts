@@ -6,7 +6,35 @@ import { budgetExhausted, createBudget } from "./budget.js";
 import type { Settings } from "./main.js";
 
 function settingsWith(maxRequests: number | null): Settings {
-  return { maxRequests } as unknown as Settings;
+  return {
+    token: "token",
+    number: 1,
+    models: ["model-a"],
+    modelNames: new Map(),
+    languages: [],
+    warrant: "",
+    apply: [],
+    permitted: [],
+    judges: [["judge-a"]],
+    judgeNames: new Map(),
+    drafts: 1,
+    maxBodyChars: null,
+    replies: false,
+    maxReplies: null,
+    chunkChars: 4000,
+    maxRequests,
+    attribution: "none",
+    dryRun: false,
+    baseUrl: "https://example.invalid",
+    apiKey: "",
+    sweep: false,
+    since: null,
+    limit: null,
+    endpoints: [],
+    apiKeys: [],
+    requestTimeoutMs: 120_000,
+    temperature: undefined,
+  };
 }
 
 function meterSpending(requests: number): Meter {

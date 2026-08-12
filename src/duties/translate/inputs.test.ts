@@ -41,6 +41,20 @@ describe("readBody", () => {
     expect(result.official).toBe("hello world");
     expect(result.published).toBe("abc123");
   });
+
+  it("truncates the author's own text, never the marker block it was split from first", () => {
+    const author = "x".repeat(200);
+    const body = `${author}\n${marker.render("abc123")}`;
+    // Shorter than the author's own text, and far shorter than the combined
+    // body with the marker block still attached — proving the limit is spent
+    // against `official` (already marker-free) rather than against the raw
+    // body the marker block is still part of.
+    const result = readBody(body, 50);
+    expect(result.official).toBe(author);
+    expect(result.source).toBe(author.slice(0, 50));
+    expect(result.truncated).toBe(true);
+    expect(result.published).toBe("abc123");
+  });
 });
 
 describe("targets", () => {
@@ -62,14 +76,20 @@ describe("parseChunkChars", () => {
   });
 
   it("refuses below the floor", () => {
-    expect(() => parseChunkChars("499")).toThrow(/chunk-chars/);
+    expect(() => parseChunkChars("499")).toThrow(
+      "chunk-chars: expected a whole number of 500 or more, got `499`.",
+    );
   });
 
   it("refuses a non-integer", () => {
-    expect(() => parseChunkChars("500.5")).toThrow(/chunk-chars/);
+    expect(() => parseChunkChars("500.5")).toThrow(
+      "chunk-chars: expected a whole number of 500 or more, got `500.5`.",
+    );
   });
 
   it("refuses an empty value", () => {
-    expect(() => parseChunkChars("")).toThrow(/chunk-chars/);
+    expect(() => parseChunkChars("")).toThrow(
+      "chunk-chars: expected a whole number of 500 or more, got ``.",
+    );
   });
 });

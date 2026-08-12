@@ -3,6 +3,18 @@
  * into whatever this run publishes — the part of the duty that actually
  * calls a model and writes to GitHub, as opposed to the sweep bookkeeping and
  * reporting that stays in `main.ts` around it.
+ *
+ * **The `dryRun` gate sits inside `translateText`, after drafting and before
+ * the `edit-body` permission check.** A dry run's whole job is to report what
+ * this run would have written, and a write the `edit-body` capability would
+ * withhold is still something the run would have drafted — so a dry run has
+ * to say so even on a run where a real write never had permission to happen.
+ * Checking `dryRun` first answers that; checking permission first would
+ * report nothing instead, which is not what a dry run promises. This is
+ * translate's own placement, not a shared rule: triage checks `dryRun` at
+ * each call site instead of inside a shared step, and duplicate checks it
+ * inside `act`, one function further into its own pipeline — three different
+ * shapes for the same knob, an accepted divergence (see the design's §1.2).
  */
 import * as core from "@actions/core";
 import { type getOctokit } from "@actions/github";

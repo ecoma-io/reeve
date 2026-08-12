@@ -45,22 +45,52 @@ export type ShortlistMatch =
     };
 
 /**
+ * What a verdict, and the shortlist it was checked against, hand
+ * `matchShortlist`. A single object rather than nine positional
+ * parameters — `duplicateOf`/`confidence` and `confidenceFloor` are two
+ * adjacent numbers apiece, and `attribution`/`model`/`language` are three
+ * adjacent strings, on a function whose whole job is a security check; a
+ * transposition at a call site would typecheck cleanly and silently pass or
+ * fail the wrong verdict.
+ */
+export interface ShortlistCandidate {
+  /** The number the verdict named as a duplicate of. */
+  readonly duplicateOf: number;
+  /** The verdict's own stated confidence. */
+  readonly confidence: number;
+  /** The verdict's rationale, not yet sanitised. */
+  readonly rawRationale: string;
+  /** The exact shortlist the judge was shown. */
+  readonly ranked: readonly Ranked[];
+  /** The thread's own text the fingerprint is computed over. */
+  readonly query: string;
+  /** `settings.confidence` — the floor `confidence` must clear to be eligible. */
+  readonly confidenceFloor: number;
+  readonly attribution: Attribution;
+  /** The judge's display name, already resolved from `settings.modelNames`. */
+  readonly model: string;
+  /** The thread's own detected language code, or `null` when detection found none. */
+  readonly language: string | null;
+}
+
+/**
  * Re-validates `duplicateOf` against `ranked`, then — only for a match —
  * computes the fingerprint and assembles the proposal a confident verdict
  * would publish. See `ShortlistMatch`'s own doc comment for why the
  * re-validation exists at all.
  */
-export function matchShortlist(
-  duplicateOf: number,
-  confidence: number,
-  rawRationale: string,
-  ranked: readonly Ranked[],
-  query: string,
-  confidenceFloor: number,
-  attribution: Attribution,
-  model: string,
-  language: string | null,
-): ShortlistMatch {
+export function matchShortlist(input: ShortlistCandidate): ShortlistMatch {
+  const {
+    duplicateOf,
+    confidence,
+    rawRationale,
+    ranked,
+    query,
+    confidenceFloor,
+    attribution,
+    model,
+    language,
+  } = input;
   const matched = ranked.find((entry) => entry.candidate.number === duplicateOf);
   if (matched === undefined) return { ok: false };
 
