@@ -31,6 +31,17 @@ has to end, and ending with an honest partial is the entire point of this
 page. `limit` defaults to `50` when left unset, modest enough to protect a
 free tier's own rate limit; the example above raises it deliberately.
 
+`limit: none` removes the count bound entirely. Paging against the forge
+follows real demand — the listing keeps asking for more until `since` says
+the rest is too old, or the backlog itself runs out — so a backlog past the
+size of one page is not silently cut off partway through: a repository with
+several thousand open issues sees all of them considered, not just however
+many the first page happened to hold. `limit` deliberately does not stop the
+listing early, only how much of it one run processes: the sweep has to see
+the whole candidate set to report `remaining` honestly, so that output
+always says how much was left unprocessed when the run ended — never a
+number that quietly stops moving once a page boundary is behind it.
+
 ## Why a sweep exists at all: weather
 
 [D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)

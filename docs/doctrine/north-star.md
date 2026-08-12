@@ -106,8 +106,12 @@ there is a duty switched off, whether or not that was the intention. This is
 where a maintainer turns on the capability that was cheapest-but-not-safest by
 default, having watched a `dry-run` say what the rate actually is first.
 
-**Level 3 — the full office.** Sweep and backfill (`sweep:`, `since:`,
-`limit:`), memory's write path, and the `duplicate` and `respond` duties.
+**Level 3 — the full office.** Sweep and backfill, memory's write path, and
+the `duplicate` and `respond` duties. The sweep's own switches — `sweep`,
+`since`, `limit` — are workflow inputs, not warrant keys, exactly as §3's
+closing paragraph draws that line; they sit at this rung because a scheduled
+sweep multiplies whatever the warrant already grants across a whole backlog,
+not because turning them on grants anything by itself.
 Every one of these is opt-in, and every one sits at the top rung on purpose:
 they are the inputs and the duties that touch the most — a correction
 committed to the repository, a sweep across the whole backlog, an answer sent
@@ -129,6 +133,28 @@ own defaults — it is the entire surface for what any duty may do — and the
 absence of that block, whether because there is no file at all or because the
 file stops at a taxonomy, is itself a stated, narrow authority rather than an
 unstated wide one.
+
+**The warrant and an input answer different questions, and confusing them
+undoes the ladder.** The warrant is authority: what a duty is permitted to do
+_to the repository_ — which label, which comment, which close, which write.
+It is reviewed the way code is, because it grants power, and it is the one
+file [D2](#d2--authority-is-granted-written-and-bounded) makes the whole
+answer once a `capabilities:` block exists. An input on the workflow is not
+that. It is how a duty already holding its authority is asked to operate —
+how many threads a sweep considers, how long one request is allowed to run,
+which endpoint carries a model, how much of a body gets read before it is
+translated. None of those grant a duty anything it did not already have; they
+shape the _how_ of work the warrant already permitted, and a maintainer
+narrows or loosens them the same way they would any other step input, in the
+workflow file, without a warrant review. This is why `endpoints`,
+`api-keys`, `request-timeout`, `temperature`, `max-body-chars` and `limit`
+live on the workflow rather than in `.github/reeve.yml`: none of them answer
+"what may Reeve touch," and putting an operational knob in the warrant would
+train a reviewer to read authority into a line that was never a permission.
+The test is not whether a setting sounds important — a timeout can break a
+run and a label cannot — it is whether turning it up changes what gets
+**written to the repository or said to somebody**. Only that question belongs
+in the warrant.
 
 ## 4. Where this sits
 
@@ -332,6 +358,27 @@ _Costs us:_ every provider error has to be classified correctly at the one
 place it is received, because a 429 misread as configuration fails a run that
 would have finished on the next scheduled sweep, and a 401 misread as weather
 runs a repository's whole queue against a key that will never work.
+
+**Amendment — many endpoints changes when "immediately" fires, not what
+counts as configuration.** A run with more than one `endpoints` roster
+configured is not one credential; it is several relationships with several
+providers, and a wrong key on one endpoint says nothing about the key on
+another. Failing the whole run red the moment the first endpoint's 401 or 403
+arrives would punish rotation for exactly the case rotation exists to
+survive: a stranger's free tier misconfigured, a paid key rotated at the
+wrong time, one endpoint down while the rest are fine. So once more than one
+endpoint is configured, an auth failure is recorded rather than thrown
+immediately — the run keeps going, and every other endpoint is still tried —
+and the run fails red only once **every** configured endpoint has ended up
+auth-failed, checked once at the end of the run rather than on the first
+miss. A single-endpoint run is unchanged by this: one endpoint auth-failing
+is every endpoint auth-failing, so the original immediate failure still
+fires, on the first model that reports it, exactly as before.
+
+_Costs us:_ a run that would have failed fast on a single bad key now runs as
+long as its slowest endpoint's rotation before it can say so, and every
+duty's summary has to name which endpoints failed, not just that the run
+did.
 
 ## 6. Shape
 

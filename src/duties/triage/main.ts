@@ -82,7 +82,15 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import { bounded, counted, fraction, readShared } from "../../core/inputs.js";
+import {
+  bounded,
+  counted,
+  fraction,
+  readShared,
+  resolveEndpoints,
+  type ApiKeySpec,
+  type EndpointSpec,
+} from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import {
   createMemory,
@@ -96,9 +104,10 @@ import {
 import { createMeter, metered } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createProvider,
+  createRoutedProvider,
   createWeather,
   parseModels,
+  settleAuth,
   shown,
   starved,
   type Names,
@@ -107,7 +116,7 @@ import {
 } from "../../core/provider.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
-import { writeSummary } from "../../core/summary.js";
+import { authSection, writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
   readWarrant,
@@ -183,7 +192,12 @@ interface Settings {
   readonly apiKey: string;
   readonly sweep: boolean;
   readonly since: Date | null;
-  readonly limit: number;
+  /** `null` is no ceiling at all — see `bounded`'s doc comment for the sentinel rule. */
+  readonly limit: number | null;
+  readonly endpoints: readonly EndpointSpec[];
+  readonly apiKeys: readonly ApiKeySpec[];
+  readonly requestTimeoutMs: number;
+  readonly temperature: number | undefined;
 }
 
 /**
@@ -323,7 +337,7 @@ async function runSweep(
   acc.candidates = candidates.length;
 
   for (const thread of candidates) {
-    if (acc.results.length >= settings.limit) break;
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
 
     // The idempotent skip: free, and counted separately from `processed` so a
     // rerun over a mostly-triaged backlog reports honestly rather than looking
@@ -379,7 +393,11 @@ export async function run(): Promise<void> {
   // an `AuthenticationFailure` thrown partway down a sweep's loop, which
   // leaves `bulk` holding every thread already processed before it threw.
   const meter = createMeter();
-  const weather = createWeather();
+  // Reassigned once `readSettings` has answered, inside the `try` below —
+  // `endpoints` is not known until then. Left at its empty-alias default if
+  // reading the settings themselves is what fails, which is fine: nothing
+  // below that point ever runs.
+  let weather = createWeather();
   let settings: Settings | null = null;
   let single: { readonly number: number; readonly outcome: Outcome; readonly done: Done } | null =
     null;
@@ -388,8 +406,12 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
+      ...base.models,
+      ...base.screenModels,
+    ]);
     const api = getOctokit(base.token);
-    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
+    const provider = createRoutedProvider(resolveEndpoints(base));
 
     const stages: Stages = {
       detect: metered(provider, meter, "detect"),
@@ -519,6 +541,12 @@ export async function run(): Promise<void> {
         single = { number, outcome, done };
       }
     }
+
+    // Deferred half of the multi-endpoint amendment to D12: a single-endpoint
+    // run never reaches this with anything to say — `reckon` already threw
+    // the moment its one endpoint answered unauthenticated. Only fires once
+    // every endpoint configured turned out to be misconfigured the same way.
+    settleAuth(weather);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
@@ -539,14 +567,20 @@ export async function run(): Promise<void> {
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
+        );
       } else if (!settings.sweep && recorded !== null) {
         reportRecordRun(recorded.outcome, rosterStarved);
-        await writeSummary(recordPage(settings, recorded.number, recorded.outcome, meter.spent()));
+        await writeSummary(
+          recordPage(settings, recorded.number, recorded.outcome, meter.spent()) +
+            authSection(weather.authFailures),
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
-          page(settings, single.number, single.outcome, single.done, meter.spent()),
+          page(settings, single.number, single.outcome, single.done, meter.spent()) +
+            authSection(weather.authFailures),
         );
       }
     }
@@ -624,6 +658,7 @@ async function decide(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
+      settings.temperature,
     ),
   );
   const language = detection.language?.label ?? null;
@@ -640,6 +675,7 @@ async function decide(
     body,
     about: settings.about,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -685,6 +721,7 @@ async function decide(
       body,
       to: pivotLanguage,
       weather,
+      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
     });
     for (const failure of pivot.failures) {
       core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
@@ -727,6 +764,7 @@ async function decide(
     language,
     recalled,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of triaged.failures) {
     core.warning(`triage: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
@@ -879,6 +917,7 @@ async function recordCorrection(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
+      settings.temperature,
     ),
   );
   // The code, because that is what the store and the pivot comparison below
@@ -908,6 +947,7 @@ async function recordCorrection(
       body,
       to: pivotLanguage,
       weather,
+      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
     });
     for (const failure of rendered.failures) {
       core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);

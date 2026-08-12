@@ -109,26 +109,36 @@ see [Cost](../../guides/cost.md#running-it-with-no-key-at-all).
 
 Every input `duplicate/action.yml` declares.
 
-| Input              | Required | Default                     | What it does                                                                                                                                              |
-| ------------------ | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`     | no       | `${{ github.token }}`       | Token used to read the thread, list the corpus, and post the one comment this duty may write.                                                             |
-| `number`           | no       | _(empty)_                   | The issue to check. Defaults to the thread that triggered the workflow.                                                                                   |
-| `base-url`         | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                        |
-| `api-key`          | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                           |
-| `models`           | **yes**  | —                           | Model ids, comma or newline separated, in preference order. Used for detection, the pivot bridge, and the judge.                                          |
-| `languages`        | no       | `en, vi, zh`                | Languages your contributors write in. The first named is also the pivot language for bridging a ranking across a language gap.                            |
-| `warrant`          | no       | `.github/reeve.yml`         | Grants nothing to this duty until `duplicate: [comment]` is written into it. Missing at this default path is not a failure.                               |
-| `apply`            | no       | `none`                      | `comment`, or `none`. Narrowed by, never widening, the warrant — and neither half defaults to `comment` on its own.                                       |
-| `candidates`       | no       | `5`                         | How many of the closest-ranked open threads reach the judge.                                                                                              |
-| `corpus-limit`     | no       | `none`                      | How many open threads the ranking runs against at all. `none` is every open issue.                                                                        |
-| `corpus-since`     | no       | _(empty)_                   | The oldest thread the corpus considers, bounded by when it was opened. A cost control, not a correctness setting.                                         |
-| `max-body-chars`   | no       | `6000`                      | How much of a body — the thread and every candidate alike — is indexed and judged. `none` reads the whole thing.                                          |
-| `confidence`       | no       | `0.75`                      | How sure the judge's verdict has to be before the comment is posted, between 0 and 1.                                                                     |
-| `show-attribution` | no       | `none`                      | How much of the machinery the posted comment names: `none`, `model`, or `detail`.                                                                         |
-| `dry-run`          | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                               |
-| `sweep`            | no       | `false`                     | Check the backlog instead of the one thread this event named. No idempotent skip — see below. Cannot combine with `number`.                               |
-| `since`            | no       | _(empty)_                   | The oldest issue a sweep will consider, bounded by when it was opened. Bounds which threads the sweep checks, not the corpus each one is checked against. |
-| `limit`            | no       | `50`                        | The most issues one sweep will actually process.                                                                                                          |
+| Input              | Required | Default                     | What it does                                                                                                                                                               |
+| ------------------ | -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`     | no       | `${{ github.token }}`       | Token used to read the thread, list the corpus, and post the one comment this duty may write.                                                                              |
+| `number`           | no       | _(empty)_                   | The issue to check. Defaults to the thread that triggered the workflow.                                                                                                    |
+| `base-url`         | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                         |
+| `api-key`          | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                            |
+| `models`           | **yes**  | —                           | Model ids, comma or newline separated, in preference order. Used for detection, the pivot bridge, and the judge.                                                           |
+| `languages`        | no       | `en, vi, zh`                | Languages your contributors write in. The first named is also the pivot language for bridging a ranking across a language gap.                                             |
+| `warrant`          | no       | `.github/reeve.yml`         | Grants nothing to this duty until `duplicate: [comment]` is written into it. Missing at this default path is not a failure.                                                |
+| `apply`            | no       | `none`                      | `comment`, or `none`. Narrowed by, never widening, the warrant — and neither half defaults to `comment` on its own.                                                        |
+| `candidates`       | no       | `5`                         | How many of the closest-ranked open threads reach the judge.                                                                                                               |
+| `corpus-limit`     | no       | `none`                      | How many open threads the ranking runs against at all. `none` is every open issue.                                                                                         |
+| `corpus-since`     | no       | _(empty)_                   | The oldest thread the corpus considers, bounded by when it was opened. A cost control, not a correctness setting.                                                          |
+| `max-body-chars`   | no       | `6000`                      | How much of a body — the thread and every candidate alike — is indexed and judged. `none` reads the whole thing.                                                           |
+| `confidence`       | no       | `0.75`                      | How sure the judge's verdict has to be before the comment is posted, between 0 and 1.                                                                                      |
+| `show-attribution` | no       | `none`                      | How much of the machinery the posted comment names: `none`, `model`, or `detail`.                                                                                          |
+| `dry-run`          | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                |
+| `sweep`            | no       | `false`                     | Check the backlog instead of the one thread this event named. No idempotent skip — see below. Cannot combine with `number`.                                                |
+| `since`            | no       | _(empty)_                   | The oldest issue a sweep will consider, bounded by when it was opened. Bounds which threads the sweep checks, not the corpus each one is checked against.                  |
+| `limit`            | no       | `50`                        | The most issues one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                             |
+| `endpoints`        | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
+| `api-keys`         | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
+| `request-timeout`  | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
+| `temperature`      | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                               |
+
+**`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
+same four provider inputs every duty takes — the full grammar, the
+`model@alias` routing rule, and what more than one endpoint changes about
+auth failures are all in
+[Installation](../../getting-started/installation.md#more-than-one-endpoint).
 
 **A published block is stripped out of every body before it is indexed or
 judged** — the thread's own and every candidate's alike, cut at the first

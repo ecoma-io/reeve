@@ -328,6 +328,10 @@ function baseInputs(
     "dry-run": "false",
     "screen-models": "",
     about: "",
+    endpoints: "",
+    "api-keys": "",
+    "request-timeout": "120s",
+    temperature: "",
   };
 }
 

@@ -101,30 +101,57 @@ a supported configuration), but almost every real provider needs one — see
 
 Every input `translate/action.yml` declares.
 
-| Input               | Required | Default                     | What it does                                                                                                                            |
-| ------------------- | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`      | no       | `${{ github.token }}`       | Token used to read and write the thread. Also what gives recursion prevention on `GITHUB_TOKEN`.                                        |
-| `number`            | no       | _(empty)_                   | The issue or pull request to translate. Defaults to the thread that triggered the workflow.                                             |
-| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                      |
-| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                         |
-| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                   |
-| `languages`         | no       | `en, vi, zh`                | What to translate **into**. Says nothing about what an author may write in. Ignored once the warrant's own `languages:` key is written. |
-| `warrant`           | no       | `.github/reeve.yml`         | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at this default path is not a failure.            |
-| `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.              |
-| `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                           |
-| `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                |
-| `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                        |
-| `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                      |
-| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                             |
-| `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                              |
-| `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                 |
-| `limit`             | no       | `50`                        | The most threads one sweep will actually process.                                                                                       |
+| Input               | Required | Default                     | What it does                                                                                                                                                               |
+| ------------------- | -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`      | no       | `${{ github.token }}`       | Token used to read and write the thread. Also what gives recursion prevention on `GITHUB_TOKEN`.                                                                           |
+| `number`            | no       | _(empty)_                   | The issue or pull request to translate. Defaults to the thread that triggered the workflow.                                                                                |
+| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                         |
+| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                            |
+| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                      |
+| `languages`         | no       | `en, vi, zh`                | What to translate **into**. Says nothing about what an author may write in. Ignored once the warrant's own `languages:` key is written.                                    |
+| `warrant`           | no       | `.github/reeve.yml`         | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at this default path is not a failure.                                               |
+| `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                 |
+| `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                                                              |
+| `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
+| `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                           |
+| `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                         |
+| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                |
+| `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                 |
+| `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                    |
+| `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                            |
+| `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
+| `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
+| `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
+| `temperature`       | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                               |
 
 **`max-body-chars`** bounds what is read from the thread, not what the model
 answers. When the body is longer, the tail is left behind and the published
 block says so rather than pretending it translated everything. Raising the
 limit later translates the rest, because the fingerprint is over the part
 that was actually read.
+
+Whatever `max-body-chars` reads, it is never sent to a model in one piece.
+The body is split into chunks a few thousand characters wide before drafting
+starts, each translated in its own draft-and-judge pass, one at a time. A
+fenced code block is never split across two chunks — a chunk that would cut
+one in half is grown past the budget instead — and a chunk that is entirely
+code is reused verbatim rather than spent on an answer already known: the
+code inside it would have to come back unchanged regardless of what a model
+said. This is what makes `max-body-chars: none` affordable at all: without
+chunking, an unbounded body would be one request of unbounded size instead of
+several ordinary ones. **One chunk failing skips the whole language**,
+exactly as [Failure behavior](#failure-behavior) already describes for a
+language no model could translate — a translation missing its middle
+paragraph is worse than no translation this run, and the next run tries
+again in full. The fingerprint is over the source text, never over where the
+chunk boundaries happened to fall, so the same body always fingerprints the
+same way regardless of `max-body-chars`.
+
+**`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
+same four provider inputs every duty takes — the full grammar, the
+`model@alias` routing rule, and what more than one endpoint changes about
+auth failures are all in
+[Installation](../../getting-started/installation.md#more-than-one-endpoint).
 
 **`judge-models` has two levels, and they mean opposite things.** `models`
 is one rotation chain: the first model that answers is used and the rest are

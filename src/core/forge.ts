@@ -372,17 +372,26 @@ export async function listRepositoryLabels(
 }
 
 /**
- * How many threads one page of a sweep's listing carries, and how many pages a
- * single run will turn.
+ * How many threads one page of a sweep's listing carries.
  *
- * The page mirrors `LABEL_PAGE` for the same reason: GitHub caps it at 100
- * regardless of what is asked for. The page count is generous on purpose —
- * `since` narrows what is kept but not what has to be walked to find it, and a
- * backlog can be old — while still being a hard ceiling a misconfigured `since`
- * cannot turn into an unbounded crawl of a repository's whole history.
+ * Mirrors `LABEL_PAGE` for the same reason: GitHub caps it at 100 regardless
+ * of what is asked for.
+ *
+ * There used to be a page-count ceiling here too, on the argument that a
+ * misconfigured `since` should not turn into an unbounded crawl of a
+ * repository's whole history. It was the wrong fix: a repository with more
+ * open threads than the ceiling allowed simply never saw the rest of them,
+ * `since` or no `since`, and `remaining` reported `0` once the ceiling was
+ * hit rather than the honest count of what was left. `since` and `limit` are
+ * already the bounds an operator asked for — `since` stops the walk the
+ * moment a page's oldest entry falls before it (the sort below makes that a
+ * true prefix, exactly as `duplicate/corpus.ts`'s `listCorpus` relies on for
+ * its own paging), and a sweep's own `limit` bounds how much of what is
+ * listed one run actually processes. A ceiling on top of both does not
+ * protect anything either does not already protect; it only lies about how
+ * much backlog is left.
  */
 const SWEEP_PAGE = 100;
-const SWEEP_PAGES = 10;
 
 /** One open thread as a sweep found it, before this duty decided anything about it. */
 export interface Listed {
@@ -423,7 +432,7 @@ export async function listOpenThreads(
 ): Promise<readonly Listed[]> {
   const listed: Listed[] = [];
 
-  for (let page = 1; page <= SWEEP_PAGES; page += 1) {
+  for (let page = 1; ; page += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,

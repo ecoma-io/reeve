@@ -64,12 +64,21 @@ import {
   listReplies,
   type Thread,
 } from "../../core/forge.js";
-import { bounded, readShared, whole } from "../../core/inputs.js";
-import { type Language } from "../../core/languages.js";
 import {
-  createProvider,
+  bounded,
+  readShared,
+  resolveEndpoints,
+  whole,
+  type ApiKeySpec,
+  type EndpointSpec,
+} from "../../core/inputs.js";
+import { type Language } from "../../core/languages.js";
+import { chunks, isCodeOnly } from "../../core/markdown.js";
+import {
+  createRoutedProvider,
   createWeather,
   parseSeats,
+  settleAuth,
   shown,
   starved,
   type Names,
@@ -78,7 +87,7 @@ import {
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
 import { createMeter, metered } from "../../core/meter.js";
-import { writeSummary } from "../../core/summary.js";
+import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
   resolveAuthority,
@@ -140,7 +149,11 @@ interface Settings {
   readonly apiKey: string;
   readonly sweep: boolean;
   readonly since: Date | null;
-  readonly limit: number;
+  readonly limit: number | null;
+  readonly endpoints: readonly EndpointSpec[];
+  readonly apiKeys: readonly ApiKeySpec[];
+  readonly requestTimeoutMs: number;
+  readonly temperature: number | undefined;
 }
 
 /**
@@ -236,14 +249,41 @@ interface Stages {
   readonly judge: Provider;
 }
 
-async function translateInto(
+/**
+ * How large one chunk of a body can be before it is asked for as its own
+ * request rather than folded into a larger one.
+ *
+ * Matches `max-body-chars`'s own default deliberately: it is the size every
+ * body this duty was built for already fit inside a single request, back
+ * when `max-body-chars: none` meant "translate it whole in one request" and
+ * anything past a bound meant "the tail is lost". A body under this size is
+ * one chunk and behaves exactly as it always has; a larger one — which used
+ * to mean a truncated tail whenever a bound was configured — is now split
+ * rather than cut, and `none` can mean "translate every character" without
+ * asking one model to answer for an unbounded body in one request.
+ */
+const CHUNK_CHARS = 6000;
+
+/** One chunk's own draft-and-judge pass — everything a single-chunk body used to get, once. */
+interface ChunkResult {
+  readonly text: string;
+  /** The model that wrote it, already a display name — or null for a chunk no model touched. */
+  readonly model: string | null;
+  readonly contested: boolean;
+  readonly score: number;
+  readonly drafts: number;
+  readonly decidedBy: "score" | "judges";
+  readonly votes: readonly { readonly model: string; readonly pick: string }[];
+}
+
+async function translateChunk(
   to: Language,
   settings: Settings,
   stages: Stages,
   from: Language | null,
   source: string,
   weather: Weather,
-): Promise<Posted | null> {
+): Promise<ChunkResult | null> {
   const drafted = await translate({
     provider: stages.draft,
     models: settings.models,
@@ -253,6 +293,7 @@ async function translateInto(
     languages: settings.languages,
     drafts: settings.drafts,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   // Named as the workflow named them, everywhere a person reads them. A
@@ -277,6 +318,7 @@ async function translateInto(
     to,
     attempts: drafted.attempts,
     weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   const seat = (id: string): string => shown(settings.judgeNames, id);
@@ -301,16 +343,84 @@ async function translateInto(
   const contested = drafted.attempts.length > 1 || verdict.votes.length > 0;
 
   return {
-    to,
     text: verdict.winner.text,
     model: model(verdict.winner.model),
-    ...(contested
+    contested,
+    score: verdict.winner.score.value,
+    drafts: drafted.attempts.length,
+    decidedBy: verdict.decidedBy,
+    votes: cast,
+  };
+}
+
+/**
+ * A whole language, chunked.
+ *
+ * `chunks()` never splits a fence, so a chunk that is entirely code — a
+ * chunk `isCodeOnly` — is reused verbatim instead of asked for: whatever a
+ * model answered would still have to reproduce the code unchanged, so the
+ * request is spent on an answer already known. Every other chunk gets its
+ * own draft-and-judge pass, one at a time — sequential, not concurrent, so a
+ * model this body grounds partway through is already grounded for the chunk
+ * after it, the same reason `translateReplies` walks its replies one at a
+ * time rather than firing them all at once.
+ *
+ * **One chunk failing skips the whole language.** A translation missing its
+ * middle paragraph because chunk two ran out of models is worse than no
+ * translation for this run — the next run tries again in full, rather than
+ * this run publishing a body no chunk boundary was ever meant to be visible
+ * in.
+ */
+async function translateInto(
+  to: Language,
+  settings: Settings,
+  stages: Stages,
+  from: Language | null,
+  source: string,
+  weather: Weather,
+): Promise<Posted | null> {
+  const pieces = chunks(source, CHUNK_CHARS);
+  const results: ChunkResult[] = [];
+
+  for (const piece of pieces) {
+    if (isCodeOnly(piece)) {
+      results.push({
+        text: piece,
+        model: null,
+        contested: false,
+        score: 1,
+        drafts: 0,
+        decidedBy: "score",
+        votes: [],
+      });
+      continue;
+    }
+
+    const outcome = await translateChunk(to, settings, stages, from, piece, weather);
+    if (outcome === null) return null;
+    results.push(outcome);
+  }
+
+  // Almost always one entry — a body under `CHUNK_CHARS` is one chunk and
+  // every chunk of it was won by the same model, which is what makes the
+  // common case read exactly as it always has. A body chunked across more
+  // than one model reports every one of them rather than picking a winner
+  // among winners, and drops the score/decision breakdown: "decided by
+  // judges" is a fact about one contest, and a multi-chunk body ran several.
+  const models = [...new Set(results.flatMap((r) => (r.model === null ? [] : [r.model])))];
+  const single = results.length === 1 ? results[0] : undefined;
+
+  return {
+    to,
+    text: results.map((r) => r.text).join(""),
+    model: models.length > 0 ? models.join(", ") : "—",
+    ...(single?.contested
       ? {
           decision: {
-            score: verdict.winner.score.value,
-            drafts: drafted.attempts.length,
-            decidedBy: verdict.decidedBy,
-            votes: cast,
+            score: single.score,
+            drafts: single.drafts,
+            decidedBy: single.decidedBy,
+            votes: single.votes,
           },
         }
       : {}),
@@ -393,7 +503,7 @@ async function translateText(
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather),
+    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
   );
   core.info(
     detection.language === null
@@ -683,7 +793,7 @@ async function runSweep(
   acc.candidates = listed.length;
 
   for (const thread of listed) {
-    if (acc.results.length >= settings.limit) break;
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
 
     // The idempotent skip: a body already carrying this duty's marker has been
     // translated at least once before, whatever the exact language set was
@@ -713,7 +823,11 @@ export async function run(): Promise<void> {
   // early by capacity starvation, which leaves `bulk` holding every thread
   // already processed before the loop broke.
   const meter = createMeter();
-  const weather = createWeather();
+  // Reassigned once `readSettings` has answered, inside the `try` below —
+  // `endpoints` is not known until then. Left at its empty-alias default if
+  // reading the settings themselves is what fails, which is fine: nothing
+  // below that point ever runs.
+  let weather = createWeather();
   let settings: Settings | null = null;
   let authority: Authority | null = null;
   let single: { readonly number: number; readonly result: ThreadResult } | null = null;
@@ -721,8 +835,12 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
+      ...base.models,
+      ...base.judges.flat(),
+    ]);
     const api = getOctokit(base.token);
-    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
+    const provider = createRoutedProvider(resolveEndpoints(base));
 
     const stages: Stages = {
       detect: metered(provider, meter, "detect"),
@@ -787,6 +905,12 @@ export async function run(): Promise<void> {
       }
       single = { number, result };
     }
+
+    // Deferred half of the multi-endpoint amendment to D12: a single-endpoint
+    // run never reaches this with anything to say — `reckon` already threw
+    // the moment its one endpoint answered unauthenticated. Only fires once
+    // every endpoint configured turned out to be misconfigured the same way.
+    settleAuth(weather);
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
@@ -807,10 +931,15 @@ export async function run(): Promise<void> {
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved);
-        await writeSummary(page(settings, authority, single.number, single.result, meter.spent()));
+        await writeSummary(
+          page(settings, authority, single.number, single.result, meter.spent()) +
+            authSection(weather.authFailures),
+        );
       }
     }
   }

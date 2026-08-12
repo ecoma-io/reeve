@@ -118,25 +118,35 @@ required by the schema, but almost every real provider needs one — see
 
 Every input `respond/action.yml` declares.
 
-| Input            | Required | Default                     | What it does                                                                                                                 |
-| ---------------- | -------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`   | no       | `${{ github.token }}`       | Token used to read the thread and post the reply.                                                                            |
-| `number`         | no       | _(empty)_                   | The issue to answer. Defaults to the thread that triggered the workflow. Meant to run on `issues: opened`.                   |
-| `base-url`       | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                           |
-| `api-key`        | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                              |
-| `models`         | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that writes drafts.                                   |
-| `judge-models`   | no       | _(empty)_                   | A panel that picks the best draft. Seats, not a fallback list — same grammar as [`translate`'s](translate.md#configuration). |
-| `drafts`         | no       | `1`                         | Attempts per run, scored and judged. A first reply is worth more than one attempt.                                           |
-| `languages`      | no       | `en, vi, zh`                | Languages your contributors write in. The first named is the pivot for bridging a correction across a language gap.          |
-| `warrant`        | no       | `.github/reeve.yml`         | Where `comment` is granted. A missing file grants `respond` nothing, same as one that is silent about it.                    |
-| `apply`          | no       | `none`                      | `comment`, or `none`. The narrower of this and the warrant wins, always.                                                     |
-| `confidence`     | no       | `0.75`                      | How sure the winning draft has to be before it is posted, between 0 and 1.                                                   |
-| `guidance`       | no       | `.github/reeve-guidance.md` | A maintainer-authored file: tone, what this project never promises, where to point an unanswerable question.                 |
-| `screen-models`  | no       | _(empty)_                   | The spam/off-topic check, same one `triage` runs. Empty turns it off.                                                        |
-| `about`          | no       | _(empty)_                   | One sentence on what this repository is about. Used only by the off-topic half of `screen-models`' check.                    |
-| `corrections`    | no       | `.reeve/corrections`        | The memory store. Empty is the cold-start case and works.                                                                    |
-| `max-body-chars` | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                     |
-| `dry-run`        | no       | `false`                     | Run the whole pipeline, write every output, post nothing.                                                                    |
+| Input             | Required | Default                     | What it does                                                                                                                                                               |
+| ----------------- | -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`    | no       | `${{ github.token }}`       | Token used to read the thread and post the reply.                                                                                                                          |
+| `number`          | no       | _(empty)_                   | The issue to answer. Defaults to the thread that triggered the workflow. Meant to run on `issues: opened`.                                                                 |
+| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                         |
+| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                            |
+| `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that writes drafts.                                                                                 |
+| `judge-models`    | no       | _(empty)_                   | A panel that picks the best draft. Seats, not a fallback list — same grammar as [`translate`'s](translate.md#configuration).                                               |
+| `drafts`          | no       | `1`                         | Attempts per run, scored and judged. A first reply is worth more than one attempt.                                                                                         |
+| `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. The first named is the pivot for bridging a correction across a language gap.                                                        |
+| `warrant`         | no       | `.github/reeve.yml`         | Where `comment` is granted. A missing file grants `respond` nothing, same as one that is silent about it.                                                                  |
+| `apply`           | no       | `none`                      | `comment`, or `none`. The narrower of this and the warrant wins, always.                                                                                                   |
+| `confidence`      | no       | `0.75`                      | How sure the winning draft has to be before it is posted, between 0 and 1.                                                                                                 |
+| `guidance`        | no       | `.github/reeve-guidance.md` | A maintainer-authored file: tone, what this project never promises, where to point an unanswerable question.                                                               |
+| `screen-models`   | no       | _(empty)_                   | The spam/off-topic check, same one `triage` runs. Empty turns it off.                                                                                                      |
+| `about`           | no       | _(empty)_                   | One sentence on what this repository is about. Used only by the off-topic half of `screen-models`' check.                                                                  |
+| `corrections`     | no       | `.reeve/corrections`        | The memory store. Empty is the cold-start case and works.                                                                                                                  |
+| `max-body-chars`  | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
+| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, post nothing.                                                                                                                  |
+| `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
+| `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
+| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
+| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                               |
+
+**`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
+same four provider inputs every duty takes — the full grammar, the
+`model@alias` routing rule, and what more than one endpoint changes about
+auth failures are all in
+[Installation](../../getting-started/installation.md#more-than-one-endpoint).
 
 **`confidence` is a floor worth measuring, not inheriting.** [Measure
 it](../../development/evaluation.md) against your own drafts before you move

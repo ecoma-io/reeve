@@ -59,6 +59,8 @@ export interface PivotRequest {
   /** The language to translate into — the run's pivot language. */
   readonly to: Language;
   readonly weather?: Weather;
+  /** Passed to every request. Omitted from the request body when not set. */
+  readonly temperature?: number;
 }
 
 /**
@@ -72,12 +74,12 @@ export interface PivotRequest {
  * `draft.ts` produces.
  */
 export async function translateToPivot(request: PivotRequest): Promise<PivotResult> {
-  const { provider, models, title, body, to, weather } = request;
+  const { provider, models, title, body, to, weather, temperature } = request;
 
   const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages),
+    (model) => answer(provider, model, messages, temperature),
     weather,
   );
   if (!rotation.success) return { draft: null, failures: rotation.failures };
@@ -104,8 +106,13 @@ async function answer(
   provider: Provider,
   model: string,
   messages: readonly Message[],
+  temperature?: number,
 ): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
+  const completion = await provider.complete(
+    model,
+    messages,
+    temperature === undefined ? undefined : { temperature },
+  );
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,

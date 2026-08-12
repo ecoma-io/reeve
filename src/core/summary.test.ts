@@ -5,7 +5,9 @@ import { join } from "node:path";
 import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cell, count, fence, table, writeSummary } from "./summary.js";
+import type { Spend } from "./meter.js";
+import type { Failure } from "./provider.js";
+import { authSection, cell, cost, count, fence, table, writeSummary } from "./summary.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is what the runner actually gives an action: `GITHUB_STEP_SUMMARY`
@@ -130,5 +132,116 @@ describe("fence", () => {
     const [open, , close] = fence(text);
     expect(open).toBe("`".repeat(7));
     expect(close).toBe("`".repeat(7));
+  });
+});
+
+function spend(overrides: Partial<Spend> = {}): Spend {
+  return {
+    purpose: "draft",
+    model: "gpt-5-mini",
+    endpoint: null,
+    requests: 1,
+    failed: 0,
+    unreported: 0,
+    prompt: 0,
+    completion: 0,
+    ...overrides,
+  };
+}
+
+describe("cost", () => {
+  const byModel = (entry: Spend) => entry.model;
+
+  it("renders the ordinary table, with no Endpoint column, when every request used the one endpoint", () => {
+    const spent = [
+      spend({ purpose: "draft", model: "gpt-5-mini", requests: 3, prompt: 100, completion: 50 }),
+      spend({ purpose: "judge", model: "gpt-5", requests: 1, prompt: 20, completion: 5 }),
+    ];
+
+    expect(cost(spent, byModel)).toBe(
+      [
+        "### Cost",
+        "",
+        "| Stage | Model | Requests | Failed | Prompt | Completion | Tokens |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Drafting | gpt-5-mini | 3 | — | 100 | 50 | 150 |",
+        "| Judging | gpt-5 | 1 | — | 20 | 5 | 25 |",
+        "| **Total** |  | **4** | — | **120** | **55** | **175** |",
+      ].join("\n"),
+    );
+  });
+
+  it("adds an Endpoint column, naming the default endpoint, once more than one endpoint carried spend", () => {
+    const spent = [
+      spend({ endpoint: null, requests: 2, prompt: 50, completion: 10 }),
+      spend({ endpoint: "fast", requests: 1, prompt: 25, completion: 5 }),
+    ];
+
+    expect(cost(spent, byModel)).toBe(
+      [
+        "### Cost",
+        "",
+        "| Stage | Model | Endpoint | Requests | Failed | Prompt | Completion | Tokens |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Drafting | gpt-5-mini | default | 2 | — | 50 | 10 | 60 |",
+        "| Drafting | gpt-5-mini | fast | 1 | — | 25 | 5 | 30 |",
+        "| **Total** |  |  | **3** | — | **75** | **15** | **90** |",
+      ].join("\n"),
+    );
+  });
+
+  it("says nothing was asked, rather than an empty table, when no request was made", () => {
+    expect(cost([], byModel)).toBe(
+      "### Cost\n\nNo model was asked anything this run — every decision was made by code.",
+    );
+  });
+
+  it("marks the totals row's failure cell too, once anything failed", () => {
+    const spent = [spend({ requests: 2, failed: 1, prompt: 10, completion: 2 })];
+
+    const rendered = cost(spent, byModel);
+
+    expect(rendered).toContain("| Drafting | gpt-5-mini | 2 | 1 | 10 | 2 | 12 |");
+    expect(rendered).toContain("**Total** |  | **2** | **1** |");
+    expect(rendered).toContain(
+      "1 request was unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.",
+    );
+  });
+
+  it("flags a floor rather than a total once a provider under-reported usage", () => {
+    const spent = [spend({ requests: 2, unreported: 1, prompt: 10, completion: 2 })];
+
+    expect(cost(spent, byModel)).toContain(
+      "1 of 2 requests came back without a `usage` field, so the token counts above are a floor rather than a total.",
+    );
+  });
+});
+
+describe("authSection", () => {
+  const refused = (endpoint: string | null): Failure => ({
+    ok: false,
+    model: "m",
+    kind: "auth",
+    usage: null,
+    reason: "HTTP 401: whatever the provider said",
+    endpoint,
+  });
+
+  it("is empty when nothing failed auth, which is every run before this amendment", () => {
+    expect(authSection([])).toBe("");
+  });
+
+  it("names every refused endpoint, with null shown as the default pair", () => {
+    const section = authSection([refused(null), refused("fast")]);
+
+    expect(section).toContain("### Endpoints that failed to authenticate");
+    expect(section).toContain("`default`");
+    expect(section).toContain("`fast`");
+  });
+
+  it("keeps the provider's own words out of the page", () => {
+    // The refusal's reason is a provider's response body — log material, not
+    // markdown this page should render.
+    expect(authSection([refused("fast")])).not.toContain("whatever the provider said");
   });
 });
