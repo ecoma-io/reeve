@@ -151,6 +151,15 @@ interface State {
    * leaving the guard nothing to exclude.
    */
   labelEvents: Record<number, { label: string; event: "labeled" | "unlabeled"; bot: boolean }[]>;
+  /**
+   * Thread numbers whose timeline the stub answers as longer than one run
+   * reads — every page full, straight through `listLabelEvents`'s own page
+   * ceiling, rather than the real (short) `labelEvents` fixture for that
+   * thread. Simulates a thread with a thousand-plus events without a
+   * thousand-plus-line fixture: the guard only cares that the walk never
+   * reaches a short page to stop on.
+   */
+  truncatedLabelHistory: Set<number>;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -198,6 +207,7 @@ async function startStub(): Promise<Stub> {
     contentsForbidden: false,
     contentsConflictsRemaining: 0,
     labelEvents: {},
+    truncatedLabelHistory: new Set(),
   };
 
   const server = createServer((request, response) => {
@@ -256,8 +266,24 @@ async function route(
   // repository whose timeline the stub never populated.
   const events = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/events$/.exec(path);
   if (method === "GET" && events) {
+    const number = Number(events[1]);
+    if (stub.truncatedLabelHistory.has(number)) {
+      // Every page full, forever — `listLabelEvents` stops asking on its own
+      // page ceiling, never on a short page, so this never needs to answer a
+      // real event to simulate a timeline longer than one run reads.
+      send(
+        response,
+        200,
+        Array.from({ length: 100 }, () => ({
+          event: "labeled",
+          label: { name: "filler" },
+          actor: { login: "maintainer", type: "User" },
+        })),
+      );
+      return;
+    }
     const page = Number(query.get("page") ?? "1");
-    const forThread = stub.labelEvents[Number(events[1])] ?? [];
+    const forThread = stub.labelEvents[number] ?? [];
     send(
       response,
       200,
@@ -1373,6 +1399,72 @@ describe("record", () => {
     },
   );
 
+  it(
+    'leaves a legacy `repo: ""` line alone in a store that also holds another ' +
+      "repository's history, rather than steal it on a colliding thread number",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      // This store has recorded for more than one repository — `other-org/
+      // other-repo`'s own explicit line proves it. The legacy line for #42
+      // predates the `repo` field and could belong to either repository's
+      // history; only a store that has only ever seen today's repo may
+      // widen it as today's own.
+      const legacy = JSON.stringify({
+        repo: "",
+        thread: 42,
+        at: "2026-07-01T00:00:00Z",
+        title: "Old title",
+        excerpt: "old excerpt",
+        language: "en",
+        proposed: [],
+        decided: ["docs"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      const foreign = JSON.stringify({
+        repo: "other-org/other-repo",
+        thread: 7,
+        at: "2026-07-01T00:00:00Z",
+        title: "A different repository's own thread",
+        excerpt: "unrelated",
+        language: "en",
+        proposed: [],
+        decided: ["bug"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      stub.contentsFiles.set(shardPath(), { content: `${legacy}\n${foreign}\n`, sha: "sha-seed" });
+      stub.labels = ["docs"];
+      const event = await labelEvent();
+
+      const run = await runAction(
+        stub,
+        { apply: "label, record", corrections: CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).toBe(0);
+      const shard = stub.contentsFiles.get(shardPath());
+      const lines = (shard?.content.trim().split("\n") ?? []).map(
+        (line) => JSON.parse(line) as { repo: string; thread: number; title: string },
+      );
+      // Not replaced: the legacy line for #42 stands untouched, the foreign
+      // repository's own #7 stands untouched, and today's write appends a
+      // third line carrying `correction.repo` explicit rather than merging
+      // into either.
+      expect(lines).toHaveLength(3);
+      expect(lines.find((line) => line.repo === "" && line.thread === 42)?.title).toBe("Old title");
+      expect(
+        lines.find((line) => line.repo === "other-org/other-repo" && line.thread === 7)?.title,
+      ).toBe("A different repository's own thread");
+      const written = lines.find((line) => line.repo === "ecoma-io/reeve" && line.thread === 42);
+      expect(written).toBeDefined();
+      expect(written?.title).not.toBe("Old title");
+    },
+  );
+
   it("replaces the prior entry in a healthy shard past an oversized sibling, warning rather than failing", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({
@@ -2367,6 +2459,43 @@ describe("the sweep", () => {
         expect(written[0]).toMatchObject({ thread: 901, decided: ["bug"] });
         expect(run.summary).toContain("| #901 |");
         expect(run.summary).not.toContain("| #902 |");
+      },
+    );
+
+    it(
+      "skips a candidate whose label history is longer than one run reads, rather than " +
+        "guess who applied it",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [
+          candidate(901, "2026-01-02T00:00:00Z", { labels: ["bug"] }),
+          // This thread's own timeline never answers a short page — the walk
+          // hits `listLabelEvents`'s own ceiling with the last page still
+          // full, so nothing here can be attributed to a human or a bot.
+          candidate(902, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
+        ];
+        stub.truncatedLabelHistory = new Set([902]);
+
+        const run = await runAction(
+          stub,
+          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        );
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.processed).toBe("1");
+        expect(run.outputs.skipped).toBe("1");
+
+        const shard = stub.contentsFiles.get(shardPath());
+        const written = (shard?.content.trim().split("\n") ?? []).map(
+          (line) => JSON.parse(line) as { thread: number },
+        );
+        expect(written).toHaveLength(1);
+        expect(written[0]?.thread).toBe(901);
+        expect(run.summary).toContain("| #901 |");
+        expect(run.summary).not.toContain("| #902 |");
+        expect(run.log).toContain(
+          "#902: label history is longer than one run reads — cannot attribute, nothing imported.",
+        );
       },
     );
 

@@ -499,10 +499,12 @@ async function runSweep(
         weather,
         "sweep",
       );
-      // The self-training guard's own skip: counted the same way the
-      // idempotent skip above is, not added to the results table — there is
-      // nothing this thread contributed to the store to show a row for.
-      if (outcome.machineOnly) {
+      // The self-training guard's own skip — machine-applied labels, or a
+      // label history too long for this run to attribute — counted the same
+      // way the idempotent skip above is, not added to the results table:
+      // there is nothing this thread contributed to the store to show a row
+      // for.
+      if (outcome.machineOnly || outcome.unattributable) {
         acc.skipped += 1;
       } else {
         acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
@@ -1085,6 +1087,17 @@ interface RecordOutcome {
    * was written. Never set outside a migration sweep.
    */
   readonly machineOnly: boolean;
+  /**
+   * Set when a migration sweep could not read this thread's whole label
+   * history — `listLabelEvents` hit its page ceiling with the last page
+   * still full. `recorded` is `false` alongside it, the same fail-closed
+   * choice as `machineOnly`: a label with no event this run could see is not
+   * proof a human applied it, only proof this run stopped reading before it
+   * got there, and importing it as a maintainer's correction on that basis
+   * would be exactly the self-training loop the guard exists to prevent.
+   * Never set outside a migration sweep.
+   */
+  readonly unattributable: boolean;
 }
 
 /**
@@ -1114,6 +1127,13 @@ interface RecordOutcome {
  * has nothing to distrust — and there alone, each candidate taxonomy label is
  * checked against its most recent `labeled` event; one whose actor is a bot
  * is excluded. A thread left with nothing decidable is not recorded at all.
+ *
+ * The guard fails closed on a thread whose label history is longer than one
+ * run reads, too: `listLabelEvents` reports `complete: false` when it hit its
+ * own page ceiling without reaching the start of the timeline, and a label
+ * with no event in what this run did see is not proof a human applied it —
+ * only proof the read stopped before it got there. Nothing is imported from
+ * that thread this run rather than guess.
  */
 async function recordCorrection(
   api: TrackerApi & ContentsApi,
@@ -1136,11 +1156,28 @@ async function recordCorrection(
   let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
 
   if (by === "sweep" && decidedLabels.length > 0) {
-    const events = await listLabelEvents(api, at);
+    const history = await listLabelEvents(api, at);
+
+    if (!history.complete) {
+      core.info(
+        `#${String(at.number)}: label history is longer than one run reads — cannot attribute, ` +
+          "nothing imported.",
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: false,
+        unattributable: true,
+      };
+    }
+
     // Oldest first, so the last write into this map for a given label is its
     // most recent `labeled` event — exactly the one the guard cares about.
     const lastLabeledByBot = new Map<string, boolean>();
-    for (const event of events) {
+    for (const event of history.events) {
       if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
     }
     decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
@@ -1156,6 +1193,7 @@ async function recordCorrection(
         pivot: false,
         pivotNote: null,
         machineOnly: true,
+        unattributable: false,
       };
     }
   }
@@ -1250,6 +1288,7 @@ async function recordCorrection(
     pivot: pivot !== null,
     pivotNote,
     machineOnly: false,
+    unattributable: false,
   };
 }
 
@@ -1323,6 +1362,11 @@ async function attemptWrite(
   const files = await listCorrectionFiles(contentsApi, at, path);
   const unreadable: string[] = [];
 
+  // Every shard is read up front, rather than stopping at the first match:
+  // the loose `repo === ""` rule below needs to know whether the *whole*
+  // store holds more than one repository's history, and a shard this run
+  // has not looked at yet could always be the one that says so.
+  const shards: { readonly path: string; readonly lines: string[]; readonly sha: string }[] = [];
   for (const file of files) {
     let read: { readonly text: string; readonly sha: string } | null;
     try {
@@ -1338,37 +1382,62 @@ async function attemptWrite(
       continue;
     }
     if (read === null) continue;
+    shards.push({ path: file.path, lines: read.text.split("\n"), sha: read.sha });
+  }
 
-    const lines = read.text.split("\n");
-    // `repo` as well as `thread` — the dedup key widened to the pair once a
-    // store could hold more than one repository's history. A line written
-    // before that field existed parses as `repo: ""`, and a stored empty repo
-    // is not a real repository this run could ever be recording for — it can
-    // only mean "written before this field existed", so it is read as this
-    // thread number's own legacy entry and treated as a match on today's
-    // repo. That is what lets the store self-migrate: the first write this
-    // thread sees after the field shipped rewrites the line in place, this
-    // time with `correction.repo` on it, and there is nothing legacy left to
-    // match loosely the next time.
-    const index = lines.findIndex((line) => {
+  // `repo` as well as `thread` — the dedup key widened to the pair once a
+  // store could hold more than one repository's history. A line written
+  // before that field existed parses as `repo: ""`, and in a store that has
+  // only ever recorded for today's repo, a stored empty repo can only mean
+  // "written before this field existed" — read as this thread number's own
+  // legacy entry, and matched loosely on today's repo. That is what lets a
+  // single-repo store self-migrate: the first write a thread sees after the
+  // field shipped rewrites the line in place, this time with
+  // `correction.repo` on it, and there is nothing legacy left to match
+  // loosely the next time.
+  //
+  // A store that also carries a *different* explicit repo — the whole reason
+  // `repo` exists — cannot make that same assumption: an empty-repo line for
+  // this thread number could belong to that other repository's own history
+  // from before it, too, recorded when both repositories shared this store
+  // and neither had `repo` yet. Matching it loosely there would let today's
+  // repo silently steal another repository's legacy entry whenever their
+  // thread numbers happened to collide. A shard this run could not read
+  // leaves that unknowable the same way a foreign repo would, so it counts
+  // against the loose match too. In both cases the legacy line is left
+  // alone and a fresh line is appended below with `correction.repo` explicit
+  // — the widened key's ordinary semantics, and nothing lost.
+  const singleRepoStore =
+    unreadable.length === 0 &&
+    shards.every((shard) =>
+      shard.lines.every((line) => {
+        if (line.trim().length === 0) return true;
+        const existing = parseCorrection(line);
+        return existing === null || existing.repo === "" || existing.repo === correction.repo;
+      }),
+    );
+
+  for (const shard of shards) {
+    const index = shard.lines.findIndex((line) => {
       if (line.trim().length === 0) return false;
       const existing = parseCorrection(line);
       return (
         existing !== null &&
         existing.thread === correction.thread &&
-        (existing.repo === correction.repo || existing.repo === "")
+        (existing.repo === correction.repo || (singleRepoStore && existing.repo === ""))
       );
     });
 
     if (index !== -1) {
+      const lines = [...shard.lines];
       lines[index] = formatCorrection(correction);
       await writeContentsFile(
         contentsApi,
         at,
-        file.path,
+        shard.path,
         `${lines.join("\n").replace(/\n*$/, "")}\n`,
         commitMessage(correction),
-        file.sha,
+        shard.sha,
       );
       return;
     }
