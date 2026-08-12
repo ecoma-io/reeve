@@ -10,6 +10,64 @@ version: 1
 reviews:
   enabled: true
 
+  # Generated bundles, committed by design (see .prettierignore and
+  # eslint.config.mjs, which exclude them for the same reason): esbuild's
+  # output, not a contributor's, so a line-by-line review of it reviews the
+  # bundler instead of the change.
+  ignore:
+    files:
+      - dist/**
+      - "*/dist/**"
+
+  # Written in English; https://docs.cubic.dev/configure/cubic-yaml has no
+  # dedicated language field, so the instruction lives here instead.
+  custom_instructions: |
+    Write all review comments in English.
+
+    Do not comment on formatting (prettier owns it) or comment-style
+    preferences — leave those to the tools and the author.
+
+    Priority order when findings compete for attention: security invariants,
+    then doctrine conformance, then docs/code parity, then test coverage of
+    behavior changes.
+
+  # Five is the maximum cubic allows; four are used here, one left free.
+  custom_rules:
+    - name: Security invariants
+      description: >-
+        Flag any secret (token, API key) logged, echoed, or otherwise
+        exposed before it is passed to core.setSecret. Flag any network
+        call to a destination other than a declared model endpoint or the
+        GitHub API. Flag untrusted or model-authored text interpolated into
+        a prompt, issue body, or comment without enclose() around input or
+        sanitize() around output bound for storage or publication. Flag any
+        code path that treats an unparseable model response as a
+        best-effort partial result rather than discarding it outright.
+
+    - name: Doctrine conformance
+      description: >-
+        Flag any mutation (a write, a state change, an external side
+        effect) that is not gated behind the run's dry-run flag. Flag any
+        code path where the machine overrides or second-guesses a decision
+        a human already made. Flag config parsing that accepts an unknown
+        key silently instead of refusing loudly. Flag error handling that
+        treats a capacity failure (HTTP 429, 5xx, timeout) as a failed run
+        rather than a partial/yellow one, or that treats an auth failure
+        (401, 403) as anything other than a hard, red failure.
+
+    - name: Docs/code parity
+      description: >-
+        For every behavioral claim added or changed in docs/ within this
+        pull request, flag it if the code in the same pull request does not
+        match — and the reverse: flag a behavior change in the diff that no
+        doc in the same pull request describes.
+
+    - name: Tests accompany behavior changes
+      description: >-
+        Flag a pull request that changes runtime behavior (not a pure
+        refactor, formatting, or comment change) and adds or updates no
+        test alongside it.
+
 pr_descriptions:
   # A pull request here already explains itself. The body is written to say what
   # changed and why the change is shaped that way — the part a reader cannot
