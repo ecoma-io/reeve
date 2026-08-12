@@ -581,6 +581,49 @@ this repository.
 Every stage above done, the numbers published, and the input surface frozen
 under semver's promise. Nothing else is waiting on it.
 
+### Beyond `1.0` — the 2.x line · **direction, nothing ships**
+
+None of this paragraph is behaviour. It is recorded here, ahead of any code,
+because this file's own first rule demands it: a 2.x line that changed what
+Reeve is allowed to become would be a change this document has to make first,
+in the open, with the argument written down — not one discovered in a diff.
+The full treatment lives in
+[the 2.x roadmap](../development/roadmap-2x.md) and
+[the agent runtime](../development/agent-runtime.md); what belongs _here_ is
+the part that is doctrine rather than design.
+
+**Reeve 2.x adds a second execution mode, not a second product.** Explicit
+mode — a duty invoked by name from a workflow line, deciding one thing and
+stopping — is preserved forever, unchanged, undeprecated. Agent Mode is a
+bounded loop that observes repository state, decides which of the duties the
+warrant already grants are worth running, runs them, and verifies the result
+before continuing or stopping. The relationship is a superset: no capability
+becomes agent-only, no explicit workflow changes meaning, and a repository
+that never opts in never notices
+([the compatibility contract](../development/agent-compatibility.md)).
+
+**The principle that governs it: autonomy is not authority.** A repository
+agent that can decide what to do, but cannot decide what it is allowed to do.
+The half being added is judgement about _which_ granted thing to do next; the
+half that stays exactly where [D2](#d2--authority-is-granted-written-and-bounded)
+put it is what is granted at all. The Authority Kernel — the component that
+checks every candidate effect against the written grant before it runs — is
+not a new idea needing new trust: it is the warrant's own enforcement stage,
+the direct descendant of the check that already runs in code against the
+parsed file, extended to a loop that may propose several effects per run
+instead of one. A better model produces a better plan; it never produces a
+wider warrant.
+
+**[Settled question §9.1](#91--does-reeve-ever-write-code-no) stands in both
+modes, unconditionally.** `code.write` — writing, running, or modifying any
+code, workflow file, or CI configuration in a consumer's repository — is
+permanently forbidden: a floor no warrant key, no authority file, and no
+future version of this roadmap may grant, not a default awaiting a policy
+that loosens it. An agent that sequences duties does not thereby become one
+that writes software, and the moment that sentence needs weakening is the
+moment this section has failed and must be argued down in its own commit,
+like everything else in this file.
+
 ## 8. Non-goals
 
 Stated so that "why doesn't it..." has an answer that is not a shrug.
@@ -679,6 +722,10 @@ and guessing now would be worse than deciding later with evidence.
    not obvious whether they should be reviewed as code or trusted as data.
 4. **One run, many duties?** Several duties firing on the same event means
    several checkouts and several model bills. Batching is obvious and couples
-   duties that are currently independent.
+   duties that are currently independent. _An answer now has a direction, not
+   yet code: [the 2.x line](#beyond-10--the-2x-line--direction-nothing-ships)
+   sequences several duties' capabilities inside one agent-mode run, while an
+   explicit-mode run stays one duty per invocation. This question closes into
+   [§9](#9-settled-questions) when that lands, not before._
 
 [gh-aw]: https://github.github.com/gh-aw/

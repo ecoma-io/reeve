@@ -12,14 +12,17 @@ Everything here is downstream of [North star](../doctrine/north-star.md). Where
 this directory explains _how_ something is built, the north star explains why it
 is allowed to exist at all, and it wins any disagreement.
 
-| Document                               | The question it answers                                                                                              |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [`architecture.md`](architecture.md)   | The pipeline stage by stage, what each stage is forbidden from doing, and where the line between core and duty runs. |
-| [`duties.md`](duties.md)               | The mechanics of adding a duty: earning it, evaluating it, wiring it in.                                             |
-| [`language.md`](language.md)           | Evaluating a duty's language handling, and what is still unresolved about the language layer.                        |
-| [`evaluation.md`](evaluation.md)       | How a duty proves it works — the fixture set, the harness, and why the headline number is the worst language.        |
-| [`releasing.md`](releasing.md)         | How a version is cut, why `dist/` is committed, and what the floating tag is allowed to deliver.                     |
-| [`agent-runtime.md`](agent-runtime.md) | Direction for a bounded agent runtime in Reeve 2.x. Nothing on that page ships today — read the banner first.        |
+| Document                                           | The question it answers                                                                                                |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [`architecture.md`](architecture.md)               | The pipeline stage by stage, what each stage is forbidden from doing, and where the line between core and duty runs.   |
+| [`duties.md`](duties.md)                           | The mechanics of adding a duty: earning it, evaluating it, wiring it in.                                               |
+| [`language.md`](language.md)                       | Evaluating a duty's language handling, and what is still unresolved about the language layer.                          |
+| [`evaluation.md`](evaluation.md)                   | How a duty proves it works — the fixture set, the harness, and why the headline number is the worst language.          |
+| [`releasing.md`](releasing.md)                     | How a version is cut, why `dist/` is committed, and what the floating tag is allowed to deliver.                       |
+| [`agent-runtime.md`](agent-runtime.md)             | The 2.x agent runtime's architecture, and the entry to the 2.x set. Nothing there ships today — read the banner first. |
+| [`roadmap-2x.md`](roadmap-2x.md)                   | The phases from today's explicit duties to Agent Mode, each with its guarantee and its deliberate not-yet.             |
+| [`agent-governance.md`](agent-governance.md)       | Draft spec for the `.reeve/` tree: what grants, what merely informs, and how a warrant lifts in.                       |
+| [`agent-compatibility.md`](agent-compatibility.md) | What every 1.x consumer is promised across the 2.x line, made specific enough to catch a violation.                    |
 
 These are normative and written ahead of the code, like
 [North star](../doctrine/north-star.md). Where an implementation disagrees with a
