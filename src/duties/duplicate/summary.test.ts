@@ -99,6 +99,26 @@ describe("summarize", () => {
     expect(page.match(/`fr`/g)).toHaveLength(1);
   });
 
+  it("says nothing about a chrome fallback when `comment` is not permitted — nothing was posted", () => {
+    const page = summarize(
+      run({ duplicateOf: 12, languageCode: "fr", posted: null, done: { commented: false } }),
+    );
+    expect(page).not.toContain("no translation for");
+  });
+
+  it("says nothing about a chrome fallback on a dry run, since nothing was actually posted", () => {
+    const page = summarize(
+      run({
+        dryRun: true,
+        duplicateOf: 12,
+        languageCode: "fr",
+        posted: "posted",
+        done: { commented: false },
+      }),
+    );
+    expect(page).not.toContain("no translation for");
+  });
+
   it("explains a verdict that was under the floor rather than reporting nothing", () => {
     const page = summarize(run({ duplicateOf: 12, confidence: 0.4, floor: 0.75, posted: null }));
 

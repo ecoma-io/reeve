@@ -447,8 +447,8 @@ describe("the action", () => {
     expect(posted).toContain(REPLY);
     // The thread is Vietnamese, and chrome follows the language of the reply
     // it wraps — see src/core/chrome.ts's doc comment.
-    expect(posted).toContain("được soạn bởi");
-    expect(posted).toContain("không phải bởi một maintainer");
+    expect(posted).toContain("Phản hồi này do [Reeve]");
+    expect(posted).toContain("không phải do maintainer viết");
     expect(posted).toContain("<!-- reeve:respond source=");
     expect(posted).toContain("được viết bằng");
     expect(run.outputs.responded).toBe("true");

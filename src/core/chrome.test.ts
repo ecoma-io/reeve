@@ -1,36 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHROME_KEYS,
   CHROME_LANGUAGES,
   chrome,
   chromeFallbackNote,
   chromeLines,
   chromeSupports,
-  type ChromeKey,
 } from "./chrome.js";
 
-// The table itself is not exported — reach every key through `chrome()` with
-// each configured language, which is exactly what a completeness test needs
-// and does not require poking at module internals to get.
-const KEYS: readonly ChromeKey[] = [
-  "translateBoundary",
-  "translateFooterFrom",
-  "translateFooterTruncated",
-  "translateFooterSkipped",
-  "translateFooterEditable",
-  "lifecycleFooterResetsAuthor",
-  "lifecycleFooterResetsAny",
-  "lifecycleFooterWhenLabel",
-  "lifecycleFooterEscape",
-  "lifecycleFooterAttribution",
-  "respondBoundaryDrafted",
-  "respondBoundaryCaveat",
-  "respondFooterUnknown",
-  "respondFooterKnown",
-  "respondFooterRecord",
-  "duplicatePossible",
-  "duplicateFooterFloor",
-  "duplicateFooterEditable",
-];
+// Read straight off the table's own export rather than a hand-maintained
+// list here — a key added to `CHROME` without a row for every language would
+// otherwise ship silently if this list forgot to grow with it.
+const KEYS = CHROME_KEYS;
 
 // Every placeholder any key uses, so a completeness pass can fill whichever
 // ones a given key needs without maintaining a second parallel key->params map.
@@ -50,11 +31,11 @@ describe("chrome — completeness", () => {
     }
   });
 
-  it("carries exactly the two languages this pull request commits", () => {
-    // Pins the language set itself — adding a third language is a real
+  it("carries exactly the three languages this file commits rows for", () => {
+    // Pins the language set itself — adding a fourth language is a real
     // change to this file and should show up as a diff to this assertion,
     // not slip in silently.
-    expect(CHROME_LANGUAGES).toEqual(["en", "vi"]);
+    expect(CHROME_LANGUAGES).toEqual(["en", "vi", "zh"]);
   });
 });
 
@@ -71,15 +52,17 @@ describe("chrome — fallback", () => {
     }
   });
 
-  it("reports chromeSupports(vi) true and chromeSupports(fr) false", () => {
+  it("reports chromeSupports(vi) and chromeSupports(zh) true, chromeSupports(fr) false", () => {
     expect(chromeSupports("vi")).toBe(true);
+    expect(chromeSupports("zh")).toBe(true);
     expect(chromeSupports("fr")).toBe(false);
     expect(chromeSupports(null)).toBe(false);
   });
 
-  it("renders a distinct string for vi than for en, for every key that has translatable words", () => {
+  it("renders a distinct string for vi and for zh than for en, for every key with translatable words", () => {
     for (const key of KEYS) {
       expect(chrome(key, "vi", ALL_PARAMS)).not.toBe(chrome(key, "en", ALL_PARAMS));
+      expect(chrome(key, "zh", ALL_PARAMS)).not.toBe(chrome(key, "en", ALL_PARAMS));
     }
   });
 });
@@ -128,7 +111,7 @@ describe("chromeFallbackNote", () => {
   });
 
   it("says which languages this table does carry", () => {
-    expect(chromeFallbackNote(["fr"])).toContain("Configured: en, vi.");
+    expect(chromeFallbackNote(["fr"])).toContain("Chrome covers: en, vi, zh.");
   });
 });
 

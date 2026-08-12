@@ -113,7 +113,8 @@ withhold, and `doctor: true` already performs none — every run under
 ## Cost
 
 None. Neither mode calls a model. `doctor: true` spends GitHub API reads
-only — one call to list this repository's labels.
+only — up to ten paginated calls to list this repository's labels (the same
+page limit every duty's own label listing uses).
 
 ## Security considerations
 

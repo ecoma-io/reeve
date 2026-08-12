@@ -110,11 +110,16 @@ export function summarize(run: Run): string {
 
 /**
  * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
- * one — see its own doc comment. `run.languageCode` is the only code this
- * duty's chrome is ever keyed by, and it is `null` exactly when there is no
- * `proposal` for chrome to have rendered anything for.
+ * one — see its own doc comment. `run.languageCode` names the language a
+ * `proposal` was built for, but the proposal's own chrome only actually
+ * rendered on a real, applied write — `!dryRun && done.commented`, the same
+ * gate `lifecycle/summary.ts`'s own `chromeGap` uses. `outcome.proposal` (and
+ * so `languageCode`) stays non-null on a dry run and when `comment` is not
+ * permitted (see `act` in `main.ts`), neither of which ever put chrome-wrapped
+ * text anywhere a reader can see it.
  */
 function chromeNote(run: Run): readonly string[] {
+  if (run.dryRun || !run.done.commented) return [];
   const note = chromeFallbackNote([run.languageCode]);
   return note === null ? [] : ["", note];
 }

@@ -37,10 +37,12 @@ to disagree.
    what it grants, whether that is the duty's own built-in default, and
    whether a written block simply leaves the duty unnamed — denied
    everything, which is a real, designed answer and not a finding.
-4. **What ran on a default because the file had no opinion.** Every place
-   `doctor` fell back to a duty's own built-in default or the narrowest
-   built-in authority is called out as its own green note, so "healthy" and
-   "healthy because nothing is configured yet" never look identical.
+4. **What ran on default, named once, together.** Every duty whose effective
+   grant above is exactly its own built-in default right now is named in a
+   single aggregated green note listing all of them, so "healthy" and
+   "healthy because nothing is configured yet" never look identical. A duty
+   a written block denies outright (see #3) is a different, separate fact
+   and never appears in this note: denied is not default.
 
 ## Example: lint your warrant in CI
 

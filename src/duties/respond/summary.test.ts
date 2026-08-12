@@ -121,6 +121,17 @@ describe("the run summary", () => {
     expect(summary).not.toContain("no translation for");
   });
 
+  it("says nothing about a chrome fallback for a draft withheld below the floor", () => {
+    const summary = subject({
+      responded: responded({ language: "Français", languageCode: "fr" }),
+      confidence: 0.4,
+      floor: 0.75,
+      published: false,
+      permitted: ["comment"],
+    });
+    expect(summary).not.toContain("no translation for");
+  });
+
   it("reports drafts, decided-by and votes for a contested reply", () => {
     const summary = subject({
       language: "English",

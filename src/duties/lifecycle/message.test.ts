@@ -126,7 +126,7 @@ describe("footer", () => {
     );
     expect(text).toContain("Một phản hồi từ tác giả của chủ đề này sẽ khởi động lại đồng hồ.");
     expect(text).toContain("Gỡ nhãn `needs-info` cũng sẽ dừng track này.");
-    expect(text).toContain("Thêm nhãn `pinned` sẽ dừng vĩnh viễn.");
+    expect(text).toContain("Thêm nhãn `pinned` sẽ dừng việc này vĩnh viễn.");
     expect(text).toContain("lifecycle — một chính sách do warrant của repository này cấu hình.");
     expect(text).not.toContain("restarts the clock");
   });

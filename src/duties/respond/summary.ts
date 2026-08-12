@@ -116,11 +116,14 @@ export function summarize(run: Run): string {
 /**
  * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
  * one — see its own doc comment. `responded.languageCode` is the only code
- * this duty's chrome is ever keyed by, and only when a draft actually exists
- * to carry it — a run that stopped before drafting called no chrome at all.
+ * this duty's chrome is ever keyed by, and `publish()`'s chrome only ever
+ * renders on the one path that actually posts a comment — `run.published`,
+ * never for a withheld draft (below the floor, `comment` not granted, an
+ * empty draft) or a dry run, every one of which leaves the draft unread
+ * anywhere the chrome-wrapped text would be.
  */
 function chromeNote(run: Run): readonly string[] {
-  if (run.responded === null || run.responded.text.length === 0) return [];
+  if (!run.published || run.responded === null || run.responded.text.length === 0) return [];
   const note = chromeFallbackNote([run.responded.languageCode]);
   return note === null ? [] : ["", note];
 }

@@ -34246,73 +34246,91 @@ async function listCorpus(api, at, exclude, limit, since, maxBodyChars = null) {
 }
 
 // src/core/chrome.ts
-var CHROME_LANGUAGES = ["en", "vi"];
+var CHROME_LANGUAGES = ["en", "vi", "zh"];
 var CHROME = {
   // translate/publish.ts — boundary() and footer() wrap every language
   // section in the thread at once, so both render through `chromeLines`.
   translateBoundary: {
     en: "**The text above is the original, and it is the version this project answers for.** Everything below is a machine translation by [Reeve](https://github.com/ecoma-io/reeve). Where the two disagree, the text above is the one that counts.",
-    vi: "**V\u0103n b\u1EA3n ph\xEDa tr\xEAn l\xE0 b\u1EA3n g\u1ED1c, v\xE0 \u0111\xE2y l\xE0 phi\xEAn b\u1EA3n m\xE0 d\u1EF1 \xE1n n\xE0y ch\u1ECBu tr\xE1ch nhi\u1EC7m.** M\u1ECDi n\u1ED9i dung ph\xEDa d\u01B0\u1EDBi l\xE0 b\u1EA3n d\u1ECBch m\xE1y b\u1EDFi [Reeve](https://github.com/ecoma-io/reeve). N\u1EBFu c\xF3 s\u1EF1 kh\xE1c bi\u1EC7t, v\u0103n b\u1EA3n ph\xEDa tr\xEAn m\u1EDBi l\xE0 v\u0103n b\u1EA3n c\xF3 gi\xE1 tr\u1ECB."
+    vi: "**V\u0103n b\u1EA3n ph\xEDa tr\xEAn l\xE0 b\u1EA3n g\u1ED1c, v\xE0 \u0111\xE2y l\xE0 phi\xEAn b\u1EA3n m\xE0 d\u1EF1 \xE1n n\xE0y ch\u1ECBu tr\xE1ch nhi\u1EC7m v\u1EC1 n\u1ED9i dung.** M\u1ECDi n\u1ED9i dung ph\xEDa d\u01B0\u1EDBi l\xE0 b\u1EA3n d\u1ECBch m\xE1y do [Reeve](https://github.com/ecoma-io/reeve) th\u1EF1c hi\u1EC7n. Khi hai b\xEAn kh\xE1c nhau, v\u0103n b\u1EA3n ph\xEDa tr\xEAn m\u1EDBi l\xE0 b\u1EA3n c\xF3 gi\xE1 tr\u1ECB.",
+    zh: "**\u4E0A\u9762\u7684\u6587\u672C\u662F\u539F\u6587\uFF0C\u8FD9\u4E2A\u9879\u76EE\u5BF9\u5176\u5185\u5BB9\u8D1F\u8D23\u3002** \u4EE5\u4E0B\u6240\u6709\u5185\u5BB9\u5747\u7531 [Reeve](https://github.com/ecoma-io/reeve) \u673A\u5668\u7FFB\u8BD1\u3002\u5982\u6709\u51FA\u5165\uFF0C\u4EE5\u4E0A\u9762\u7684\u6587\u672C\u4E3A\u51C6\u3002"
   },
   translateFooterFrom: {
     en: "Translated from {label}.",
-    vi: "\u0110\u01B0\u1EE3c d\u1ECBch t\u1EEB {label}."
+    vi: "\u0110\u01B0\u1EE3c d\u1ECBch t\u1EEB {label}.",
+    zh: "\u7FFB\u8BD1\u81EA {label}\u3002"
   },
   translateFooterTruncated: {
     en: "The body was longer than this run's limit, so its tail was not translated.",
-    vi: "N\u1ED9i dung d\xE0i h\u01A1n gi\u1EDBi h\u1EA1n c\u1EE7a l\u1EA7n ch\u1EA1y n\xE0y, n\xEAn ph\u1EA7n cu\u1ED1i ch\u01B0a \u0111\u01B0\u1EE3c d\u1ECBch."
+    vi: "N\u1ED9i dung d\xE0i h\u01A1n gi\u1EDBi h\u1EA1n c\u1EE7a l\u1EA7n ch\u1EA1y n\xE0y, n\xEAn ph\u1EA7n cu\u1ED1i ch\u01B0a \u0111\u01B0\u1EE3c d\u1ECBch.",
+    zh: "\u6B63\u6587\u957F\u5EA6\u8D85\u8FC7\u672C\u6B21\u8FD0\u884C\u7684\u9650\u5236\uFF0C\u672B\u5C3E\u90E8\u5206\u672A\u88AB\u7FFB\u8BD1\u3002"
   },
   translateFooterSkipped: {
     en: "Not translated this run: {list}.",
-    vi: "Ch\u01B0a \u0111\u01B0\u1EE3c d\u1ECBch trong l\u1EA7n ch\u1EA1y n\xE0y: {list}."
+    vi: "Ch\u01B0a \u0111\u01B0\u1EE3c d\u1ECBch trong l\u1EA7n ch\u1EA1y n\xE0y: {list}.",
+    zh: "\u672C\u6B21\u8FD0\u884C\u672A\u7FFB\u8BD1\uFF1A{list}\u3002"
   },
   translateFooterEditable: {
     en: "Editing the text above republishes this; deleting this block regenerates it.",
-    vi: "Ch\u1EC9nh s\u1EEDa v\u0103n b\u1EA3n ph\xEDa tr\xEAn s\u1EBD \u0111\u0103ng l\u1EA1i b\u1EA3n d\u1ECBch n\xE0y; x\xF3a kh\u1ED1i n\xE0y s\u1EBD t\u1EA1o l\u1EA1i n\xF3."
+    vi: "Ch\u1EC9nh s\u1EEDa v\u0103n b\u1EA3n ph\xEDa tr\xEAn s\u1EBD \u0111\u0103ng l\u1EA1i b\u1EA3n d\u1ECBch n\xE0y; x\xF3a kh\u1ED1i n\xE0y s\u1EBD t\u1EA1o l\u1EA1i n\xF3.",
+    zh: "\u7F16\u8F91\u4E0A\u9762\u7684\u6587\u672C\u4F1A\u91CD\u65B0\u53D1\u5E03\u6B64\u7FFB\u8BD1\uFF1B\u5220\u9664\u6B64\u533A\u5757\u4F1A\u91CD\u65B0\u751F\u6210\u5B83\u3002"
   },
   // lifecycle/message.ts's footer() — every line below already sits under a
   // comment `renderSay`/`renderClose` already resolved to one language, so
-  // this renders through `chrome`, not `chromeLines`.
+  // this renders through `chrome`, not `chromeLines`. The zh row keeps the
+  // same register as `lifecycle/message.ts`'s own `BUILTIN_REMINDER`/
+  // `BUILTIN_CLOSE` — "重新开始计时" for "restarts the clock" — so a lifecycle
+  // comment reads as one voice, not two translators.
   lifecycleFooterResetsAuthor: {
     en: "A reply from this thread's author restarts the clock.",
-    vi: "M\u1ED9t ph\u1EA3n h\u1ED3i t\u1EEB t\xE1c gi\u1EA3 c\u1EE7a ch\u1EE7 \u0111\u1EC1 n\xE0y s\u1EBD kh\u1EDFi \u0111\u1ED9ng l\u1EA1i \u0111\u1ED3ng h\u1ED3."
+    vi: "M\u1ED9t ph\u1EA3n h\u1ED3i t\u1EEB t\xE1c gi\u1EA3 c\u1EE7a ch\u1EE7 \u0111\u1EC1 n\xE0y s\u1EBD kh\u1EDFi \u0111\u1ED9ng l\u1EA1i \u0111\u1ED3ng h\u1ED3.",
+    zh: "\u6B64\u8BDD\u9898\u4F5C\u8005\u7684\u56DE\u590D\u4F1A\u91CD\u65B0\u5F00\u59CB\u8BA1\u65F6\u3002"
   },
   lifecycleFooterResetsAny: {
     en: "Any activity here restarts the clock.",
-    vi: "B\u1EA5t k\u1EF3 ho\u1EA1t \u0111\u1ED9ng n\xE0o \u1EDF \u0111\xE2y c\u0169ng s\u1EBD kh\u1EDFi \u0111\u1ED9ng l\u1EA1i \u0111\u1ED3ng h\u1ED3."
+    vi: "B\u1EA5t k\u1EF3 ho\u1EA1t \u0111\u1ED9ng n\xE0o \u1EDF \u0111\xE2y c\u0169ng s\u1EBD kh\u1EDFi \u0111\u1ED9ng l\u1EA1i \u0111\u1ED3ng h\u1ED3.",
+    zh: "\u8FD9\u91CC\u7684\u4EFB\u4F55\u6D3B\u52A8\u90FD\u4F1A\u91CD\u65B0\u5F00\u59CB\u8BA1\u65F6\u3002"
   },
   lifecycleFooterWhenLabel: {
     en: "Removing the `{label}` label also stops this track.",
-    vi: "G\u1EE1 nh\xE3n `{label}` c\u0169ng s\u1EBD d\u1EEBng track n\xE0y."
+    vi: "G\u1EE1 nh\xE3n `{label}` c\u0169ng s\u1EBD d\u1EEBng track n\xE0y.",
+    zh: "\u79FB\u9664 `{label}` \u6807\u7B7E\u4E5F\u4F1A\u505C\u6B62\u6B64\u8DDF\u8E2A\u3002"
   },
   lifecycleFooterEscape: {
     en: "Adding `{label}` stops this permanently.",
-    vi: "Th\xEAm nh\xE3n `{label}` s\u1EBD d\u1EEBng v\u0129nh vi\u1EC5n."
+    vi: "Th\xEAm nh\xE3n `{label}` s\u1EBD d\u1EEBng vi\u1EC7c n\xE0y v\u0129nh vi\u1EC5n.",
+    zh: "\u6DFB\u52A0 `{label}` \u4F1A\u6C38\u4E45\u505C\u6B62\u6B64\u64CD\u4F5C\u3002"
   },
   lifecycleFooterAttribution: {
     en: "lifecycle \u2014 a policy this repository's own warrant configured.",
-    vi: "lifecycle \u2014 m\u1ED9t ch\xEDnh s\xE1ch do warrant c\u1EE7a repository n\xE0y c\u1EA5u h\xECnh."
+    vi: "lifecycle \u2014 m\u1ED9t ch\xEDnh s\xE1ch do warrant c\u1EE7a repository n\xE0y c\u1EA5u h\xECnh.",
+    zh: "lifecycle \u2014 \u8BE5\u4ED3\u5E93\u81EA\u5DF1\u7684 warrant \u6240\u914D\u7F6E\u7684\u7B56\u7565\u3002"
   },
   // respond/publish.ts — one reply, one language throughout, via `chrome`.
   respondBoundaryDrafted: {
     en: "This reply was drafted by [Reeve](https://github.com/ecoma-io/reeve), not by a maintainer.",
-    vi: "Ph\u1EA3n h\u1ED3i n\xE0y \u0111\u01B0\u1EE3c so\u1EA1n b\u1EDFi [Reeve](https://github.com/ecoma-io/reeve), kh\xF4ng ph\u1EA3i b\u1EDFi m\u1ED9t maintainer."
+    vi: "Ph\u1EA3n h\u1ED3i n\xE0y do [Reeve](https://github.com/ecoma-io/reeve) so\u1EA1n, kh\xF4ng ph\u1EA3i do maintainer vi\u1EBFt.",
+    zh: "\u6B64\u56DE\u590D\u7531 [Reeve](https://github.com/ecoma-io/reeve) \u64B0\u5199\uFF0C\u800C\u975E\u7EF4\u62A4\u8005\u672C\u4EBA\u3002"
   },
   respondBoundaryCaveat: {
     en: "A maintainer has not reviewed it. Treat it as a starting point, not an answer.",
-    vi: "M\u1ED9t maintainer ch\u01B0a xem x\xE9t ph\u1EA3n h\u1ED3i n\xE0y. H\xE3y xem \u0111\xE2y l\xE0 \u0111i\u1EC3m kh\u1EDFi \u0111\u1EA7u, kh\xF4ng ph\u1EA3i c\xE2u tr\u1EA3 l\u1EDDi cu\u1ED1i c\xF9ng."
+    vi: "Ch\u01B0a c\xF3 maintainer n\xE0o xem x\xE9t ph\u1EA3n h\u1ED3i n\xE0y. H\xE3y xem \u0111\xE2y l\xE0 \u0111i\u1EC3m kh\u1EDFi \u0111\u1EA7u, kh\xF4ng ph\u1EA3i m\u1ED9t c\xE2u tr\u1EA3 l\u1EDDi.",
+    zh: "\u5C1A\u65E0\u7EF4\u62A4\u8005\u5BA1\u9605\u8FC7\u6B64\u56DE\u590D\u3002\u8BF7\u5C06\u5176\u89C6\u4E3A\u4E00\u4E2A\u8D77\u70B9\uFF0C\u800C\u975E\u6700\u7EC8\u7B54\u6848\u3002"
   },
   respondFooterUnknown: {
     en: "This project could not identify the thread's language, so the reply above is in English.",
-    vi: "D\u1EF1 \xE1n n\xE0y kh\xF4ng th\u1EC3 x\xE1c \u0111\u1ECBnh ng\xF4n ng\u1EEF c\u1EE7a ch\u1EE7 \u0111\u1EC1, v\xEC v\u1EADy ph\u1EA3n h\u1ED3i ph\xEDa tr\xEAn b\u1EB1ng ti\u1EBFng Anh."
+    vi: "D\u1EF1 \xE1n n\xE0y kh\xF4ng th\u1EC3 x\xE1c \u0111\u1ECBnh ng\xF4n ng\u1EEF c\u1EE7a ch\u1EE7 \u0111\u1EC1, v\xEC v\u1EADy ph\u1EA3n h\u1ED3i ph\xEDa tr\xEAn b\u1EB1ng ti\u1EBFng Anh.",
+    zh: "\u672C\u9879\u76EE\u65E0\u6CD5\u8BC6\u522B\u8BE5\u8BDD\u9898\u6240\u4F7F\u7528\u7684\u8BED\u8A00\uFF0C\u56E0\u6B64\u4E0A\u9762\u7684\u56DE\u590D\u4F7F\u7528\u82F1\u6587\u3002"
   },
   respondFooterKnown: {
     en: "The thread was written in {label}.",
-    vi: "Ch\u1EE7 \u0111\u1EC1 n\xE0y \u0111\u01B0\u1EE3c vi\u1EBFt b\u1EB1ng {label}."
+    vi: "Ch\u1EE7 \u0111\u1EC1 n\xE0y \u0111\u01B0\u1EE3c vi\u1EBFt b\u1EB1ng {label}.",
+    zh: "\u8BE5\u8BDD\u9898\u4F7F\u7528{label}\u64B0\u5199\u3002"
   },
   respondFooterRecord: {
     en: "Reeve answers a thread once. This comment is the record of it.",
-    vi: "Reeve ch\u1EC9 tr\u1EA3 l\u1EDDi m\u1ED9t ch\u1EE7 \u0111\u1EC1 m\u1ED9t l\u1EA7n. B\xECnh lu\u1EADn n\xE0y l\xE0 b\u1EB1ng ch\u1EE9ng cho \u0111i\u1EC1u \u0111\xF3."
+    vi: "Reeve ch\u1EC9 tr\u1EA3 l\u1EDDi m\u1ED7i ch\u1EE7 \u0111\u1EC1 m\u1ED9t l\u1EA7n. B\xECnh lu\u1EADn n\xE0y ch\xEDnh l\xE0 b\u1EA3n ghi c\u1EE7a l\u1EA7n tr\u1EA3 l\u1EDDi \u0111\xF3.",
+    zh: "Reeve \u53EA\u56DE\u7B54\u4E00\u4E2A\u8BDD\u9898\u4E00\u6B21\u3002\u6B64\u8BC4\u8BBA\u5C31\u662F\u8FD9\u6B21\u56DE\u7B54\u7684\u8BB0\u5F55\u3002"
   },
   // duplicate/publish.ts — one proposal, one language (the thread's own —
   // see `render`'s doc comment for why that signal is trustworthy here even
@@ -34320,17 +34338,21 @@ var CHROME = {
   // `chrome`.
   duplicatePossible: {
     en: "Possible duplicate of #{number}.",
-    vi: "C\xF3 th\u1EC3 tr\xF9ng l\u1EB7p v\u1EDBi #{number}."
+    vi: "C\xF3 th\u1EC3 tr\xF9ng l\u1EB7p v\u1EDBi #{number}.",
+    zh: "\u53EF\u80FD\u4E0E #{number} \u91CD\u590D\u3002"
   },
   duplicateFooterFloor: {
     en: "Proposed by a model, not decided by a maintainer \u2014 read it as a lead to check.",
-    vi: "\u0110\u01B0\u1EE3c \u0111\u1EC1 xu\u1EA5t b\u1EDFi m\u1ED9t model, kh\xF4ng ph\u1EA3i quy\u1EBFt \u0111\u1ECBnh c\u1EE7a maintainer \u2014 h\xE3y xem \u0111\xE2y l\xE0 m\u1ED9t manh m\u1ED1i c\u1EA7n ki\u1EC3m tra."
+    vi: "Do m\u1ED9t model \u0111\u1EC1 xu\u1EA5t, kh\xF4ng ph\u1EA3i quy\u1EBFt \u0111\u1ECBnh c\u1EE7a maintainer \u2014 h\xE3y xem \u0111\xE2y l\xE0 m\u1ED9t g\u1EE3i \xFD c\u1EA7n ki\u1EC3m ch\u1EE9ng.",
+    zh: "\u7531\u6A21\u578B\u63D0\u51FA\uFF0C\u800C\u975E\u7EF4\u62A4\u8005\u7684\u51B3\u5B9A \u2014 \u8BF7\u5C06\u5176\u89C6\u4E3A\u9700\u8981\u6838\u5B9E\u7684\u7EBF\u7D22\u3002"
   },
   duplicateFooterEditable: {
     en: "Editing this thread and re-running replaces this comment; it is never posted twice.",
-    vi: "Ch\u1EC9nh s\u1EEDa ch\u1EE7 \u0111\u1EC1 n\xE0y v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n."
+    vi: "Ch\u1EC9nh s\u1EEDa ch\u1EE7 \u0111\u1EC1 n\xE0y v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n.",
+    zh: "\u7F16\u8F91\u6B64\u8BDD\u9898\u5E76\u91CD\u65B0\u8FD0\u884C\u4F1A\u66FF\u6362\u6B64\u8BC4\u8BBA\uFF1B\u5B83\u7EDD\u4E0D\u4F1A\u88AB\u53D1\u5E03\u4E24\u6B21\u3002"
   }
 };
+var CHROME_KEYS = Object.keys(CHROME);
 var LANGUAGE_SET = new Set(CHROME_LANGUAGES);
 function resolve(code) {
   return code !== null && LANGUAGE_SET.has(code) ? code : "en";
@@ -34355,7 +34377,7 @@ function chromeFallbackNote(codes) {
   );
   if (missing.size === 0) return null;
   const list = [...missing].sort().map((code) => `\`${code}\``).join(", ");
-  return `${list} \u2014 Reeve's own scaffolding text has no translation for ${missing.size === 1 ? "this language" : "these languages"} yet, so it rendered in English instead. Configured: ${CHROME_LANGUAGES.join(", ")}.`;
+  return `${list} \u2014 Reeve's own scaffolding text has no translation for ${missing.size === 1 ? "this language" : "these languages"} yet, so it rendered in English instead. Chrome covers: ${CHROME_LANGUAGES.join(", ")}.`;
 }
 
 // src/duties/duplicate/publish.ts
@@ -34543,6 +34565,7 @@ function summarize(run2) {
 `;
 }
 function chromeNote(run2) {
+  if (run2.dryRun || !run2.done.commented) return [];
   const note = chromeFallbackNote([run2.languageCode]);
   return note === null ? [] : ["", note];
 }

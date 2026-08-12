@@ -124,10 +124,10 @@ describe("publication", () => {
 
   it("follows the reply's own language for the boundary note and footer", () => {
     const rendered = body({ language: "Tiếng Việt", languageCode: "vi" });
-    expect(rendered).toContain("Phản hồi này được soạn bởi");
-    expect(rendered).toContain("Một maintainer chưa xem xét phản hồi này");
+    expect(rendered).toContain("Phản hồi này do [Reeve]");
+    expect(rendered).toContain("Chưa có maintainer nào xem xét phản hồi này");
     expect(rendered).toContain("Chủ đề này được viết bằng Tiếng Việt.");
-    expect(rendered).toContain("Reeve chỉ trả lời một chủ đề một lần.");
+    expect(rendered).toContain("Reeve chỉ trả lời mỗi chủ đề một lần.");
     expect(rendered).not.toContain("This reply was drafted by");
   });
 

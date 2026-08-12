@@ -40,7 +40,10 @@ import {
   type Warrant,
 } from "../core/warrant.js";
 import { DEFAULT_CAPABILITIES as DUPLICATE_DEFAULTS } from "../duties/duplicate/capabilities.js";
-import { DEFAULT_CAPABILITIES as LIFECYCLE_DEFAULTS } from "../duties/lifecycle/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as LIFECYCLE_DEFAULTS,
+  LIFECYCLE_CAPABILITIES,
+} from "../duties/lifecycle/capabilities.js";
 import { DEFAULT_CAPABILITIES as RESPOND_DEFAULTS } from "../duties/respond/capabilities.js";
 import { DEFAULT_CAPABILITIES as TRANSLATE_DEFAULTS } from "../duties/translate/capabilities.js";
 import { DEFAULT_CAPABILITIES as TRIAGE_DEFAULTS } from "../duties/triage/capabilities.js";
@@ -66,6 +69,22 @@ const DEFAULTS_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["lifecycle", LIFECYCLE_DEFAULTS],
 ]);
 
+/**
+ * Every duty's own ladder of capabilities it actually has a use for, wired
+ * to its name — `null` when a duty has no narrower ladder than "whatever the
+ * warrant grants it". Only `lifecycle` narrows today (see
+ * `LIFECYCLE_CAPABILITIES`'s own doc comment); the map exists so a future
+ * duty that grows the same kind of narrowing needs one entry here, not a
+ * second filtering scheme.
+ */
+const LADDER_BY_DUTY: ReadonlyMap<string, readonly Capability[] | null> = new Map([
+  ["translate", null],
+  ["triage", null],
+  ["duplicate", null],
+  ["respond", null],
+  ["lifecycle", LIFECYCLE_CAPABILITIES],
+]);
+
 /** Whether a finding stops a real run (`red`) or describes a healthy or weather condition (`green`). */
 export type Severity = "red" | "green";
 
@@ -78,12 +97,24 @@ export interface Finding {
 /** One duty's row in the effective-authority table. */
 export interface AuthorityRow {
   readonly duty: string;
-  /** What this duty would actually be granted right now. Empty when `denied`. */
+  /**
+   * What this duty would actually be granted right now — already narrowed by
+   * its own ladder (see `LADDER_BY_DUTY`) the same way a real run narrows it,
+   * so this is the duty's true effective authority, not just the warrant's
+   * raw say-so. Empty when `denied`.
+   */
   readonly granted: readonly Capability[];
   /** True when a written `capabilities:` block exists and does not name this duty. */
   readonly denied: boolean;
   /** True when `granted` is exactly this duty's own built-in default (see `DEFAULTS_BY_DUTY`). */
   readonly isDefault: boolean;
+  /**
+   * Capabilities the warrant granted this duty that its own ladder filters
+   * back out — granted, but never asked for, the same distinction a real
+   * `lifecycle` run's `core.notice` warns about at runtime. Empty for every
+   * duty whose `LADDER_BY_DUTY` entry is `null`.
+   */
+  readonly unused: readonly Capability[];
 }
 
 export interface Report {
@@ -222,6 +253,23 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
   const scoped = duty === null ? DUTIES : [duty];
   const authorityRows = scoped.map((name) => authorityRow(authority.warrant, name));
 
+  // One aggregated note, not one per duty — named once so a reader sees the
+  // whole set of duties running unmodified at their own built-in default in
+  // a single place. `isDefault` alone is deliberately the only test: a duty
+  // `warrant.unnamed` denies is a different, separate fact, already visible
+  // in its own row (`denied: true`), and never belongs in this note — a
+  // written `capabilities:` block that leaves a duty out denies it, it does
+  // not default it (see `unnamed`'s own doc comment in `core/warrant.ts`).
+  const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
+  if (defaulted.length > 0) {
+    findings.push({
+      severity: "green",
+      text:
+        `${defaulted.map((row) => `\`${row.duty}\``).join(", ")} — each duty's effective grant ` +
+        "above is exactly its own built-in default right now.",
+    });
+  }
+
   return {
     ...base,
     implicit: authority.implicit,
@@ -235,10 +283,13 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
 function authorityRow(warrant: Warrant, duty: string): AuthorityRow {
   const fallback = DEFAULTS_BY_DUTY.get(duty) ?? [];
   if (warrant.unnamed(duty)) {
-    return { duty, granted: [], denied: true, isDefault: false };
+    return { duty, granted: [], denied: true, isDefault: false, unused: [] };
   }
-  const granted = warrant.granted(duty, fallback);
-  return { duty, granted, denied: false, isDefault: sameCapabilities(granted, fallback) };
+  const grantedRaw = warrant.granted(duty, fallback);
+  const ladder = LADDER_BY_DUTY.get(duty) ?? null;
+  const granted = ladder === null ? grantedRaw : grantedRaw.filter((c) => ladder.includes(c));
+  const unused = ladder === null ? [] : grantedRaw.filter((c) => !ladder.includes(c));
+  return { duty, granted, denied: false, isDefault: sameCapabilities(granted, fallback), unused };
 }
 
 /** Set equality, not array equality — a warrant may list a duty's default capabilities in a different order. */

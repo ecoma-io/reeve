@@ -8,7 +8,14 @@ function finding(over: Partial<Finding> = {}): Finding {
 }
 
 function row(over: Partial<AuthorityRow> = {}): AuthorityRow {
-  return { duty: "triage", granted: ["label"], denied: false, isDefault: true, ...over };
+  return {
+    duty: "triage",
+    granted: ["label"],
+    denied: false,
+    isDefault: true,
+    unused: [],
+    ...over,
+  };
 }
 
 function report(over: Partial<Report> = {}): Report {
@@ -97,6 +104,25 @@ describe("summarize", () => {
     );
 
     expect(page).toContain("| `triage` | `label`, `comment` | — |");
+  });
+
+  it("notes a capability the warrant granted a duty that its own ladder has no use for", () => {
+    const page = summarize(
+      report({
+        authority: [
+          row({
+            duty: "lifecycle",
+            granted: ["label", "comment"],
+            isDefault: true,
+            unused: ["edit-body"],
+          }),
+        ],
+      }),
+    );
+
+    expect(page).toContain(
+      "| `lifecycle` | `label`, `comment` | this duty's own default; granted `edit-body` in warrant, this duty has no use for it |",
+    );
   });
 
   it("ends with exactly one newline, whatever the last section was", () => {

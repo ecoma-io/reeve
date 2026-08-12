@@ -410,7 +410,7 @@ describe("postOrReplace", () => {
 
     expect(comments[0]?.body).toContain("Có thể trùng lặp với #7.");
     expect(comments[0]?.body).toContain(
-      "Được đề xuất bởi một model, không phải quyết định của maintainer",
+      "Do một model đề xuất, không phải quyết định của maintainer",
     );
     expect(comments[0]?.body).toContain("không bao giờ được đăng hai lần");
     expect(comments[0]?.body).not.toContain("Possible duplicate of");

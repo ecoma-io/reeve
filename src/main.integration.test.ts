@@ -217,12 +217,31 @@ describe("the root action", () => {
     expect(run.log).toContain("uses: ecoma-io/reeve/triage@v0.1");
   });
 
+  it("names lifecycle's own is-a-duty refusal text, exactly the same shape as every other shipped duty", async () => {
+    const run = await runAction(stub, { doctor: "false", duty: "lifecycle" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("`lifecycle` is a duty, but it is not this action.");
+    expect(run.log).toContain("uses: ecoma-io/reeve/lifecycle@v0.1");
+  });
+
+  it("fails clean, naming the accepted spellings, when `doctor` is not a recognised boolean", async () => {
+    const run = await runAction(stub, { doctor: "yes" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("true | True | TRUE | false | False | FALSE");
+    expect(run.log).not.toContain("TypeError");
+    expect(run.log).not.toMatch(/\n\s*at /);
+  });
+
   it("is green with `problems: 0` when the warrant is healthy", async () => {
     const run = await runAction(stub, { doctor: "true" });
 
     expect(run.code).toBe(0);
     expect(run.outputs.problems).toBe("0");
     expect(run.summary).toContain("## Reeve · doctor");
+    expect(run.summary).toContain("### Problems");
+    expect(run.summary).toContain("None — nothing here would refuse a duty at runtime.");
     expect(run.summary).toContain("### Effective authority");
   });
 

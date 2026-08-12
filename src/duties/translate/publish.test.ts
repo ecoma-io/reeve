@@ -19,6 +19,9 @@ import {
 const vietnamese: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latin"] };
 const english: Language = { code: "en", label: "English", scripts: ["Latin"] };
 const chinese: Language = { code: "zh", label: "中文", scripts: ["Hani"] };
+// French has no row in chrome.ts's committed table — unlike `chinese` above,
+// which chrome does have a row for as of the language it added.
+const french: Language = { code: "fr", label: "Français", scripts: ["Latin"] };
 
 const OFFICIAL = "Ứng dụng bị lỗi khi tôi bấm nút.";
 
@@ -290,9 +293,9 @@ describe("chrome — follows the languages actually posted", () => {
   });
 
   it("falls back to English boundary/footer chrome for a posted language chrome has no row for", () => {
-    // Chinese has no row in chrome.ts's committed table — the whole point of the
+    // French has no row in chrome.ts's committed table — the whole point of the
     // deterministic English fallback rather than a runtime guess at a translation.
-    const rendered = body({ posted: [posted(chinese)] });
+    const rendered = body({ posted: [posted(french)] });
     expect(rendered).toContain("The text above is the original");
     expect(rendered.split("The text above is the original")).toHaveLength(2);
   });

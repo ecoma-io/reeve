@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TrackerApi } from "../core/forge.js";
+import { DUTIES } from "../refusal.js";
 
 import { diagnose, problems, type Report } from "./diagnose.js";
 
@@ -194,10 +195,14 @@ describe("diagnose", () => {
     ).toBe(true);
   });
 
-  it("says nothing about `lifecycle:` when the warrant never wrote one", async () => {
+  it("says nothing about a `lifecycle:` labels check when the warrant never wrote one", async () => {
     const result = await report(TAXONOMY, labelsApi(["bug", "docs"]));
 
-    expect(result.findings.some((finding) => finding.text.includes("lifecycle"))).toBe(false);
+    // Scoped to the `lifecycle:` labels-check finding specifically — the
+    // aggregated default note (see the tests above) legitimately names every
+    // duty running on its own default, `lifecycle` included, so a bare
+    // substring match on "lifecycle" would collide with that unrelated note.
+    expect(result.findings.some((finding) => finding.text.includes("lifecycle:"))).toBe(false);
   });
 
   it("is green, weather, when the labels endpoint fails on capacity — and names the endpoint", async () => {
@@ -224,20 +229,72 @@ describe("diagnose", () => {
     const result = await report(TAXONOMY, labelsApi(["bug", "docs"]));
 
     const triage = result.authority.find((row) => row.duty === "triage");
-    expect(triage).toEqual({ duty: "triage", granted: ["label"], denied: false, isDefault: true });
+    expect(triage).toEqual({
+      duty: "triage",
+      granted: ["label"],
+      denied: false,
+      isDefault: true,
+      unused: [],
+    });
 
     const respond = result.authority.find((row) => row.duty === "respond");
-    expect(respond).toEqual({ duty: "respond", granted: [], denied: false, isDefault: true });
+    expect(respond).toEqual({
+      duty: "respond",
+      granted: [],
+      denied: false,
+      isDefault: true,
+      unused: [],
+    });
   });
 
   it("marks a duty denied when a written `capabilities:` block does not name it", async () => {
     const result = await report(WITH_CAPABILITIES, labelsApi(["bug", "docs"]));
 
     const respond = result.authority.find((row) => row.duty === "respond");
-    expect(respond).toEqual({ duty: "respond", granted: [], denied: true, isDefault: false });
+    expect(respond).toEqual({
+      duty: "respond",
+      granted: [],
+      denied: true,
+      isDefault: false,
+      unused: [],
+    });
 
     const triage = result.authority.find((row) => row.duty === "triage");
-    expect(triage).toEqual({ duty: "triage", granted: ["label"], denied: false, isDefault: true });
+    expect(triage).toEqual({
+      duty: "triage",
+      granted: ["label"],
+      denied: false,
+      isDefault: true,
+      unused: [],
+    });
+  });
+
+  it("narrows lifecycle's granted capabilities to its own ladder, and notes what was filtered", async () => {
+    const source = `${TAXONOMY}capabilities:\n  lifecycle: [label, comment, edit-body]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const lifecycle = result.authority.find((row) => row.duty === "lifecycle");
+    expect(lifecycle).toEqual({
+      duty: "lifecycle",
+      granted: ["label", "comment"],
+      denied: false,
+      isDefault: true,
+      unused: ["edit-body"],
+    });
+  });
+
+  it("leaves `unused` empty when the warrant grants nothing outside a duty's own ladder", async () => {
+    const source = `${TAXONOMY}capabilities:\n  lifecycle: [label]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const lifecycle = result.authority.find((row) => row.duty === "lifecycle");
+    expect(lifecycle).toEqual({
+      duty: "lifecycle",
+      granted: ["label"],
+      denied: false,
+      isDefault: false,
+      unused: [],
+    });
   });
 
   it("scopes the authority table to one duty when `duty` names it", async () => {
@@ -245,5 +302,28 @@ describe("diagnose", () => {
 
     expect(result.authority).toHaveLength(1);
     expect(result.authority[0]?.duty).toBe("lifecycle");
+  });
+
+  it("names every duty running on its own default in one aggregated green note", async () => {
+    const result = await report(TAXONOMY, labelsApi(["bug", "docs"]));
+
+    const note = result.findings.find((finding) => finding.text.includes("built-in default"));
+    expect(note?.severity).toBe("green");
+    for (const duty of DUTIES) expect(note?.text).toContain(`\`${duty}\``);
+  });
+
+  it("leaves a duty a written block denies out of the default note — denied is not default", async () => {
+    const result = await report(WITH_CAPABILITIES, labelsApi(["bug", "docs"]));
+
+    const note = result.findings.find((finding) => finding.text.includes("built-in default"));
+    // `triage` is named with exactly its own default (`[label]`), so it is
+    // still `isDefault: true` and belongs in the note. `respond` and the
+    // other three duties this block does not name are `denied: true` — a
+    // real, designed answer, not a default, so they must not appear here.
+    expect(note?.text).toContain("`triage`");
+    expect(note?.text).not.toContain("`respond`");
+    expect(note?.text).not.toContain("`duplicate`");
+    expect(note?.text).not.toContain("`translate`");
+    expect(note?.text).not.toContain("`lifecycle`");
   });
 });

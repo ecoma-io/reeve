@@ -32457,6 +32457,7 @@ var DEFAULT_CAPABILITIES = [];
 
 // src/duties/lifecycle/capabilities.ts
 var DEFAULT_CAPABILITIES2 = ["label", "comment"];
+var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 
 // src/duties/respond/capabilities.ts
 var DEFAULT_CAPABILITIES3 = [];
@@ -32475,6 +32476,13 @@ var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
   ["duplicate", DEFAULT_CAPABILITIES],
   ["respond", DEFAULT_CAPABILITIES3],
   ["lifecycle", DEFAULT_CAPABILITIES2]
+]);
+var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
+  ["translate", null],
+  ["triage", null],
+  ["duplicate", null],
+  ["respond", null],
+  ["lifecycle", LIFECYCLE_CAPABILITIES]
 ]);
 function problems(report) {
   return report.findings.filter((finding) => finding.severity === "red").length;
@@ -32563,6 +32571,13 @@ async function diagnose(options) {
   }
   const scoped = duty === null ? DUTIES : [duty];
   const authorityRows = scoped.map((name) => authorityRow(authority.warrant, name));
+  const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
+  if (defaulted.length > 0) {
+    findings.push({
+      severity: "green",
+      text: `${defaulted.map((row) => `\`${row.duty}\``).join(", ")} \u2014 each duty's effective grant above is exactly its own built-in default right now.`
+    });
+  }
   return {
     ...base,
     implicit: authority.implicit,
@@ -32574,10 +32589,13 @@ async function diagnose(options) {
 function authorityRow(warrant, duty) {
   const fallback = DEFAULTS_BY_DUTY.get(duty) ?? [];
   if (warrant.unnamed(duty)) {
-    return { duty, granted: [], denied: true, isDefault: false };
+    return { duty, granted: [], denied: true, isDefault: false, unused: [] };
   }
-  const granted = warrant.granted(duty, fallback);
-  return { duty, granted, denied: false, isDefault: sameCapabilities(granted, fallback) };
+  const grantedRaw = warrant.granted(duty, fallback);
+  const ladder = LADDER_BY_DUTY.get(duty) ?? null;
+  const granted = ladder === null ? grantedRaw : grantedRaw.filter((c) => ladder.includes(c));
+  const unused = ladder === null ? [] : grantedRaw.filter((c) => !ladder.includes(c));
+  return { duty, granted, denied: false, isDefault: sameCapabilities(granted, fallback), unused };
 }
 function sameCapabilities(a, b) {
   if (a.length !== b.length) return false;
@@ -32652,9 +32670,14 @@ function capabilities(row) {
   return row.granted.length === 0 ? "*(none)*" : row.granted.map((capability) => `\`${cell(capability)}\``).join(", ");
 }
 function note(row) {
-  if (row.denied) return "denied \u2014 the `capabilities:` block does not name it";
-  if (row.isDefault) return "this duty's own default";
-  return "\u2014";
+  const parts = [];
+  if (row.denied) parts.push("denied \u2014 the `capabilities:` block does not name it");
+  else if (row.isDefault) parts.push("this duty's own default");
+  if (row.unused.length > 0) {
+    const list = row.unused.map((capability) => `\`${capability}\``).join(", ");
+    parts.push(`granted ${list} in warrant, this duty has no use for it`);
+  }
+  return parts.length > 0 ? parts.join("; ") : "\u2014";
 }
 
 // src/doctor/run.ts
@@ -32687,7 +32710,14 @@ async function runDoctor() {
 
 // src/main.ts
 async function run() {
-  if (getBooleanInput("doctor")) {
+  let doctor;
+  try {
+    doctor = getBooleanInput("doctor");
+  } catch (error2) {
+    setFailed(error2 instanceof Error ? error2.message : String(error2));
+    return;
+  }
+  if (doctor) {
     await runDoctor();
     return;
   }

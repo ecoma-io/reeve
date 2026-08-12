@@ -21,7 +21,21 @@ import { runDoctor } from "./doctor/run.js";
 import { refusal } from "./refusal.js";
 
 export async function run(): Promise<void> {
-  if (core.getBooleanInput("doctor")) {
+  // Guarded, not a bare `if`: a `doctor:` value outside the accepted
+  // spellings throws from inside `@actions/core` itself, and an uncaught
+  // throw here would surface as a raw stack trace rather than the house
+  // voice every other configuration mistake in this project fails with —
+  // see D5. The thrown message already names the accepted spellings, so
+  // relaying it is enough; there is nothing this file could add to it.
+  let doctor: boolean;
+  try {
+    doctor = core.getBooleanInput("doctor");
+  } catch (error) {
+    core.setFailed(error instanceof Error ? error.message : String(error));
+    return;
+  }
+
+  if (doctor) {
     await runDoctor();
     return;
   }
