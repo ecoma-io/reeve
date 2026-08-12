@@ -160,6 +160,7 @@ with:
   sweep: true
   sweep-state: all
   limit: 500
+  apply: record
 ```
 
 ```yaml
