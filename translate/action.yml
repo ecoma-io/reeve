@@ -257,10 +257,17 @@ inputs:
       bound. A self-imposed ceiling, deliberately not the same thing `starved`
       reports: `starved` is the provider running dry, weather from its own
       side; this is a budget this run chose for itself, working exactly as
-      configured. Checked before each request that would spend it — a
-      language, a reply, a sweep's next thread — so what was already drafted
-      and published still stands, and only the work not yet started is left
-      for a later run. See `budget-exhausted`.
+      configured. Checked at every clean-cut boundary a text or a thread
+      reaches — before detection starts, before each language, before each
+      reply, before a sweep's next thread — never mid-language, so a language
+      already being translated always finishes atomically: what was already
+      drafted and published still stands, and only the work not yet started
+      is left for a later run. See `budget-exhausted`.
+
+      Every request made counts against this, whatever it answered — a 429 a
+      model rotation left behind still spent one, the same as a request that
+      came back with a usable draft. This is a count of asks, not a count of
+      answers.
     required: false
     default: none
 
@@ -334,12 +341,16 @@ outputs:
 
   skipped:
     description: >-
-      Outside `sweep`: JSON array of the language codes no model could
-      translate this run. `[]` on the run where everything worked, never
-      unset — a language that failed does not fail the job, so this is what a
-      workflow branches on. Under `sweep`: a count of threads already carrying
-      this duty's marker, left alone at no cost beyond the listing itself. The
-      two modes never run in the same job — `sweep` and `number` are mutually
+      Outside `sweep`: JSON array of the language codes not translated this
+      run — combining two different reasons a workflow branching on this
+      output does not need to tell apart: no model produced a draft, or
+      `max-requests` was reached before this language was reached. `[]` on
+      the run where everything worked, never unset — a language that failed
+      does not fail the job, so this is what a workflow branches on. The job
+      summary's own table does distinguish the two, for a maintainer reading
+      by eye. Under `sweep`: a count of threads already carrying this duty's
+      marker, left alone at no cost beyond the listing itself. The two modes
+      never run in the same job — `sweep` and `number` are mutually
       exclusive — so the name answers whichever question this run actually
       asked.
 
@@ -358,11 +369,15 @@ outputs:
 
   budget-exhausted:
     description: >-
-      `true` when this run's own `max-requests` ceiling was reached — never
-      set when `max-requests` is `none`, the default. Distinct from `starved`:
-      this is a bound the run chose for itself, not the provider running dry.
-      Outside `sweep` this run still published whatever it drafted before the
-      budget ran out; under `sweep` see `remaining` for what is left.
+      `true` when this run's own `max-requests` ceiling genuinely turned work
+      away — never `true` when `max-requests` is `none`, the default, and not
+      simply whether the meter ended the run sitting at or past the ceiling:
+      a thread that needed exactly `max-requests` requests and had nothing
+      left to ask for reports `false` here, the same as a run that never came
+      close. Distinct from `starved`: this is a bound the run chose for
+      itself, not the provider running dry. Outside `sweep` this run still
+      published whatever it drafted before the budget ran out; under `sweep`
+      see `remaining` for what is left.
 
   processed:
     description: >-

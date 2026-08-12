@@ -1198,6 +1198,57 @@ describe("max-requests", () => {
     expect(run.outputs.translated).toBe(JSON.stringify(["en", "zh"]));
     expect(run.outputs["budget-exhausted"]).toBe("false");
   });
+
+  it(
+    "reports `budget-exhausted: false` when a thread with a single target language " +
+      "spends exactly `max-requests` and has nothing left to deny",
+    async () => {
+      // The bug this pins: recomputing "exhausted" from the meter's final
+      // reading at the end of the run cannot tell this case apart from one
+      // where a language really was turned away — both leave the meter
+      // sitting exactly at the ceiling. Genuine denial is tracked instead,
+      // and this thread's one and only target language never gets turned
+      // away — the loop simply runs out of languages to check before it
+      // runs out of budget.
+      stub.answer = translating({ en: ENGLISH });
+
+      const run = await runAction(stub, { languages: "en, vi", "max-requests": "1" });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+      expect(run.outputs.skipped).toBe(JSON.stringify([]));
+      expect(run.outputs["budget-exhausted"]).toBe("false");
+    },
+  );
+
+  it(
+    "reports `budget-exhausted: true` from a sweep whose only candidate denied a " +
+      "language inside its own thread, with no next candidate left for the sweep's " +
+      "own pre-thread check to ever run again",
+    async () => {
+      // The other direction of the same bug: the sweep's own pre-thread
+      // checkpoint only ever fires before starting a thread, so a denial
+      // that happens inside the last (here, the only) candidate's own
+      // per-language checkpoint has no later loop iteration to be noticed
+      // by. Tracking genuine denial at its source — inside `budgetExhausted`
+      // itself — catches it anyway.
+      stub.issues = [{ number: 101, body: VIETNAMESE, createdAt: "2026-01-01T00:00:00Z" }];
+      stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+
+      const run = await runAction(stub, {
+        sweep: "true",
+        number: "",
+        languages: "en, vi, zh",
+        "max-requests": "1",
+      });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.remaining).toBe("0");
+      expect(run.outputs.starved).toBe("false");
+      expect(run.outputs["budget-exhausted"]).toBe("true");
+    },
+  );
 });
 
 describe("the sweep", () => {

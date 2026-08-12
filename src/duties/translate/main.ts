@@ -310,6 +310,31 @@ function parseChunkChars(raw: string): number {
 }
 
 /**
+ * Whether this run ever genuinely turned work away for `max-requests` —
+ * the one thing `budget-exhausted` reports, distinct from whether the meter
+ * happens to sit at or past the ceiling once the run is over.
+ *
+ * A single mutable object rather than a `boolean` recomputed at the end,
+ * because recomputing from the final meter reading gets both directions
+ * wrong: a thread that needed exactly `max-requests` requests and had
+ * nothing left to ask for reads identically, at the end, to one that had a
+ * language turned away — the meter sits at the ceiling either way — and a
+ * sweep's last candidate can deny work inside its own per-language or
+ * per-reply checkpoint with no further candidate left for the sweep's own
+ * pre-thread check to ever run again and notice. `denied` is set exactly
+ * once, at the moment `budgetExhausted` itself answers `true` — every call
+ * site below only asks the question immediately before a real piece of work
+ * it would otherwise do, so that answer is always a genuine denial.
+ */
+interface Budget {
+  denied: boolean;
+}
+
+function createBudget(): Budget {
+  return { denied: false };
+}
+
+/**
  * Whether this run has already spent `max-requests`, across every purpose —
  * detection, drafting and judging combined, the same total the summary's own
  * spend table adds up to. `null` is no bound, the default, and never
@@ -322,14 +347,17 @@ function parseChunkChars(raw: string): number {
  * have a maintainer watching `starved` for exactly the wrong reason once
  * `max-requests` started tripping it instead of a real outage.
  *
- * Checked at each place a fresh request is about to be spent — a language, a
- * reply, a sweep's next thread — rather than once up front, because the
- * budget can run out partway through any of those, and what already
- * happened stands: a translation already drafted and published is not
- * un-published because the next language could not be started.
+ * Checked at each place a fresh request is about to be spent — before
+ * detection, a language, a reply, a sweep's next thread — rather than once
+ * up front, because the budget can run out partway through any of those, and
+ * what already happened stands: a translation already drafted and published
+ * is not un-published because the next language could not be started.
  */
-function budgetExhausted(settings: Settings, meter: Meter): boolean {
-  return settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
+function budgetExhausted(settings: Settings, meter: Meter, budget: Budget): boolean {
+  const exhausted =
+    settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
+  if (exhausted) budget.denied = true;
+  return exhausted;
 }
 
 /** One chunk's own draft-and-judge pass — everything a single-chunk body used to get, once. */
@@ -508,7 +536,7 @@ interface Report extends Looked {
 }
 
 function nothing(what: string, note: string): Report {
-  return { what, from: null, posted: [], skipped: [], note, published: false };
+  return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
 
 /**
@@ -527,6 +555,7 @@ async function translateText(
   stages: Stages,
   weather: Weather,
   meter: Meter,
+  budget: Budget,
 ): Promise<Report> {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
@@ -569,6 +598,16 @@ async function translateText(
     );
   }
 
+  // Before detection, same as every other checkpoint below: the free checks
+  // above already ran (they cost nothing to make, whatever the budget), but
+  // detection is the first thing that would actually spend a request, and a
+  // budget already at its ceiling has no business starting a text it cannot
+  // finish deciding about.
+  if (budgetExhausted(settings, meter, budget)) {
+    core.warning(`${what}: \`max-requests\` was reached, so this text was not attempted this run.`);
+    return nothing(what, "budget exhausted");
+  }
+
   const detection = await detectLanguage(
     source,
     settings.languages,
@@ -583,13 +622,15 @@ async function translateText(
   const toTranslate = targets(settings.languages, detection.language);
   const posted: Posted[] = [];
   const skipped: Language[] = [];
+  const budgetSkipped: Language[] = [];
   for (const [index, to] of toTranslate.entries()) {
     // Checked before spending the request a language is about to cost, not
     // after — so a budget set tight enough to stop mid-thread stops before
     // the request that would have gone over it, not after.
-    if (budgetExhausted(settings, meter)) {
+    if (budgetExhausted(settings, meter, budget)) {
       const remaining = toTranslate.slice(index);
       skipped.push(...remaining);
+      budgetSkipped.push(...remaining);
       core.warning(
         `${what}: \`max-requests\` was reached, so ${remaining.map((language) => language.code).join(", ")} ` +
           `${remaining.length === 1 ? "was" : "were"} not attempted this run. ` +
@@ -641,7 +682,15 @@ async function translateText(
         ? `Dry run — ${what} would have been left alone: no language produced a translation.`
         : `Dry run — ${what} would have become:\n${assemble(official, marker, would)}`,
     );
-    return { what, from: detection.language, posted, skipped, note: null, published: false };
+    return {
+      what,
+      from: detection.language,
+      posted,
+      skipped,
+      budgetSkipped,
+      note: null,
+      published: false,
+    };
   }
 
   // Guarded here and nowhere earlier: detection, drafting and judging all ran
@@ -670,6 +719,7 @@ async function translateText(
         from: detection.language,
         posted: [],
         skipped,
+        budgetSkipped,
         note:
           `\`edit-body\` is not permitted this run, so the ` +
           `${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} ` +
@@ -677,7 +727,15 @@ async function translateText(
         published: false,
       };
     }
-    return { what, from: detection.language, posted: [], skipped, note: null, published: false };
+    return {
+      what,
+      from: detection.language,
+      posted: [],
+      skipped,
+      budgetSkipped,
+      note: null,
+      published: false,
+    };
   }
 
   const outcome = await publish(thread, marker, publication(translated));
@@ -687,9 +745,9 @@ async function translateText(
       : `${what}: ${outcome.action}.`,
   );
   // Not red: the write already landed, and whatever raced it is a fact about
-  // this run's timing, not about whether it was allowed to happen. `docs/usage/
-  // installation.md`'s `concurrency:` group is the fix; this is the run saying
-  // it hit exactly the gap that guidance closes.
+  // this run's timing, not about whether it was allowed to happen.
+  // `docs/getting-started/installation.md`'s `concurrency:` group is the fix;
+  // this is the run saying it hit exactly the gap that guidance closes.
   if (outcome.action === "published" && outcome.mismatched) {
     core.warning(
       `${what}: another write landed on this thread between this run's write and its check — ` +
@@ -703,6 +761,7 @@ async function translateText(
     from: detection.language,
     posted,
     skipped,
+    budgetSkipped,
     note: null,
     published: outcome.action === "published",
   };
@@ -727,6 +786,7 @@ async function translateReplies(
   looked: Looked[],
   weather: Weather,
   meter: Meter,
+  budget: Budget,
 ): Promise<number> {
   const { replies, more } = await listReplies(api, at, {
     max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
@@ -744,7 +804,7 @@ async function translateReplies(
     // Checked before the reply's own first request, same as the per-language
     // check inside `translateText` — a reply not yet started is cheaper to
     // leave for a later run than one translated into half its languages.
-    if (budgetExhausted(settings, meter)) {
+    if (budgetExhausted(settings, meter, budget)) {
       core.warning(
         `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not ` +
           "attempted this run.",
@@ -760,6 +820,7 @@ async function translateReplies(
       stages,
       weather,
       meter,
+      budget,
     );
     looked.push(translated);
     if (translated.published) published += 1;
@@ -797,6 +858,7 @@ async function processThread(
   stages: Stages,
   weather: Weather,
   meter: Meter,
+  budget: Budget,
 ): Promise<ThreadResult> {
   const thread = createThread(api, at);
   const translated = await translateText(
@@ -807,11 +869,12 @@ async function processThread(
     stages,
     weather,
     meter,
+    budget,
   );
   const looked: Looked[] = [translated];
 
   const replies = settings.replies
-    ? await translateReplies(api, at, settings, stages, looked, weather, meter)
+    ? await translateReplies(api, at, settings, stages, looked, weather, meter, budget)
     : 0;
 
   return { looked, translated, replies, ungranted: null };
@@ -845,22 +908,13 @@ interface SweepAccumulator {
   readonly results: SweptThread[];
   skipped: number;
   starvedRun: boolean;
-  /** Set once the run's own `max-requests` budget stopped it partway through. */
-  budgetExhausted: boolean;
   candidates: number;
   /** Set once, before the listing, when the warrant never named this duty at all. */
   ungranted: string | null;
 }
 
 function newAccumulator(): SweepAccumulator {
-  return {
-    results: [],
-    skipped: 0,
-    starvedRun: false,
-    budgetExhausted: false,
-    candidates: 0,
-    ungranted: null,
-  };
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
 }
 
 /** Candidates neither processed nor skipped — what a next sweep still has to look at. */
@@ -908,6 +962,7 @@ async function runSweep(
   stages: Stages,
   weather: Weather,
   meter: Meter,
+  budget: Budget,
 ): Promise<void> {
   // Once, before the listing — exactly as triage's sweep — because the warrant
   // is checked once per run, not once per thread, and a listing this duty was
@@ -925,10 +980,10 @@ async function runSweep(
 
     // The idempotent skip: a body already carrying this duty's marker has been
     // translated at least once before, whatever the exact language set was
-    // that run — the same "already decided about" reading `alreadyTaxonomized`
-    // gives triage's skip, and free for the same reason: nothing here calls
-    // the tracker or a model, only `marker.split` on text the listing already
-    // fetched.
+    // that run — the same "already decided about" reading triage's own
+    // marker-carrying skip gives it, and free for the same reason: nothing
+    // here calls the tracker or a model, only `marker.split` on text the
+    // listing already fetched.
     if (marker.split(thread.body).fingerprint !== null) {
       acc.skipped += 1;
       continue;
@@ -942,14 +997,24 @@ async function runSweep(
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
     // thread it cannot even begin — leaving it for `remaining` is cheaper
-    // than starting it and stopping mid-language.
-    if (budgetExhausted(settings, meter)) {
-      acc.budgetExhausted = true;
-      break;
-    }
+    // than starting it and stopping mid-language. `budget.denied` is what
+    // `run`'s `finally` reads back; nothing here needs its own copy of the
+    // answer, including when the very last candidate is the one that denies
+    // work inside its own per-language or per-reply checkpoint with no
+    // further iteration left to notice — `budget` already has it by then.
+    if (budgetExhausted(settings, meter, budget)) break;
 
     const at = { ...context.repo, number: thread.number };
-    const result = await processThread(api, at, thread.body, settings, stages, weather, meter);
+    const result = await processThread(
+      api,
+      at,
+      thread.body,
+      settings,
+      stages,
+      weather,
+      meter,
+      budget,
+    );
     acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
   }
 }
@@ -960,6 +1025,11 @@ export async function run(): Promise<void> {
   // early by capacity starvation, which leaves `bulk` holding every thread
   // already processed before the loop broke.
   const meter = createMeter();
+  // The one place `budget.denied` is set — inside `budgetExhausted` itself —
+  // and the one place it is read — `finally`, below — so both the
+  // single-thread path and the sweep answer `budget-exhausted` off the same
+  // genuine-denial tracker rather than each recomputing its own guess.
+  const budget = createBudget();
   // Reassigned once `readSettings` has answered, inside the `try` below —
   // `endpoints` is not known until then. Left at its empty-alias default if
   // reading the settings themselves is what fails, which is fine: nothing
@@ -1040,7 +1110,7 @@ export async function run(): Promise<void> {
 
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, authority, settings, stages, weather, meter);
+      await runSweep(bulk, api, authority, settings, stages, weather, meter, budget);
     } else {
       const number = settings.number;
       // `readShared` refuses `sweep` combined with `number`, but a bare
@@ -1062,6 +1132,7 @@ export async function run(): Promise<void> {
             from: null,
             posted: [],
             skipped: [],
+            budgetSkipped: [],
             note: null,
             published: false,
           },
@@ -1070,7 +1141,7 @@ export async function run(): Promise<void> {
         };
       } else {
         const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather, meter);
+        result = await processThread(api, at, body, settings, stages, weather, meter, budget);
       }
       single = { number, result };
     }
@@ -1098,13 +1169,16 @@ export async function run(): Promise<void> {
         );
       }
 
-      // `bulk.budgetExhausted` already answers this for a sweep, set the
-      // moment `runSweep` broke out of its own loop; a single thread has no
-      // accumulator to have set it, so it is read straight off the meter
-      // instead, the same way each checkpoint inside `translateText` and
-      // `translateReplies` did while the run was still going.
-      const budgetSpent =
-        settings.sweep && bulk !== null ? bulk.budgetExhausted : budgetExhausted(settings, meter);
+      // `budget.denied` answers this the same way for both modes — set the
+      // moment any checkpoint, in either mode, first turned real work away —
+      // rather than recomputed here from the meter's final reading, which
+      // gets both directions wrong: a thread that needed exactly
+      // `max-requests` requests and had nothing left to deny reads
+      // identically, at the end, to one that actually had a language turned
+      // away, and a sweep's last candidate can deny work inside its own
+      // per-language or per-reply checkpoint with no further candidate left
+      // for the sweep's own pre-thread check to notice.
+      const budgetSpent = budget.denied;
       if (budgetSpent) {
         core.warning(
           "`max-requests` was reached this run. " +
@@ -1119,7 +1193,7 @@ export async function run(): Promise<void> {
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved, budgetSpent);
         await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
+          sweepPage(settings, bulk, meter.spent(), budgetSpent) + authSection(weather.authFailures),
         );
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
@@ -1202,14 +1276,19 @@ function page(
   });
 }
 
-function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
+function sweepPage(
+  settings: Settings,
+  bulk: SweepAccumulator,
+  spent: Run["spent"],
+  budgetSpent: boolean,
+): string {
   return summarizeSweep({
     dryRun: settings.dryRun,
     results: bulk.results,
     skipped: bulk.skipped,
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
-    budgetExhausted: bulk.budgetExhausted,
+    budgetExhausted: budgetSpent,
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

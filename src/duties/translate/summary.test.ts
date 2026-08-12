@@ -14,7 +14,15 @@ function posted(overrides: Partial<Posted> = {}): Posted {
 }
 
 function looked(overrides: Partial<Looked> = {}): Looked {
-  return { what: "#42", from: VIETNAMESE, posted: [], skipped: [], note: null, ...overrides };
+  return {
+    what: "#42",
+    from: VIETNAMESE,
+    posted: [],
+    skipped: [],
+    budgetSkipped: [],
+    note: null,
+    ...overrides,
+  };
 }
 
 function spend(overrides: Partial<Spend> = {}): Spend {
@@ -90,6 +98,17 @@ describe("the run summary", () => {
     const summary = subject({ looked: [looked({ skipped: [ENGLISH] })] });
 
     expect(summary).toContain("| #42 | English (en) | **no draft** |");
+  });
+
+  it("tells a language left for `max-requests` apart from one no model could draft", () => {
+    // The two look identical in `skipped` alone — `budgetSkipped` is what a
+    // reader needs to tell "this run never tried" from "nothing came back".
+    const summary = subject({
+      looked: [looked({ skipped: [ENGLISH, VIETNAMESE], budgetSkipped: [VIETNAMESE] })],
+    });
+
+    expect(summary).toContain("| #42 | English (en) | **no draft** |");
+    expect(summary).toContain("| #42 | Tiếng Việt (vi) | **budget** |");
   });
 
   it("reports why a text was left alone", () => {
