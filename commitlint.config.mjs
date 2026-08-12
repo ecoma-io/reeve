@@ -33,6 +33,7 @@ export default {
         "triage",
         "duplicate",
         "respond",
+        "lifecycle",
 
         // Everything else.
         "eval", // evaluation sets and the harness over them
