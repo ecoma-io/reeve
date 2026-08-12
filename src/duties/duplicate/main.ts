@@ -20,9 +20,9 @@
  *      model. The judge is told what it is reading rather than left to infer
  *      it.
  *   3. **Corpus.** Every open thread `corpus-limit`/`corpus-since` allow,
- *      through `./corpus.ts`'s own unbounded-paging listing — deliberately
- *      not `listOpenThreads`, which stops at a fixed page ceiling meant for a
- *      sweep's work budget rather than for an index a maintainer configured.
+ *      through `./corpus.ts`'s own listing — deliberately not
+ *      `listOpenThreads`, whose newest-created-first order serves a sweep's
+ *      work budget rather than an index a maintainer configured.
  *   4. **Bridge, when it is worth a request.** Cross-language matching only
  *      helps when the corpus actually holds a thread in another language, and
  *      that is a fact `detectLanguage` can check on every candidate for free —
@@ -390,7 +390,7 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)));
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), base.models);
     const api = getOctokit(base.token);
     const provider = createRoutedProvider(resolveEndpoints(base));
 

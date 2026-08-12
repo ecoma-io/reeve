@@ -503,7 +503,7 @@ async function translateText(
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather),
+    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
   );
   core.info(
     detection.language === null
@@ -835,7 +835,10 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)));
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
+      ...base.models,
+      ...base.judges.flat(),
+    ]);
     const api = getOctokit(base.token);
     const provider = createRoutedProvider(resolveEndpoints(base));
 

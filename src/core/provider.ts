@@ -90,13 +90,14 @@ export interface Failure {
   /** Same as `Success.endpoint` — which endpoint this attempt was routed to. */
   readonly endpoint?: string | null;
   /**
-   * True for a `"capacity"` failure that never reached the endpoint at all —
-   * a timeout, a DNS failure, a connection refused. Set only for those two
-   * cases, never for an HTTP-level 429 or 5xx: a transport failure says
-   * something about the endpoint itself, so `reckon` grounds every model
-   * routed to it rather than just the one that happened to be asked first.
-   * An HTTP status came from the endpoint, which is proof it is reachable —
-   * only the one model that asked is grounded.
+   * True for a `"capacity"` failure where the connection itself failed — a
+   * DNS failure, a connection refused. Never for an HTTP-level 429 or 5xx,
+   * and deliberately never for a timeout or a body that broke mid-read
+   * either: a transport failure says something about the endpoint itself, so
+   * `reckon` grounds every model routed to it rather than just the one that
+   * happened to be asked first — while a timeout may simply be one slow
+   * model, and a broken body arrived with a status line that proves the
+   * endpoint reachable, so both demote only the pair that hit them.
    */
   readonly transport?: boolean;
   /**
@@ -338,12 +339,18 @@ export function createProvider(config: ProviderConfig): Provider {
         // Never a status at all — a timeout, a DNS failure, a connection
         // refused. There is no 401 hiding in a request that never reached the
         // provider, so this is weather by construction, not a guess.
+        //
+        // `transport` — the flag that grounds the whole endpoint rather than
+        // the one pair — is set only when the connection itself failed. A
+        // timeout is deliberately not that: a large model can run past a
+        // deadline a small one never touches on the same healthy endpoint,
+        // so a timeout demotes the pair that hit it and nothing else.
         return {
           ok: false,
           model,
           usage: null,
           kind: "capacity",
-          transport: true,
+          ...(isTimeout(error) ? {} : { transport: true }),
           reason: describeRequestError(error, timeoutMs),
         };
       }
@@ -352,12 +359,14 @@ export function createProvider(config: ProviderConfig): Provider {
       try {
         text = await response.text();
       } catch (error) {
+        // Not `transport`: the endpoint answered — status line and headers
+        // arrived — and a body that broke mid-read condemns this one response,
+        // not every model the endpoint serves.
         return {
           ok: false,
           model,
           usage: null,
           kind: "capacity",
-          transport: true,
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error, timeoutMs)})`,
         };
       }
@@ -659,14 +668,28 @@ export interface Weather {
  * `aliases` is every endpoint `endpoints` declared — empty for the common
  * case, which is what makes `multiEndpoint` false and every method below
  * behave exactly as it always did for a run with one endpoint.
+ *
+ * `models` is every model id this run's rosters can ask, across every list
+ * the duty takes — drafting, screening, judging. It exists to scope
+ * `authExhausted` to the endpoints those ids actually route to: a run whose
+ * every model says `@fast` never asks the default endpoint anything, and a
+ * run like that must not stay green on the grounds that an endpoint nobody
+ * could reach never got the chance to refuse a key. Left unset, the universe
+ * falls back to every declared endpoint plus the default.
  */
-export function createWeather(aliases: ReadonlySet<string> = new Set()): Weather {
+export function createWeather(
+  aliases: ReadonlySet<string> = new Set(),
+  models?: readonly string[],
+): Weather {
   const order: string[] = [];
   const dead = new Set<string>();
   const deadEndpoints = new Set<string | null>();
-  // Every endpoint this run can route to: the default, plus every declared
-  // alias — the universe `authExhausted` checks for completeness against.
-  const universe = new Set<string | null>([null, ...aliases]);
+  // Every endpoint this run can actually route a request to — the universe
+  // `authExhausted` checks for completeness against.
+  const universe =
+    models === undefined || models.length === 0
+      ? new Set<string | null>([null, ...aliases])
+      : new Set<string | null>(models.map((model) => splitEndpointAlias(model, aliases).alias));
   const authFailed = new Map<string | null, Failure>();
 
   return {
@@ -810,8 +833,13 @@ export async function rotateModels(
   return { success: null, failures };
 }
 
+/** Whether a fetch rejection is `AbortSignal.timeout` firing, by its one name. */
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === "TimeoutError";
+}
+
 function describeRequestError(error: unknown, timeoutMs: number): string {
-  if (error instanceof Error && error.name === "TimeoutError") {
+  if (isTimeout(error)) {
     return `request timed out after ${String(timeoutMs)}ms`;
   }
   return `request failed — ${error instanceof Error ? error.message : String(error)}`;

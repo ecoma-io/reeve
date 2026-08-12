@@ -388,6 +388,15 @@ describe("parseTimeout", () => {
   ])("refuses %s", (_case, raw) => {
     expect(() => parseTimeout("request-timeout", raw)).toThrow(/request-timeout:/);
   });
+
+  it("refuses a duration past what a timer can hold, rather than letting it fire instantly", () => {
+    // Node's timers overflow past 2^31-1 ms and fire almost immediately —
+    // which would silently turn every request into instant weather.
+    expect(() => parseTimeout("request-timeout", "35792m")).toThrow(
+      "request-timeout: `35792m` is longer than any run could ever wait — use a shorter duration.",
+    );
+    expect(parseTimeout("request-timeout", "35791m")).toBe(35_791 * 60_000);
+  });
 });
 
 describe("parseTemperature", () => {
@@ -454,6 +463,18 @@ describe("parseEndpoints", () => {
     expect(() => parseEndpoints("fast! = https://api.example.com/v1")).toThrow(
       "endpoints: `fast!` is not a valid alias — letters, digits, `-` and `_` only.",
     );
+  });
+
+  it("refuses `default` as an alias — it already names the built-in endpoint", () => {
+    expect(() => parseEndpoints("default = https://api.example.com/v1")).toThrow(
+      "endpoints: `default` is reserved — it names the built-in `base-url` endpoint. Pick another alias.",
+    );
+  });
+
+  it("refuses `timeout=` written twice on one line, rather than letting the last win", () => {
+    expect(() =>
+      parseEndpoints("fast = https://api.example.com/v1 timeout=30s timeout=60s"),
+    ).toThrow("endpoints: `fast` names `timeout=` more than once.");
   });
 
   it("refuses the same alias declared twice", () => {

@@ -32418,12 +32418,27 @@ function segments(markdown) {
 function chunks(markdown, maxChars) {
   const out = [];
   let current = "";
-  for (const segment of segments(markdown)) {
-    if (current.length > 0 && current.length + segment.text.length > maxChars) {
+  const take = (piece) => {
+    if (current.length > 0 && current.length + piece.length > maxChars) {
       out.push(current);
       current = "";
     }
-    current += segment.text;
+    current += piece;
+  };
+  for (const segment of segments(markdown)) {
+    if (segment.kind !== "prose" || segment.text.length <= maxChars) {
+      take(segment.text);
+      continue;
+    }
+    for (const line of terminatedLines(segment.text)) {
+      if (line.length <= maxChars) {
+        take(line);
+        continue;
+      }
+      for (let at = 0; at < line.length; at += maxChars) {
+        take(line.slice(at, at + maxChars));
+      }
+    }
   }
   if (current.length > 0) out.push(current);
   return out.length > 0 ? out : [markdown];
@@ -32611,7 +32626,7 @@ function createProvider(config) {
           model,
           usage: null,
           kind: "capacity",
-          transport: true,
+          ...isTimeout(error2) ? {} : { transport: true },
           reason: describeRequestError(error2, timeoutMs)
         };
       }
@@ -32624,7 +32639,6 @@ function createProvider(config) {
           model,
           usage: null,
           kind: "capacity",
-          transport: true,
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
         };
       }
@@ -32743,11 +32757,11 @@ var AuthenticationFailure = class extends Error {
     this.failure = failure;
   }
 };
-function createWeather(aliases = /* @__PURE__ */ new Set()) {
+function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
   const order = [];
   const dead = /* @__PURE__ */ new Set();
   const deadEndpoints = /* @__PURE__ */ new Set();
-  const universe = /* @__PURE__ */ new Set([null, ...aliases]);
+  const universe = models === void 0 || models.length === 0 ? /* @__PURE__ */ new Set([null, ...aliases]) : new Set(models.map((model) => splitEndpointAlias(model, aliases).alias));
   const authFailed = /* @__PURE__ */ new Map();
   return {
     grounded: (model) => {
@@ -32820,8 +32834,11 @@ async function rotateModels(models, attempt, weather) {
   }
   return { success: null, failures };
 }
+function isTimeout(error2) {
+  return error2 instanceof Error && error2.name === "TimeoutError";
+}
 function describeRequestError(error2, timeoutMs) {
-  if (error2 instanceof Error && error2.name === "TimeoutError") {
+  if (isTimeout(error2)) {
     return `request timed out after ${String(timeoutMs)}ms`;
   }
   return `request failed \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`;
@@ -33083,6 +33100,11 @@ function parseEndpoints(raw) {
         `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
       );
     }
+    if (alias === "default") {
+      throw new Error(
+        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
+      );
+    }
     if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
     seen.add(alias);
     const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
@@ -33096,6 +33118,9 @@ function parseEndpoints(raw) {
         );
       }
       const [, duration = ""] = match;
+      if (timeoutMs !== null) {
+        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
+      }
       timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
     }
     return { alias, baseUrl: url, timeoutMs };
@@ -33138,7 +33163,13 @@ function parseTimeout(name, raw) {
   const [, digits, unit] = match;
   const value = Number(digits);
   if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
-  return unit === "m" ? value * 6e4 : value * 1e3;
+  const ms = unit === "m" ? value * 6e4 : value * 1e3;
+  if (ms > 2147483647) {
+    throw new Error(
+      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
+    );
+  }
+  return ms;
 }
 function parseTemperature(raw) {
   const trimmed = raw.trim();
@@ -34521,7 +34552,7 @@ async function translateText(what, body, thread, settings, stages, weather) {
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather)
+    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature)
   );
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
@@ -34684,7 +34715,10 @@ async function run() {
   let bulk = null;
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)));
+    weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)), [
+      ...base.models,
+      ...base.judges.flat()
+    ]);
     const api = getOctokit(base.token);
     const provider = createRoutedProvider(resolveEndpoints(base));
     const stages = {

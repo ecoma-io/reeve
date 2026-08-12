@@ -562,6 +562,20 @@ describe("createProvider", () => {
       );
     });
 
+    it("scopes a timeout to the pair, never the endpoint — a slow model is not a dead gateway", async () => {
+      const timeout = new Error("The operation was aborted due to timeout");
+      timeout.name = "TimeoutError";
+      fetchMock.mockRejectedValue(timeout);
+
+      expect(expectFailure(await subject().complete("m", HELLO)).transport).toBeUndefined();
+    });
+
+    it("marks a failure that never connected as transport, grounding the whole endpoint", async () => {
+      fetchMock.mockRejectedValue(new Error("getaddrinfo ENOTFOUND api.example.test"));
+
+      expect(expectFailure(await subject().complete("m", HELLO)).transport).toBe(true);
+    });
+
     it("gives the request a deadline even when none is configured", async () => {
       fetchMock.mockResolvedValue(answering("hi"));
 
@@ -591,6 +605,9 @@ describe("createProvider", () => {
 
       expect(failure.reason).toContain("could not be read");
       expect(failure.kind).toBe("capacity");
+      // The status line arrived, which is proof the endpoint is reachable —
+      // a broken body condemns this response, not every model behind it.
+      expect(failure.transport).toBeUndefined();
     });
   });
 });
@@ -1004,5 +1021,29 @@ describe("settleAuth", () => {
     expect(() => {
       settleAuth(weather);
     }).toThrow(AuthenticationFailure);
+  });
+
+  it("scopes exhaustion to the endpoints the roster routes to, not every declared one", () => {
+    // Every model says `@fast`, so the default endpoint is never asked
+    // anything — a run like this must not stay green on the strength of an
+    // endpoint nothing could reach.
+    const weather = createWeather(new Set(["fast"]), ["a@fast", "b@fast"]);
+    reckon({ ok: false, model: "a@fast", reason: "401", kind: "auth", endpoint: "fast" }, weather);
+
+    expect(weather.authExhausted).toBe(true);
+    expect(() => {
+      settleAuth(weather);
+    }).toThrow(AuthenticationFailure);
+  });
+
+  it("still waits for every roster-reachable endpoint before settling", () => {
+    const weather = createWeather(new Set(["fast"]), ["a@fast", "plain"]);
+    reckon({ ok: false, model: "a@fast", reason: "401", kind: "auth", endpoint: "fast" }, weather);
+
+    // `plain` routes to the default endpoint, which has not refused anything.
+    expect(weather.authExhausted).toBe(false);
+    expect(() => {
+      settleAuth(weather);
+    }).not.toThrow();
   });
 });

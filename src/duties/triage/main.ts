@@ -406,7 +406,10 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)));
+    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
+      ...base.models,
+      ...base.screenModels,
+    ]);
     const api = getOctokit(base.token);
     const provider = createRoutedProvider(resolveEndpoints(base));
 

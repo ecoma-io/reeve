@@ -124,6 +124,8 @@ with:
 
 Each `endpoints` line is `alias = url`, with an optional trailing
 `timeout=<duration>` overriding `request-timeout` for that one endpoint.
+One alias is reserved: `default` names the built-in `base-url` endpoint in
+every log line and summary, so it cannot be declared as an alias of its own.
 `api-keys` is `alias = key`, one line per alias that needs one — every value
 in it is registered as a secret before anything else is even parsed, so a
 malformed later line's error message can never expose an earlier key. An
@@ -154,8 +156,11 @@ exactly as
 has always described. Once `endpoints` names more than one, a 401 or 403 is
 recorded instead of thrown, and the run keeps going — one endpoint's wrong
 key says nothing about another endpoint's — failing red only at the end, and
-only once **every** configured endpoint has ended up auth-failed. See the
-doctrine's own amendment at that same link for the full reasoning.
+only once **every** endpoint this run's model ids actually route to has
+ended up auth-failed. An endpoint no model routes to does not keep a doomed
+run green: the question is whether anything that could have been asked still
+authenticated. See the doctrine's own amendment at that same link for the
+full reasoning.
 
 Once more than one endpoint has carried any spend, every duty's job summary
 gains an Endpoint column, naming which one answered each row.

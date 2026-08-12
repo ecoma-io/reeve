@@ -203,12 +203,35 @@ describe("chunks", () => {
   });
 
   it("splits at a segment boundary once the budget is crossed", () => {
-    // Plain prose is one segment end to end, however long — `segments()` only
-    // breaks on a fence or a code span, so a boundary needs one of those to
-    // land on.
     const text = "a".repeat(10) + "`x`" + "b".repeat(10);
 
     expect(chunks(text, 12)).toEqual(["a".repeat(10), "`x`", "b".repeat(10)]);
+  });
+
+  it("splits plain prose at line boundaries — a long body with no code still chunks", () => {
+    // `segments()` reads prose with no fences or spans as one segment end to
+    // end, which is the ordinary shape of a long issue body. The budget has
+    // to bite anyway.
+    const text = Array.from(
+      { length: 10 },
+      (_, i) => `line ${String(i)} of an ordinary report`,
+    ).join("\n");
+
+    const result = chunks(text, 70);
+
+    expect(result.length).toBeGreaterThan(1);
+    expect(result.every((chunk) => chunk.length <= 70)).toBe(true);
+    expect(result.join("")).toBe(text);
+    // Boundaries fall between lines, never inside one.
+    expect(result.slice(0, -1).every((chunk) => chunk.endsWith("\n"))).toBe(true);
+  });
+
+  it("hard-cuts a single line longer than the budget — there is no boundary in it to prefer", () => {
+    const text = "a".repeat(25);
+
+    const result = chunks(text, 10);
+
+    expect(result).toEqual(["a".repeat(10), "a".repeat(10), "a".repeat(5)]);
   });
 
   it("never splits a fenced block across two chunks", () => {

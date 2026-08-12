@@ -43,14 +43,19 @@ export function segments(markdown: string): Segment[] {
 
 /**
  * Splits Markdown into pieces no fence is ever split across, each `maxChars`
- * or smaller wherever a boundary between segments allows it.
+ * or smaller wherever any legitimate boundary allows it.
  *
  * Built on `segments()`, which already never splits a fence or a code span —
- * this only decides where a chunk boundary falls between whole segments,
- * greedily filling one chunk before starting the next. A single fence bigger
- * than `maxChars` is not a bug to work around: it becomes a chunk of its own,
- * over budget, because cutting a fence in two is the one thing a caller of
- * this function is asking never to happen.
+ * a chunk boundary falls between whole segments, greedily filling one chunk
+ * before starting the next. A prose segment longer than `maxChars` on its own
+ * — the ordinary shape of a long issue body, which is one prose segment end
+ * to end unless something in it is code — is further split at line
+ * boundaries, so plain prose actually chunks instead of riding through whole
+ * on a technicality. Only a single fence or a single line bigger than
+ * `maxChars` ends up a chunk over budget (a monster line is hard-cut rather
+ * than kept whole — there is no boundary in it anyone could prefer), because
+ * cutting a fence in two is the one thing a caller of this function is
+ * asking never to happen.
  *
  * Concatenating the result in order reproduces the input byte for byte, same
  * as `segments()` itself — a caller chunking a body for translation and
@@ -60,12 +65,28 @@ export function chunks(markdown: string, maxChars: number): readonly string[] {
   const out: string[] = [];
   let current = "";
 
-  for (const segment of segments(markdown)) {
-    if (current.length > 0 && current.length + segment.text.length > maxChars) {
+  const take = (piece: string): void => {
+    if (current.length > 0 && current.length + piece.length > maxChars) {
       out.push(current);
       current = "";
     }
-    current += segment.text;
+    current += piece;
+  };
+
+  for (const segment of segments(markdown)) {
+    if (segment.kind !== "prose" || segment.text.length <= maxChars) {
+      take(segment.text);
+      continue;
+    }
+    for (const line of terminatedLines(segment.text)) {
+      if (line.length <= maxChars) {
+        take(line);
+        continue;
+      }
+      for (let at = 0; at < line.length; at += maxChars) {
+        take(line.slice(at, at + maxChars));
+      }
+    }
   }
   if (current.length > 0) out.push(current);
 

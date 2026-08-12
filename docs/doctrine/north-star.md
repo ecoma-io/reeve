@@ -106,8 +106,12 @@ there is a duty switched off, whether or not that was the intention. This is
 where a maintainer turns on the capability that was cheapest-but-not-safest by
 default, having watched a `dry-run` say what the rate actually is first.
 
-**Level 3 — the full office.** Sweep and backfill (`sweep:`, `since:`,
-`limit:`), memory's write path, and the `duplicate` and `respond` duties.
+**Level 3 — the full office.** Sweep and backfill, memory's write path, and
+the `duplicate` and `respond` duties. The sweep's own switches — `sweep`,
+`since`, `limit` — are workflow inputs, not warrant keys, exactly as §3's
+closing paragraph draws that line; they sit at this rung because a scheduled
+sweep multiplies whatever the warrant already grants across a whole backlog,
+not because turning them on grants anything by itself.
 Every one of these is opt-in, and every one sits at the top rung on purpose:
 they are the inputs and the duties that touch the most — a correction
 committed to the repository, a sweep across the whole backlog, an answer sent

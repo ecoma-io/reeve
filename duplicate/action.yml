@@ -253,8 +253,9 @@ inputs:
       demotes the whole endpoint, on the grounds that one broken connection
       says nothing about the model asked over it. An auth failure — a 401 or
       403 — is recorded rather than failing the run red immediately, and
-      only fails red at the end if every endpoint configured ended up
-      auth-failed; see `docs/north-star.md`.
+      only fails red at the end if every endpoint this run's model ids
+      actually route to ended up auth-failed; see
+      `docs/doctrine/north-star.md`.
     required: false
     default: ""
 
@@ -262,9 +263,11 @@ inputs:
     description: >-
       One `alias = key` per line, comma or newline separated, supplying the
       key for each `endpoints` alias that needs one. Every alias named here
-      must also be declared in `endpoints`. Registered as a secret in full —
-      the whole value, not just the part after `=` — before anything can log
-      it, and before anything else in this input is even parsed.
+      must also be declared in `endpoints`. Each entry's key — everything
+      after its first `=` — is registered as a secret before any entry is
+      validated, so a malformed line further down can never land an unmasked
+      key in an error message or this run's log. The alias half is ordinary
+      log-safe text, like a model id.
     required: false
     default: ""
 

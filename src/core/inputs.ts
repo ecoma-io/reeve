@@ -166,6 +166,14 @@ export function parseEndpoints(raw: string): readonly EndpointSpec[] {
         `endpoints: \`${alias || entry}\` is not a valid alias — letters, digits, \`-\` and \`_\` only.`,
       );
     }
+    // Reserved: it is the name every log line and summary already uses for
+    // the built-in `base-url` endpoint, and an alias spelled the same way
+    // would make two different endpoints unreadable as one.
+    if (alias === "default") {
+      throw new Error(
+        "endpoints: `default` is reserved — it names the built-in `base-url` endpoint. Pick another alias.",
+      );
+    }
     if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
     seen.add(alias);
 
@@ -181,6 +189,12 @@ export function parseEndpoints(raw: string): readonly EndpointSpec[] {
         );
       }
       const [, duration = ""] = match;
+      // Refused rather than last-wins: two timeouts on one line is a typo,
+      // and silently honouring the second would change how long requests
+      // wait without a single input error saying so.
+      if (timeoutMs !== null) {
+        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
+      }
       timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
     }
 
@@ -255,7 +269,17 @@ export function parseTimeout(name: string, raw: string): number {
   const [, digits, unit] = match;
   const value = Number(digits);
   if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
-  return unit === "m" ? value * 60_000 : value * 1000;
+  const ms = unit === "m" ? value * 60_000 : value * 1000;
+  // Node's timers, `AbortSignal.timeout` among them, overflow past 2^31-1 ms
+  // and fire almost immediately instead — which would quietly turn every
+  // request on the endpoint into instant weather. An input error is the
+  // honest version of that.
+  if (ms > 2_147_483_647) {
+    throw new Error(
+      `${name}: \`${raw}\` is longer than any run could ever wait — use a shorter duration.`,
+    );
+  }
+  return ms;
 }
 
 /**

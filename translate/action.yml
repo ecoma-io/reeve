@@ -128,10 +128,11 @@ inputs:
       later translates the rest. `0` is refused — write `none` for that
       meaning instead.
 
-      A body past this bound — including under `none` — is split into
-      chunks and translated a piece at a time rather than truncated or sent
-      whole in one request; a fenced code block is never split across two of
-      them. Every chunk has to succeed for the language to publish at all —
+      Whatever this bound admits — the whole body under `none`, the head
+      of it under a number, with the tail still left behind exactly as the
+      paragraph above says — is never sent to a model in one oversized
+      request: it is split into chunks and translated a piece at a time,
+      and a fenced code block is never split across two of them. Every chunk has to succeed for the language to publish at all —
       a language missing its middle paragraph because one chunk ran out of
       models is worse than a language skipped outright, so a single chunk
       failing skips the whole thing.
@@ -221,8 +222,9 @@ inputs:
       demotes the whole endpoint, on the grounds that one broken connection
       says nothing about the model asked over it. An auth failure — a 401 or
       403 — is recorded rather than failing the run red immediately, and
-      only fails red at the end if every endpoint configured ended up
-      auth-failed; see `docs/north-star.md`.
+      only fails red at the end if every endpoint this run's model ids
+      actually route to ended up auth-failed; see
+      `docs/doctrine/north-star.md`.
     required: false
     default: ""
 
@@ -230,9 +232,11 @@ inputs:
     description: >-
       One `alias = key` per line, comma or newline separated, supplying the
       key for each `endpoints` alias that needs one. Every alias named here
-      must also be declared in `endpoints`. Registered as a secret in full —
-      the whole value, not just the part after `=` — before anything can log
-      it, and before anything else in this input is even parsed.
+      must also be declared in `endpoints`. Each entry's key — everything
+      after its first `=` — is registered as a secret before any entry is
+      validated, so a malformed line further down can never land an unmasked
+      key in an error message or this run's log. The alias half is ordinary
+      log-safe text, like a model id.
     required: false
     default: ""
 
