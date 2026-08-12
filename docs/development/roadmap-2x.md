@@ -63,21 +63,24 @@ each. **The warrant is the seed of the Authority Kernel** — not its
 inspiration, its ancestor: the kernel is `enforce.ts`'s job description with
 more callers, and a consumer who trusts today's warrant check is trusting the
 same check tomorrow. **The duties are the capability set** — Agent Mode
-composes `triage`, `translate`, `duplicate` and `respond`; it does not
-replace them, and a capability added later is added the way a duty is added
-today, by [earning its place](../doctrine/north-star.md#d10--a-duty-must-earn-its-place).
+composes `triage`, `translate`, `duplicate`, `respond` and `lifecycle`; it
+does not replace them, and a capability added later is added the way a duty
+is added today, by [earning its place](../doctrine/north-star.md#d10--a-duty-must-earn-its-place).
 
 ## Phase 0 — the ground · **standing, and finishing**
 
 The phase that is not proposed, because it exists. Named here so the rest of
 the page is anchored to something checkable rather than to an idea of 1.x.
 
-**Standing today:** four duties ship and are dogfooded on this repository —
+**Standing today:** five duties ship —
 [`triage`](../reference/duties/triage.md),
 [`translate`](../reference/duties/translate.md),
-[`duplicate`](../reference/duties/duplicate.md) and
-[`respond`](../reference/duties/respond.md), the last two proven in
-report-only mode first, which is the same discipline Phase 3 below borrows.
+[`duplicate`](../reference/duties/duplicate.md),
+[`respond`](../reference/duties/respond.md) and
+[`lifecycle`](../reference/duties/lifecycle.md). The first four are dogfooded
+on this repository, the last two of those in report-only mode first, which
+is the same discipline Phase 3 below borrows; `lifecycle` is the newest and
+does not yet have a workflow of its own here.
 The warrant is the whole answer for authority, with total enumeration once a
 `capabilities:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog
@@ -119,13 +122,13 @@ the point, and it is what makes the phase reviewable.
 
 The argument for doing this before anything visible: the kernel is the one
 component the whole 2.x line stands on, and a component like that must exist
-and be exercised — by all four duties, on real threads, through every
-dogfooded run this repository already does — before the first line of agent
-code is allowed to call it. A kernel born alongside the agent would be tested
-only by the agent; a kernel extracted first is tested by the whole standing
-body of explicit-mode behaviour that must not change under it.
+and be exercised — by every duty, on real threads, through every dogfooded
+run this repository already does — before the first line of agent code is
+allowed to call it. A kernel born alongside the agent would be tested only by
+the agent; a kernel extracted first is tested by the whole standing body of
+explicit-mode behaviour that must not change under it.
 
-**Delivers:** the kernel module; the capability-request shape; the four
+**Delivers:** the kernel module; the capability-request shape; the five
 duties registered as capabilities behind their existing names; the same tests
 green before and after, plus new ones pinning the request boundary itself.
 

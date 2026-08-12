@@ -427,6 +427,9 @@ describe("readStanding", () => {
       labels: ["bug", "needs reproduction"],
       closed: false,
       author: { login: "", isBot: false },
+      milestone: null,
+      assignees: [],
+      createdAt: new Date(0),
     });
     expect(get).toHaveBeenCalledWith({ owner: "ecoma-io", repo: "reeve", issue_number: 42 });
   });
@@ -471,6 +474,9 @@ describe("readStanding", () => {
       labels: [],
       closed: false,
       author: { login: "", isBot: false },
+      milestone: null,
+      assignees: [],
+      createdAt: new Date(0),
     });
   });
 

@@ -39,6 +39,9 @@ function label(over: Partial<Label> = {}): Label {
     owner: null,
     exclusiveWith: [],
     confidence: null,
+    paths: [],
+    create: false,
+    color: null,
     ...over,
   };
 }

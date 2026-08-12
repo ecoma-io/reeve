@@ -45,6 +45,12 @@ function stubOf(entries: readonly Entry[]): TrackerApi {
         listEvents: () => {
           throw new Error("not used by listCorpus");
         },
+        removeLabel: () => {
+          throw new Error("not used by listCorpus");
+        },
+        createLabel: () => {
+          throw new Error("not used by listCorpus");
+        },
       },
     },
   };

@@ -153,3 +153,39 @@ export function fingerprint(text: string, keys: readonly string[]): string {
     .digest("hex")
     .slice(0, 16);
 }
+
+/**
+ * The `propose` capability's own marker grammar, one level finer than
+ * {@link markerFor}.
+ *
+ * `markerFor("propose")` identifies the whole change-set a proposal PR
+ * carries, by one fingerprint — that is what makes an unchanged world cost
+ * nothing. But a closed-unmerged proposal's rejection has to be remembered
+ * per *entry*, not per change-set: a change-set is never the same twice once
+ * a new package appears, so respecting only the old fingerprint would let a
+ * struck entry ride back in, hiding inside a change-set that merely grew.
+ * This is the sibling grammar that names one entry — `add:area:billing` or
+ * `retire:area:billing` — so a rejection can be remembered by name and
+ * survive a change-set that has moved on. Both markers live in the same PR
+ * body; neither substitutes for the other.
+ */
+export function proposeEntryMarker(action: "add" | "retire", name: string): string {
+  return `<!-- reeve:propose:entry ${action}:${name} -->`;
+}
+
+/**
+ * Every entry marker `body` carries, as `"add:area:billing"`-shaped tokens.
+ *
+ * Read from a *closed, unmerged* proposal PR's body — the permanent memory of
+ * what a maintainer rejected by closing rather than merging. Bounded by the
+ * marker's own `-->` closer rather than by whitespace, because a label name
+ * may contain almost anything except a newline.
+ */
+export function readProposeEntryMarkers(body: string): ReadonlySet<string> {
+  const found = new Set<string>();
+  const re = /<!-- reeve:propose:entry ((?:add|retire):[^\n]*?) -->/g;
+  for (const match of body.matchAll(re)) {
+    if (match[1] !== undefined) found.add(match[1]);
+  }
+  return found;
+}

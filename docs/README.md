@@ -76,13 +76,15 @@ section true. Where a document describes something not yet built, it says so
 in that section rather than in a global disclaimer you would have to
 remember.
 
-Four duties ship — [`triage`](reference/duties/triage.md),
+Five duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
-[`duplicate`](reference/duties/duplicate.md), and
-[`respond`](reference/duties/respond.md) — and all four are dogfooded on this
-repository today: `triage` and `translate` acting on real threads, `duplicate`
-and `respond` in report-only mode, writing verdicts to job summaries and
-touching nothing.
+[`duplicate`](reference/duties/duplicate.md),
+[`respond`](reference/duties/respond.md), and
+[`lifecycle`](reference/duties/lifecycle.md) — and the first four are
+dogfooded on this repository today: `triage` and `translate` acting on real
+threads, `duplicate` and `respond` in report-only mode, writing verdicts to
+job summaries and touching nothing. `lifecycle` is the newest of the five and
+does not yet have a workflow of its own here.
 
 ## Full index
 
@@ -107,6 +109,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`reference/duties/translate.md`](reference/duties/translate.md)           | reference                | Full contract for the translate duty.                                             |
 | [`reference/duties/duplicate.md`](reference/duties/duplicate.md)           | reference                | Full contract for the duplicate duty.                                             |
 | [`reference/duties/respond.md`](reference/duties/respond.md)               | reference                | Full contract for the respond duty.                                               |
+| [`reference/duties/lifecycle.md`](reference/duties/lifecycle.md)           | reference                | Full contract for the lifecycle duty.                                             |
 | [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
 | [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
 | [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action.                                            |

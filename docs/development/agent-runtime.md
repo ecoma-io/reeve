@@ -21,9 +21,10 @@ which moved first, in its own commit, per that document's own amendment
 rule.
 
 > [!IMPORTANT]
-> **Nothing on this page ships today.** Reeve today runs exactly four duties —
-> `triage`, `translate`, `duplicate`, `respond` — each a fixed pipeline of
-> reviewed TypeScript, exactly as described in [Architecture](architecture.md).
+> **Nothing on this page ships today.** Reeve today runs exactly five duties —
+> `triage`, `translate`, `duplicate`, `respond`, `lifecycle` — each a fixed
+> pipeline of reviewed TypeScript, exactly as described in
+> [Architecture](architecture.md).
 > There is no agent runtime in this repository's `src/`, no workflow can opt
 > into one, and no warrant key turns one on. This page is direction for a
 > 2.x line, written down now so that when the work starts, it starts inside

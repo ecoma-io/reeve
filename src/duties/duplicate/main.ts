@@ -333,6 +333,11 @@ async function runSweep(
       // `duplicate`'s own decision reads it: ranking a candidate against the
       // thread in hand never turns on who either one's author is.
       author: { login: "", isBot: false },
+      // Nor does it carry milestone/assignee state — `duplicate` never reads
+      // either, so both are left at their honest "unknown" value.
+      milestone: null,
+      assignees: [],
+      createdAt: thread.createdAt,
     };
     const outcome = await decide(
       api,

@@ -349,6 +349,10 @@ export interface TrackerApi {
           state?: string;
           labels?: (string | { name?: string })[];
           user?: { login?: string; type?: string } | null;
+          milestone?: { title?: string } | null;
+          assignees?: ({ login?: string } | null)[] | null;
+          /** Read for `lifecycle`'s inactivity-track clock start. Optional so every existing stub of this call keeps typechecking unchanged. */
+          created_at?: string;
         };
       }>;
       update(params: {
@@ -363,6 +367,25 @@ export interface TrackerApi {
         repo: string;
         issue_number: number;
         labels: string[];
+      }): Promise<unknown>;
+      /**
+       * Removes exactly one label from one thread. Not part of {@link Effects}
+       * — see {@link LifecycleEffects}'s doc comment for the bounded exception
+       * this exists for.
+       */
+      removeLabel(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        name: string;
+      }): Promise<unknown>;
+      /** Creates a repository label object — used only by `create: true`. */
+      createLabel(params: {
+        owner: string;
+        repo: string;
+        name: string;
+        color?: string;
+        description?: string;
       }): Promise<unknown>;
       createComment(params: {
         owner: string;
@@ -441,6 +464,17 @@ export interface Standing {
    * say.
    */
   readonly author: { readonly login: string; readonly isBot: boolean };
+  /** The milestone's title, or `null` when unmilestoned. Read for `lifecycle`'s exemption layer. */
+  readonly milestone: string | null;
+  /** Logins assigned to the thread. Read for `lifecycle`'s exemption layer. */
+  readonly assignees: readonly string[];
+  /**
+   * When the thread was opened, or the Unix epoch when the API answered
+   * without one — every caller but `lifecycle` already had no use for this
+   * field, so a stub built before it existed reads as an impossible date
+   * rather than failing to typecheck.
+   */
+  readonly createdAt: Date;
 }
 
 export async function readStanding(api: TrackerApi, at: Location): Promise<Standing> {
@@ -463,6 +497,11 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
       .filter((name) => name.length > 0),
     closed: data.state === "closed",
     author: { login, isBot: isBotAuthor(data.user) },
+    milestone: data.milestone?.title ?? null,
+    assignees: (data.assignees ?? [])
+      .map((assignee) => assignee?.login ?? "")
+      .filter((login_) => login_.length > 0),
+    createdAt: data.created_at !== undefined ? new Date(data.created_at) : new Date(0),
   };
 }
 
@@ -920,4 +959,58 @@ export function createEffects(api: TrackerApi, at: Location): Effects {
       await api.rest.issues.update({ ...issue, state: "closed", state_reason: "not_planned" });
     },
   };
+}
+
+/**
+ * `Effects`, plus exactly one bounded exception: removing a label.
+ *
+ * `Effects`'s own doctrine comment reads "every method adds… What a
+ * maintainer did to a thread stands," and that sentence is still true for
+ * every duty that holds plain `Effects`. `lifecycle` is the one duty that
+ * needs a narrow way past it, and the north-star amendment that permits this
+ * (D3, "…with one bounded exception") is the argument: a label the warrant
+ * itself names as a lifecycle track's clock-hand is declared, by that
+ * naming, to be machine-managed state, not a maintainer's own word. This
+ * port does not decide *whether* removal is safe — the warrant declaration
+ * already did that — it only performs it, on exactly the name it is given.
+ *
+ * A separate interface rather than a widened `Effects` so every other duty's
+ * "what can this do to my repository" answer stays the one it always was.
+ */
+export interface LifecycleEffects extends Effects {
+  /** Removes exactly one label — only ever called with a track's own declared clock-hand. */
+  removeLabel(name: string): Promise<void>;
+}
+
+export function createLifecycleEffects(api: TrackerApi, at: Location): LifecycleEffects {
+  const issue = { owner: at.owner, repo: at.repo, issue_number: at.number };
+  const base = createEffects(api, at);
+
+  return {
+    ...base,
+    async removeLabel(name) {
+      await api.rest.issues.removeLabel({ ...issue, name });
+    },
+  };
+}
+
+/**
+ * Creates a bare repository label object — no description, a neutral color
+ * when none was given. Used only for a warrant entry carrying `create:
+ * true`, which is a human-merged instruction (directly, or via a `propose`
+ * PR) rather than a capability grant; see `checkLabelsExist`'s doc comment
+ * in `warrant.ts` for the branch that calls this.
+ */
+export async function createRepositoryLabel(
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+  label: { readonly name: string; readonly color: string | null; readonly description: string },
+): Promise<void> {
+  await api.rest.issues.createLabel({
+    owner: at.owner,
+    repo: at.repo,
+    name: label.name,
+    color: label.color ?? "ededed",
+    description: label.description.slice(0, 100),
+  });
 }

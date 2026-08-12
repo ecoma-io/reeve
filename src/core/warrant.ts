@@ -61,7 +61,8 @@ import { findLanguage, parseLanguages, type Language } from "./languages.js";
  * project's decision to keep a memory at all, and only an explicit
  * `capabilities:` block can make it.
  */
-export type Capability = "label" | "edit-body" | "comment" | "close" | "assign" | "record";
+export type Capability =
+  "label" | "edit-body" | "comment" | "close" | "assign" | "record" | "propose";
 
 export const CAPABILITIES: readonly Capability[] = [
   "label",
@@ -70,6 +71,7 @@ export const CAPABILITIES: readonly Capability[] = [
   "close",
   "assign",
   "record",
+  "propose",
 ];
 
 /** The only version this reader understands. */
@@ -79,6 +81,80 @@ const VERSION = 1;
 export interface MemorySettings {
   readonly recall: number;
 }
+
+/** What resets a track's clock. `author` is the only sensible reading for a `when:` track. */
+export type LifecycleResets = "author" | "any";
+
+/** A step's `say:` — a step with no `say:` posts no comment at all. */
+export type LifecycleSay =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "built-in" }
+  | { readonly kind: "map"; readonly map: ReadonlyMap<string, string> };
+
+/** One step in a track's escalation ladder. */
+export interface LifecycleStep {
+  /** Milliseconds from the previous step's delivery (or from clock start, for step 1). */
+  readonly after: number;
+  readonly label: string | null;
+  readonly say: LifecycleSay | null;
+  /** `true` only on the closing step of a track; always `not_planned`. */
+  readonly close: boolean;
+}
+
+/** A per-label timing exception, mirroring the taxonomy's per-label confidence. */
+export interface LifecycleOverride {
+  readonly label: string;
+  /** Milliseconds replacing the first step's `after`, or `null` when `never` won. */
+  readonly after: number | null;
+  readonly never: boolean;
+}
+
+/** One user-defined lifecycle track. */
+export interface LifecycleTrack {
+  readonly name: string;
+  /** The label whose human application starts the clock, or `null` for an inactivity track. */
+  readonly when: string | null;
+  readonly resets: LifecycleResets;
+  readonly steps: readonly LifecycleStep[];
+}
+
+/** The four layers of `lifecycle.exempt` — see the design's §1.5/§1.1. */
+export interface LifecycleExempt {
+  readonly labels: readonly string[];
+  /** `true` = any milestone/assignee protects (default); a list scopes it; `false` disables it. */
+  readonly milestones: boolean | readonly string[];
+  readonly assignees: boolean | readonly string[];
+  readonly taxonomy: boolean;
+  /** `null` = unset = off; a whole number ≥1 blocks `close` steps only. */
+  readonly comments: number | null;
+}
+
+/** The `lifecycle:` key, in full — `null` when the file never wrote one at all. */
+export interface LifecyclePolicy {
+  readonly tracks: readonly LifecycleTrack[];
+  readonly exempt: LifecycleExempt;
+  readonly overrides: readonly LifecycleOverride[];
+  readonly threads: "issues" | "prs" | "both";
+}
+
+/** The `propose.workspace:` strategy's own knobs — see the design's §3.2. */
+export interface ProposeWorkspace {
+  /** Exactly one `{package}` placeholder, refused otherwise. */
+  readonly name: string;
+  readonly except: readonly string[];
+  readonly evidence: number;
+  readonly window: number;
+  readonly retire: boolean;
+}
+
+/** Defaults `readPropose` returns when `propose:` was never written. */
+export const DEFAULT_PROPOSE_WORKSPACE: ProposeWorkspace = {
+  name: "area:{package}",
+  except: [],
+  evidence: 3,
+  window: 90 * 24 * 60 * 60 * 1000,
+  retire: false,
+};
 
 /**
  * A handle, syntactically.
@@ -117,6 +193,23 @@ export interface Label {
    * one run-wide number tuned to the riskiest one.
    */
   readonly confidence: number | null;
+  /**
+   * Path prefixes or package names (from `atlas`) this label answers to.
+   * Evidence for the deterministic matcher and for `propose`'s drift check —
+   * never authority. An entry naming a path atlas cannot find is a warning,
+   * not red: packages move, and a label is not wrong for outliving one.
+   */
+  readonly paths: readonly string[];
+  /**
+   * Written by a human (directly, or by merging a `propose` PR) to let
+   * `checkLabelsExist` create the repository label object instead of failing
+   * red when it is missing. The merge is the grant — this key never creates
+   * anything on its own; it is only ever consulted after the file that
+   * carries it has already been read as authority.
+   */
+  readonly create: boolean;
+  /** The hex color (no `#`) used only when `create` fires. `null` lets GitHub pick. */
+  readonly color: string | null;
 }
 
 /** The parsed file, and the questions the rest of Reeve is allowed to ask it. */
@@ -159,6 +252,21 @@ export interface Warrant {
    * back to the `about` input then, the same input every duty already reads.
    */
   readonly about: string | null;
+  /**
+   * The `lifecycle:` key, or `null` when the file never wrote one — the
+   * lifecycle duty's own no-implicit-policy floor. There is no fallback
+   * here the way `memory`/`about` have one: no pre-existing artifact states
+   * a staleness policy, so an absent key means the duty decides nothing,
+   * ever, not "decides the duty's own default."
+   */
+  readonly lifecycle: LifecyclePolicy | null;
+  /**
+   * The `propose.workspace:` strategy, always present — defaults fill in
+   * when the file never wrote `propose:` at all, because the numbers in
+   * {@link DEFAULT_PROPOSE_WORKSPACE} are the design's own ruled defaults,
+   * not a duty's private opinion the way `memory`'s are.
+   */
+  readonly propose: ProposeWorkspace;
   /**
    * What this duty was granted.
    *
@@ -265,6 +373,8 @@ export function parseWarrant(path: string, source: string): Warrant {
   const pivot = readPivot(path, document.pivot);
   const memory = readMemory(path, document.memory);
   const about = readAbout(path, document.about);
+  const lifecycle = readLifecycle(path, document.lifecycle);
+  const propose = readPropose(path, document.propose);
   const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
@@ -290,6 +400,8 @@ export function parseWarrant(path: string, source: string): Warrant {
     pivot,
     memory,
     about,
+    lifecycle,
+    propose,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
@@ -316,22 +428,65 @@ export function parseWarrant(path: string, source: string): Warrant {
  * checking the warrant's whole one instead would fail a run over a label
  * renamed in an area it was never asked to touch, which is exactly the
  * isolation this narrowing exists to give it.
+ *
+ * A missing entry whose `create: true` is not an error: it is returned
+ * instead, for the caller to create via the tracker API (this module never
+ * touches the network) — the narrow branch `propose`'s design describes. A
+ * missing entry without `create: true` still fails exactly as before.
  */
 export function checkLabelsExist(
   warrant: Warrant,
   existing: readonly string[],
   taxonomy: readonly Label[] = warrant.labels,
-): void {
+): readonly Label[] {
   const present = new Set(existing);
-  const missing = taxonomy.map((label) => label.name).filter((name) => !present.has(name));
+  const missing = taxonomy.filter((label) => !present.has(label.name));
+  if (missing.length === 0) return [];
+
+  const toCreate = missing.filter((label) => label.create);
+  const toFail = missing.filter((label) => !label.create);
+  if (toFail.length > 0) {
+    // Every missing name at once. Reporting the first would make fixing a
+    // three-label rename three failed runs.
+    throw new Error(
+      `warrant: \`${warrant.path}\` names ${toFail.length === 1 ? "a label" : "labels"} ` +
+        `this repository does not have — ${toFail.map((label) => `\`${label.name}\``).join(", ")}. ` +
+        "Create them, correct the taxonomy, or mark the entry `create: true`.",
+    );
+  }
+  return toCreate;
+}
+
+/**
+ * The same check as {@link checkLabelsExist}, scoped to a lifecycle policy's
+ * own label references (`when:`, `overrides[].label`, `exempt.labels`) —
+ * kept separate because a track's clock-hand need not be a taxonomy entry at
+ * all (`stale`, `never-stale` usually aren't), so it cannot reuse
+ * `warrant.labels`. Always red on missing: a clock-hand label that does not
+ * exist looks exactly like a clock that never ran.
+ */
+export function checkLifecycleLabelsExist(warrant: Warrant, existing: readonly string[]): void {
+  const policy = warrant.lifecycle;
+  if (policy === null) return;
+
+  const named = new Set<string>();
+  for (const track of policy.tracks) {
+    if (track.when !== null) named.add(track.when);
+    for (const step of track.steps) {
+      if (step.label !== null) named.add(step.label);
+    }
+  }
+  for (const override of policy.overrides) named.add(override.label);
+  for (const label of policy.exempt.labels) named.add(label);
+
+  const present = new Set(existing);
+  const missing = [...named].filter((name) => !present.has(name));
   if (missing.length === 0) return;
 
-  // Every missing name at once. Reporting the first would make fixing a
-  // three-label rename three failed runs.
   throw new Error(
-    `warrant: \`${warrant.path}\` names ${missing.length === 1 ? "a label" : "labels"} ` +
+    `warrant: \`${warrant.path}\`'s \`lifecycle:\` names ${missing.length === 1 ? "a label" : "labels"} ` +
       `this repository does not have — ${missing.map((name) => `\`${name}\``).join(", ")}. ` +
-      "Create them, or correct the taxonomy.",
+      "Create them, or correct the policy.",
   );
 }
 
@@ -396,6 +551,9 @@ export function implicitWarrant(
       owner: null,
       exclusiveWith: [],
       confidence: null,
+      paths: [],
+      create: false,
+      color: null,
     });
   }
 
@@ -409,6 +567,8 @@ export function implicitWarrant(
       pivot: null,
       memory: null,
       about: null,
+      lifecycle: null,
+      propose: DEFAULT_PROPOSE_WORKSPACE,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name),
@@ -628,6 +788,9 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
       owner: nullable(owner),
       exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
       confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence),
+      paths: strings(`${at} (\`${name}\`)`, "paths", fields.paths),
+      create: booleanField(`${at} (\`${name}\`)`, "create", fields.create, false),
+      color: colorField(`${at} (\`${name}\`)`, "color", fields.color),
     });
   }
 
@@ -745,6 +908,325 @@ function readAbout(path: string, raw: unknown): string | null {
   }
   const value = raw.trim();
   return value.length === 0 ? null : value;
+}
+
+/**
+ * The `lifecycle:` key. Absent entirely is `null` — see {@link Warrant.lifecycle}'s
+ * no-implicit-policy doc comment. Written with nothing under it is refused,
+ * the same half-finished-edit shape `memory:`/`capabilities:` both refuse.
+ */
+function readLifecycle(path: string, raw: unknown): LifecyclePolicy | null {
+  if (raw === undefined) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`lifecycle:\` with nothing under it. Write \`tracks:\` under ` +
+        "it, or remove the key to leave the duty unwired.",
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw)}, expected a mapping.`,
+    );
+  }
+  const fields = raw as Record<string, unknown>;
+
+  const tracks = readLifecycleTracks(path, fields.tracks);
+  const exempt = readLifecycleExempt(path, fields.exempt);
+  const overrides = readLifecycleOverrides(path, fields.overrides);
+
+  const threadsRaw = fields.threads;
+  const threads = threadsRaw === undefined ? "issues" : threadsRaw;
+  if (threads !== "issues" && threads !== "prs" && threads !== "both") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.threads\` is ${describe(threadsRaw)}, ` +
+        "expected `issues`, `prs`, or `both`.",
+    );
+  }
+
+  // The permanent escape hatch must exist before closing may be configured at
+  // all — enforced structurally, not editorially, once here rather than once
+  // per track.
+  const hasClose = tracks.some((track) => track.steps.some((step) => step.close));
+  if (hasClose && exempt.labels.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` configures a \`close\` step, but \`exempt.labels\` is ` +
+        "empty. A permanent escape hatch must exist before closing may be configured at all.",
+    );
+  }
+
+  return { tracks, exempt, overrides, threads };
+}
+
+/** `lifecycle.tracks`: required, non-empty, unique names. */
+function readLifecycleTracks(path: string, raw: unknown): readonly LifecycleTrack[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` has no \`tracks\` — a lifecycle with no tracks ` +
+        "decides nothing. Delete the key, or write a track.",
+    );
+  }
+
+  const seen = new Set<string>();
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.tracks\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry as Record<string, unknown>;
+
+    const name = text(at, "name", fields.name, { required: true });
+    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+      throw new Error(
+        `warrant: ${at} names the track \`${name}\`, expected lowercase letters, digits and ` +
+          "hyphens, starting with a letter.",
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`lifecycle.tracks\` names \`${name}\` more than once.`,
+      );
+    }
+    seen.add(name);
+
+    const named = `${at} (\`${name}\`)`;
+    const when = nullable(text(named, "when", fields.when, { required: false }));
+    const resets = resetsField(named, fields.resets, when !== null ? "author" : "any");
+
+    const stepsRaw = fields.steps;
+    if (!Array.isArray(stepsRaw) || stepsRaw.length === 0) {
+      throw new Error(
+        `warrant: ${named} has no \`steps\` — a track with no steps decides nothing.`,
+      );
+    }
+    const steps = stepsRaw.map((step, stepIndex) =>
+      readLifecycleStep(
+        `${named} step ${String(stepIndex + 1)}`,
+        step,
+        stepIndex === stepsRaw.length - 1,
+      ),
+    );
+
+    // A close with no prior warning on mere silence is the single most-
+    // regretted behaviour in the field. A `when:` track may close first —
+    // there the human's label application was the warning.
+    if (when === null && steps[0]?.close === true) {
+      throw new Error(
+        `warrant: ${named} is an inactivity track whose first step closes — a close with no prior ` +
+          "warning is refused. Add a `when:` start, or a warning step before the close.",
+      );
+    }
+
+    return { name, when, resets, steps };
+  });
+}
+
+function resetsField(at: string, raw: unknown, fallback: LifecycleResets): LifecycleResets {
+  if (raw === undefined || raw === null) return fallback;
+  if (raw === "author" || raw === "any") return raw;
+  throw new Error(
+    `warrant: ${at} has \`resets\` as ${describe(raw)}, expected \`author\` or \`any\`.`,
+  );
+}
+
+function readLifecycleStep(at: string, raw: unknown, isLast: boolean): LifecycleStep {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw as Record<string, unknown>;
+
+  const after = durationField(at, "after", fields.after, { allowNever: false });
+  const label = nullable(text(at, "label", fields.label, { required: false }));
+  const say = readSay(at, fields.say);
+  const close = closeField(at, fields.close);
+
+  if (close && !isLast) {
+    throw new Error(
+      `warrant: ${at} has \`close\` on a step that is not the track's last — close must be the ` +
+        "terminal step.",
+    );
+  }
+  if (label === null && say === null && !close) {
+    throw new Error(
+      `warrant: ${at} carries none of \`label\`, \`say\`, \`close\` — a step must do something.`,
+    );
+  }
+
+  return { after, label, say, close };
+}
+
+/** A step's `say:` — bare `true` = built-in template, text, or a language-keyed mapping. */
+function readSay(at: string, raw: unknown): LifecycleSay | null {
+  if (raw === undefined || raw === null || raw === false) return null;
+  if (raw === true) return { kind: "built-in" };
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (value.length === 0) throw new Error(`warrant: ${at} has an empty \`say\`.`);
+    return { kind: "text", text: value };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const map = new Map<string, string>();
+    for (const [lang, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`warrant: ${at}'s \`say.${lang}\` is ${describe(value)}, expected text.`);
+      }
+      map.set(lang, value.trim());
+    }
+    if (map.size === 0) throw new Error(`warrant: ${at} writes \`say:\` with nothing under it.`);
+    return { kind: "map", map };
+  }
+  throw new Error(
+    `warrant: ${at} has \`say\` as ${describe(raw)}, expected true, text, or a mapping of language to text.`,
+  );
+}
+
+/**
+ * A step's `close:`. `true` and the literal `not_planned` both mean the
+ * same thing. `completed` is refused by name: `forge.ts`'s own
+ * `closeAsNotPlanned` doctrine comment is the argument — "nothing Reeve
+ * closes was completed by Reeve closing it."
+ */
+function closeField(at: string, raw: unknown): boolean {
+  if (raw === undefined || raw === null || raw === false) return false;
+  if (raw === true || raw === "not_planned") return true;
+  if (raw === "completed") {
+    throw new Error(
+      `warrant: ${at} has \`close: completed\` — Reeve closes only as \`not_planned\`. Write ` +
+        "`close: true`.",
+    );
+  }
+  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw)}, expected true or false.`);
+}
+
+/** `lifecycle.exempt`: the four layers. Protective defaults even when the key is unwritten. */
+function readLifecycleExempt(path: string, raw: unknown): LifecycleExempt {
+  const at = `\`${path}\`'s \`lifecycle.exempt\``;
+  if (raw === undefined || raw === null) {
+    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw as Record<string, unknown>;
+  return {
+    labels: strings(at, "labels", fields.labels),
+    milestones: guardField(at, "milestones", fields.milestones, true),
+    assignees: guardField(at, "assignees", fields.assignees, true),
+    taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+  };
+}
+
+/** `true`, `false`, or a scoping list of names — the shape `milestones`/`assignees` share. */
+function guardField(
+  at: string,
+  key: string,
+  raw: unknown,
+  fallback: boolean,
+): boolean | readonly string[] {
+  if (raw === undefined || raw === null) return fallback;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string" || Array.isArray(raw)) return strings(at, key, raw);
+  throw new Error(
+    `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true, false, or a list of names.`,
+  );
+}
+
+/** `lifecycle.overrides`: per-label timing exceptions. */
+function readLifecycleOverrides(path: string, raw: unknown): readonly LifecycleOverride[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw)}, expected a list.`,
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.overrides\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
+    }
+    const fields = entry as Record<string, unknown>;
+    const label = text(at, "label", fields.label, { required: true });
+    const hasAfter = fields.after !== undefined && fields.after !== null;
+    const never = booleanField(at, "never", fields.never, false);
+    if (hasAfter && never) {
+      throw new Error(
+        `warrant: ${at} (\`${label}\`) has both \`after\` and \`never\` — write one.`,
+      );
+    }
+    if (!hasAfter && !never) {
+      throw new Error(`warrant: ${at} (\`${label}\`) has neither \`after\` nor \`never\`.`);
+    }
+    const after = hasAfter ? durationField(at, "after", fields.after, { allowNever: false }) : null;
+    return { label, after, never };
+  });
+}
+
+/**
+ * The `propose.workspace:` strategy. Absent entirely — either no `propose:`
+ * key, or `propose:` written without a `workspace:` sub-key — takes the
+ * design's own ruled defaults ({@link DEFAULT_PROPOSE_WORKSPACE}); these are
+ * numbers the design already settled, not a duty's private opinion, so
+ * defaulting them here (rather than leaving `null` for a caller to guess at)
+ * is honest.
+ */
+function readPropose(path: string, raw: unknown): ProposeWorkspace {
+  if (raw === undefined) return DEFAULT_PROPOSE_WORKSPACE;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`propose:\` with nothing under it. Write \`workspace:\` under ` +
+        "it, or remove the key to take the defaults.",
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`propose\` as ${describe(raw)}, expected a mapping.`,
+    );
+  }
+  const fields = raw as Record<string, unknown>;
+  const workspaceRaw = fields.workspace;
+  if (workspaceRaw === undefined || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
+  if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`propose.workspace\` is ${describe(workspaceRaw)}, expected a mapping.`,
+    );
+  }
+  const w = workspaceRaw as Record<string, unknown>;
+  const at = `\`${path}\`'s \`propose.workspace\``;
+
+  const nameRaw = text(at, "name", w.name, { required: false });
+  const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
+  if ((name.match(/\{package\}/g) ?? []).length !== 1) {
+    throw new Error(
+      `warrant: ${at} has \`name: ${name}\`, expected exactly one \`{package}\` placeholder.`,
+    );
+  }
+
+  const except = strings(at, "except", w.except);
+  const evidence =
+    w.evidence === undefined
+      ? DEFAULT_PROPOSE_WORKSPACE.evidence
+      : wholeNumber(at, "evidence", w.evidence, 0);
+  const window =
+    w.window === undefined
+      ? DEFAULT_PROPOSE_WORKSPACE.window
+      : durationField(at, "window", w.window, { allowNever: false });
+  const retire = booleanField(at, "retire", w.retire, false);
+
+  return { name, except, evidence, window, retire };
+}
+
+function wholeNumber(at: string, key: string, raw: unknown, min: number): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a whole number of ${String(min)} or more.`,
+    );
+  }
+  return raw;
+}
+
+function optionalWholeNumber(at: string, key: string, raw: unknown, min: number): number | null {
+  if (raw === undefined || raw === null) return null;
+  return wholeNumber(at, key, raw, min);
 }
 
 /** Whether the block existed at all, and what it named if it did. */
@@ -868,6 +1350,68 @@ function confidenceField(at: string, key: string, raw: unknown): number | null {
     );
   }
   return raw;
+}
+
+/** A required-or-defaulted boolean field. */
+function booleanField(at: string, key: string, raw: unknown, fallback: boolean): boolean {
+  if (raw === undefined || raw === null) return fallback;
+  if (typeof raw !== "boolean") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true or false.`);
+  }
+  return raw;
+}
+
+const HEX_COLOR = /^[0-9a-fA-F]{6}$/;
+
+/** A label's own `color:` — a bare 6-digit hex, consulted only when `create` fires. */
+function colorField(at: string, key: string, raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string" || !HEX_COLOR.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a 6-digit hex color with no \`#\`.`,
+    );
+  }
+  return raw.trim().toLowerCase();
+}
+
+/**
+ * A duration field in the one grammar this file uses everywhere: `<n>d`,
+ * whole days only. `never` is accepted only where the caller says so.
+ * `0d` is refused — a duration of zero is not a duration, it is a `close:
+ * true` in disguise.
+ */
+function durationField(
+  at: string,
+  key: string,
+  raw: unknown,
+  options: { allowNever: false },
+): number;
+function durationField(
+  at: string,
+  key: string,
+  raw: unknown,
+  options: { allowNever: true },
+): number | null;
+function durationField(
+  at: string,
+  key: string,
+  raw: unknown,
+  options: { readonly allowNever: boolean },
+): number | null {
+  if (options.allowNever && raw === "never") return null;
+  if (typeof raw !== "string" || !/^\d+d$/.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a duration like \`14d\`` +
+        (options.allowNever ? " or `never`." : "."),
+    );
+  }
+  const days = Number(raw.trim().slice(0, -1));
+  if (days === 0) {
+    throw new Error(
+      `warrant: ${at} has \`${key}: 0d\`, which is not a duration. Write \`never\`, or remove the step.`,
+    );
+  }
+  return days * 24 * 60 * 60 * 1000;
 }
 
 /** What a wrong value is, for a message that helps rather than quotes YAML at somebody. */

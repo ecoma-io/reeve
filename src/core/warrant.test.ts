@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   checkLabelsExist,
+  checkLifecycleLabelsExist,
   implicitWarrant,
   parseWarrant,
   readWarrant,
@@ -66,6 +67,9 @@ describe("parseWarrant", () => {
       owner: "@ecoma-io/runtime",
       exclusiveWith: [],
       confidence: null,
+      paths: [],
+      create: false,
+      color: null,
     });
   });
 
@@ -575,6 +579,125 @@ describe("checkLabelsExist", () => {
   it("passes an empty taxonomy, which claims nothing", () => {
     expect(checking("version: 1\n", [])).not.toThrow();
   });
+
+  it("returns a `create: true` entry instead of failing over it", () => {
+    const source =
+      "version: 1\nlabels:\n  - name: area:billing\n    description: Billing work.\n    create: true\n";
+    const toCreate = checkLabelsExist(warrant(source), []);
+    expect(toCreate.map((label) => label.name)).toEqual(["area:billing"]);
+  });
+
+  it("still fails on a missing entry without `create: true`, alongside one that has it", () => {
+    const source =
+      "version: 1\n" +
+      "labels:\n" +
+      "  - name: area:billing\n    description: Billing work.\n    create: true\n" +
+      "  - name: bug\n    description: A defect.\n";
+    expect(checking(source, [])).toThrow(/does not have — `bug`/);
+  });
+
+  it("does not ask the caller to create a label that already exists", () => {
+    const source =
+      "version: 1\nlabels:\n  - name: area:billing\n    description: Billing work.\n    create: true\n";
+    expect(checkLabelsExist(warrant(source), ["area:billing"])).toEqual([]);
+  });
+});
+
+describe("checkLifecycleLabelsExist", () => {
+  const LIFECYCLE_SOURCE =
+    "version: 1\n" +
+    "lifecycle:\n" +
+    "  tracks:\n" +
+    "    - name: stale\n" +
+    "      when: needs-info\n" +
+    "      steps:\n" +
+    "        - say: Ping.\n" +
+    "          after: 7d\n" +
+    "        - label: stale\n" +
+    "          after: 14d\n" +
+    "  exempt:\n" +
+    "    labels: [pinned]\n";
+
+  it("passes silently when there is no `lifecycle:` policy at all", () => {
+    expect(() => {
+      checkLifecycleLabelsExist(warrant(MINIMAL), []);
+    }).not.toThrow();
+  });
+
+  it("passes when every label the policy names exists", () => {
+    expect(() => {
+      checkLifecycleLabelsExist(warrant(LIFECYCLE_SOURCE), ["needs-info", "stale", "pinned"]);
+    }).not.toThrow();
+  });
+
+  it("fails, naming every missing label the policy refers to at once", () => {
+    expect(() => {
+      checkLifecycleLabelsExist(warrant(LIFECYCLE_SOURCE), []);
+    }).toThrow(/`needs-info`, `stale`, `pinned`/);
+  });
+
+  it("is red on a missing clock-hand label even though it need not be a taxonomy entry", () => {
+    expect(() => {
+      checkLifecycleLabelsExist(warrant(LIFECYCLE_SOURCE), ["pinned"]);
+    }).toThrow(/does not have/);
+  });
+});
+
+describe("readPropose", () => {
+  it("takes the design's own defaults when `propose:` is never written", () => {
+    const found = warrant(MINIMAL).propose;
+    expect(found).toEqual({
+      name: "area:{package}",
+      except: [],
+      evidence: 3,
+      window: 90 * 24 * 60 * 60 * 1000,
+      retire: false,
+    });
+  });
+
+  it("takes the defaults when `propose:` is written without a `workspace:` sub-key", () => {
+    const found = warrant("version: 1\npropose: {}\n").propose;
+    expect(found.name).toBe("area:{package}");
+  });
+
+  it("reads every knob under `propose.workspace`", () => {
+    const source =
+      "version: 1\n" +
+      "propose:\n" +
+      "  workspace:\n" +
+      "    name: team:{package}\n" +
+      "    except: [internal-*]\n" +
+      "    evidence: 5\n" +
+      "    window: 30d\n" +
+      "    retire: true\n";
+    expect(warrant(source).propose).toEqual({
+      name: "team:{package}",
+      except: ["internal-*"],
+      evidence: 5,
+      window: 30 * 24 * 60 * 60 * 1000,
+      retire: true,
+    });
+  });
+
+  it("refuses a `name` template with no `{package}` placeholder", () => {
+    const source = "version: 1\npropose:\n  workspace:\n    name: area\n";
+    expect(() => warrant(source)).toThrow(/exactly one `\{package\}` placeholder/);
+  });
+
+  it("refuses a `name` template with more than one `{package}` placeholder", () => {
+    const source = "version: 1\npropose:\n  workspace:\n    name: area:{package}:{package}\n";
+    expect(() => warrant(source)).toThrow(/exactly one `\{package\}` placeholder/);
+  });
+
+  it("refuses `propose:` written with nothing under it", () => {
+    expect(() => warrant("version: 1\npropose:\n")).toThrow(/nothing under it/);
+  });
+
+  it("refuses `propose.workspace` that is not a mapping", () => {
+    expect(() => warrant("version: 1\npropose:\n  workspace: nope\n")).toThrow(
+      /expected a mapping/,
+    );
+  });
 });
 
 describe("readWarrant", () => {
@@ -647,6 +770,9 @@ describe("implicitWarrant", () => {
         owner: null,
         exclusiveWith: [],
         confidence: null,
+        paths: [],
+        create: false,
+        color: null,
       },
       {
         name: "docs",
@@ -656,6 +782,9 @@ describe("implicitWarrant", () => {
         owner: null,
         exclusiveWith: [],
         confidence: null,
+        paths: [],
+        create: false,
+        color: null,
       },
     ]);
     expect(excluded).toEqual([]);

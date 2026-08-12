@@ -14941,7 +14941,7 @@ var require_util4 = __commonJS({
           if (encoding === "failure") {
             encoding = "UTF-8";
           }
-          return decode(bytes, encoding);
+          return decode2(bytes, encoding);
         }
         case "ArrayBuffer": {
           const sequence = combineByteSequences(bytes);
@@ -14958,7 +14958,7 @@ var require_util4 = __commonJS({
         }
       }
     }
-    function decode(ioQueue, encoding) {
+    function decode2(ioQueue, encoding) {
       const bytes = combineByteSequences(ioQueue);
       const BOMEncoding = BOMSniffing(bytes);
       let slice = 0;
@@ -31578,6 +31578,249 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// src/core/atlas.ts
+var import_yaml = __toESM(require_dist2(), 1);
+var EMPTY_ATLAS = { packages: [], truncated: false };
+var ATLAS_MAX_PACKAGES = 200;
+var DESCRIPTION_CAP = 200;
+function sanitize(text2) {
+  const stripped = text2.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim();
+  return stripped.length > DESCRIPTION_CAP ? `${stripped.slice(0, DESCRIPTION_CAP)}\u2026` : stripped;
+}
+function decode(entry) {
+  if (entry.content === void 0) return null;
+  if (entry.encoding === "base64") {
+    return Buffer.from(entry.content, "base64").toString("utf8");
+  }
+  return entry.content;
+}
+async function readFileAt(api, at, path, ref) {
+  try {
+    const { data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path, ref });
+    if (Array.isArray(data)) return null;
+    return decode(data);
+  } catch {
+    return null;
+  }
+}
+function directoriesOf(tree) {
+  const dirs = /* @__PURE__ */ new Set([""]);
+  for (const entry of tree) {
+    if (entry.type === "tree" && entry.path !== void 0) dirs.add(entry.path);
+  }
+  return [...dirs];
+}
+function globToMatcher(glob) {
+  const exclude = glob.startsWith("!");
+  const body = exclude ? glob.slice(1) : glob;
+  const escaped = body.split("/").map(
+    (segment) => segment === "**" ? "\0DOUBLESTAR\0" : segment.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, ".")
+  ).join("/").replace(/\x00DOUBLESTAR\x00/g, ".*").replace(/\/\.\*\//g, "(?:/.*)?/").replace(/^\.\*\//, "(?:.*/)?");
+  const regex = new RegExp(`^${escaped}$`);
+  return { test: (dir) => regex.test(dir), exclude };
+}
+function expandGlobs(globs, directories) {
+  const matchers2 = globs.map(globToMatcher);
+  const matched = /* @__PURE__ */ new Set();
+  for (const dir of directories) {
+    if (dir.length === 0) continue;
+    let hit = false;
+    for (const matcher2 of matchers2) {
+      if (matcher2.exclude) continue;
+      if (matcher2.test(dir)) hit = true;
+    }
+    for (const matcher2 of matchers2) {
+      if (matcher2.exclude && matcher2.test(dir)) hit = false;
+    }
+    if (hit) matched.add(dir);
+  }
+  return [...matched].sort();
+}
+function join(dir, file) {
+  return dir.length === 0 ? file : `${dir}/${file}`;
+}
+function parsePnpmWorkspace(source) {
+  try {
+    const document2 = (0, import_yaml.parse)(source);
+    if (document2 === null || typeof document2 !== "object") return [];
+    const packages = document2.packages;
+    if (!Array.isArray(packages)) return [];
+    return packages.filter((entry) => typeof entry === "string");
+  } catch {
+    return [];
+  }
+}
+function parseNpmWorkspaces(source) {
+  try {
+    const document2 = JSON.parse(source);
+    if (document2 === null || typeof document2 !== "object") return [];
+    const workspaces = document2.workspaces;
+    if (Array.isArray(workspaces)) {
+      return workspaces.filter((entry) => typeof entry === "string");
+    }
+    if (workspaces !== null && typeof workspaces === "object") {
+      const packages = workspaces.packages;
+      if (Array.isArray(packages)) {
+        return packages.filter((entry) => typeof entry === "string");
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+function parseCargoWorkspace(source) {
+  const workspaceMatch = /\[workspace]([\s\S]*?)(?:\n\[|$)/.exec(source);
+  const section = workspaceMatch?.[1] ?? "";
+  const membersMatch = /members\s*=\s*\[([\s\S]*?)]/.exec(section);
+  if (membersMatch === null) return [];
+  return (membersMatch[1] ?? "").split(",").map((entry) => entry.trim().replace(/^["']|["']$/g, "")).filter((entry) => entry.length > 0);
+}
+function parseGoWork(source) {
+  const dirs = [];
+  const blockMatch = /use\s*\(([\s\S]*?)\)/.exec(source);
+  if (blockMatch !== null) {
+    for (const line of (blockMatch[1] ?? "").split("\n")) {
+      const value = line.trim();
+      if (value.length > 0) dirs.push(value);
+    }
+  }
+  for (const match of source.matchAll(/^use\s+(\S+)\s*$/gm)) {
+    if (match[1] !== void 0) dirs.push(match[1]);
+  }
+  return dirs.map((entry) => entry.replace(/^\.\//, "").replace(/\/$/, "")).filter((entry) => entry.length > 0);
+}
+async function readNpmMember(api, at, ref, dir) {
+  const source = await readFileAt(api, at, join(dir, "package.json"), ref);
+  if (source === null) return null;
+  try {
+    const document2 = JSON.parse(source);
+    if (document2 === null || typeof document2 !== "object") return null;
+    const fields = document2;
+    const name = typeof fields.name === "string" ? fields.name.trim() : "";
+    if (name.length === 0) return null;
+    const description = typeof fields.description === "string" ? sanitize(fields.description) : "";
+    return { name, path: dir, description };
+  } catch {
+    return null;
+  }
+}
+async function readCargoMember(api, at, ref, dir) {
+  const source = await readFileAt(api, at, join(dir, "Cargo.toml"), ref);
+  if (source === null) return null;
+  const packageMatch = /\[package]([\s\S]*?)(?:\n\[|$)/.exec(source);
+  const section = packageMatch?.[1] ?? source;
+  const nameMatch = /^\s*name\s*=\s*["']([^"']+)["']/m.exec(section);
+  if (nameMatch === null) return null;
+  const descriptionMatch = /^\s*description\s*=\s*["']([^"']*)["']/m.exec(section);
+  return {
+    name: nameMatch[1] ?? "",
+    path: dir,
+    description: sanitize(descriptionMatch?.[1] ?? "")
+  };
+}
+async function readGoMember(api, at, ref, dir) {
+  const source = await readFileAt(api, at, join(dir, "go.mod"), ref);
+  if (source === null) return null;
+  const moduleMatch = /^module\s+(\S+)/m.exec(source);
+  if (moduleMatch === null) return null;
+  const modulePath = moduleMatch[1] ?? "";
+  const segments2 = modulePath.split("/");
+  const name = segments2[segments2.length - 1] ?? modulePath;
+  return { name, path: dir, description: "" };
+}
+async function readAtlas(api, at, ref) {
+  let head = ref;
+  if (head === void 0) {
+    try {
+      const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+      head = data.default_branch;
+    } catch {
+      return EMPTY_ATLAS;
+    }
+  }
+  if (head === void 0 || head.length === 0) return EMPTY_ATLAS;
+  const resolvedHead = head;
+  let tree;
+  try {
+    const { data } = await api.rest.git.getTree({
+      owner: at.owner,
+      repo: at.repo,
+      tree_sha: resolvedHead,
+      recursive: "1"
+    });
+    tree = data.tree;
+  } catch {
+    return EMPTY_ATLAS;
+  }
+  const rootFiles = new Set(
+    tree.filter((entry) => entry.type === "blob" && entry.path !== void 0).map((entry) => entry.path ?? "")
+  );
+  const directories = directoriesOf(tree);
+  const members = /* @__PURE__ */ new Map();
+  async function collect(manifestFile, parseGlobs, read2) {
+    if (!rootFiles.has(manifestFile)) return;
+    const source = await readFileAt(api, at, manifestFile, resolvedHead);
+    if (source === null) return;
+    const globs = parseGlobs(source);
+    if (globs.length === 0) return;
+    for (const dir of expandGlobs(globs, directories)) {
+      if (!members.has(dir)) members.set(dir, { dir, read: read2 });
+    }
+  }
+  await collect("pnpm-workspace.yaml", parsePnpmWorkspace, readNpmMember);
+  await collect("package.json", parseNpmWorkspaces, readNpmMember);
+  await collect("Cargo.toml", parseCargoWorkspace, readCargoMember);
+  await collect("go.work", parseGoWork, readGoMember);
+  const dirs = [...members.values()];
+  const truncated = dirs.length > ATLAS_MAX_PACKAGES;
+  const bounded2 = truncated ? dirs.slice(0, ATLAS_MAX_PACKAGES) : dirs;
+  const packages = [];
+  for (const { dir, read: read2 } of bounded2) {
+    const found = await read2(api, at, resolvedHead, dir);
+    if (found !== null) packages.push({ ...found, description: sanitize(found.description) });
+  }
+  return { packages, truncated };
+}
+var PATH_TOKEN = /(?:^|[\s(`'"])((?:[\w.-]+\/){1,})[\w.-]+(?:\.\w+)?/g;
+function matchAtlasEvidence(atlas, text2, labelPaths) {
+  const tokens = /* @__PURE__ */ new Set();
+  for (const match of text2.matchAll(PATH_TOKEN)) {
+    const candidate = match[0].trim().replace(/^[(`'"]/, "");
+    if (candidate.includes("/")) tokens.add(candidate);
+  }
+  if (tokens.size === 0) return { lines: [], candidates: [] };
+  const lines = [];
+  const candidates = /* @__PURE__ */ new Set();
+  for (const token of tokens) {
+    let best = null;
+    let bestLength = 0;
+    for (const pkg of atlas.packages) {
+      if ((token.startsWith(`${pkg.path}/`) || token === pkg.path) && pkg.path.length > bestLength) {
+        best = { kind: "package", pkg };
+        bestLength = pkg.path.length;
+      }
+    }
+    for (const [label, paths] of labelPaths) {
+      for (const prefix of paths) {
+        if ((token.startsWith(`${prefix}/`) || token === prefix) && prefix.length > bestLength) {
+          best = { kind: "label", label };
+          bestLength = prefix.length;
+        }
+      }
+    }
+    if (best === null) continue;
+    if (best.kind === "package") {
+      lines.push(`\`${token}\` matches package \`${best.pkg.name}\` at \`${best.pkg.path}\`.`);
+      candidates.add(best.pkg.name);
+    } else {
+      lines.push(`\`${token}\` matches \`${best.label}\`'s configured \`paths:\`.`);
+      candidates.add(best.label);
+    }
+  }
+  return { lines, candidates: [...candidates] };
+}
+
 // node_modules/.pnpm/eld@2.0.3/node_modules/eld/src/avgScore.js
 var avgScore = {
   "am": 0.832,
@@ -32905,7 +33148,7 @@ function residue(text2) {
 }
 
 // src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
+var import_yaml2 = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
 
 // src/core/forge.ts
@@ -32928,7 +33171,10 @@ async function readStanding(api, at) {
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: { login, isBot: isBotAuthor(data.user) }
+    author: { login, isBot: isBotAuthor(data.user) },
+    milestone: data.milestone?.title ?? null,
+    assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
+    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0)
   };
 }
 var LABEL_PAGE = 100;
@@ -33078,6 +33324,15 @@ function createEffects(api, at) {
     }
   };
 }
+async function createRepositoryLabel(api, at, label) {
+  await api.rest.issues.createLabel({
+    owner: at.owner,
+    repo: at.repo,
+    name: label.name,
+    color: label.color ?? "ededed",
+    description: label.description.slice(0, 100)
+  });
+}
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -33086,9 +33341,17 @@ var CAPABILITIES = [
   "comment",
   "close",
   "assign",
-  "record"
+  "record",
+  "propose"
 ];
 var VERSION7 = 1;
+var DEFAULT_PROPOSE_WORKSPACE = {
+  name: "area:{package}",
+  except: [],
+  evidence: 3,
+  window: 90 * 24 * 60 * 60 * 1e3,
+  retire: false
+};
 var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
 async function readWarrant(path, options) {
   let source;
@@ -33120,6 +33383,8 @@ function parseWarrant(path, source) {
   const pivot = readPivot(path, document2.pivot);
   const memory = readMemory(path, document2.memory);
   const about = readAbout(path, document2.about);
+  const lifecycle = readLifecycle(path, document2.lifecycle);
+  const propose = readPropose(path, document2.propose);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -33139,6 +33404,8 @@ function parseWarrant(path, source) {
     pivot,
     memory,
     about,
+    lifecycle,
+    propose,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -33146,11 +33413,16 @@ function parseWarrant(path, source) {
 }
 function checkLabelsExist(warrant, existing, taxonomy = warrant.labels) {
   const present = new Set(existing);
-  const missing = taxonomy.map((label) => label.name).filter((name) => !present.has(name));
-  if (missing.length === 0) return;
-  throw new Error(
-    `warrant: \`${warrant.path}\` names ${missing.length === 1 ? "a label" : "labels"} this repository does not have \u2014 ${missing.map((name) => `\`${name}\``).join(", ")}. Create them, or correct the taxonomy.`
-  );
+  const missing = taxonomy.filter((label) => !present.has(label.name));
+  if (missing.length === 0) return [];
+  const toCreate = missing.filter((label) => label.create);
+  const toFail = missing.filter((label) => !label.create);
+  if (toFail.length > 0) {
+    throw new Error(
+      `warrant: \`${warrant.path}\` names ${toFail.length === 1 ? "a label" : "labels"} this repository does not have \u2014 ${toFail.map((label) => `\`${label.name}\``).join(", ")}. Create them, correct the taxonomy, or mark the entry \`create: true\`.`
+    );
+  }
+  return toCreate;
 }
 function implicitWarrant(path, repositoryLabels) {
   const labels = [];
@@ -33168,7 +33440,10 @@ function implicitWarrant(path, repositoryLabels) {
       examples: [],
       owner: null,
       exclusiveWith: [],
-      confidence: null
+      confidence: null,
+      paths: [],
+      create: false,
+      color: null
     });
   }
   const byName = new Map(labels.map((label) => [label.name, label]));
@@ -33180,6 +33455,8 @@ function implicitWarrant(path, repositoryLabels) {
       pivot: null,
       memory: null,
       about: null,
+      lifecycle: null,
+      propose: DEFAULT_PROPOSE_WORKSPACE,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
@@ -33235,9 +33512,9 @@ function resolveAbout(warrant, rawInput) {
 function load(path, source) {
   let document2;
   try {
-    document2 = (0, import_yaml.parse)(source);
+    document2 = (0, import_yaml2.parse)(source);
   } catch (error2) {
-    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
   }
   if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
@@ -33280,7 +33557,10 @@ function readLabels(path, raw) {
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
       exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
-      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence),
+      paths: strings(`${at} (\`${name}\`)`, "paths", fields.paths),
+      create: booleanField(`${at} (\`${name}\`)`, "create", fields.create, false),
+      color: colorField(`${at} (\`${name}\`)`, "color", fields.color)
     });
   }
   return labels;
@@ -33348,6 +33628,247 @@ function readAbout(path, raw) {
   }
   const value = raw.trim();
   return value.length === 0 ? null : value;
+}
+function readLifecycle(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`lifecycle:\` with nothing under it. Write \`tracks:\` under it, or remove the key to leave the duty unwired.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  const tracks = readLifecycleTracks(path, fields.tracks);
+  const exempt = readLifecycleExempt(path, fields.exempt);
+  const overrides = readLifecycleOverrides(path, fields.overrides);
+  const threadsRaw = fields.threads;
+  const threads = threadsRaw === void 0 ? "issues" : threadsRaw;
+  if (threads !== "issues" && threads !== "prs" && threads !== "both") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.threads\` is ${describe(threadsRaw)}, expected \`issues\`, \`prs\`, or \`both\`.`
+    );
+  }
+  const hasClose = tracks.some((track) => track.steps.some((step) => step.close));
+  if (hasClose && exempt.labels.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` configures a \`close\` step, but \`exempt.labels\` is empty. A permanent escape hatch must exist before closing may be configured at all.`
+    );
+  }
+  return { tracks, exempt, overrides, threads };
+}
+function readLifecycleTracks(path, raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` has no \`tracks\` \u2014 a lifecycle with no tracks decides nothing. Delete the key, or write a track.`
+    );
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.tracks\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    const name = text(at, "name", fields.name, { required: true });
+    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+      throw new Error(
+        `warrant: ${at} names the track \`${name}\`, expected lowercase letters, digits and hyphens, starting with a letter.`
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`lifecycle.tracks\` names \`${name}\` more than once.`
+      );
+    }
+    seen.add(name);
+    const named = `${at} (\`${name}\`)`;
+    const when = nullable(text(named, "when", fields.when, { required: false }));
+    const resets = resetsField(named, fields.resets, when !== null ? "author" : "any");
+    const stepsRaw = fields.steps;
+    if (!Array.isArray(stepsRaw) || stepsRaw.length === 0) {
+      throw new Error(
+        `warrant: ${named} has no \`steps\` \u2014 a track with no steps decides nothing.`
+      );
+    }
+    const steps = stepsRaw.map(
+      (step, stepIndex) => readLifecycleStep(
+        `${named} step ${String(stepIndex + 1)}`,
+        step,
+        stepIndex === stepsRaw.length - 1
+      )
+    );
+    if (when === null && steps[0]?.close === true) {
+      throw new Error(
+        `warrant: ${named} is an inactivity track whose first step closes \u2014 a close with no prior warning is refused. Add a \`when:\` start, or a warning step before the close.`
+      );
+    }
+    return { name, when, resets, steps };
+  });
+}
+function resetsField(at, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (raw === "author" || raw === "any") return raw;
+  throw new Error(
+    `warrant: ${at} has \`resets\` as ${describe(raw)}, expected \`author\` or \`any\`.`
+  );
+}
+function readLifecycleStep(at, raw, isLast) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const after = durationField(at, "after", fields.after, { allowNever: false });
+  const label = nullable(text(at, "label", fields.label, { required: false }));
+  const say = readSay(at, fields.say);
+  const close = closeField(at, fields.close);
+  if (close && !isLast) {
+    throw new Error(
+      `warrant: ${at} has \`close\` on a step that is not the track's last \u2014 close must be the terminal step.`
+    );
+  }
+  if (label === null && say === null && !close) {
+    throw new Error(
+      `warrant: ${at} carries none of \`label\`, \`say\`, \`close\` \u2014 a step must do something.`
+    );
+  }
+  return { after, label, say, close };
+}
+function readSay(at, raw) {
+  if (raw === void 0 || raw === null || raw === false) return null;
+  if (raw === true) return { kind: "built-in" };
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (value.length === 0) throw new Error(`warrant: ${at} has an empty \`say\`.`);
+    return { kind: "text", text: value };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const map = /* @__PURE__ */ new Map();
+    for (const [lang, value] of Object.entries(raw)) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`warrant: ${at}'s \`say.${lang}\` is ${describe(value)}, expected text.`);
+      }
+      map.set(lang, value.trim());
+    }
+    if (map.size === 0) throw new Error(`warrant: ${at} writes \`say:\` with nothing under it.`);
+    return { kind: "map", map };
+  }
+  throw new Error(
+    `warrant: ${at} has \`say\` as ${describe(raw)}, expected true, text, or a mapping of language to text.`
+  );
+}
+function closeField(at, raw) {
+  if (raw === void 0 || raw === null || raw === false) return false;
+  if (raw === true || raw === "not_planned") return true;
+  if (raw === "completed") {
+    throw new Error(
+      `warrant: ${at} has \`close: completed\` \u2014 Reeve closes only as \`not_planned\`. Write \`close: true\`.`
+    );
+  }
+  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw)}, expected true or false.`);
+}
+function readLifecycleExempt(path, raw) {
+  const at = `\`${path}\`'s \`lifecycle.exempt\``;
+  if (raw === void 0 || raw === null) {
+    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  return {
+    labels: strings(at, "labels", fields.labels),
+    milestones: guardField(at, "milestones", fields.milestones, true),
+    assignees: guardField(at, "assignees", fields.assignees, true),
+    taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1)
+  };
+}
+function guardField(at, key, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string" || Array.isArray(raw)) return strings(at, key, raw);
+  throw new Error(
+    `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true, false, or a list of names.`
+  );
+}
+function readLifecycleOverrides(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw)}, expected a list.`
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.overrides\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
+    }
+    const fields = entry;
+    const label = text(at, "label", fields.label, { required: true });
+    const hasAfter = fields.after !== void 0 && fields.after !== null;
+    const never = booleanField(at, "never", fields.never, false);
+    if (hasAfter && never) {
+      throw new Error(
+        `warrant: ${at} (\`${label}\`) has both \`after\` and \`never\` \u2014 write one.`
+      );
+    }
+    if (!hasAfter && !never) {
+      throw new Error(`warrant: ${at} (\`${label}\`) has neither \`after\` nor \`never\`.`);
+    }
+    const after = hasAfter ? durationField(at, "after", fields.after, { allowNever: false }) : null;
+    return { label, after, never };
+  });
+}
+function readPropose(path, raw) {
+  if (raw === void 0) return DEFAULT_PROPOSE_WORKSPACE;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`propose:\` with nothing under it. Write \`workspace:\` under it, or remove the key to take the defaults.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`propose\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  const workspaceRaw = fields.workspace;
+  if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
+  if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`propose.workspace\` is ${describe(workspaceRaw)}, expected a mapping.`
+    );
+  }
+  const w = workspaceRaw;
+  const at = `\`${path}\`'s \`propose.workspace\``;
+  const nameRaw = text(at, "name", w.name, { required: false });
+  const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
+  if ((name.match(/\{package\}/g) ?? []).length !== 1) {
+    throw new Error(
+      `warrant: ${at} has \`name: ${name}\`, expected exactly one \`{package}\` placeholder.`
+    );
+  }
+  const except = strings(at, "except", w.except);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 0);
+  const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
+  const retire = booleanField(at, "retire", w.retire, false);
+  return { name, except, evidence, window: window2, retire };
+}
+function wholeNumber(at, key, raw, min) {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a whole number of ${String(min)} or more.`
+    );
+  }
+  return raw;
+}
+function optionalWholeNumber(at, key, raw, min) {
+  if (raw === void 0 || raw === null) return null;
+  return wholeNumber(at, key, raw, min);
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33424,6 +33945,38 @@ function confidenceField(at, key, raw) {
     );
   }
   return raw;
+}
+function booleanField(at, key, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw !== "boolean") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true or false.`);
+  }
+  return raw;
+}
+var HEX_COLOR = /^[0-9a-fA-F]{6}$/;
+function colorField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string" || !HEX_COLOR.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a 6-digit hex color with no \`#\`.`
+    );
+  }
+  return raw.trim().toLowerCase();
+}
+function durationField(at, key, raw, options) {
+  if (options.allowNever && raw === "never") return null;
+  if (typeof raw !== "string" || !/^\d+d$/.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a duration like \`14d\`` + (options.allowNever ? " or `never`." : ".")
+    );
+  }
+  const days = Number(raw.trim().slice(0, -1));
+  if (days === 0) {
+    throw new Error(
+      `warrant: ${at} has \`${key}: 0d\`, which is not a duration. Write \`never\`, or remove the step.`
+    );
+  }
+  return days * 24 * 60 * 60 * 1e3;
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -33736,7 +34289,7 @@ function fraction(name, raw) {
 
 // src/core/memory.ts
 import { readdir as readdir2, readFile as readFile2 } from "node:fs/promises";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 var EXCERPT = 500;
 function createMemory(corrections, similarity = lexical) {
   const ownDocuments = corrections.map(searchable);
@@ -33850,7 +34403,7 @@ async function readStore(path) {
   const corrections = [];
   const unreadable = [];
   for (const name of names) {
-    const file = join(path, name);
+    const file = join2(path, name);
     let source;
     try {
       source = await readFile2(file, "utf8");
@@ -34001,7 +34554,7 @@ var REFERENCE = new RegExp(
   ].join("|"),
   "gi"
 );
-function sanitize(markdown) {
+function sanitize2(markdown) {
   return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
 }
 function defangComments(prose) {
@@ -34046,7 +34599,7 @@ async function translateToPivot(request2) {
   const draft = readAnswer(unwrapped(rotation.success.content));
   if (draft === null) return { draft: null, failures: rotation.failures };
   return {
-    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    draft: { title: sanitize2(draft.title), body: sanitize2(draft.body) },
     failures: rotation.failures
   };
 }
@@ -34470,6 +35023,609 @@ function summarizeSweep(run2) {
 `;
 }
 
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+function proposeEntryMarker(action, name) {
+  return `<!-- reeve:propose:entry ${action}:${name} -->`;
+}
+function readProposeEntryMarkers(body) {
+  const found = /* @__PURE__ */ new Set();
+  const re = /<!-- reeve:propose:entry ((?:add|retire):[^\n]*?) -->/g;
+  for (const match of body.matchAll(re)) {
+    if (match[1] !== void 0) found.add(match[1]);
+  }
+  return found;
+}
+
+// src/duties/triage/propose.ts
+var BRANCH = "reeve/propose";
+var MARKER = markerFor("propose");
+var LABEL_NAME_MAX = 50;
+var LIST_PAGES = 10;
+var WRITE_ATTEMPTS = 3;
+var SCOPE_PREFIX = /^@[^/]+\//;
+function packageSlug(name) {
+  return name.replace(SCOPE_PREFIX, "").toLowerCase();
+}
+function renderName(template, slug) {
+  return template.replace("{package}", slug);
+}
+function templateSuffix(template, labelName) {
+  const at = template.indexOf("{package}");
+  if (at === -1) return null;
+  const prefix = template.slice(0, at);
+  const suffix = template.slice(at + "{package}".length);
+  if (prefix.length + suffix.length >= labelName.length) return null;
+  if (!labelName.startsWith(prefix) || !labelName.endsWith(suffix)) return null;
+  return labelName.slice(prefix.length, labelName.length - suffix.length);
+}
+function pathCovered(pkg, labels) {
+  return labels.some(
+    (label) => label.paths.some((p) => p === pkg.path || pkg.path.startsWith(`${p}/`))
+  );
+}
+function detectAdditions(labels, atlas, cfg) {
+  const notes = [];
+  const candidates = [];
+  const existingNames = new Set(labels.map((label) => label.name));
+  const excludeMatchers = cfg.except.map(globToMatcher);
+  for (const pkg of atlas.packages) {
+    if (excludeMatchers.some((matcher2) => matcher2.test(pkg.path))) continue;
+    if (pathCovered(pkg, labels)) continue;
+    if (pkg.description.length === 0) {
+      notes.push(
+        `\`${pkg.name}\` has no manifest description for propose to honestly write one from \u2014 skipped.`
+      );
+      continue;
+    }
+    const labelName = renderName(cfg.name, packageSlug(pkg.name));
+    if (labelName.length > LABEL_NAME_MAX) {
+      notes.push(`\`${labelName}\` is longer than ${String(LABEL_NAME_MAX)} characters \u2014 skipped.`);
+      continue;
+    }
+    if (existingNames.has(labelName)) continue;
+    candidates.push({ labelName, pkg });
+  }
+  return { candidates, notes };
+}
+function detectRetirements(labels, atlas, cfg) {
+  if (!cfg.retire) return [];
+  const currentSlugs = new Set(atlas.packages.map((pkg) => packageSlug(pkg.name)));
+  const out = [];
+  for (const label of labels) {
+    const slot = templateSuffix(cfg.name, label.name);
+    if (slot === null) continue;
+    if (currentSlugs.has(slot)) continue;
+    out.push({ labelName: label.name });
+  }
+  return out;
+}
+function gateByEvidence(candidates, openIssues, cfg, now) {
+  if (candidates.length === 0) return [];
+  if (cfg.evidence === 0) return candidates.map((candidate) => ({ ...candidate, issues: [] }));
+  const since = new Date(now.getTime() - cfg.window);
+  const windowed = openIssues.filter((issue2) => issue2.createdAt >= since);
+  const packages = candidates.map((candidate) => candidate.pkg);
+  const byPackage = /* @__PURE__ */ new Map();
+  for (const issue2 of windowed) {
+    const { candidates: matched } = matchAtlasEvidence(
+      { packages, truncated: false },
+      `${issue2.title}
+${issue2.body}`,
+      /* @__PURE__ */ new Map()
+    );
+    for (const name of matched) {
+      const list = byPackage.get(name) ?? [];
+      list.push(issue2.number);
+      byPackage.set(name, list);
+    }
+  }
+  const evidenced2 = [];
+  for (const candidate of candidates) {
+    const issues = byPackage.get(candidate.pkg.name) ?? [];
+    if (issues.length >= cfg.evidence)
+      evidenced2.push({ ...candidate, issues: [...issues].sort((a, b) => a - b) });
+  }
+  return evidenced2;
+}
+function buildEntries(evidenced2, retirements) {
+  const adds = evidenced2.map((e) => ({
+    action: "add",
+    name: e.labelName,
+    description: e.pkg.description,
+    path: e.pkg.path,
+    issues: e.issues
+  }));
+  const retires = retirements.map((r) => ({
+    action: "retire",
+    name: r.labelName,
+    description: "",
+    path: "",
+    issues: []
+  }));
+  return [...adds, ...retires].sort((a, b) => {
+    if (a.action !== b.action) return a.action === "add" ? -1 : 1;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
+}
+function shortHash(text2) {
+  return fingerprint(text2, []).slice(0, 8);
+}
+function changeSetText(entries) {
+  return entries.map(
+    (e) => e.action === "add" ? `add ${e.name} ${shortHash(e.description)}` : `retire ${e.name}`
+  ).join("\n");
+}
+function entryToken(entry) {
+  return `${entry.action}:${entry.name}`;
+}
+async function struckEntries(api, at) {
+  const struck = /* @__PURE__ */ new Set();
+  for (let page2 = 1; page2 <= LIST_PAGES; page2 += 1) {
+    const { data } = await api.rest.pulls.list({
+      owner: at.owner,
+      repo: at.repo,
+      state: "closed",
+      head: `${at.owner}:${BRANCH}`,
+      per_page: 100,
+      page: page2
+    });
+    if (data.length === 0) break;
+    for (const pr of data) {
+      if (pr.merged_at !== null && pr.merged_at !== void 0) continue;
+      const body = pr.body ?? "";
+      if (MARKER.split(body).fingerprint === null) continue;
+      for (const token of readProposeEntryMarkers(body)) struck.add(token);
+    }
+    if (data.length < 100) break;
+  }
+  return struck;
+}
+async function findOwnOpenPr(api, at) {
+  const { data } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${BRANCH}`,
+    per_page: 10,
+    page: 1
+  });
+  for (const pr of data) {
+    const body = pr.body ?? "";
+    if (MARKER.split(body).fingerprint !== null)
+      return { number: pr.number, headSha: pr.head.sha, body };
+  }
+  return null;
+}
+async function branchFrozen(api, at, headSha) {
+  try {
+    const { data } = await api.rest.repos.getCommit({
+      owner: at.owner,
+      repo: at.repo,
+      ref: headSha
+    });
+    return !isBotAuthor(data.author);
+  } catch {
+    return false;
+  }
+}
+async function ensureBranch(api, at, base) {
+  try {
+    await api.rest.git.getRef({ owner: at.owner, repo: at.repo, ref: `heads/${BRANCH}` });
+    return;
+  } catch (error2) {
+    if (!isMissing(error2)) throw error2;
+  }
+  const { data } = await api.rest.git.getRef({
+    owner: at.owner,
+    repo: at.repo,
+    ref: `heads/${base}`
+  });
+  await api.rest.git.createRef({
+    owner: at.owner,
+    repo: at.repo,
+    ref: `refs/heads/${BRANCH}`,
+    sha: data.object.sha
+  });
+}
+function yamlScalar(value) {
+  return JSON.stringify(value);
+}
+function itemName(line) {
+  const m = /^\s*-\s*name:\s*(.+?)\s*$/.exec(line);
+  if (m === null) return null;
+  const raw = m[1] ?? "";
+  if (raw.length >= 2 && (raw.startsWith('"') && raw.endsWith('"') || raw.startsWith("'") && raw.endsWith("'"))) {
+    return raw.slice(1, -1);
+  }
+  return raw;
+}
+function findLabelsBlock(lines) {
+  const start = lines.findIndex((line) => /^labels:\s*$/.test(line));
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\S/.test(lines[i] ?? "")) {
+      end = i;
+      break;
+    }
+  }
+  return { start, end };
+}
+function findItemSpan(lines, blockStart, blockEnd, name) {
+  for (let i = blockStart + 1; i < blockEnd; i += 1) {
+    if (/^\s*-\s*name:/.test(lines[i] ?? "") && itemName(lines[i] ?? "") === name) {
+      let end = blockEnd;
+      for (let j = i + 1; j < blockEnd; j += 1) {
+        if (/^\s*-\s*name:/.test(lines[j] ?? "")) {
+          end = j;
+          break;
+        }
+      }
+      return { start: i, end };
+    }
+  }
+  return null;
+}
+function applyChangeSet(source, entries) {
+  const lines = source.split("\n");
+  const block = findLabelsBlock(lines);
+  if (block === null) return null;
+  const { start } = block;
+  let end = block.end;
+  for (const entry of entries) {
+    if (entry.action !== "retire") continue;
+    const span = findItemSpan(lines, start, end, entry.name);
+    if (span === null) return null;
+    lines.splice(span.start, span.end - span.start);
+    end -= span.end - span.start;
+  }
+  const additions = entries.filter((e) => e.action === "add");
+  if (additions.length > 0) {
+    const newLines = [];
+    for (const entry of additions) {
+      newLines.push(`  - name: ${yamlScalar(entry.name)}`);
+      newLines.push(`    description: ${yamlScalar(entry.description)}`);
+      newLines.push("    paths:");
+      newLines.push(`      - ${yamlScalar(entry.path)}`);
+      newLines.push("    create: true");
+    }
+    lines.splice(end, 0, ...newLines);
+  }
+  return lines.join("\n");
+}
+function expectedLabelNames(original, entries) {
+  const set = new Set(original);
+  for (const entry of entries) {
+    if (entry.action === "add") set.add(entry.name);
+    else set.delete(entry.name);
+  }
+  return set;
+}
+function setsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
+function summaryTitle(entries) {
+  const first = entries[0];
+  if (first === void 0) return "warrant: propose";
+  const more = entries.length - 1;
+  return `warrant: propose ${first.action === "add" ? "" : "retire "}${first.name}${more > 0 ? ` (+${String(more)} more)` : ""}`;
+}
+function renderBody(path, entries, fp) {
+  const lines = [];
+  lines.push(
+    `This proposes ${String(entries.length)} change${entries.length === 1 ? "" : "s"} to \`${path}\`'s taxonomy, detected from this workspace's own manifests and open issues \u2014 never from a model.`
+  );
+  lines.push("");
+  for (const entry of entries) {
+    if (entry.action === "add") {
+      lines.push(`### Add \`${entry.name}\``);
+      lines.push("");
+      lines.push(`- Package: \`${entry.path}\` \u2014 ${entry.description}`);
+      if (entry.issues.length > 0) {
+        lines.push(`- Evidence: ${entry.issues.map((n) => `#${String(n)}`).join(", ")}`);
+      }
+      lines.push(proposeEntryMarker("add", entry.name));
+    } else {
+      lines.push(`### Retire \`${entry.name}\``);
+      lines.push("");
+      lines.push("- No package in this workspace matches it anymore.");
+      lines.push(proposeEntryMarker("retire", entry.name));
+    }
+    lines.push("");
+  }
+  lines.push(
+    "<sub>No model wrote any of this \u2014 every line above came from this workspace's own manifests and this repository's own open issues, matched by name and path alone.</sub>"
+  );
+  lines.push("");
+  lines.push(MARKER.render(fp));
+  return lines.join("\n");
+}
+function isShaConflict(error2) {
+  if (typeof error2 !== "object" || error2 === null || !("status" in error2)) return false;
+  const status = error2.status;
+  if (status === 409) return true;
+  if (status === 422) {
+    const raw = error2.message;
+    const message = error2 instanceof Error ? error2.message : typeof raw === "string" ? raw : "";
+    return message.toLowerCase().includes("sha");
+  }
+  return false;
+}
+function isWeather(error2) {
+  if (typeof error2 === "object" && error2 !== null && "status" in error2) {
+    const status = error2.status;
+    if (status === 429 || typeof status === "number" && status >= 500) return true;
+  }
+  const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
+  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
+}
+async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
+  const expected = expectedLabelNames(
+    warrant.labels.map((label) => label.name),
+    entries
+  );
+  for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt += 1) {
+    const { data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path: warrant.path,
+      ref: BRANCH
+    });
+    if (Array.isArray(data)) return null;
+    const { content, encoding, sha } = data;
+    if (content === void 0) return null;
+    const source = Buffer.from(content, encoding === "base64" ? "base64" : "utf8").toString("utf8");
+    const edited = applyChangeSet(source, entries);
+    if (edited === null) return null;
+    let reparsed;
+    try {
+      reparsed = parseWarrant(warrant.path, edited);
+    } catch {
+      return null;
+    }
+    if (!setsEqual(new Set(reparsed.labels.map((label) => label.name)), expected)) return null;
+    try {
+      await api.rest.repos.createOrUpdateFileContents({
+        owner: at.owner,
+        repo: at.repo,
+        path: warrant.path,
+        message: summaryTitle(entries),
+        content: Buffer.from(edited, "utf8").toString("base64"),
+        branch: BRANCH,
+        ...sha === void 0 ? {} : { sha }
+      });
+      break;
+    } catch (error2) {
+      if (isShaConflict(error2) && attempt < WRITE_ATTEMPTS) continue;
+      throw error2;
+    }
+  }
+  const title = summaryTitle(entries);
+  const body = renderBody(warrant.path, entries, fp);
+  if (existingPr !== null) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr,
+      title,
+      body
+    });
+    return existingPr;
+  }
+  const created = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title,
+    head: BRANCH,
+    base,
+    body,
+    draft: true
+  });
+  return created.data.number;
+}
+async function defaultBranchAndReady(api, at) {
+  const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+  const base = data.default_branch ?? "main";
+  await ensureBranch(api, at, base);
+  return base;
+}
+function report(over) {
+  return {
+    eligible: true,
+    additions: 0,
+    retirements: 0,
+    struck: 0,
+    pr: null,
+    unchanged: false,
+    frozen: false,
+    dryRun: false,
+    ...over
+  };
+}
+async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dryRun) {
+  if (implicit) {
+    return report({
+      eligible: false,
+      notes: [
+        "`propose` needs an explicit warrant file to edit \u2014 this repository has none, so it did nothing."
+      ]
+    });
+  }
+  const notes = [];
+  if (atlas.truncated) {
+    notes.push("The workspace atlas was truncated \u2014 some packages may not have been considered.");
+  }
+  const { candidates, notes: detectNotes } = detectAdditions(
+    warrant.labels,
+    atlas,
+    warrant.propose
+  );
+  notes.push(...detectNotes);
+  const retirements = detectRetirements(warrant.labels, atlas, warrant.propose);
+  const evidenced2 = gateByEvidence(candidates, openIssues, warrant.propose, now);
+  const short = candidates.length - evidenced2.length;
+  if (short > 0) {
+    notes.push(
+      `${String(short)} candidate label${short === 1 ? "" : "s"} did not reach ${String(
+        warrant.propose.evidence
+      )} matching open issue${warrant.propose.evidence === 1 ? "" : "s"} within the configured window \u2014 skipped.`
+    );
+  }
+  let entries = buildEntries(evidenced2, retirements);
+  if (entries.length === 0) {
+    return report({ notes: [...notes, "No workspace drift found this run."] });
+  }
+  try {
+    const struck = await struckEntries(api, at);
+    const strikeCount = entries.filter((entry) => struck.has(entryToken(entry))).length;
+    entries = entries.filter((entry) => !struck.has(entryToken(entry)));
+    if (strikeCount > 0) {
+      notes.push(
+        `${String(strikeCount)} previously-rejected entr${strikeCount === 1 ? "y" : "ies"} will not be re-proposed.`
+      );
+    }
+    if (entries.length === 0) {
+      return report({
+        notes: [...notes, "Every candidate this run found was already struck."],
+        struck: strikeCount
+      });
+    }
+    const fp = fingerprint(changeSetText(entries), []);
+    const additions = entries.filter((e) => e.action === "add").length;
+    const retiring = entries.filter((e) => e.action === "retire").length;
+    const existing = await findOwnOpenPr(api, at);
+    if (existing !== null) {
+      if (MARKER.split(existing.body).fingerprint === fp) {
+        return report({
+          notes: [
+            ...notes,
+            `The open proposal (#${String(existing.number)}) already carries this exact change-set.`
+          ],
+          additions,
+          retirements: retiring,
+          struck: strikeCount,
+          pr: existing.number,
+          unchanged: true
+        });
+      }
+      if (await branchFrozen(api, at, existing.headSha)) {
+        return report({
+          notes: [
+            ...notes,
+            `The proposal branch (#${String(existing.number)}) carries a commit from someone other than this run \u2014 left untouched.`
+          ],
+          additions,
+          retirements: retiring,
+          struck: strikeCount,
+          pr: existing.number,
+          frozen: true
+        });
+      }
+      if (dryRun) {
+        return report({
+          notes: [
+            ...notes,
+            `Dry run \u2014 would update the open proposal (#${String(existing.number)}).`
+          ],
+          additions,
+          retirements: retiring,
+          struck: strikeCount,
+          pr: existing.number,
+          dryRun: true
+        });
+      }
+      const base2 = await defaultBranchAndReady(api, at);
+      const updated = await writeProposal(api, at, warrant, entries, fp, existing.number, base2);
+      if (updated === null) {
+        return report({
+          notes: [
+            ...notes,
+            "The proposed change-set would not parse back cleanly \u2014 aborted, nothing was written."
+          ],
+          pr: existing.number
+        });
+      }
+      return report({
+        notes: [...notes, `Updated the open proposal \u2014 #${String(updated)}.`],
+        additions,
+        retirements: retiring,
+        struck: strikeCount,
+        pr: updated
+      });
+    }
+    if (dryRun) {
+      return report({
+        notes: [...notes, "Dry run \u2014 would open a new proposal."],
+        additions,
+        retirements: retiring,
+        struck: strikeCount,
+        dryRun: true
+      });
+    }
+    const base = await defaultBranchAndReady(api, at);
+    const created = await writeProposal(api, at, warrant, entries, fp, null, base);
+    if (created === null) {
+      return report({
+        notes: [
+          ...notes,
+          "The proposed change-set would not parse back cleanly \u2014 aborted, nothing was written."
+        ]
+      });
+    }
+    return report({
+      notes: [...notes, `Opened a new proposal \u2014 #${String(created)}.`],
+      additions,
+      retirements: retiring,
+      struck: strikeCount,
+      pr: created
+    });
+  } catch (error2) {
+    if (isWeather(error2)) {
+      return report({
+        notes: [
+          ...notes,
+          `\`propose\` hit a capacity error and stopped rather than partially publish \u2014 ${error2 instanceof Error ? error2.message : String(error2)}.`
+        ]
+      });
+    }
+    throw error2;
+  }
+}
+
 // src/duties/triage/verdict.ts
 var NOTHING = { labels: [], confidence: 0, duplicateOf: null, rationale: "" };
 async function triage(request2) {
@@ -34663,10 +35819,14 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
     return;
   }
   if (!authority2.implicit) {
-    checkLabelsExist(
-      authority2.warrant,
-      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name),
-      settings.taxonomy
+    await createMissingLabels(
+      api,
+      context2.repo,
+      checkLabelsExist(
+        authority2.warrant,
+        (await listRepositoryLabels(api, context2.repo)).map((label) => label.name),
+        settings.taxonomy
+      )
     );
   }
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
@@ -34702,7 +35862,11 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       // A sweep's listing endpoint does not carry the opener's account type,
       // and triage has no guard that reads it — this placeholder is never
       // inspected, only `respond`'s bot-author guard reads `author` at all.
-      author: { login: "", isBot: false }
+      author: { login: "", isBot: false },
+      // Nor milestone/assignee state — triage never reads either.
+      milestone: null,
+      assignees: [],
+      createdAt: thread.createdAt
     };
     if (recording) {
       const outcome = await recordCorrection(
@@ -34725,6 +35889,46 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
       acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
     }
+  }
+}
+async function runProposeSweep(api, authority2, settings) {
+  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  if (!permitted.includes("propose")) {
+    if (grantedCapabilities.includes("propose")) {
+      notice(
+        `\`${authority2.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep did not propose anything. The narrower of the two wins \u2014 add \`propose\` to \`apply\` as well to enable it.`
+      );
+    }
+    return;
+  }
+  const atlas = await readAtlas(api, context2.repo);
+  const openIssues = (await listOpenThreads(api, context2.repo, settings.since, "open")).filter(
+    (issue2) => !issue2.isPullRequest
+  );
+  const proposeReport = await runPropose(
+    api,
+    context2.repo,
+    authority2.warrant,
+    authority2.implicit,
+    atlas,
+    openIssues,
+    /* @__PURE__ */ new Date(),
+    settings.dryRun
+  );
+  for (const note of proposeReport.notes) info(`propose: ${note}`);
+  if (proposeReport.pr !== null) {
+    notice(
+      `propose: ${proposeReport.unchanged ? "the open proposal" : "the proposal"} is #${String(proposeReport.pr)}.`
+    );
+  }
+}
+function noticeProposeSweepOnly(authority2) {
+  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  if (grantedCapabilities.includes("propose")) {
+    info(
+      `\`${authority2.warrant.path}\` grants \`propose\`, but it only runs under \`sweep\` \u2014 this run did nothing with it.`
+    );
   }
 }
 function describeRecordOutcome(outcome) {
@@ -34780,6 +35984,7 @@ async function run() {
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority2, settings, stages, weather);
+      await runProposeSweep(api, authority2, settings);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
@@ -34791,10 +35996,14 @@ async function run() {
       } else {
         const standing = await readStanding(api, at);
         if (!authority2.implicit) {
-          checkLabelsExist(
-            authority2.warrant,
-            (await listRepositoryLabels(api, at)).map((label) => label.name),
-            settings.taxonomy
+          await createMissingLabels(
+            api,
+            at,
+            checkLabelsExist(
+              authority2.warrant,
+              (await listRepositoryLabels(api, at)).map((label) => label.name),
+              settings.taxonomy
+            )
           );
         }
         const trigger = recordTrigger();
@@ -34808,6 +36017,7 @@ async function run() {
         if (trigger.reason !== "" && permitted.includes("record")) {
           info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
         }
+        noticeProposeSweepOnly(authority2);
         if (trigger.eligible && permitted.includes("record")) {
           recordOutcome = await recordCorrection(
             api,
@@ -34852,7 +36062,7 @@ async function run() {
           recordPage(settings, recorded.number, recorded.outcome, meter.spent()) + authSection(weather.authFailures)
         );
       } else if (!settings.sweep && single !== null) {
-        report(single.outcome, single.done, settings.dryRun, rosterStarved);
+        report2(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
           page(settings, single.number, single.outcome, single.done, meter.spent()) + authSection(weather.authFailures)
         );
@@ -35166,7 +36376,7 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     unattributable: false
   };
 }
-var WRITE_ATTEMPTS = 3;
+var WRITE_ATTEMPTS2 = 3;
 async function writeCorrection(contentsApi, at, path, correction) {
   const relativePath = repoRelativePath(path);
   for (let attempt = 1; ; attempt += 1) {
@@ -35174,9 +36384,9 @@ async function writeCorrection(contentsApi, at, path, correction) {
       await attemptWrite(contentsApi, at, relativePath, correction);
       return;
     } catch (error2) {
-      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error2)) throw error2;
+      if (attempt >= WRITE_ATTEMPTS2 || !isShaConflict2(error2)) throw error2;
       info(
-        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`
+        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS2)}).`
       );
     }
   }
@@ -35285,7 +36495,7 @@ async function selectShard(contentsApi, at, path) {
     `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
   );
 }
-function isShaConflict(error2) {
+function isShaConflict2(error2) {
   const status = error2?.status;
   if (status === 409) return true;
   if (status !== 422) return false;
@@ -35310,6 +36520,20 @@ function monthShard() {
 function commitMessage(correction) {
   const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
   return `memory: record #${String(correction.thread)} as ${decided}`;
+}
+async function createMissingLabels(api, at, toCreate) {
+  for (const label of toCreate) {
+    try {
+      await createRepositoryLabel(api, at, label);
+      notice(
+        `triage: created \`${label.name}\` (\`create: true\`) \u2014 remove that key from the warrant once you've reviewed it; it does nothing further once the label exists.`
+      );
+    } catch (error2) {
+      warning(
+        `triage: could not create \`${label.name}\` \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`
+      );
+    }
+  }
 }
 function notGranted(warrant) {
   return {
@@ -35382,7 +36606,7 @@ function excerpt2(answer2) {
   const flat = answer2.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
-function report(outcome, done, dryRun, rosterStarved) {
+function report2(outcome, done, dryRun, rosterStarved) {
   setOutput("labels", JSON.stringify(outcome.applied));
   setOutput("proposed", JSON.stringify(outcome.verdict.labels));
   setOutput("confidence", outcome.verdict.confidence.toFixed(2));

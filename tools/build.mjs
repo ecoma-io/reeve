@@ -33,6 +33,7 @@ const BUNDLES = [
   { entry: "src/duties/triage/main.ts", outfile: "triage/dist/index.js" },
   { entry: "src/duties/duplicate/main.ts", outfile: "duplicate/dist/index.js" },
   { entry: "src/duties/respond/main.ts", outfile: "respond/dist/index.js" },
+  { entry: "src/duties/lifecycle/main.ts", outfile: "lifecycle/dist/index.js" },
 ];
 
 for (const { entry, outfile } of BUNDLES) {

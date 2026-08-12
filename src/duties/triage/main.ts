@@ -57,10 +57,12 @@ import { isAbsolute, relative } from "node:path";
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
+import { readAtlas, type AtlasApi } from "../../core/atlas.js";
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { enforceLabels, narrow, owners, parseApply, type Refusal } from "../../core/enforce.js";
 import {
   createEffects,
+  createRepositoryLabel,
   isBotAuthor,
   listCorrectionFiles,
   listLabelEvents,
@@ -132,6 +134,7 @@ import {
   type Run,
   type SweptThread,
 } from "./summary.js";
+import { runPropose, type ProposalsApi } from "./propose.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 
 /**
@@ -426,10 +429,14 @@ async function runSweep(
     // area's `labels` subset is checked only against its own area, so a label
     // renamed in an area this run was never asked to touch does not turn it
     // red — see `checkLabelsExist`'s own doc comment.
-    checkLabelsExist(
-      authority.warrant,
-      (await listRepositoryLabels(api, context.repo)).map((label) => label.name),
-      settings.taxonomy,
+    await createMissingLabels(
+      api,
+      context.repo,
+      checkLabelsExist(
+        authority.warrant,
+        (await listRepositoryLabels(api, context.repo)).map((label) => label.name),
+        settings.taxonomy,
+      ),
     );
   }
 
@@ -486,6 +493,10 @@ async function runSweep(
       // and triage has no guard that reads it — this placeholder is never
       // inspected, only `respond`'s bot-author guard reads `author` at all.
       author: { login: "", isBot: false },
+      // Nor milestone/assignee state — triage never reads either.
+      milestone: null,
+      assignees: [],
+      createdAt: thread.createdAt,
     };
 
     if (recording) {
@@ -516,6 +527,75 @@ async function runSweep(
         : await act(createEffects(api, at), authority.warrant, outcome);
       acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
     }
+  }
+}
+
+/**
+ * `propose`'s own half of a sweep — a fact about the whole backlog, never
+ * about one thread, so it runs once per sweep rather than inside
+ * {@link runSweep}'s per-thread loop.
+ *
+ * Double-gated exactly like `record`: granted by the warrant's
+ * `capabilities:` and named by the workflow's `apply`, narrower wins, with
+ * the same asymmetric notice `record` already gives when the file grants it
+ * and `apply` does not ask for it. A capacity error and an authentication
+ * failure are both `runPropose`'s own business (D12) — this only logs what
+ * it decided.
+ */
+async function runProposeSweep(
+  api: TrackerApi & AtlasApi & ProposalsApi,
+  authority: Authority,
+  settings: Settings,
+): Promise<void> {
+  const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  if (!permitted.includes("propose")) {
+    if (grantedCapabilities.includes("propose")) {
+      core.notice(
+        `\`${authority.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep ` +
+          "did not propose anything. The narrower of the two wins — add `propose` to `apply` as well to " +
+          "enable it.",
+      );
+    }
+    return;
+  }
+
+  const atlas = await readAtlas(api, context.repo);
+  const openIssues = (await listOpenThreads(api, context.repo, settings.since, "open")).filter(
+    (issue) => !issue.isPullRequest,
+  );
+
+  const proposeReport = await runPropose(
+    api,
+    context.repo,
+    authority.warrant,
+    authority.implicit,
+    atlas,
+    openIssues,
+    new Date(),
+    settings.dryRun,
+  );
+  for (const note of proposeReport.notes) core.info(`propose: ${note}`);
+  if (proposeReport.pr !== null) {
+    core.notice(
+      `propose: ${proposeReport.unchanged ? "the open proposal" : "the proposal"} is #${String(proposeReport.pr)}.`,
+    );
+  }
+}
+
+/**
+ * A single-thread run's own notice for `propose` — it is granted, but a
+ * sweep is the only shape that holds the whole-backlog picture this
+ * capability needs, so an event-triggered run does nothing with it. Mirrors
+ * the `record`-eligible-but-not-fired notice this duty already gives.
+ */
+function noticeProposeSweepOnly(authority: Authority): void {
+  const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  if (grantedCapabilities.includes("propose")) {
+    core.info(
+      `\`${authority.warrant.path}\` grants \`propose\`, but it only runs under \`sweep\` — this run did ` +
+        "nothing with it.",
+    );
   }
 }
 
@@ -617,6 +697,7 @@ export async function run(): Promise<void> {
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority, settings, stages, weather);
+      await runProposeSweep(api, authority, settings);
     } else {
       const number = settings.number;
       // `readShared` refuses `sweep` combined with `number`, but a bare
@@ -645,10 +726,14 @@ export async function run(): Promise<void> {
           // against `settings.taxonomy`, already narrowed by the `labels`
           // input — a rename in an area this run was never asked to touch is
           // not this run's business to fail over.
-          checkLabelsExist(
-            authority.warrant,
-            (await listRepositoryLabels(api, at)).map((label) => label.name),
-            settings.taxonomy,
+          await createMissingLabels(
+            api,
+            at,
+            checkLabelsExist(
+              authority.warrant,
+              (await listRepositoryLabels(api, at)).map((label) => label.name),
+              settings.taxonomy,
+            ),
           );
         }
 
@@ -692,6 +777,11 @@ export async function run(): Promise<void> {
         if (trigger.reason !== "" && permitted.includes("record")) {
           core.info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
         }
+
+        // `propose` needs the whole backlog picture a sweep holds — an
+        // event-triggered run granted it does nothing but say so, the same
+        // shape as the two notices above.
+        noticeProposeSweepOnly(authority);
 
         if (trigger.eligible && permitted.includes("record")) {
           recordOutcome = await recordCorrection(
@@ -1632,6 +1722,37 @@ function commitMessage(correction: Correction): string {
  * point: this is reached instead of `decide`, not by it, so it costs nothing
  * to produce.
  */
+/**
+ * Creates repository label objects for taxonomy entries `checkLabelsExist`
+ * returned instead of failing red — every one of them carries `create: true`,
+ * a human-merged instruction (written by hand, or via a `propose` PR) rather
+ * than a capability grant, per that function's own doc comment.
+ *
+ * Best-effort per label: a create call that fails (most likely a race with a
+ * human creating the same name between the check and this call) is noted and
+ * does not fail the run — what the next `checkLabelsExist` call cares about
+ * is whether the label exists now, not who created it.
+ */
+async function createMissingLabels(
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+  toCreate: readonly Label[],
+): Promise<void> {
+  for (const label of toCreate) {
+    try {
+      await createRepositoryLabel(api, at, label);
+      core.notice(
+        `triage: created \`${label.name}\` (\`create: true\`) — remove that key from the warrant ` +
+          "once you've reviewed it; it does nothing further once the label exists.",
+      );
+    } catch (error) {
+      core.warning(
+        `triage: could not create \`${label.name}\` — ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
 function notGranted(warrant: Warrant): Outcome {
   return {
     language: null,
