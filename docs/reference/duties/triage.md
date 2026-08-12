@@ -117,6 +117,7 @@ narrower one would only be free to drift from it.
 | `screen-models`   | no       | _(empty)_                   | A cheaper roster asked which language a thread is in and whether it is spam or off-topic, before `models` is spent.                                                        |
 | `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. Ignored once the warrant's own `languages:` key is written.                                                                          |
 | `warrant`         | no       | `.github/reeve.yml`         | Where the taxonomy and permissions live. Missing at this default path is not a failure — see [The warrant](../../guides/warrant.md).                                       |
+| `labels`          | no       | _(empty)_                   | Which of the warrant's taxonomy this run may propose, or empty for all of it. A name not in the taxonomy fails red — see below.                                            |
 | `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, or `none`. Narrowed by the warrant, never widened past it.                         |
 | `confidence`      | no       | `0.75`                      | How sure the verdict has to be before anything is applied, between 0 and 1.                                                                                                |
 | `corrections`     | no       | `.reeve/corrections`        | Directory of `.ndjson` files recording maintainer corrections, shown to the model as examples.                                                                             |
@@ -210,6 +211,45 @@ rather than on a schedule.
 this run's own `confidence` input for that label alone — see
 [the warrant format reference](../warrant-format.md#label-fields).
 
+**The action input `labels` narrows which of the file's `labels:` taxonomy this
+run may propose** — two different things sharing one name, so keep them
+apart: the file's `labels:` key, below, defines the whole taxonomy this
+project has; the input of the same name, in the workflow that follows it,
+picks a subset of it for one run. This exists for the monorepo with one area
+per directory and one shared `.github/reeve.yml`: point every area's workflow
+at the same file, and give each one its own `labels` _input_ rather than
+maintaining a taxonomy file per area.
+
+```yaml
+# .github/reeve.yml — one shared taxonomy, both areas' labels in it
+capabilities:
+  triage: [label]
+
+labels:
+  - name: frontend-bug
+    description: A defect in the web client.
+  - name: backend-bug
+    description: A defect in the API server.
+```
+
+```yaml
+# .github/workflows/reeve-triage-frontend.yml — this area's own subset
+- uses: ecoma-io/reeve/triage@v0.1
+  with:
+    models: gpt-5-mini
+    labels: frontend-bug
+```
+
+A name `labels` asks for that is not in the file's taxonomy fails the run red,
+naming it, before a single request is made — the same "fail on the
+configuration mistake" reasoning as a taxonomy naming a renamed repository
+label. Narrowing which labels reach the verdict prompt narrows everything
+downstream of it too: a `sweep` scoped to `labels: frontend-bug` treats a
+thread another area already labelled as undecided from its own point of
+view, and a bulk-migration `record` composed with it only imports the labels
+its own slice named — the file is shared, but each area's history in the
+corrections store stays its own.
+
 ## Outputs
 
 Every output `triage/action.yml` declares.
@@ -242,6 +282,7 @@ field — it is the only place a refused verdict is visible.
 | The verdict did not parse                            | Loud warning, empty verdict, nothing applied, **green**           |
 | Confidence below the floor                           | `proposed` populated, `labels: []`, **green**                     |
 | The warrant does not parse, or names a missing label | **Red**, naming the file and the label                            |
+| `labels` names something not in the taxonomy         | **Red**, naming the file and the name, before a request is made   |
 | The thread cannot be read                            | **Red**                                                           |
 
 **The failure mode of this duty is doing nothing.** Every branch above ends

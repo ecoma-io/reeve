@@ -111,6 +111,31 @@ inputs:
     required: false
     default: .github/reeve.yml
 
+  labels:
+    description: >-
+      Which of the warrant's taxonomy this run may propose, comma or newline
+      separated by name. Empty is the whole taxonomy, unchanged — this exists
+      for the monorepo with one area per directory and one shared
+      `.github/reeve.yml`: point every area's workflow at the same file and
+      use this to keep each one proposing only the labels its own area owns,
+      rather than maintaining a taxonomy file per area.
+
+      A name here that the file's taxonomy does not have fails the run red,
+      naming it, before a single request — a typo would otherwise triage
+      forever with one label quietly missing from the roster. The order named
+      in the file, not the order written here, is what survives: that order is
+      what breaks a tie between two proposals, and this input only narrows the
+      set, it does not resequence it.
+
+      This is a different narrowing than `apply`: `apply` says what this run
+      may **do** with a verdict, this says what verdicts it may **reach** at
+      all — a thread another area already labelled from its own slice of this
+      same file is not "already triaged" from this run's point of view, and a
+      `record` sweep composed with this only imports the labels its own slice
+      named.
+    required: false
+    default: ""
+
   apply:
     description: >-
       What this run may do, comma separated: any of `label`, `comment`,

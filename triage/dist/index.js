@@ -33435,7 +33435,8 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
-function enforceLabels(warrant, proposed, onThread, confidence, floor) {
+function enforceLabels(path, taxonomy, proposed, onThread, confidence, floor) {
+  const byName = new Map(taxonomy.map((label) => [label.name, label]));
   const applied = [];
   const refused = [];
   const seen = /* @__PURE__ */ new Set();
@@ -33443,9 +33444,9 @@ function enforceLabels(warrant, proposed, onThread, confidence, floor) {
   for (const name of proposed) {
     if (seen.has(name)) continue;
     seen.add(name);
-    const entry = warrant.labelNamed(name);
+    const entry = byName.get(name);
     if (entry === void 0) {
-      refused.push({ what: name, why: `\`${warrant.path}\` does not name it` });
+      refused.push({ what: name, why: `\`${path}\` does not name it` });
       continue;
     }
     const labelFloor = entry.confidence ?? floor;
@@ -33469,7 +33470,7 @@ function enforceLabels(warrant, proposed, onThread, confidence, floor) {
       continue;
     }
     const conflict = applied.find(
-      (kept) => entry.exclusiveWith.includes(kept) || (warrant.labelNamed(kept)?.exclusiveWith.includes(name) ?? false)
+      (kept) => entry.exclusiveWith.includes(kept) || (byName.get(kept)?.exclusiveWith.includes(name) ?? false)
     );
     if (conflict !== void 0) {
       refused.push({ what: name, why: `it cannot be applied alongside \`${conflict}\`` });
@@ -33478,9 +33479,6 @@ function enforceLabels(warrant, proposed, onThread, confidence, floor) {
     applied.push(name);
   }
   return { applied, refused };
-}
-function alreadyTaxonomized(warrant, labels) {
-  return labels.some((name) => warrant.labelNamed(name) !== void 0);
 }
 function owners(warrant, applied) {
   const users = [];
@@ -34587,6 +34585,22 @@ function parseSweepState(raw) {
   }
   return match;
 }
+function resolveTaxonomy(warrant, raw) {
+  const requested = raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  if (requested.length === 0) return warrant.labels;
+  for (const name of requested) {
+    if (warrant.labelNamed(name) === void 0) {
+      throw new Error(
+        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. Add it there, or correct the name.`
+      );
+    }
+  }
+  const wanted = new Set(requested);
+  return warrant.labels.filter((label) => wanted.has(label.name));
+}
+function taxonomyNames(settings) {
+  return new Set(settings.taxonomy.map((label) => label.name));
+}
 function readSettings() {
   const shared = readShared();
   const cheap = parseModels(getInput("screen-models"));
@@ -34633,17 +34647,16 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   const listed = await listOpenThreads(api, context2.repo, settings.since, settings.sweepState);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
+  const names = taxonomyNames(settings);
   for (const thread of candidates) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
     if (recording) {
-      const decidable = thread.labels.some(
-        (name) => authority2.warrant.labelNamed(name) !== void 0
-      );
+      const decidable = thread.labels.some((name) => names.has(name));
       if (!decidable) {
         acc.skipped += 1;
         continue;
       }
-    } else if (alreadyTaxonomized(authority2.warrant, thread.labels)) {
+    } else if (thread.labels.some((name) => names.has(name))) {
       acc.skipped += 1;
       continue;
     }
@@ -34724,10 +34737,12 @@ async function run() {
     if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
     const about = resolveAbout(authority2.warrant, base.about);
     if (about.notice !== null) notice(about.notice);
+    const taxonomy = denied ? [] : resolveTaxonomy(authority2.warrant, getInput("labels"));
     settings = {
       ...base,
       languages: resolution === null ? [] : resolution.languages,
-      about: about.about
+      about: about.about,
+      taxonomy
     };
     if (settings.sweep) {
       bulk = newAccumulator();
@@ -34932,7 +34947,7 @@ ${pivot.draft.body}`,
     models: settings.models,
     title: standing.title,
     body,
-    taxonomy: warrant.labels,
+    taxonomy: settings.taxonomy,
     language,
     recalled,
     weather,
@@ -34961,7 +34976,8 @@ ${pivot.draft.body}`,
     ungranted: null
   };
   const decision = enforceLabels(
-    warrant,
+    warrant.path,
+    settings.taxonomy,
     verdict2.labels,
     standing.labels,
     verdict2.confidence,
@@ -35009,7 +35025,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     )
   );
   const code = detection.language?.code ?? null;
-  const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== void 0);
+  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
   const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   let pivot = null;
   let pivotNote = null;
@@ -35123,8 +35139,7 @@ async function attemptWrite(contentsApi, at, path, correction) {
       `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
     );
   }
-  const shard = `${path.replace(/\/+$/, "")}/${monthShard()}.ndjson`;
-  const existing = await readContentsFile(contentsApi, at, shard);
+  const { shard, existing } = await selectShard(contentsApi, at, path);
   const text2 = existing === null ? `${formatCorrection(correction)}
 ` : `${existing.text.replace(/\n*$/, "")}
 ${formatCorrection(correction)}
@@ -35136,6 +35151,30 @@ ${formatCorrection(correction)}
     text2,
     commitMessage(correction),
     existing?.sha ?? null
+  );
+}
+var SHARD_SOFT_LIMIT_BYTES = 9e5;
+var MAX_SHARD_ATTEMPTS = 500;
+async function selectShard(contentsApi, at, path) {
+  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
+  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
+    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
+    let existing;
+    try {
+      existing = await readContentsFile(contentsApi, at, shard);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the next shard instead. Split the corrections store into smaller shards.`
+      );
+      continue;
+    }
+    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
+      return { shard, existing };
+    }
+  }
+  throw new Error(
+    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
   );
 }
 function isShaConflict(error2) {

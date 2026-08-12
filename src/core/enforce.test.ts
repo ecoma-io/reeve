@@ -35,7 +35,7 @@ function decide(
   confidence = 1,
   floor = 0,
 ) {
-  return enforceLabels(w, proposed, onThread, confidence, floor);
+  return enforceLabels(w.path, w.labels, proposed, onThread, confidence, floor);
 }
 
 describe("parseApply", () => {

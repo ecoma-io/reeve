@@ -58,14 +58,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import {
-  alreadyTaxonomized,
-  enforceLabels,
-  narrow,
-  owners,
-  parseApply,
-  type Refusal,
-} from "../../core/enforce.js";
+import { enforceLabels, narrow, owners, parseApply, type Refusal } from "../../core/enforce.js";
 import {
   createEffects,
   isBotAuthor,
@@ -126,6 +119,7 @@ import {
   resolvePivot,
   type Authority,
   type Capability,
+  type Label,
   type Warrant,
 } from "../../core/warrant.js";
 
@@ -185,6 +179,12 @@ interface Settings {
   readonly screenNames: Names;
   readonly languages: readonly Language[];
   readonly warrant: string;
+  /**
+   * The subset of `warrant.labels` this run may propose — `labels`'s own
+   * answer, in the warrant's order. The whole taxonomy when `labels` named
+   * nothing. See `resolveTaxonomy`.
+   */
+  readonly taxonomy: readonly Label[];
   readonly apply: readonly Capability[];
   readonly confidence: number;
   readonly corrections: string;
@@ -236,12 +236,49 @@ function parseSweepState(raw: string): SweepState {
 }
 
 /**
- * Everything but `languages`, which cannot be read here: whether the warrant
- * or the input answers it is a question only `resolveAuthority`'s result can
- * settle, and that read is async while every other input here is not. `run`
- * completes the object once the warrant has been read.
+ * `labels`, narrowed against the warrant's own taxonomy — in the warrant's
+ * order, because that order is what breaks a tie between two proposals, not
+ * the input's.
+ *
+ * Empty is the whole taxonomy, unchanged: a monorepo with one area per
+ * directory and one shared `.github/reeve.yml` points every area's workflow
+ * at the same file and uses this to keep each one proposing only the labels
+ * its own area owns, without maintaining a taxonomy file per area. A name
+ * this asks for that the file does not have is refused rather than quietly
+ * dropped — a typo here would otherwise triage forever with one label
+ * missing from the roster and nothing saying so.
  */
-function readSettings(): Omit<Settings, "languages"> {
+function resolveTaxonomy(warrant: Warrant, raw: string): readonly Label[] {
+  const requested = raw
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  if (requested.length === 0) return warrant.labels;
+
+  for (const name of requested) {
+    if (warrant.labelNamed(name) === undefined) {
+      throw new Error(
+        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. ` +
+          "Add it there, or correct the name.",
+      );
+    }
+  }
+  const wanted = new Set(requested);
+  return warrant.labels.filter((label) => wanted.has(label.name));
+}
+
+/** `settings.taxonomy`'s own names, for the places that check membership rather than shape. */
+function taxonomyNames(settings: Settings): ReadonlySet<string> {
+  return new Set(settings.taxonomy.map((label) => label.name));
+}
+
+/**
+ * Everything but `languages` and `taxonomy`, neither of which can be read
+ * here: both need the warrant, and `readWarrant`'s own result is only
+ * available once `resolveAuthority` has answered, while every other input
+ * here is not async at all. `run` completes the object once it has.
+ */
+function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
   const shared = readShared();
   const cheap = parseModels(core.getInput("screen-models"));
 
@@ -402,6 +439,12 @@ async function runSweep(
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
 
+  // `settings.taxonomy`'s own names, not the warrant's whole one: a sweep
+  // scoped to one area's `labels` subset only recognises its own area's
+  // labels as "already decided" — a thread another area already taxonomized
+  // is not this sweep's business to skip or to import.
+  const names = taxonomyNames(settings);
+
   for (const thread of candidates) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
 
@@ -409,14 +452,12 @@ async function runSweep(
       // Bulk migration's own idempotent skip: a thread the taxonomy never
       // touched has no maintainer decision on it to import — nothing this
       // sweep is for.
-      const decidable = thread.labels.some(
-        (name) => authority.warrant.labelNamed(name) !== undefined,
-      );
+      const decidable = thread.labels.some((name) => names.has(name));
       if (!decidable) {
         acc.skipped += 1;
         continue;
       }
-    } else if (alreadyTaxonomized(authority.warrant, thread.labels)) {
+    } else if (thread.labels.some((name) => names.has(name))) {
       // The idempotent skip: free, and counted separately from `processed` so
       // a rerun over a mostly-triaged backlog reports honestly rather than
       // looking like it did nothing.
@@ -545,10 +586,17 @@ export async function run(): Promise<void> {
     const about = resolveAbout(authority.warrant, base.about);
     if (about.notice !== null) core.notice(about.notice);
 
+    // Guarded the same way `resolution` is: a denied run is promised a green
+    // no-op, and `labels` is configuration it was never going to use — a typo
+    // in it has no business red-failing a run that could never have reached
+    // the taxonomy anyway.
+    const taxonomy = denied ? [] : resolveTaxonomy(authority.warrant, core.getInput("labels"));
+
     settings = {
       ...base,
       languages: resolution === null ? [] : resolution.languages,
       about: about.about,
+      taxonomy,
     };
 
     if (settings.sweep) {
@@ -871,7 +919,7 @@ async function decide(
     models: settings.models,
     title: standing.title,
     body,
-    taxonomy: warrant.labels,
+    taxonomy: settings.taxonomy,
     language,
     recalled,
     weather,
@@ -917,7 +965,8 @@ async function decide(
   // under the run's floor can still clear one label's own lower bar, and a
   // verdict over it can still be turned away by one label's own higher one.
   const decision = enforceLabels(
-    warrant,
+    warrant.path,
+    settings.taxonomy,
     verdict.labels,
     standing.labels,
     verdict.confidence,
@@ -1044,10 +1093,13 @@ async function recordCorrection(
   // `language` output sees the same shape whichever path produced it.
   const code = detection.language?.code ?? null;
 
-  // Taxonomy-filtered: a label some other tool or automation applied is not a
-  // maintainer correcting this duty's taxonomy, and recording it would teach
-  // recall a category triage was never asked to propose.
-  const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== undefined);
+  // Taxonomy-filtered against `settings.taxonomy`, not the whole warrant: a
+  // label some other tool or automation applied is not a maintainer
+  // correcting this duty's taxonomy, and neither is a label from another
+  // area's slice of a shared file this run's own `labels` never named —
+  // recording either would teach recall a category this run was never asked
+  // to propose.
+  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
 
   const pivotLanguage =
     settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
@@ -1252,8 +1304,7 @@ async function attemptWrite(
   // maintainers correcting different threads the same week append to the same
   // file and git resolves it, rather than every correction becoming a
   // conflict on one file that never rolls over.
-  const shard = `${path.replace(/\/+$/, "")}/${monthShard()}.ndjson`;
-  const existing = await readContentsFile(contentsApi, at, shard);
+  const { shard, existing } = await selectShard(contentsApi, at, path);
   const text =
     existing === null
       ? `${formatCorrection(correction)}\n`
@@ -1265,6 +1316,77 @@ async function attemptWrite(
     text,
     commitMessage(correction),
     existing?.sha ?? null,
+  );
+}
+
+/**
+ * A soft ceiling on one shard's own size, not a hard one — the Contents API's
+ * real limit is the 1 MB `readContentsFile` already treats as unreadable, and
+ * this is well under it on purpose, so a shard rolls over while it can still
+ * be read and written normally rather than only once it has already crossed
+ * into `UnreadableContentsFile` territory.
+ */
+const SHARD_SOFT_LIMIT_BYTES = 900_000;
+
+/**
+ * How many numbered siblings one calendar month's shard may grow before this
+ * gives up — not a real ceiling on how much a project may record, only a
+ * bound on the loop below, because a bounded loop is one that cannot hang a
+ * run over a store that has gone genuinely, unexpectedly enormous.
+ */
+const MAX_SHARD_ATTEMPTS = 500;
+
+/**
+ * This month's shard, and whatever is already in it — `monthShard().ndjson`
+ * for the first correction of the month, `monthShard().2.ndjson` once that
+ * one has grown past `SHARD_SOFT_LIMIT_BYTES`, and so on. Read once per
+ * candidate rather than sized off a directory listing, because size is a
+ * property of a shard's own content, not of its name.
+ *
+ * Rolling over by size rather than only by month keeps `writeCorrection`'s
+ * read-modify-write pass — and `attemptWrite`'s search before it — working
+ * against files small enough for the Contents API to inline, on a project
+ * recording enough corrections that one calendar month would otherwise grow
+ * past that on its own.
+ */
+async function selectShard(
+  contentsApi: ContentsApi,
+  at: Location,
+  path: string,
+): Promise<{
+  readonly shard: string;
+  readonly existing: { readonly text: string; readonly sha: string } | null;
+}> {
+  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
+
+  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
+    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
+    let existing: { readonly text: string; readonly sha: string } | null;
+    try {
+      existing = await readContentsFile(contentsApi, at, shard);
+    } catch (error) {
+      // Unreadable — over the 1 MB the Contents API can inline — is read the
+      // same way `attemptWrite`'s own search treats it: not proof the shard
+      // is full, but not a shard this run can safely append to either, so
+      // the roll-over moves past it exactly as it would past one merely over
+      // the soft limit.
+      if (!(error instanceof UnreadableContentsFile)) throw error;
+      core.warning(
+        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the ` +
+          "next shard instead. Split the corrections store into smaller shards.",
+      );
+      continue;
+    }
+    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
+      return { shard, existing };
+    }
+  }
+
+  throw new Error(
+    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, ` +
+      `every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft ` +
+      "limit. That is almost certainly a runaway write loop rather than a genuinely enormous " +
+      "month, so this stops here rather than trying a shard 501.",
   );
 }
 

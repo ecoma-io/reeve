@@ -1058,6 +1058,113 @@ describe("the action", () => {
   });
 });
 
+describe("labels", () => {
+  // `WARRANT` (top of file) names `bug` and `docs`. Every case below narrows
+  // to `docs` alone, so `bug` — a real entry in the file — is the one this
+  // suite uses to prove the subset actually excludes something.
+
+  it("shows the model only the subset's names, not the warrant's whole taxonomy", async () => {
+    const run = await runAction(stub, { labels: "docs" });
+
+    expect(run.code).toBe(0);
+    const asked = stub.asked.find((ask) => ask.system.includes("chosen from exactly these names"));
+    expect(asked?.system).toContain("chosen from exactly these names: docs.");
+    expect(asked?.system).not.toContain("- bug:");
+  });
+
+  it(
+    "refuses a proposal outside the `labels` subset even though the warrant itself names it " +
+      "— the security boundary, not only the prompt",
+    async () => {
+      // The model proposes `bug`, which the file names — but this run was
+      // scoped to `docs` alone, so `enforceLabels` has to refuse it exactly as
+      // it would refuse a name the file never had.
+      stub.answer = triaging(verdict({ labels: ["bug"] }));
+
+      const run = await runAction(stub, { labels: "docs" });
+
+      expect(run.code).toBe(0);
+      expect(stub.effects.applied).toEqual([]);
+      expect(run.outputs.labels).toBe(JSON.stringify([]));
+      expect(run.summary).toContain("| `bug` | **refused** |");
+    },
+  );
+
+  it("fails loudly when `labels` names something not in the warrant's taxonomy, before spending anything", async () => {
+    const run = await runAction(stub, { labels: "bug, wontfix" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("labels: `wontfix` is not in");
+    expect(run.log).toContain("taxonomy");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("reads a comma or newline separated list the same way `apply` does", async () => {
+    const run = await runAction(stub, { labels: "docs\nbug" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
+  it(
+    "does not skip a sweep candidate labelled from outside this run's own `labels` subset " +
+      "— another area's taxonomy entry is not this run's idea of already-decided",
+    async () => {
+      stub.issues = [
+        {
+          number: 501,
+          title: "Thread 501",
+          body: REPORT,
+          labels: ["bug"],
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ];
+      // `bug` is a real, whole taxonomy entry — just not one this run's
+      // `labels` named — so the ordinary sweep skip (`thread.labels.some`
+      // against `settings.taxonomy`) must not treat it as already triaged.
+      stub.answer = triaging(verdict({ labels: ["docs"] }));
+
+      const run = await runAction(stub, { sweep: "true", number: "", labels: "docs" });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.skipped).toBe("0");
+      expect(stub.asked).toHaveLength(1);
+    },
+  );
+
+  describe("with `record`", () => {
+    const RECORDING_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record]");
+    const CORRECTIONS = ".reeve/corrections";
+
+    function shardPath(): string {
+      return `${CORRECTIONS}/${currentShard()}.ndjson`;
+    }
+
+    it(
+      "only imports the labels within this run's own `labels` subset, leaving a label from " +
+        "outside it out of the correction",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.labels = ["bug", "docs"];
+        const event = await labelEvent();
+
+        const run = await runAction(
+          stub,
+          { labels: "docs", apply: "label, record", corrections: CORRECTIONS },
+          { GITHUB_EVENT_PATH: event },
+        );
+
+        expect(run.code).toBe(0);
+        const shard = stub.contentsFiles.get(shardPath());
+        expect(shard).toBeDefined();
+        const written = JSON.parse(shard?.content.trim() ?? "") as { decided: string[] };
+        expect(written.decided).toEqual(["docs"]);
+      },
+    );
+  });
+});
+
 describe("record", () => {
   // A warrant granting `record` explicitly — never a duty default, and never
   // implied by `triage: [label]` alone. Decision 1's whole point.
@@ -1221,6 +1328,97 @@ describe("record", () => {
     expect(run.log).toContain("::warning::corrections:");
     expect(run.log).toContain(`\`${oversizedPath}\``);
     expect(run.log).toContain("Split the corrections store into smaller shards.");
+  });
+
+  it("rolls over to a numbered sibling once this month's shard is past the soft size limit", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // Just over the soft limit — still comfortably under the 1 MB the
+    // Contents API can inline, so this is the rollover case, not the
+    // `UnreadableContentsFile` one covered above.
+    const full = "x".repeat(900_001);
+    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-full" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // The full shard was never appended to.
+    expect(stub.contentsFiles.get(shardPath())?.content).toBe(full);
+    const sibling = `${CORRECTIONS}/${currentShard()}.2.ndjson`;
+    const shard = stub.contentsFiles.get(sibling);
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written.thread).toBe(42);
+  });
+
+  it("keeps rolling forward past a second full sibling to a third, rather than stopping at one", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const full = "x".repeat(900_001);
+    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-full-1" });
+    stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.2.ndjson`, {
+      content: full,
+      sha: "sha-full-2",
+    });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    const shard = stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.3.ndjson`);
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written.thread).toBe(42);
+  });
+
+  it("finds and replaces an existing entry sitting in a numbered sibling shard, not only the first", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const previous = JSON.stringify({
+      repo: "ecoma-io/reeve",
+      thread: 42,
+      at: "2026-07-01T00:00:00Z",
+      title: "Old title",
+      excerpt: "old excerpt",
+      language: "en",
+      proposed: [],
+      decided: ["docs"],
+      by: "ana",
+      note: null,
+      pivot: null,
+    });
+    stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.2.ndjson`, {
+      content: `${previous}\n`,
+      sha: "sha-seed",
+    });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    // Replaced in place, in the sibling it was already in — not appended
+    // fresh to `shardPath()`.
+    expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+    const shard = stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.2.ndjson`);
+    const lines = (shard?.content.trim().split("\n") ?? []).map(
+      (line) => JSON.parse(line) as { thread: number; decided: string[] },
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ thread: 42, decided: ["bug"] });
   });
 
   it("fails red, naming the unreadable shard, when the thread cannot be found anywhere readable", async () => {
