@@ -65,7 +65,7 @@ import {
   type EndpointSpec,
 } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
-import { createMemory, readStore, type WeightedQuery } from "../../core/memory.js";
+import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { parseApply, narrow } from "../../core/enforce.js";
 import { translateToPivot } from "../../core/pivot.js";
@@ -400,59 +400,72 @@ async function decide(
 
   const record = responseFingerprint(standing.title, body, language?.code ?? null);
 
-  const store = await readStore(settings.corrections);
-  for (const line of store.unreadable) core.warning(`corrections: ${line}`);
-  const memory = createMemory(store.corrections);
+  // `recall: 0` (or a negative override) is a promise as much as a setting:
+  // the store is not touched at all, not merely searched-and-returns-nothing
+  // — the same contract triage's own recall gate honors.
+  const recallCount = warrant.memory?.recall ?? RECALLED;
+  let recalled: readonly Correction[] = [];
 
-  const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
-  // The same pivot bridge triage uses: the first configured language is this
-  // project's pivot, and a store with corrections in other languages is worth
-  // bridging into it before recalling — see `core/pivot.ts`. A thread already
-  // written in the pivot language has nothing to gain from being translated
-  // into itself, so that case spends no provider call here either.
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  const worthBridging =
-    language !== null &&
-    pivotLanguage !== null &&
-    language.code !== pivotLanguage.code &&
-    store.corrections.some((correction) => correction.language !== language.code);
-  if (worthBridging) {
-    // The cheap roster, same as triage's own bridge — a mechanical
-    // translation for recall does not need the roster a first reply is
-    // drafted with, and falls back to it only when `screen-models` was
-    // never configured.
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames =
-      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const pivot = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-    });
-    for (const failure of pivot.failures) {
-      core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
-    }
-    if (pivot.draft !== null) {
-      queries.push({
-        text: `${pivot.draft.title}\n${pivot.draft.body}`,
-        against: { pivot: pivotLanguage.code },
+  if (recallCount > 0) {
+    const store = await readStore(settings.corrections);
+    for (const line of store.unreadable) core.warning(`corrections: ${line}`);
+    const memory = createMemory(store.corrections);
+
+    const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
+    // The same pivot bridge triage uses: the first configured language is this
+    // project's pivot, and a store with corrections in other languages is worth
+    // bridging into it before recalling — see `core/pivot.ts`. A thread already
+    // written in the pivot language has nothing to gain from being translated
+    // into itself, so that case spends no provider call here either.
+    const pivotLanguage =
+      settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+    const worthBridging =
+      language !== null &&
+      pivotLanguage !== null &&
+      language.code !== pivotLanguage.code &&
+      store.corrections.some((correction) => correction.language !== language.code);
+    if (worthBridging) {
+      // The cheap roster, same as triage's own bridge — a mechanical
+      // translation for recall does not need the roster a first reply is
+      // drafted with, and falls back to it only when `screen-models` was
+      // never configured.
+      const pivotModels =
+        settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+      const pivotNames =
+        settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+      const pivot = await translateToPivot({
+        provider: stages.pivot,
+        models: pivotModels,
+        title: standing.title,
+        body,
+        to: pivotLanguage,
+        weather,
+        ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
       });
-    } else {
-      core.info(
-        "Cross-language recall could not translate this thread into the pivot language this run " +
-          "— recall used the thread's own language only.",
-      );
+      for (const failure of pivot.failures) {
+        core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+      }
+      if (pivot.draft !== null) {
+        queries.push({
+          text: `${pivot.draft.title}\n${pivot.draft.body}`,
+          against: { pivot: pivotLanguage.code },
+        });
+      } else {
+        core.info(
+          "Cross-language recall could not translate this thread into the pivot language this run " +
+            "— recall used the thread's own language only.",
+        );
+      }
     }
+    recalled = memory.recallAcrossQueries(queries, recallCount);
+    core.info(
+      `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`,
+    );
+  } else {
+    core.info(
+      "Recall is disabled (`memory.recall` is 0 or lower) — the corrections store was not read.",
+    );
   }
-  const recalled = memory.recallAcrossQueries(queries, RECALLED);
-  core.info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`,
-  );
 
   const guidance = await readGuidance(settings.guidance);
 

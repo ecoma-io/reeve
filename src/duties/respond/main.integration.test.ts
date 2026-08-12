@@ -551,6 +551,31 @@ describe("the action", () => {
     expect(seenDecisions).toContain("Known double-submit issue");
   });
 
+  it("honours `memory.recall: 0` by never reading the corrections store at all", async () => {
+    // A malformed line the store would normally warn about by name — proof,
+    // if the warning never appears, that `readStore` was never called rather
+    // than merely called and told to recall nothing.
+    await mkdir(correctionsPath, { recursive: true });
+    await writeFile(join(correctionsPath, "2026-08.ndjson"), "not json\n");
+    await writeFile(
+      warrantPath,
+      ["version: 1", "capabilities:", "  respond: [comment]", "memory:", "  recall: 0"].join("\n"),
+    );
+    let seenDecisions = "";
+    stub.answer = stageAnswer({
+      draft: (ask) => {
+        seenDecisions = ask.user;
+        return saying(JSON.stringify({ text: REPLY, confidence: 0.9 }));
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).not.toContain("corrections:");
+    expect(seenDecisions).not.toContain("DECISIONS THIS PROJECT ALREADY MADE");
+  });
+
   it("reaches a correction recorded in another language through its pivot rendering", async () => {
     await remember({ language: "en" });
     stub.title = "Lỗi khi lưu hai lần liên tiếp";
