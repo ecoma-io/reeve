@@ -23,6 +23,8 @@
  * discovering the same answer one thread at a time. The threads it never
  * reached are `remaining`, which is what a repeat sweep exists to pick up.
  */
+import * as core from "@actions/core";
+
 import type { Listed, Standing } from "./forge.js";
 import { starved, type Weather } from "./provider.js";
 
@@ -53,6 +55,20 @@ export interface SweepAccumulator<Row> {
 
 export function newAccumulator<Row>(): SweepAccumulator<Row> {
   return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+
+/**
+ * A sweep's own two outputs, answered at zero by a run that did not sweep.
+ *
+ * `0`, not unset: `processed` and `remaining` describe a backlog, and a
+ * single-thread run has none — but a workflow that reads them on every run
+ * would read an empty string on this one and have to guess whether that meant
+ * zero or meant broken. Answering honestly costs two lines and removes the
+ * guess.
+ */
+export function reportNoSweep(): void {
+  core.setOutput("processed", "0");
+  core.setOutput("remaining", "0");
 }
 
 /** Candidates neither processed nor skipped — what a next sweep still has to look at. */

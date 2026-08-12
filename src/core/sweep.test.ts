@@ -1,3 +1,4 @@
+import * as core from "@actions/core";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Listed } from "./forge.js";
@@ -5,14 +6,17 @@ import { createWeather } from "./provider.js";
 import {
   newAccumulator,
   remainingOf,
+  reportNoSweep,
   standingFromListing,
   sweepThreads,
   type SweepAccumulator,
 } from "./sweep.js";
 
-// Nothing is mocked. The walk's whole contract is which of four checks stops
+// Nothing is mocked except `core.setOutput`, which is an effect on the runner
+// rather than a value. The walk's whole contract is which of four checks stops
 // it and what each one counts as, and every one of those is decidable from a
 // list, a number and a `Weather` — none of it needs a network to be true.
+vi.mock("@actions/core", () => ({ setOutput: vi.fn() }));
 
 const MODELS = ["gpt-4o-mini"];
 
@@ -292,5 +296,18 @@ describe("sweepThreads", () => {
 
     expect(acc.results.map((entry) => entry.number)).toEqual([1]);
     expect(acc.candidates).toBe(2);
+  });
+});
+
+describe("reportNoSweep", () => {
+  it("answers a sweep's own two outputs at zero rather than leaving them unset", () => {
+    // A workflow that reads `remaining` on every run would read an empty
+    // string on a single-thread run and have to guess whether that meant zero
+    // or meant broken.
+    reportNoSweep();
+
+    expect(vi.mocked(core.setOutput)).toHaveBeenCalledWith("processed", "0");
+    expect(vi.mocked(core.setOutput)).toHaveBeenCalledWith("remaining", "0");
+    expect(vi.mocked(core.setOutput)).toHaveBeenCalledTimes(2);
   });
 });

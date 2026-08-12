@@ -35130,6 +35130,17 @@ async function writeSummary(markdown) {
     );
   }
 }
+function starvedWarning(sweep) {
+  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
+}
+function warnIfStarved(models, weather, sweep) {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
+}
 function table(headers, rows) {
   if (rows.length === 0) return "";
   return [
@@ -37040,26 +37051,24 @@ async function run() {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        warning(
-          "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + proposeSection(proposeOutcome) + authSection(weather.authFailures)
+        await writeRunSummary(
+          sweepPage(settings, bulk, meter.spent()) + proposeSection(proposeOutcome),
+          weather
         );
       } else if (!settings.sweep && recorded !== null) {
         reportRecordRun(recorded.outcome, rosterStarved);
-        await writeSummary(
-          recordPage(settings, recorded.number, recorded.outcome, meter.spent()) + authSection(weather.authFailures)
+        await writeRunSummary(
+          recordPage(settings, recorded.number, recorded.outcome, meter.spent()),
+          weather
         );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, settings.dryRun, rosterStarved);
-        await writeSummary(
-          page(settings, single.number, single.outcome, single.done, meter.spent()) + authSection(weather.authFailures)
+        await writeRunSummary(
+          page(settings, single.number, single.outcome, single.done, meter.spent()),
+          weather
         );
       }
     }

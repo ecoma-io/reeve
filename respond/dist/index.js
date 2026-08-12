@@ -34495,6 +34495,9 @@ async function writeSummary(markdown) {
     );
   }
 }
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
+}
 function table(headers, rows) {
   if (rows.length === 0) return "";
   return [
@@ -35470,9 +35473,7 @@ async function run() {
         );
       }
       report(outcome2, rosterStarved);
-      await writeSummary(
-        page(settings, authority2, outcome2, ungranted, meter.spent()) + authSection(weather.authFailures)
-      );
+      await writeRunSummary(page(settings, authority2, outcome2, ungranted, meter.spent()), weather);
     }
   }
 }

@@ -90,15 +90,15 @@ import {
   createWeather,
   parseSeats,
   settleAuth,
-  starved,
   type Names,
   type Weather,
 } from "../../core/provider.js";
 import { createMeter, type Meter } from "../../core/meter.js";
-import { authSection, writeSummary } from "../../core/summary.js";
+import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import {
   newAccumulator,
   remainingOf,
+  reportNoSweep,
   sweepThreads,
   type SweepAccumulator as Accumulator,
 } from "../../core/sweep.js";
@@ -482,17 +482,7 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null && authority !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        core.warning(
-          "Every model in `models` failed on capacity this run. " +
-            (settings.sweep
-              ? "The sweep delivered what it could before the roster ran dry, and " +
-                "stopped early — see `remaining`."
-              : "This run delivered what it could rather than failing red — weather, " +
-                "not a broken configuration."),
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
 
       // `budget.denied` answers this the same way for both modes — see
       // `createBudget`'s doc comment in `budget.ts`.
@@ -510,14 +500,12 @@ export async function run(): Promise<void> {
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved, budgetSpent);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent(), budgetSpent) + authSection(weather.authFailures),
-        );
+        await writeRunSummary(sweepPage(settings, bulk, meter.spent(), budgetSpent), weather);
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
-        await writeSummary(
-          page(settings, authority, single.number, single.result, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          page(settings, authority, single.number, single.result, meter.spent()),
+          weather,
         );
       }
     }
@@ -547,13 +535,9 @@ function report(
   core.setOutput("replies-translated", String(replies));
   core.setOutput("starved", String(rosterStarved));
   core.setOutput("budget-exhausted", String(budgetSpent));
-  // `0`, not unset: `processed`/`remaining` are a sweep's own outputs, and a
-  // single-thread run answers both honestly at zero rather than leaving a
-  // workflow that reads them on every run reading an empty string on this one.
-  // `skipped` is not repeated here — this mode already gave it its own meaning
-  // two lines up.
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
+  // `skipped` is not repeated by `reportNoSweep` — this mode already gave it
+  // its own meaning two lines up.
+  reportNoSweep();
 }
 
 /**

@@ -34163,6 +34163,17 @@ async function writeSummary(markdown) {
     );
   }
 }
+function starvedWarning(sweep) {
+  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
+}
+function warnIfStarved(models, weather, sweep) {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
+}
 function table(headers, rows) {
   if (rows.length === 0) return "";
   return [
@@ -34243,6 +34254,10 @@ function cost(spent, name) {
 // src/core/sweep.ts
 function newAccumulator() {
   return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
 }
 function remainingOf(acc) {
   return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
@@ -34662,8 +34677,7 @@ function report(outcome, done, rosterStarved) {
   setOutput("language", outcome.language ?? "");
   setOutput("commented", String(done.commented));
   setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
+  reportNoSweep();
 }
 function reportSweep(bulk, rosterStarved) {
   setOutput("processed", String(bulk.results.length));
@@ -35083,21 +35097,15 @@ async function run() {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        warning(
-          "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
-        );
+        await writeRunSummary(sweepPage(settings, bulk, meter.spent()), weather);
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, rosterStarved);
-        await writeSummary(
-          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent()) + authSection(weather.authFailures)
+        await writeRunSummary(
+          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent()),
+          weather
         );
       }
     }

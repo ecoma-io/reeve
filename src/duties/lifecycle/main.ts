@@ -49,6 +49,7 @@ import { writeSummary } from "../../core/summary.js";
 import {
   newAccumulator,
   remainingOf,
+  reportNoSweep,
   type SweepAccumulator as Accumulator,
 } from "../../core/sweep.js";
 import {
@@ -582,8 +583,7 @@ export async function run(): Promise<void> {
 }
 
 function reportSingle(outcome: Outcome, done: Done): void {
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
+  reportNoSweep();
   core.setOutput("starved", "false");
   core.setOutput(
     "skipped",

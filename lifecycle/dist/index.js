@@ -33472,6 +33472,10 @@ function cell(text2) {
 function newAccumulator() {
   return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
 }
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
 function remainingOf(acc) {
   return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
@@ -34295,8 +34299,7 @@ async function run() {
   }
 }
 function reportSingle(outcome, done) {
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
+  reportNoSweep();
   setOutput("starved", "false");
   setOutput(
     "skipped",

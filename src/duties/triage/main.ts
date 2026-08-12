@@ -103,14 +103,13 @@ import {
   parseModels,
   settleAuth,
   shown,
-  starved,
   type Provider,
   type Weather,
 } from "../../core/provider.js";
 import { recallCorrections } from "../../core/recall.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
-import { authSection, writeSummary } from "../../core/summary.js";
+import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import {
   newAccumulator as newCoreAccumulator,
   standingFromListing,
@@ -722,36 +721,25 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        core.warning(
-          "Every model in `models` failed on capacity this run. " +
-            (settings.sweep
-              ? "The sweep delivered what it could before the roster ran dry, and " +
-                "stopped early — see `remaining`."
-              : "This run delivered what it could rather than failing red — weather, " +
-                "not a broken configuration."),
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) +
-            proposeSection(proposeOutcome) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          sweepPage(settings, bulk, meter.spent()) + proposeSection(proposeOutcome),
+          weather,
         );
       } else if (!settings.sweep && recorded !== null) {
         reportRecordRun(recorded.outcome, rosterStarved);
-        await writeSummary(
-          recordPage(settings, recorded.number, recorded.outcome, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          recordPage(settings, recorded.number, recorded.outcome, meter.spent()),
+          weather,
         );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, settings.dryRun, rosterStarved);
-        await writeSummary(
-          page(settings, single.number, single.outcome, single.done, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          page(settings, single.number, single.outcome, single.done, meter.spent()),
+          weather,
         );
       }
     }

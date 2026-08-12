@@ -7,7 +7,7 @@
  */
 import * as core from "@actions/core";
 
-import { remainingOf } from "../../core/sweep.js";
+import { remainingOf, reportNoSweep } from "../../core/sweep.js";
 
 import type { Outcome, Settings, SweepAccumulator } from "./main.js";
 import type { Posted } from "./publish.js";
@@ -34,11 +34,7 @@ export function report(outcome: Outcome, done: Done, rosterStarved: boolean): vo
   core.setOutput("language", outcome.language ?? "");
   core.setOutput("commented", String(done.commented));
   core.setOutput("starved", String(rosterStarved));
-  // `0`, not unset — a single-thread run answers a sweep's own outputs
-  // honestly at zero rather than leaving a workflow that reads them on every
-  // run reading an empty string on this one.
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
+  reportNoSweep();
 }
 
 /**
