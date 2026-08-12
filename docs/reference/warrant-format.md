@@ -24,9 +24,9 @@ behind each field, see [The warrant](../guides/warrant.md).
 
 ### `memory` fields
 
-| Field    | Required | What it does                                                                                                                                       |
-| -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `recall` | no       | A whole number of corrections put in front of a model. `0` is accepted and turns recall off. Absent leaves the duty's own default (`4`) in charge. |
+| Field    | Required | What it does                                                                                                                                                                                                                    |
+| -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recall` | yes      | A whole number of corrections put in front of a model. `0` is accepted and turns recall off. Required whenever the `memory:` block is present — omitting the whole block is what leaves the duty's own default (`4`) in charge. |
 
 ## Label fields
 
