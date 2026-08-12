@@ -116,14 +116,16 @@ import {
   type RecordOutcome,
 } from "./record.js";
 import { repoRelativePath } from "./store.js";
+import { type Done, type SweptThread } from "./summary.js";
 import {
-  summarize,
-  summarizeRecord,
-  summarizeSweep,
-  type Done,
-  type Run,
-  type SweptThread,
-} from "./summary.js";
+  NOTHING_DONE,
+  page,
+  recordPage,
+  report,
+  reportRecordRun,
+  reportSweep,
+  sweepPage,
+} from "./outputs.js";
 import {
   report as buildProposeReport,
   proposeSection,
@@ -176,7 +178,7 @@ export interface Stages {
 }
 
 /** Everything the run concluded, whatever path it took to conclude it. */
-interface Outcome {
+export interface Outcome {
   readonly language: string | null;
   readonly screenedOut: { readonly reason: string; readonly note: string } | null;
   readonly verdict: Verdict;
@@ -211,9 +213,6 @@ interface Outcome {
   readonly ungranted: string | null;
 }
 
-/** What a run that touched nothing did. Also what every dry run reports. */
-const NOTHING_DONE: Done = { labels: [], commented: false, assigned: [], closed: false };
-
 /**
  * A sweep's progress, mutated in place rather than assembled and returned.
  *
@@ -224,7 +223,7 @@ const NOTHING_DONE: Done = { labels: [], commented: false, assigned: [], closed:
  * only on success cannot do that — an object mutated as the loop goes can,
  * because the caller already holds the same reference.
  */
-interface SweepAccumulator {
+export interface SweepAccumulator {
   readonly results: SweptThread[];
   skipped: number;
   starvedRun: boolean;
@@ -500,11 +499,6 @@ function noticeProposeSweepOnly(authority: Authority): void {
         "nothing with it.",
     );
   }
-}
-
-/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
-function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
 
 /** One sweep row's outcome, in the fewest words that are true. */
@@ -1340,147 +1334,6 @@ function comment(outcome: Outcome, done: Done): string {
 function excerpt(answer: string): string {
   const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}…`;
-}
-
-/**
- * Every output, written on every path that reaches an answer — including the
- * ones that answer "nothing". A workflow branching on `screened-out` needs it to
- * be an empty string rather than an unset output on the run where everything
- * worked.
- */
-function report(outcome: Outcome, done: Done, dryRun: boolean, rosterStarved: boolean): void {
-  core.setOutput("labels", JSON.stringify(outcome.applied));
-  core.setOutput("proposed", JSON.stringify(outcome.verdict.labels));
-  core.setOutput("confidence", outcome.verdict.confidence.toFixed(2));
-  core.setOutput("language", outcome.language ?? "");
-  core.setOutput(
-    "duplicate-of",
-    outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf),
-  );
-  core.setOutput("screened-out", outcome.screenedOut?.reason ?? "");
-  // Empty under a rehearsal, which is how a workflow tells one from a run: `{}`
-  // is a shape no real run produces, because a real run always reports all four
-  // keys whether or not it did anything with them.
-  core.setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
-  core.setOutput("starved", String(rosterStarved));
-  // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
-  // outputs, and a single-thread run answers all three honestly at zero rather
-  // than leaving a workflow that reads them on every run reading an empty
-  // string on this one.
-  core.setOutput("processed", "0");
-  core.setOutput("skipped", "0");
-  core.setOutput("remaining", "0");
-  // `false` here always: this is the ordinary decide/act pipeline, which
-  // never writes to the corrections store. `recorded` only ever reads `true`
-  // from the dedicated record path below.
-  core.setOutput("recorded", "false");
-}
-
-/**
- * `processed`, `skipped` and `remaining` — a sweep's own outputs, distinct
- * from every output above because none of those name one thread. `starved` is
- * shared vocabulary between the two modes, so it keeps the same name here.
- */
-function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
-  core.setOutput("processed", String(bulk.results.length));
-  core.setOutput("skipped", String(bulk.skipped));
-  core.setOutput("remaining", String(remainingOf(bulk)));
-  core.setOutput("starved", String(rosterStarved));
-  // `true` only for bulk migration — `record` composed with `sweep`, decided
-  // once for the whole run and carried on the accumulator. An ordinary
-  // triaging sweep never records, the same as it always did.
-  core.setOutput("recorded", String(bulk.recording));
-}
-
-/**
- * Every output, on a `record` run — the full contract every path answers, so
- * a workflow that reads `labels` or `confidence` on every run of this action
- * finds the neutral values a run that never triaged actually produced, rather
- * than an output some other path simply never set.
- */
-function reportRecordRun(outcome: RecordOutcome, rosterStarved: boolean): void {
-  core.setOutput("labels", JSON.stringify([]));
-  core.setOutput("proposed", JSON.stringify([]));
-  core.setOutput("confidence", "0.00");
-  core.setOutput("language", outcome.language ?? "");
-  core.setOutput("duplicate-of", "");
-  core.setOutput("screened-out", "");
-  core.setOutput("applied", JSON.stringify(NOTHING_DONE));
-  core.setOutput("starved", String(rosterStarved));
-  core.setOutput("processed", "0");
-  core.setOutput("skipped", "0");
-  core.setOutput("remaining", "0");
-  core.setOutput("recorded", String(outcome.recorded));
-}
-
-function page(
-  settings: Settings,
-  thread: number,
-  outcome: Outcome,
-  done: Done,
-  spent: Run["spent"],
-): string {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    screenedOut: outcome.screenedOut,
-    proposed: outcome.verdict.labels,
-    confidence: outcome.verdict.confidence,
-    floor: settings.confidence,
-    applied: outcome.applied,
-    refused: outcome.refused,
-    duplicateOf: outcome.verdict.duplicateOf,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    done,
-    memory: outcome.memory,
-    note: outcome.note,
-    implicit: outcome.implicit,
-    excludedLabels: outcome.excludedLabels,
-    ungranted: outcome.ungranted,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames,
-  });
-}
-
-function recordPage(
-  settings: Settings,
-  thread: number,
-  outcome: RecordOutcome,
-  spent: Run["spent"],
-): string {
-  return summarizeRecord({
-    thread,
-    dryRun: settings.dryRun,
-    recorded: outcome.recorded,
-    language: outcome.language,
-    decided: outcome.decided,
-    pivot: outcome.pivot,
-    pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames,
-  });
-}
-
-function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    skipped: bulk.skipped,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    recording: bulk.recording,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames,
-  });
 }
 
 await run();

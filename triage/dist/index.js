@@ -35717,6 +35717,131 @@ function summarizeSweep(run2) {
 `;
 }
 
+// src/duties/triage/outputs.ts
+var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function writeOutputs(values) {
+  setOutput("labels", values.labels);
+  setOutput("proposed", values.proposed);
+  setOutput("confidence", values.confidence);
+  setOutput("language", values.language);
+  setOutput("duplicate-of", values["duplicate-of"]);
+  setOutput("screened-out", values["screened-out"]);
+  setOutput("applied", values.applied);
+  setOutput("starved", values.starved);
+  setOutput("processed", values.processed);
+  setOutput("skipped", values.skipped);
+  setOutput("remaining", values.remaining);
+  setOutput("recorded", values.recorded);
+}
+function report(outcome, done, dryRun, rosterStarved) {
+  writeOutputs({
+    labels: JSON.stringify(outcome.applied),
+    proposed: JSON.stringify(outcome.verdict.labels),
+    confidence: outcome.verdict.confidence.toFixed(2),
+    language: outcome.language ?? "",
+    "duplicate-of": outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf),
+    "screened-out": outcome.screenedOut?.reason ?? "",
+    // Empty under a rehearsal, which is how a workflow tells one from a run: `{}`
+    // is a shape no real run produces, because a real run always reports all four
+    // keys whether or not it did anything with them.
+    applied: dryRun ? "{}" : JSON.stringify(done),
+    starved: String(rosterStarved),
+    // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
+    // outputs, and a single-thread run answers all three honestly at zero rather
+    // than leaving a workflow that reads them on every run reading an empty
+    // string on this one.
+    processed: "0",
+    skipped: "0",
+    remaining: "0",
+    // `false` here always: this is the ordinary decide/act pipeline, which
+    // never writes to the corrections store. `recorded` only ever reads `true`
+    // from the dedicated record path below.
+    recorded: "false"
+  });
+}
+function reportSweep(bulk, rosterStarved) {
+  setOutput("processed", String(bulk.results.length));
+  setOutput("skipped", String(bulk.skipped));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(rosterStarved));
+  setOutput("recorded", String(bulk.recording));
+}
+function reportRecordRun(outcome, rosterStarved) {
+  writeOutputs({
+    labels: JSON.stringify([]),
+    proposed: JSON.stringify([]),
+    confidence: "0.00",
+    language: outcome.language ?? "",
+    "duplicate-of": "",
+    "screened-out": "",
+    applied: JSON.stringify(NOTHING_DONE),
+    starved: String(rosterStarved),
+    processed: "0",
+    skipped: "0",
+    remaining: "0",
+    recorded: String(outcome.recorded)
+  });
+}
+function page(settings, thread, outcome, done, spent) {
+  return summarize({
+    thread,
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    language: outcome.language,
+    screenedOut: outcome.screenedOut,
+    proposed: outcome.verdict.labels,
+    confidence: outcome.verdict.confidence,
+    floor: settings.confidence,
+    applied: outcome.applied,
+    refused: outcome.refused,
+    duplicateOf: outcome.verdict.duplicateOf,
+    permitted: outcome.permitted,
+    withheld: outcome.withheld,
+    done,
+    memory: outcome.memory,
+    note: outcome.note,
+    implicit: outcome.implicit,
+    excludedLabels: outcome.excludedLabels,
+    ungranted: outcome.ungranted,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+function recordPage(settings, thread, outcome, spent) {
+  return summarizeRecord({
+    thread,
+    dryRun: settings.dryRun,
+    recorded: outcome.recorded,
+    language: outcome.language,
+    decided: outcome.decided,
+    pivot: outcome.pivot,
+    pivotNote: outcome.pivotNote,
+    corrections: settings.corrections,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+function sweepPage(settings, bulk, spent) {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    results: bulk.results,
+    skipped: bulk.skipped,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    ungranted: bulk.ungranted,
+    recording: bulk.recording,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+
 // src/duties/triage/propose.ts
 var BRANCH = "reeve/propose";
 var MARKER = markerFor("propose");
@@ -36154,7 +36279,7 @@ async function defaultBranchAndReset(api, at) {
   await resetBranch(api, at, base);
   return base;
 }
-function report(over) {
+function report2(over) {
   return {
     eligible: true,
     additions: 0,
@@ -36195,7 +36320,7 @@ function proposeSection(report3) {
 }
 async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dryRun) {
   if (implicit) {
-    return report({
+    return report2({
       eligible: false,
       notes: [
         "`propose` needs an explicit warrant file to edit \u2014 this repository has none, so it did nothing."
@@ -36226,7 +36351,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
   }
   let entries = buildEntries(evidenced2, retirements);
   if (entries.length === 0) {
-    return report({ notes: [...notes, "No workspace drift found this run."] });
+    return report2({ notes: [...notes, "No workspace drift found this run."] });
   }
   try {
     const struck = await struckEntries(api, at);
@@ -36238,7 +36363,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       );
     }
     if (entries.length === 0) {
-      return report({
+      return report2({
         notes: [...notes, "Every candidate this run found was already struck."],
         struck: strikeCount
       });
@@ -36249,7 +36374,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     const existing = await findOwnOpenPr(api, at);
     if (existing !== null) {
       if (MARKER.split(existing.body).fingerprint === fp) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             `The open proposal (#${String(existing.number)}) already carries this exact change-set.`
@@ -36263,7 +36388,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       }
       const frozen = await branchFrozen(api, at, existing.headSha);
       if (frozen.frozen) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             frozen.errorReason === null ? `The proposal branch (#${String(existing.number)}) carries a commit from someone other than this run \u2014 left untouched.` : `The proposal branch (#${String(existing.number)})'s freshness could not be checked (${frozen.errorReason}) \u2014 treated as frozen and left untouched.`
@@ -36276,7 +36401,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
         });
       }
       if (dryRun) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             `Dry run \u2014 would update the open proposal (#${String(existing.number)}).`
@@ -36291,7 +36416,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       const base2 = await defaultBranchAndReady(api, at);
       const updated = await writeProposal(api, at, warrant, entries, fp, existing.number, base2);
       if (updated === null) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             "The proposed change-set would not parse back cleanly \u2014 aborted, nothing was written."
@@ -36299,7 +36424,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
           pr: existing.number
         });
       }
-      return report({
+      return report2({
         notes: [...notes, `Updated the open proposal \u2014 #${String(updated)}.`],
         additions,
         retirements: retiring,
@@ -36308,7 +36433,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       });
     }
     if (dryRun) {
-      return report({
+      return report2({
         notes: [...notes, "Dry run \u2014 would open a new proposal."],
         additions,
         retirements: retiring,
@@ -36319,14 +36444,14 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     const base = await defaultBranchAndReset(api, at);
     const created = await writeProposal(api, at, warrant, entries, fp, null, base);
     if (created === null) {
-      return report({
+      return report2({
         notes: [
           ...notes,
           "The proposed change-set would not parse back cleanly \u2014 aborted, nothing was written."
         ]
       });
     }
-    return report({
+    return report2({
       notes: [...notes, `Opened a new proposal \u2014 #${String(created)}.`],
       additions,
       retirements: retiring,
@@ -36335,7 +36460,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     });
   } catch (error2) {
     if (isWeather(error2)) {
-      return report({
+      return report2({
         notes: [
           ...notes,
           `\`propose\` hit a capacity error and stopped rather than partially publish \u2014 ${error2 instanceof Error ? error2.message : String(error2)}.`
@@ -36514,7 +36639,6 @@ var DEFAULT_CAPABILITIES = ["label"];
 // src/duties/triage/main.ts
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
-var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 function newAccumulator() {
   return {
     results: [],
@@ -36626,7 +36750,7 @@ async function runProposeSweep(api, authority2, settings) {
     notice(
       `\`${authority2.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep did not propose anything. The narrower of the two wins \u2014 add \`propose\` to \`apply\` as well to enable it.`
     );
-    return report({
+    return report2({
       notes: [
         "`apply` does not name `propose`, so this sweep declined to propose anything this run."
       ]
@@ -36641,7 +36765,7 @@ async function runProposeSweep(api, authority2, settings) {
     if (!isCapacityError(error2)) throw error2;
     const note = "`propose` hit a capacity error before it could read the workspace or its evidence \u2014 nothing was proposed this run; the next sweep starts fresh.";
     warning(note);
-    return report({ notes: [note] });
+    return report2({ notes: [note] });
   }
   const proposeReport = await runPropose(
     api,
@@ -36668,9 +36792,6 @@ function noticeProposeSweepOnly(authority2) {
       `\`${authority2.warrant.path}\` grants \`propose\`, but it only runs under \`sweep\` \u2014 this run did nothing with it.`
     );
   }
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
 function describeOutcome(outcome, done) {
   if (outcome.ungranted !== null) return "not granted";
@@ -36851,7 +36972,7 @@ async function run() {
           recordPage(settings, recorded.number, recorded.outcome, meter.spent()) + authSection(weather.authFailures)
         );
       } else if (!settings.sweep && single !== null) {
-        report2(single.outcome, single.done, settings.dryRun, rosterStarved);
+        report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
           page(settings, single.number, single.outcome, single.done, meter.spent()) + authSection(weather.authFailures)
         );
@@ -37176,100 +37297,6 @@ function comment(outcome, done) {
 function excerpt2(answer2) {
   const flat = answer2.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
-}
-function report2(outcome, done, dryRun, rosterStarved) {
-  setOutput("labels", JSON.stringify(outcome.applied));
-  setOutput("proposed", JSON.stringify(outcome.verdict.labels));
-  setOutput("confidence", outcome.verdict.confidence.toFixed(2));
-  setOutput("language", outcome.language ?? "");
-  setOutput(
-    "duplicate-of",
-    outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf)
-  );
-  setOutput("screened-out", outcome.screenedOut?.reason ?? "");
-  setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("skipped", "0");
-  setOutput("remaining", "0");
-  setOutput("recorded", "false");
-}
-function reportSweep(bulk, rosterStarved) {
-  setOutput("processed", String(bulk.results.length));
-  setOutput("skipped", String(bulk.skipped));
-  setOutput("remaining", String(remainingOf(bulk)));
-  setOutput("starved", String(rosterStarved));
-  setOutput("recorded", String(bulk.recording));
-}
-function reportRecordRun(outcome, rosterStarved) {
-  setOutput("labels", JSON.stringify([]));
-  setOutput("proposed", JSON.stringify([]));
-  setOutput("confidence", "0.00");
-  setOutput("language", outcome.language ?? "");
-  setOutput("duplicate-of", "");
-  setOutput("screened-out", "");
-  setOutput("applied", JSON.stringify(NOTHING_DONE));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("skipped", "0");
-  setOutput("remaining", "0");
-  setOutput("recorded", String(outcome.recorded));
-}
-function page(settings, thread, outcome, done, spent) {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    screenedOut: outcome.screenedOut,
-    proposed: outcome.verdict.labels,
-    confidence: outcome.verdict.confidence,
-    floor: settings.confidence,
-    applied: outcome.applied,
-    refused: outcome.refused,
-    duplicateOf: outcome.verdict.duplicateOf,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    done,
-    memory: outcome.memory,
-    note: outcome.note,
-    implicit: outcome.implicit,
-    excludedLabels: outcome.excludedLabels,
-    ungranted: outcome.ungranted,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
-}
-function recordPage(settings, thread, outcome, spent) {
-  return summarizeRecord({
-    thread,
-    dryRun: settings.dryRun,
-    recorded: outcome.recorded,
-    language: outcome.language,
-    decided: outcome.decided,
-    pivot: outcome.pivot,
-    pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
-}
-function sweepPage(settings, bulk, spent) {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    skipped: bulk.skipped,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    recording: bulk.recording,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
 }
 await run();
 export {
