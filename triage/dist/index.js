@@ -34240,6 +34240,15 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
 function enforceLabels(path, taxonomy, proposed, onThread, confidence, floor) {
   const byName = new Map(taxonomy.map((label) => [label.name, label]));
   const applied = [];
@@ -36999,15 +37008,12 @@ async function decide(authority2, standing, settings, stages, weather) {
       `Only the first ${String(limit)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
     );
   }
-  const { permitted, withheld: withheld2 } = narrow(
+  const { permitted, withheld: withheld2 } = narrowWarned(
     warrant.granted("triage", DEFAULT_CAPABILITIES),
-    settings.apply
+    settings.apply,
+    "triage",
+    warrant.path
   );
-  for (const capability of withheld2) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to triage. The narrower of the two wins.`
-    );
-  }
   const stopped = (screened, language2) => ({
     language: language2,
     screenedOut: screened,

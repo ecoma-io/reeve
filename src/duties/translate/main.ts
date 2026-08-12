@@ -74,7 +74,7 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrow, parseApply } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { listOpenThreads, readStanding } from "../../core/forge.js";
 import {
   bounded,
@@ -116,11 +116,10 @@ import { DEFAULT_CAPABILITIES } from "./capabilities.js";
  * `languages`'s own default in `action.yml`, repeated here for the same
  * reason `core/warrant.ts` keeps `DEFAULT_WARRANT_PATH`: a default this file
  * has to compare against is a value this file needs. Used only to tell "this
- * is the input
- * nobody touched" from "this is what somebody typed, and it happens to match"
- * — the two are not otherwise distinguishable once the input has already
- * been filled in, and the run treats the coincidence as harmless rather than
- * try to detect it.
+ * is the input nobody touched" from "this is what somebody typed, and it
+ * happens to match" — the two are not otherwise distinguishable once the
+ * input has already been filled in, and the run treats the coincidence as
+ * harmless rather than try to detect it.
  */
 const DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
 
@@ -458,16 +457,14 @@ export async function run(): Promise<void> {
     // reported once here, up front, rather than per thread: a run that never
     // reaches a single translatable thread should still say why `apply`'s own
     // request is not the whole story.
-    const { permitted, withheld } = narrow(
+    const { permitted } = narrowWarned(
       authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
       base.apply,
+      "translate",
+      // The raw input, not `authority.warrant.path`, which is what the other
+      // four duties quote. Kept exactly as it was; see `narrowWarned`.
+      base.warrant,
     );
-    for (const capability of withheld) {
-      core.warning(
-        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. ` +
-          "The narrower of the two wins.",
-      );
-    }
 
     settings = {
       ...base,

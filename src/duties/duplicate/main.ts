@@ -78,7 +78,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import { narrow, parseApply } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   listOpenThreads,
   readStanding,
@@ -526,16 +526,12 @@ async function decide(
     );
   }
 
-  const { permitted, withheld } = narrow(
+  const { permitted, withheld } = narrowWarned(
     warrant.granted("duplicate", DEFAULT_CAPABILITIES),
     settings.apply,
+    "duplicate",
+    warrant.path,
   );
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. ` +
-        "The narrower of the two wins.",
-    );
-  }
 
   /**
    * A run that reached no proposal: the guardrails still reported, nothing

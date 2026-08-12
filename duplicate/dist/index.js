@@ -33779,6 +33779,15 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
 
 // src/core/inputs.ts
 function readCore() {
@@ -35078,15 +35087,12 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
       `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\`, or set it to \`none\`, to read the rest.`
     );
   }
-  const { permitted, withheld: withheld2 } = narrow(
+  const { permitted, withheld: withheld2 } = narrowWarned(
     warrant.granted("duplicate", DEFAULT_CAPABILITIES),
-    settings.apply
+    settings.apply,
+    "duplicate",
+    warrant.path
   );
-  for (const capability of withheld2) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. The narrower of the two wins.`
-    );
-  }
   const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence) => ({
     language: language2,
     duplicateOf: null,

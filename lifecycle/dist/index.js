@@ -33338,6 +33338,15 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
 
 // src/core/inputs.ts
 function parseSince(raw) {
@@ -34225,12 +34234,12 @@ async function run() {
         `\`${authority.warrant.path}\` grants lifecycle ${grantedButUnused.map((capability) => `\`${capability}\``).join(", ")}, which this duty has no use for.`
       );
     }
-    const { permitted, withheld } = narrow(granted, settings.apply);
-    for (const capability of withheld) {
-      warning(
-        `\`apply\` asks for \`${capability}\`, which \`${settings.warrant}\` does not grant to lifecycle. The narrower of the two wins.`
-      );
-    }
+    const { permitted, withheld } = narrowWarned(
+      granted,
+      settings.apply,
+      "lifecycle",
+      settings.warrant
+    );
     const ownLogin = await resolveOwnLogin(api);
     const ctx = { permitted, withheld, ownLogin };
     if (settings.sweep) {

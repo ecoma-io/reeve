@@ -72,7 +72,14 @@ import { context, getOctokit } from "@actions/github";
 
 import { readAtlas, type AtlasApi } from "../../core/atlas.js";
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import { enforceLabels, narrow, owners, parseApply, type Refusal } from "../../core/enforce.js";
+import {
+  enforceLabels,
+  narrow,
+  narrowWarned,
+  owners,
+  parseApply,
+  type Refusal,
+} from "../../core/enforce.js";
 import {
   createEffects,
   createRepositoryLabel,
@@ -828,16 +835,12 @@ async function decide(
     );
   }
 
-  const { permitted, withheld } = narrow(
+  const { permitted, withheld } = narrowWarned(
     warrant.granted("triage", DEFAULT_CAPABILITIES),
     settings.apply,
+    "triage",
+    warrant.path,
   );
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to triage. ` +
-        "The narrower of the two wins.",
-    );
-  }
 
   /** A run that stopped early: no verdict, and the guardrails still reported. */
   const stopped = (screened: Outcome["screenedOut"], language: string | null): Outcome => ({

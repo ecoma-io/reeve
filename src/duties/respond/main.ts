@@ -61,7 +61,7 @@ import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
 import { createMeter } from "../../core/meter.js";
-import { parseApply, narrow } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
   assembleClient,
@@ -273,16 +273,12 @@ async function decide(
   stages: Stages,
   weather: Weather,
 ): Promise<Outcome> {
-  const { permitted, withheld } = narrow(
+  const { permitted, withheld } = narrowWarned(
     warrant.granted("respond", DEFAULT_CAPABILITIES),
     settings.apply,
+    "respond",
+    warrant.path,
   );
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to respond. ` +
-        "The narrower of the two wins.",
-    );
-  }
 
   /**
    * Every one of this duty's thirteen `Outcome`-shaped returns goes through

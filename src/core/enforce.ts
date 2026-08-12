@@ -26,6 +26,8 @@
  * label already on the thread is resolved in the human's favour, every time,
  * with no input that changes it.
  */
+import * as core from "@actions/core";
+
 import { CAPABILITIES, type Capability, type Label, type Warrant } from "./warrant.js";
 
 /**
@@ -84,6 +86,38 @@ export function narrow(granted: readonly Capability[], requested: readonly Capab
     permitted: granted.filter((capability) => requested.includes(capability)),
     withheld: requested.filter((capability) => !granted.includes(capability)),
   };
+}
+
+/**
+ * `narrow`, and the warning every duty writes about what it withheld.
+ *
+ * A withheld capability is not an error — the file is the authority, and the
+ * narrower of the two wins by design — but it is a silence a maintainer
+ * reading `apply` would misread, so it is said once per capability rather
+ * than left to be inferred from a run that quietly did less than the workflow
+ * asked for.
+ *
+ * `warrantPath` is a parameter rather than read off the warrant because the
+ * five duties do not agree about which spelling of the path they quote:
+ * translate names the raw `warrant` input, the rest name `warrant.path`. The
+ * two differ only for a consumer who wrote a path that normalises to a
+ * different string, and reconciling them is a behaviour change rather than
+ * this extraction's business.
+ */
+export function narrowWarned(
+  granted: readonly Capability[],
+  requested: readonly Capability[],
+  duty: string,
+  warrantPath: string,
+): Narrowed {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    core.warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. ` +
+        "The narrower of the two wins.",
+    );
+  }
+  return narrowed;
 }
 
 /** One thing that was proposed and did not happen, and why. */

@@ -32570,6 +32570,15 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
 
 // src/core/meter.ts
 var STAGE = {
@@ -35531,15 +35540,14 @@ async function run() {
         "languages: running on the default (`en, vi, zh`) \u2014 nobody has set this yet. Write the `languages` input, or `languages:` in the warrant, to choose on purpose."
       );
     }
-    const { permitted, withheld } = narrow(
+    const { permitted } = narrowWarned(
       authority2.warrant.granted("translate", DEFAULT_CAPABILITIES),
-      base.apply
+      base.apply,
+      "translate",
+      // The raw input, not `authority.warrant.path`, which is what the other
+      // four duties quote. Kept exactly as it was; see `narrowWarned`.
+      base.warrant
     );
-    for (const capability of withheld) {
-      warning(
-        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. The narrower of the two wins.`
-      );
-    }
     settings = {
       ...base,
       languages,

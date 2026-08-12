@@ -32,7 +32,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { detectLanguage } from "../../core/detect.js";
-import { narrow, parseApply } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   createLifecycleEffects,
   isCapacityError,
@@ -512,13 +512,12 @@ export async function run(): Promise<void> {
           "has no use for.",
       );
     }
-    const { permitted, withheld } = narrow(granted, settings.apply);
-    for (const capability of withheld) {
-      core.warning(
-        `\`apply\` asks for \`${capability}\`, which \`${settings.warrant}\` does not grant to ` +
-          "lifecycle. The narrower of the two wins.",
-      );
-    }
+    const { permitted, withheld } = narrowWarned(
+      granted,
+      settings.apply,
+      "lifecycle",
+      settings.warrant,
+    );
 
     // Resolved once per run and cached — the attribution gate every
     // un-staling decision reads needs to know who "our own actor" is before

@@ -34227,6 +34227,15 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
 
 // src/core/sanitize.ts
 var OPENER = "<!--";
@@ -35172,15 +35181,12 @@ async function walkReplies(api, at, settled) {
   return null;
 }
 async function decide(api, at, warrant, settings, stages, weather) {
-  const { permitted, withheld: withheld2 } = narrow(
+  const { permitted, withheld: withheld2 } = narrowWarned(
     warrant.granted("respond", DEFAULT_CAPABILITIES),
-    settings.apply
+    settings.apply,
+    "respond",
+    warrant.path
   );
-  for (const capability of withheld2) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to respond. The narrower of the two wins.`
-    );
-  }
   const settled = (over = {}) => ({
     note: null,
     language: null,
