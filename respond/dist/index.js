@@ -32924,34 +32924,62 @@ function isBotAuthor(author) {
 }
 var REPLY_PAGE = 100;
 var REPLY_PAGES = 10;
+function lastPageFrom(link) {
+  if (link === void 0) return null;
+  const match = /<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/.exec(link);
+  return match?.[1] === void 0 ? null : Number(match[1]);
+}
+function toReply(comment) {
+  return {
+    id: comment.id,
+    body: comment.body ?? "",
+    login: comment.user?.login ?? "",
+    isBot: isBotAuthor(comment.user)
+  };
+}
 async function listReplies(api, at, options) {
   const max = options?.max ?? REPLY_PAGE;
   const order = options?.order ?? "oldest";
-  const pageCap = order === "oldest" ? Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE)) : REPLY_PAGES;
-  const all = [];
-  let lastPageFull = false;
-  for (let page2 = 1; page2 <= pageCap; page2 += 1) {
-    const { data } = await api.rest.issues.listComments({
-      owner: at.owner,
-      repo: at.repo,
-      issue_number: at.number,
-      per_page: REPLY_PAGE,
-      page: page2
-    });
-    all.push(
-      ...data.map((comment) => ({
-        id: comment.id,
-        body: comment.body ?? "",
-        login: comment.user?.login ?? "",
-        isBot: isBotAuthor(comment.user)
-      }))
-    );
-    lastPageFull = data.length === REPLY_PAGE;
-    if (!lastPageFull) break;
-    if (order === "oldest" && all.length >= max) break;
+  const page2 = (n) => api.rest.issues.listComments({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number,
+    per_page: REPLY_PAGE,
+    page: n
+  });
+  if (order === "oldest") {
+    const pageCap = Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE));
+    const all = [];
+    let lastPageFull = false;
+    for (let n = 1; n <= pageCap; n += 1) {
+      const { data } = await page2(n);
+      all.push(...data.map(toReply));
+      lastPageFull = data.length === REPLY_PAGE;
+      if (!lastPageFull || all.length >= max) break;
+    }
+    return { replies: all.slice(0, max), more: all.length > max || lastPageFull };
   }
-  const replies = order === "oldest" ? all.slice(0, max) : all.slice(-max);
-  return { replies, more: all.length > max || lastPageFull };
+  const first = await page2(1);
+  const lastPage = lastPageFrom(first.headers?.link);
+  if (lastPage === null || lastPage <= 1) {
+    const all = first.data.map(toReply);
+    return { replies: all.slice(-max), more: all.length > max };
+  }
+  const pagesNeeded = Math.min(
+    REPLY_PAGES,
+    Math.ceil(Math.min(max, REPLY_PAGE * REPLY_PAGES) / REPLY_PAGE),
+    lastPage
+  );
+  const firstPageWalked = lastPage - pagesNeeded + 1;
+  const collected = [];
+  for (let n = lastPage; n >= firstPageWalked; n -= 1) {
+    const { data } = n === 1 ? first : await page2(n);
+    collected.unshift(...data.map(toReply));
+  }
+  return {
+    replies: collected.slice(-max),
+    more: firstPageWalked > 1 || collected.length > max
+  };
 }
 async function readStanding(api, at) {
   const { data } = await api.rest.issues.get({
@@ -33525,8 +33553,7 @@ function resolvePivot(warrant, languages) {
     }
     return first;
   }
-  const named = warrant.pivot.toLowerCase();
-  const found = languages.find((language) => language.code.toLowerCase() === named);
+  const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
       `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured languages (${languages.map((language) => language.code).join(", ")}).`
@@ -33631,7 +33658,12 @@ function readPivot2(path, raw) {
   return raw.trim();
 }
 function readMemory(path, raw) {
-  if (raw === void 0 || raw === null) return null;
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
   }
@@ -34702,44 +34734,52 @@ async function decide(api, at, warrant, settings, stages, weather) {
     language === null ? `#${String(at.number)}: language not identified (${String(detection.candidates.length)} candidate(s)).` : `#${String(at.number)}: language ${language.code} (by ${detection.by}).`
   );
   const record = responseFingerprint(standing.title, body, language?.code ?? null);
-  const store = await readStore(settings.corrections);
-  for (const line of store.unreadable) warning(`corrections: ${line}`);
-  const memory = createMemory(store.corrections);
-  const queries = [{ text: `${standing.title}
+  const recallCount = warrant.memory?.recall ?? RECALLED;
+  let recalled = [];
+  if (recallCount > 0) {
+    const store = await readStore(settings.corrections);
+    for (const line of store.unreadable) warning(`corrections: ${line}`);
+    const memory = createMemory(store.corrections);
+    const queries = [{ text: `${standing.title}
 ${body}`, against: "own" }];
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  const worthBridging = language !== null && pivotLanguage !== null && language.code !== pivotLanguage.code && store.corrections.some((correction) => correction.language !== language.code);
-  if (worthBridging) {
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const pivot = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-    });
-    for (const failure of pivot.failures) {
-      warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
-    }
-    if (pivot.draft !== null) {
-      queries.push({
-        text: `${pivot.draft.title}
-${pivot.draft.body}`,
-        against: { pivot: pivotLanguage.code }
+    const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+    const worthBridging = language !== null && pivotLanguage !== null && language.code !== pivotLanguage.code && store.corrections.some((correction) => correction.language !== language.code);
+    if (worthBridging) {
+      const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+      const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+      const pivot = await translateToPivot({
+        provider: stages.pivot,
+        models: pivotModels,
+        title: standing.title,
+        body,
+        to: pivotLanguage,
+        weather,
+        ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
       });
-    } else {
-      info(
-        "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-      );
+      for (const failure of pivot.failures) {
+        warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+      }
+      if (pivot.draft !== null) {
+        queries.push({
+          text: `${pivot.draft.title}
+${pivot.draft.body}`,
+          against: { pivot: pivotLanguage.code }
+        });
+      } else {
+        info(
+          "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
+        );
+      }
     }
+    recalled = memory.recallAcrossQueries(queries, recallCount);
+    info(
+      `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`
+    );
+  } else {
+    info(
+      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
+    );
   }
-  const recalled = memory.recallAcrossQueries(queries, RECALLED);
-  info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`
-  );
   const guidance = await readGuidance(settings.guidance);
   const standingLabels = standing.labels.map((name) => warrant.labelNamed(name)).filter((entry) => entry !== void 0);
   const drafted = await draft({

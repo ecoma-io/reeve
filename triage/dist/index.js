@@ -32982,6 +32982,28 @@ async function listOpenThreads(api, at, since, state = "open") {
   }
   return listed;
 }
+var EVENT_PAGE = 100;
+var EVENT_PAGES = 10;
+async function listLabelEvents(api, at) {
+  const events = [];
+  for (let page2 = 1; page2 <= EVENT_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listEvents({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: EVENT_PAGE,
+      page: page2
+    });
+    for (const entry of data) {
+      if (entry.event !== "labeled" && entry.event !== "unlabeled") continue;
+      const name = entry.label?.name;
+      if (name === void 0 || name.length === 0) continue;
+      events.push({ label: name, action: entry.event, isBot: isBotAuthor(entry.actor) });
+    }
+    if (data.length < EVENT_PAGE) break;
+  }
+  return events;
+}
 function isMissing(error2) {
   return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
 }
@@ -33120,9 +33142,9 @@ function parseWarrant(path, source) {
     labelNamed: (name) => byName.get(name)
   };
 }
-function checkLabelsExist(warrant, existing) {
+function checkLabelsExist(warrant, existing, taxonomy = warrant.labels) {
   const present = new Set(existing);
-  const missing = warrant.labels.map((label) => label.name).filter((name) => !present.has(name));
+  const missing = taxonomy.map((label) => label.name).filter((name) => !present.has(name));
   if (missing.length === 0) return;
   throw new Error(
     `warrant: \`${warrant.path}\` names ${missing.length === 1 ? "a label" : "labels"} this repository does not have \u2014 ${missing.map((name) => `\`${name}\``).join(", ")}. Create them, or correct the taxonomy.`
@@ -33191,8 +33213,7 @@ function resolvePivot(warrant, languages) {
     }
     return first;
   }
-  const named = warrant.pivot.toLowerCase();
-  const found = languages.find((language) => language.code.toLowerCase() === named);
+  const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
       `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured languages (${languages.map((language) => language.code).join(", ")}).`
@@ -33297,7 +33318,12 @@ function readPivot(path, raw) {
   return raw.trim();
 }
 function readMemory(path, raw) {
-  if (raw === void 0 || raw === null) return null;
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
   }
@@ -34637,7 +34663,8 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   if (!authority2.implicit) {
     checkLabelsExist(
       authority2.warrant,
-      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name)
+      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name),
+      settings.taxonomy
     );
   }
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
@@ -34686,7 +34713,11 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
         weather,
         "sweep"
       );
-      acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+      if (outcome.machineOnly) {
+        acc.skipped += 1;
+      } else {
+        acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+      }
     } else {
       const outcome = await decide(authority2, standing, settings, stages, weather);
       const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
@@ -34760,7 +34791,8 @@ async function run() {
         if (!authority2.implicit) {
           checkLabelsExist(
             authority2.warrant,
-            (await listRepositoryLabels(api, at)).map((label) => label.name)
+            (await listRepositoryLabels(api, at)).map((label) => label.name),
+            settings.taxonomy
           );
         }
         const trigger = recordTrigger();
@@ -34898,50 +34930,61 @@ async function decide(authority2, standing, settings, stages, weather) {
     info(`Screened out as ${sifted.dropped.reason} \u2014 ${sifted.dropped.note}.`);
     return stopped(sifted.dropped, language);
   }
-  const store = await readStore(settings.corrections);
-  for (const line of store.unreadable) {
-    warning(`corrections: ${line}`);
-  }
-  const memory = createMemory(store.corrections);
-  const queries = [{ text: `${standing.title}
-${body}`, against: "own" }];
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  const recallCount = warrant.memory?.recall ?? RECALLED;
   const threadLanguage = detection.language;
-  const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
-  if (worthBridging) {
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const pivot = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-    });
-    for (const failure of pivot.failures) {
-      warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+  let recalled = [];
+  let memorySize = 0;
+  let pivotRecalled = 0;
+  if (recallCount > 0) {
+    const store = await readStore(settings.corrections);
+    for (const line of store.unreadable) {
+      warning(`corrections: ${line}`);
     }
-    if (pivot.draft !== null) {
-      queries.push({
-        text: `${pivot.draft.title}
-${pivot.draft.body}`,
-        against: { pivot: pivotLanguage.code }
+    const memory = createMemory(store.corrections);
+    memorySize = memory.size;
+    const queries = [{ text: `${standing.title}
+${body}`, against: "own" }];
+    const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+    const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
+    if (worthBridging) {
+      const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+      const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+      const pivot = await translateToPivot({
+        provider: stages.pivot,
+        models: pivotModels,
+        title: standing.title,
+        body,
+        to: pivotLanguage,
+        weather,
+        ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
       });
-    } else {
-      info(
-        "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-      );
+      for (const failure of pivot.failures) {
+        warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+      }
+      if (pivot.draft !== null) {
+        queries.push({
+          text: `${pivot.draft.title}
+${pivot.draft.body}`,
+          against: { pivot: pivotLanguage.code }
+        });
+      } else {
+        info(
+          "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
+        );
+      }
     }
+    recalled = memory.recallAcrossQueries(queries, recallCount);
+    pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
+      (correction) => correction.language !== null && correction.language !== threadLanguage.code
+    ).length;
+    info(
+      `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
+    );
+  } else {
+    info(
+      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
+    );
   }
-  const recalled = memory.recallAcrossQueries(queries, warrant.memory?.recall ?? RECALLED);
-  const pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
-    (correction) => correction.language !== null && correction.language !== threadLanguage.code
-  ).length;
-  info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
-  );
   const triaged = await triage({
     provider: stages.triage,
     models: settings.models,
@@ -34970,7 +35013,7 @@ ${pivot.draft.body}`,
     permitted,
     withheld: withheld2,
     note,
-    memory: { size: memory.size, recalled: recalled.length, pivotRecalled },
+    memory: { size: memorySize, recalled: recalled.length, pivotRecalled },
     implicit: authority2.implicit,
     excludedLabels: authority2.excludedLabels,
     ungranted: null
@@ -35010,8 +35053,30 @@ function senderLogin() {
   const payload = context2.payload;
   return payload.sender?.login ?? "";
 }
-async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather, by) {
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by) {
   const warrant = authority2.warrant;
+  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  if (by === "sweep" && decidedLabels.length > 0) {
+    const events = await listLabelEvents(api, at);
+    const lastLabeledByBot = /* @__PURE__ */ new Map();
+    for (const event of events) {
+      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
+    }
+    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
+    if (decidedLabels.length === 0) {
+      info(
+        `#${String(at.number)}: every taxonomy label here was machine-applied \u2014 nothing to import.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: true
+      };
+    }
+  }
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
   const detection = await detectLanguage(
@@ -35025,7 +35090,6 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     )
   );
   const code = detection.language?.code ?? null;
-  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
   const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   let pivot = null;
   let pivotNote = null;
@@ -35073,14 +35137,15 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
       `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
     );
   } else {
-    await writeCorrection(contentsApi, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction);
   }
   return {
     recorded: true,
     language: detection.language?.label ?? null,
     decided: decidedLabels,
     pivot: pivot !== null,
-    pivotNote
+    pivotNote,
+    machineOnly: false
   };
 }
 var WRITE_ATTEMPTS = 3;
@@ -35118,7 +35183,7 @@ async function attemptWrite(contentsApi, at, path, correction) {
     const index = lines.findIndex((line) => {
       if (line.trim().length === 0) return false;
       const existing2 = parseCorrection(line);
-      return existing2 !== null && existing2.thread === correction.thread && existing2.repo === correction.repo;
+      return existing2 !== null && existing2.thread === correction.thread && (existing2.repo === correction.repo || existing2.repo === "");
     });
     if (index !== -1) {
       lines[index] = formatCorrection(correction);

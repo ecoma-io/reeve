@@ -33108,8 +33108,7 @@ function resolvePivot(warrant, languages) {
     }
     return first;
   }
-  const named = warrant.pivot.toLowerCase();
-  const found = languages.find((language) => language.code.toLowerCase() === named);
+  const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
       `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured languages (${languages.map((language) => language.code).join(", ")}).`
@@ -33205,7 +33204,12 @@ function readPivot(path, raw) {
   return raw.trim();
 }
 function readMemory(path, raw) {
-  if (raw === void 0 || raw === null) return null;
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
   }
