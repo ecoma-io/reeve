@@ -25,6 +25,19 @@
  * would leave a state neither this run nor the next could tell from a step
  * that simply had not fired yet.
  *
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), and answering a sweep's two outputs at zero when this run
+ * did not sweep (`reportNoSweep`). Both were near-copies in four or five
+ * duties; both are now one tested module, called from here.
+ *
+ * The rest of the shared ending is not this duty's: with no provider it has
+ * no `Weather`, so it writes a plain `writeSummary` where the other four
+ * append the endpoints that refused a key, and it walks its own backlog
+ * rather than `sweepThreads` — see `SweepAccumulator`'s own note for why.
+ *
  * This file is excluded from coverage because it calls `run()` at import —
  * `clock.ts` and `message.ts` carry this duty's tested logic.
  */

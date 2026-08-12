@@ -66,6 +66,17 @@
  * `summary.ts` (the page `outputs.ts` renders onto), and `verdict.ts` (the
  * one stage that talks to a model, and the only one whose answer is treated
  * as a suggestion).
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), walking the backlog (`sweepThreads`), recalling
+ * corrections including the cross-language bridge (`recallCorrections`, and
+ * `RECALLED` — the default every recalling duty now shares), and ending the
+ * run (`warnIfStarved`, `writeRunSummary`). Each of those was a near-copy in
+ * four or five duties; each is now one tested module, called from here.
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";

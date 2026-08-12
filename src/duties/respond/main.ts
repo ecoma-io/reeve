@@ -50,6 +50,24 @@
  * own control flow: settings, the guards in points 2 and 3 above (including
  * `walkReplies`, the reply-walk guard's own read), and the two functions that
  * turn one run's `Outcome` into `core.setOutput` calls and a summary page.
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), recalling corrections including the cross-language bridge
+ * (`recallCorrections`, and `RECALLED`), and writing the page with the
+ * endpoints that refused a key (`writeRunSummary`). Each of those was a
+ * near-copy in four or five duties; each is now one tested module, called
+ * from here.
+ *
+ * Two things it still does for itself, on purpose: its capacity warning is
+ * different prose from the sweeping duties' (this duty answers one thread,
+ * so there is no `remaining` to point at), and it withholds the
+ * cross-language bridge for a thread already written in the pivot language —
+ * which is why `recallCorrections` takes a bridge that may be `null` rather
+ * than deciding that for its callers.
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";

@@ -66,6 +66,17 @@
  * load-bearing; the three duties' three placements are an accepted
  * divergence (design §1.2), not something this wave unifies.
  *
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), walking the backlog (`sweepThreads`), and ending the run
+ * (`warnIfStarved`, `writeRunSummary`, `reportNoSweep`). Each of those was a
+ * near-copy in four or five duties; each is now one tested module, called
+ * from here.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API, which is what a runner does — see
