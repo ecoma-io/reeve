@@ -38,12 +38,14 @@ function label(over: Partial<Label> = {}): Label {
     examples: [],
     owner: null,
     exclusiveWith: [],
+    confidence: null,
     ...over,
   };
 }
 
 function correction(over: Partial<Correction> = {}): Correction {
   return {
+    repo: "ecoma-io/reeve",
     thread: 42,
     at: "2026-01-01T00:00:00Z",
     title: "The button does nothing on mobile",

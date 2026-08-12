@@ -32,8 +32,10 @@ function decide(
   proposed: readonly string[],
   onThread: readonly string[] = [],
   w: Warrant = WARRANT,
+  confidence = 1,
+  floor = 0,
 ) {
-  return enforceLabels(w, proposed, onThread);
+  return enforceLabels(w.path, w.labels, proposed, onThread, confidence, floor);
 }
 
 describe("parseApply", () => {
@@ -164,6 +166,66 @@ describe("enforceLabels", () => {
     const empty = parseWarrant(".github/reeve.yml", "version: 1\n");
 
     expect(decide(["bug"], [], empty).applied).toEqual([]);
+  });
+
+  describe("confidence", () => {
+    it("refuses a proposal under the run's own floor", () => {
+      const result = decide(["bug"], [], WARRANT, 0.6, 0.75);
+
+      expect(result.applied).toEqual([]);
+      expect(result.refused).toEqual([
+        { what: "bug", why: "confidence 0.60 is under the floor of 0.75" },
+      ]);
+    });
+
+    it("applies a proposal that clears the run's own floor", () => {
+      expect(decide(["bug"], [], WARRANT, 0.8, 0.75).applied).toEqual(["bug"]);
+    });
+
+    const OWN_FLOOR = parseWarrant(
+      ".github/reeve.yml",
+      `
+version: 1
+labels:
+  - name: bug
+    description: Released behaviour contradicts its documentation.
+    confidence: 0.5
+  - name: performance
+    description: Correct behaviour that is too slow.
+`,
+    );
+
+    it("lets a label's own floor admit a proposal the run's floor would have refused", () => {
+      const result = decide(["bug"], [], OWN_FLOOR, 0.6, 0.75);
+
+      expect(result.applied).toEqual(["bug"]);
+      expect(result.refused).toEqual([]);
+    });
+
+    it("still refuses a label with no floor of its own against the run's floor", () => {
+      const result = decide(["performance"], [], OWN_FLOOR, 0.6, 0.75);
+
+      expect(result.refused).toEqual([
+        { what: "performance", why: "confidence 0.60 is under the floor of 0.75" },
+      ]);
+    });
+
+    it("lets a label's own floor refuse a proposal the run's floor would have admitted", () => {
+      const result = decide(["bug"], [], OWN_FLOOR, 0.4, 0.3);
+
+      expect(result.applied).toEqual([]);
+      expect(result.refused).toEqual([
+        { what: "bug", why: "confidence 0.40 is under `bug`'s own floor of 0.50" },
+      ]);
+    });
+
+    it("checks confidence before the taxonomy check finds an unknown label pointless work", () => {
+      // Order does not matter here — an unknown label is refused first either
+      // way, since there is no floor to check without a taxonomy entry.
+      expect(decide(["security"], [], WARRANT, 0.1, 0.75).refused).toEqual([
+        { what: "security", why: "`.github/reeve.yml` does not name it" },
+      ]);
+    });
   });
 });
 

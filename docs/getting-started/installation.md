@@ -185,6 +185,15 @@ permissions:
   issues: write
 ```
 
+`concurrency` is doing a second job here beyond cancelling the stale run: it is
+also what keeps two runs from writing the same thread at once. A duty's own
+write is not a lock — `publish()` writes once, reads once to check what landed,
+and warns rather than fails when the two disagree, because by then the write
+already happened and there is nothing left to roll back. The `group` above is
+the actual fix: keyed on the thread, it serializes every run that could touch
+one, so there is only ever one write in flight to warn about, never two racing
+each other.
+
 ### Pull requests
 
 One deliberate change, and it is the one to understand before you copy it.
@@ -257,6 +266,10 @@ cannot express "labels only", so the duty has to.** See
 The ambient `secrets.GITHUB_TOKEN` covers everything a duty does by default, and
 it is the `github-token` default. Pass something else only for the reason in the
 next paragraph.
+
+**This runs unmodified on GitHub Enterprise Server** — the tracker client reads
+the runner's own `GITHUB_API_URL`, so there is nothing to point at your instance
+and no input for it to get wrong.
 
 **A label applied by `GITHUB_TOKEN` does not start a workflow listening on
 `issues: [labeled]`.** GitHub suppresses that to prevent recursion, and it does

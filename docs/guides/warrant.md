@@ -120,11 +120,34 @@ labels:
     not: >-
       A report that is merely short. If the steps are there, this is not it.
     exclusive_with: [bug]
+
+  - name: security
+    description: >-
+      A report that a user's data, credentials or access could be exposed to
+      someone who should not have them.
+    confidence: 0.9
 ```
 
 Every field's name, whether it is required, and what it does is
 [the warrant format reference](../reference/warrant-format.md#label-fields) —
 this page stays on why and how to write one; the schema itself lives there.
+
+**`confidence` here replaces the run's own floor for this one label, in
+either direction — it is not a ceiling still subject to it.** A verdict needs
+to clear a floor to apply any label at all — the `confidence` input, above
+the taxonomy in the run's own settings — and a label's own `confidence:`
+substitutes a different floor for _that_ label alone: lower it for a label
+safe to apply on a hunch, raise it above the run's own floor for one costly
+enough to get wrong that a hunch is not enough, without moving the bar for
+every other label in the file to do it. `security` is the usual example:
+
+```yaml
+- name: security
+  description: >-
+    A report that a user's data, credentials or access could be exposed to
+    someone who should not have them.
+  confidence: 0.9
+```
 
 `version` is currently `1`. It exists so a format change can be refused with a
 message naming the version, rather than parsed into something plausible and
@@ -300,6 +323,10 @@ on:
   issues:
     types: [labeled, unlabeled]
 
+concurrency:
+  group: reeve-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   issues: write
@@ -314,17 +341,46 @@ jobs:
           apply: label, record
 ```
 
+The `concurrency` group is what keeps two of this thread's events from racing
+each other's write — a `labeled` and an `unlabeled` landing together, most
+often. Nothing after the write retries on its own: a duty that finds another
+write already landed reports that plainly rather than silently picking a
+winner. See [installation](../getting-started/installation.md#2-pick-a-trigger)
+for the same pattern on the trigger that starts the run in the first place.
+
 See [the triage duty](../reference/duties/triage.md#configuration) for the full shape of this.
 
-**The pivot language is what makes the store cross-language.** The first
-language `triage` resolves — from `languages:` here, or from the `languages`
-input — is the pivot. A correction recorded in another language is also
-translated into the pivot and stored alongside the original; recalling for a
-thread in yet another language translates the query into the pivot too, and
-the two renderings meet there. A correction already in the pivot language, or
-a store that only ever sees one language, spends no extra request on any of
-this — the bridge is only built when there is a language gap for it to cross.
-This is [Stage 4](../doctrine/north-star.md#7-roadmap), landed.
+**The pivot language is what makes the store cross-language.** By default it
+is the first language `triage` resolves — from `languages:` here, or from the
+`languages` input. Write `pivot:` in this file to name it instead:
+
+```yaml
+pivot: en
+```
+
+`pivot:` must name one of the resolved `languages` — a pivot that is not read
+or written into is not a bridge to anything — and a mismatch refuses the run,
+naming both. A correction recorded in another language is also translated
+into the pivot and stored alongside the original; recalling for a thread in
+yet another language translates the query into the pivot too, and the two
+renderings meet there. A correction already in the pivot language, or a store
+that only ever sees one language, spends no extra request on any of this — the
+bridge is only built when there is a language gap for it to cross. This is
+[Stage 4](../doctrine/north-star.md#7-roadmap), landed.
+
+**`memory:` tunes how much of the store one run reads.** `recall`, a whole
+number, is how many corrections are put in the prompt — the same `4` this
+duty has always used, now a written default rather than an unwritten one:
+
+```yaml
+memory:
+  recall: 4
+```
+
+`0` is accepted and turns recall off — the store is still written to when
+`record` is granted, only never read back — which is different from deleting
+`.reeve/corrections` outright: the history stays, ready the day `recall` goes
+back above `0`.
 
 **An empty store is the cold-start case, not an error.** Every duty works with no
 memory. It works better with one.

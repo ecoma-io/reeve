@@ -26,7 +26,7 @@
  * label already on the thread is resolved in the human's favour, every time,
  * with no input that changes it.
  */
-import { CAPABILITIES, type Capability, type Warrant } from "./warrant.js";
+import { CAPABILITIES, type Capability, type Label, type Warrant } from "./warrant.js";
 
 /**
  * The `apply` input, refused rather than guessed at.
@@ -104,22 +104,43 @@ export interface LabelDecision {
 /**
  * Which of the proposed labels may be applied.
  *
- * Every check is against the parsed warrant or against the thread as it stands,
- * and never against the verdict's own account of itself. A verdict that claims
- * a label is permitted is a verdict repeating something it read in an issue
+ * Every check is against `taxonomy` or against the thread as it stands, and
+ * never against the verdict's own account of itself. A verdict that claims a
+ * label is permitted is a verdict repeating something it read in an issue
  * body.
+ *
+ * `taxonomy` is not necessarily the warrant's whole one — a caller narrowed
+ * by its own `labels`-style input (triage's, for instance) passes only the
+ * subset that input granted, so a name that exists in the file but outside
+ * that subset is refused here exactly as a name the file never had at all
+ * would be. Checking against the narrowed list rather than the file directly
+ * is what makes the narrowing hold against an injected or hallucinated
+ * proposal, not only against an honest one — a verdict is data, and a
+ * subset a caller never offered the model is not something the model gets
+ * to reach for anyway.
  *
  * Order is the verdict's own, which is the model's preference order, and it is
  * what breaks an exclusive conflict between two proposals: the first one named
  * wins. That is a real decision and not a tie-break dressed up — asking the
  * model to resolve its own conflict is asking the least reliable participant
  * the hardest question.
+ *
+ * `confidence` is the verdict's own account of how sure it is, checked against
+ * `floor` — the run's own floor, the `confidence` input every label has always
+ * shared — unless the label names a floor of its own in the warrant, which
+ * then answers for that label alone. A label costly to get wrong can ask for
+ * more certainty than the run otherwise requires, without moving the run's
+ * floor for every other label to get it.
  */
 export function enforceLabels(
-  warrant: Warrant,
+  path: string,
+  taxonomy: readonly Label[],
   proposed: readonly string[],
   onThread: readonly string[],
+  confidence: number,
+  floor: number,
 ): LabelDecision {
+  const byName = new Map(taxonomy.map((label) => [label.name, label]));
   const applied: string[] = [];
   const refused: Refusal[] = [];
   const seen = new Set<string>();
@@ -129,11 +150,25 @@ export function enforceLabels(
     if (seen.has(name)) continue;
     seen.add(name);
 
-    const entry = warrant.labelNamed(name);
+    const entry = byName.get(name);
     if (entry === undefined) {
-      // The single check that makes injected text unable to invent an outcome.
-      // Text can persuade a model; it cannot add a name to a file it is not in.
-      refused.push({ what: name, why: `\`${warrant.path}\` does not name it` });
+      // The single check that makes injected text unable to invent an outcome
+      // — or reach past whatever slice of the taxonomy this run was scoped
+      // to. Text can persuade a model; it cannot add a name to a file it is
+      // not in, or to a `labels` subset the workflow never granted it.
+      refused.push({ what: name, why: `\`${path}\` does not name it` });
+      continue;
+    }
+
+    const labelFloor = entry.confidence ?? floor;
+    if (confidence < labelFloor) {
+      refused.push({
+        what: name,
+        why:
+          entry.confidence === null
+            ? `confidence ${confidence.toFixed(2)} is under the floor of ${labelFloor.toFixed(2)}`
+            : `confidence ${confidence.toFixed(2)} is under \`${name}\`'s own floor of ${labelFloor.toFixed(2)}`,
+      });
       continue;
     }
 
@@ -161,7 +196,7 @@ export function enforceLabels(
     const conflict = applied.find(
       (kept) =>
         entry.exclusiveWith.includes(kept) ||
-        (warrant.labelNamed(kept)?.exclusiveWith.includes(name) ?? false),
+        (byName.get(kept)?.exclusiveWith.includes(name) ?? false),
     );
     if (conflict !== undefined) {
       refused.push({ what: name, why: `it cannot be applied alongside \`${conflict}\`` });
@@ -172,21 +207,6 @@ export function enforceLabels(
   }
 
   return { applied, refused };
-}
-
-/**
- * Whether a thread already carries a label this project's own taxonomy names.
- *
- * A sweep's idempotent skip, and deliberately not "does it carry any label at
- * all" — a maintainer's own workflow labels routinely mark priority or a
- * milestone, and a thread wearing one of those has not been triaged by this
- * duty's own reading of it. Reusing `labelNamed` keeps this the same
- * definition `enforceLabels` already uses for "the thread already carries
- * it" (above), rather than inventing a second one that could drift from the
- * first.
- */
-export function alreadyTaxonomized(warrant: Warrant, labels: readonly string[]): boolean {
-  return labels.some((name) => warrant.labelNamed(name) !== undefined);
 }
 
 /** The handles behind a set of applied labels, split by what GitHub can do with them. */

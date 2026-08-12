@@ -327,6 +327,14 @@ async function route(
     send(response, 200, { id, body: stub.replies.get(id) });
     return;
   }
+  // `publish`'s re-read-after-write, for a reply: `createReply`'s second
+  // `read()` goes back here rather than answering from the listing it started
+  // from — see `core/forge.ts`.
+  if (method === "GET" && comment) {
+    const id = Number(comment[1]);
+    send(response, 200, { id, body: stub.replies.get(id) ?? "" });
+    return;
+  }
 
   if (method === "POST" && path === "/v1/chat/completions") {
     const ask = askOf(raw, request.headers.authorization ?? null);
@@ -400,10 +408,13 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     // bundle, which is the only place the built artifact's ICU is exercised.
     languages: "en, vi",
     warrant,
+    apply: "edit-body",
     drafts: "1",
     "judge-models": "",
     "max-body-chars": "6000",
+    "chunk-chars": "6000",
     "translate-replies": "false",
+    "max-replies": "100",
     "show-attribution": "none",
     "dry-run": "false",
     sweep: "false",
@@ -413,6 +424,7 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "api-keys": "",
     "request-timeout": "120s",
     temperature: "",
+    "max-requests": "none",
   };
 }
 
@@ -659,6 +671,7 @@ describe("the action", () => {
       skipped: JSON.stringify([]),
       "replies-translated": "0",
       starved: "false",
+      "budget-exhausted": "false",
       processed: "0",
       remaining: "0",
     });
@@ -844,6 +857,7 @@ describe("the action", () => {
       skipped: JSON.stringify([]),
       "replies-translated": "0",
       starved: "false",
+      "budget-exhausted": "false",
       processed: "0",
       remaining: "0",
     });
@@ -885,6 +899,14 @@ describe("the action", () => {
 
     expect(run.code).toBe(1);
     expect(run.log).toContain("drafts: expected a whole number of 1 or more, got `0`");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("refuses a chunk size below the floor, rather than paying full overhead per sentence", async () => {
+    const run = await runAction(stub, { "chunk-chars": "499" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("chunk-chars: expected a whole number of 500 or more, got `499`");
     expect(stub.asked).toHaveLength(0);
   });
 
@@ -1094,6 +1116,139 @@ describe("the action, translating the replies", () => {
 
     expect(run.log).toContain("#42 comment 991");
   });
+});
+
+describe("max-requests", () => {
+  // A self-imposed ceiling, deliberately unlike `starved`: the roster is
+  // healthy the whole time in every case below, and every stop is this run's
+  // own budget running out rather than the provider's.
+
+  it(
+    "stops translating further languages once the budget is reached, publishing what " +
+      "already drafted",
+    async () => {
+      stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+
+      const run = await runAction(stub, { languages: "en, zh, vi", "max-requests": "1" });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+      expect(run.outputs.skipped).toBe(JSON.stringify(["zh"]));
+      expect(run.outputs["budget-exhausted"]).toBe("true");
+      expect(stub.body).toContain(ENGLISH);
+      expect(stub.body).not.toContain(CHINESE);
+      expect(run.log).toContain(
+        "#42: `max-requests` was reached, so zh was not attempted this run. " +
+          "What was already drafted still publishes.",
+      );
+    },
+  );
+
+  it("stops translating further replies once the budget is reached, leaving the rest alone", async () => {
+    const VIETNAMESE_REPLY = "Tôi cũng gặp phải lỗi này trên máy của tôi, và nó xảy ra mỗi lần.";
+    const ENGLISH_REPLY = "I hit this on my machine too, and it happens every single time.";
+    stub.body = "";
+    stub.replies.set(991, VIETNAMESE_REPLY);
+    stub.replies.set(992, `${VIETNAMESE_REPLY} Hai.`);
+    stub.answer = translating({ en: ENGLISH_REPLY });
+
+    const run = await runAction(stub, { "translate-replies": "true", "max-requests": "1" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toContain(ENGLISH_REPLY);
+    expect(stub.replies.get(992)).toBe(`${VIETNAMESE_REPLY} Hai.`);
+    expect(run.outputs["replies-translated"]).toBe("1");
+    expect(run.outputs["budget-exhausted"]).toBe("true");
+    expect(run.log).toContain(
+      "#42: `max-requests` was reached, so its remaining replies were not attempted this run.",
+    );
+  });
+
+  it(
+    "stops a sweep from starting a new thread once the budget is reached, distinctly from " +
+      "a starved roster",
+    async () => {
+      stub.issues = [
+        { number: 101, body: VIETNAMESE, createdAt: "2026-01-03T00:00:00Z" },
+        { number: 102, body: VIETNAMESE, createdAt: "2026-01-02T00:00:00Z" },
+      ];
+
+      const run = await runAction(stub, {
+        sweep: "true",
+        number: "",
+        "max-requests": "1",
+      });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.remaining).toBe("1");
+      expect(run.outputs.starved).toBe("false");
+      expect(run.outputs["budget-exhausted"]).toBe("true");
+      expect(run.summary).toContain("`max-requests` was reached partway through");
+      expect(run.summary).not.toContain("ran out of capacity");
+    },
+  );
+
+  it("never trips on the default (`none`), whatever this run spends", async () => {
+    stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+
+    const run = await runAction(stub, { languages: "en, zh, vi" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en", "zh"]));
+    expect(run.outputs["budget-exhausted"]).toBe("false");
+  });
+
+  it(
+    "reports `budget-exhausted: false` when a thread with a single target language " +
+      "spends exactly `max-requests` and has nothing left to deny",
+    async () => {
+      // The bug this pins: recomputing "exhausted" from the meter's final
+      // reading at the end of the run cannot tell this case apart from one
+      // where a language really was turned away — both leave the meter
+      // sitting exactly at the ceiling. Genuine denial is tracked instead,
+      // and this thread's one and only target language never gets turned
+      // away — the loop simply runs out of languages to check before it
+      // runs out of budget.
+      stub.answer = translating({ en: ENGLISH });
+
+      const run = await runAction(stub, { languages: "en, vi", "max-requests": "1" });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+      expect(run.outputs.skipped).toBe(JSON.stringify([]));
+      expect(run.outputs["budget-exhausted"]).toBe("false");
+    },
+  );
+
+  it(
+    "reports `budget-exhausted: true` from a sweep whose only candidate denied a " +
+      "language inside its own thread, with no next candidate left for the sweep's " +
+      "own pre-thread check to ever run again",
+    async () => {
+      // The other direction of the same bug: the sweep's own pre-thread
+      // checkpoint only ever fires before starting a thread, so a denial
+      // that happens inside the last (here, the only) candidate's own
+      // per-language checkpoint has no later loop iteration to be noticed
+      // by. Tracking genuine denial at its source — inside `budgetExhausted`
+      // itself — catches it anyway.
+      stub.issues = [{ number: 101, body: VIETNAMESE, createdAt: "2026-01-01T00:00:00Z" }];
+      stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+
+      const run = await runAction(stub, {
+        sweep: "true",
+        number: "",
+        languages: "en, vi, zh",
+        "max-requests": "1",
+      });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.remaining).toBe("0");
+      expect(run.outputs.starved).toBe("false");
+      expect(run.outputs["budget-exhausted"]).toBe("true");
+    },
+  );
 });
 
 describe("the sweep", () => {
@@ -1332,7 +1487,31 @@ describe("the warrant", () => {
     expect(run.code).toBe(0);
     expect(stub.body).toBe(VIETNAMESE);
     expect(stub.asked.length).toBeGreaterThan(0);
-    expect(run.summary).toContain("does not grant `edit-body`");
+    expect(run.summary).toContain("`edit-body` is not permitted this run");
+  });
+
+  it("says which half withheld it, once, up front, when `apply` asks for more than the warrant grants", async () => {
+    await writeFile(warrantPath, ["version: 1", "capabilities:", "  translate: [none]"].join("\n"));
+
+    const run = await runAction(stub, { languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain(
+      `\`apply\` asks for \`edit-body\`, which \`${warrantPath}\` does not grant to translate.`,
+    );
+  });
+
+  it("narrows `edit-body` away when `apply` alone withholds it, warrant granting freely", async () => {
+    const run = await runAction(stub, { apply: "none", languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    // Detection, drafting and judging still ran and spent — only the write is gated.
+    expect(stub.asked.length).toBeGreaterThan(0);
+    expect(stub.body).toBe(VIETNAMESE);
+    // Nothing was withheld from what `apply` asked for — it asked for nothing —
+    // so the upfront warning never fires; only the generic not-published note does.
+    expect(run.log).not.toContain("does not grant");
+    expect(run.summary).toContain("`edit-body` is not permitted this run");
   });
 
   it("grants translate nothing in a sweep too, checked once before the listing", async () => {

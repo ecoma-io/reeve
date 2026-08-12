@@ -21,6 +21,7 @@ import {
 
 function correction(over: Partial<Correction> = {}): Correction {
   return {
+    repo: "ecoma-io/reeve",
     thread: 1,
     at: "2026-08-01T00:00:00Z",
     title: "Export produces an empty file",
@@ -454,6 +455,7 @@ describe("parseCorrection", () => {
     const parsed = parseCorrection('{"thread":7,"decided":["bug"]}');
 
     expect(parsed).toEqual({
+      repo: "",
       thread: 7,
       at: "",
       title: "",

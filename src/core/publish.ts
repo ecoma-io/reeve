@@ -18,6 +18,8 @@
  * emphatically not an overwrite: a provider that was out of quota this morning
  * must not cost the thread the good output it already has.
  */
+import * as core from "@actions/core";
+
 import { authorHalf, type Marker } from "./marker.js";
 import type { Thread } from "./forge.js";
 
@@ -38,7 +40,8 @@ export interface Publication {
 }
 
 export type Outcome =
-  | { readonly action: "published" | "unchanged" }
+  | { readonly action: "published"; readonly mismatched: boolean }
+  | { readonly action: "unchanged" }
   | { readonly action: "none"; readonly reason: string };
 
 /**
@@ -76,5 +79,31 @@ export async function publish(
   if (current === body) return { action: "unchanged" };
 
   await thread.write(body);
-  return { action: "published" };
+
+  // One re-read, after the write and never before it — this is not a lock and
+  // it does not retry. Two runs racing the same thread (a `labeled` event and
+  // an `edited` event landing together, most often) can both read the same
+  // starting body and both write, and whichever write lands second wins
+  // silently: GitHub has no compare-and-swap on an issue body the way the
+  // Contents API has a `sha` for a file. A single re-read cannot undo that —
+  // only a workflow's own `concurrency:` group can, by never letting two runs
+  // reach `write` at once (see the installation guide) — so this is reported
+  // rather than corrected: `mismatched` says the body this run is about to
+  // call "published" was already moved out from under it by the time it
+  // checked, and the caller decides what a reader needs to hear about that.
+  //
+  // The write already landed by the time this read runs — a failure here is
+  // never the write's failure, and must not be reported as one. A sweep that
+  // turned one thread's successful publish into a run failure over a
+  // verification read (a transient 500, a rate limit) would lose every
+  // thread after it for nothing the write itself did wrong.
+  try {
+    const after = await thread.read();
+    return { action: "published", mismatched: after !== body };
+  } catch (error) {
+    core.warning(
+      `published, but the verification read failed — treating as delivered: ${String(error)}`,
+    );
+    return { action: "published", mismatched: false };
+  }
 }

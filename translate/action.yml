@@ -96,6 +96,23 @@ inputs:
     required: false
     default: .github/reeve.yml
 
+  apply:
+    description: >-
+      What this run may do: `edit-body`, or `none` for a run that drafts,
+      judges and reports without touching the thread. `edit-body` is this
+      duty's only capability, so unlike `triage`'s `apply` there is nothing
+      to comma-separate — the choice is the whole thing or nothing.
+
+      The narrower of this and the warrant file wins, always — the same
+      double-gate every other duty applies, with the same shape: detection,
+      drafting and judging all run and spend whatever they were going to
+      spend regardless of this input, and only the write at the end is
+      gated. A capability the warrant withholds is a reason not to publish,
+      not a reason not to have decided — `none` is a good way to watch what
+      this duty would have written before it is allowed to write it.
+    required: false
+    default: edit-body
+
   drafts:
     description: >-
       How many translations to ask for per language. Every answer is scored
@@ -139,14 +156,41 @@ inputs:
     required: false
     default: "6000"
 
+  chunk-chars:
+    description: >-
+      How large one chunk of a body can be before it is asked for as its own
+      request, rather than folded into a larger one — see `max-body-chars`
+      for what chunking is and why. Refused below `500`: a chunk that small
+      stops being a request-sizing decision and starts being a way to pay a
+      whole request's fixed overhead — the system prompt, the glossary, the
+      examples — for a shrinking sliver of actual text. No ceiling: a larger
+      value trades fewer requests for a coarser failure grain, one chunk
+      failing losing more of a language's translation, and that trade is
+      this project's to make on your own body sizes, not this action's to
+      refuse on your behalf.
+    required: false
+    default: "6000"
+
   translate-replies:
     description: >-
       Also translate the thread's replies, each detected and fingerprinted on
       its own. Off by default because the ceiling is real: every reply, times
-      every language it is missing. One run reads the most recent hundred and
-      warns when there were more.
+      every language it is missing. One run reads the most recent replies
+      (`max-replies`) and warns when there were more.
     required: false
     default: "false"
+
+  max-replies:
+    description: >-
+      How many of a thread's most recent replies one run reads, when
+      `translate-replies` is on, or `none` for no bound. GitHub's own comment
+      listing has no reverse-chronological order, so finding the most recent
+      ones means walking forward from the start of the thread — this duty
+      still does that within one run, but a thread of thousands of replies is
+      the case even `none` will not fully read, and the run says so rather
+      than pretending otherwise.
+    required: false
+    default: "100"
 
   show-attribution:
     description: >-
@@ -205,6 +249,27 @@ inputs:
       stalls on a hidden ceiling.
     required: false
     default: "50"
+
+  max-requests:
+    description: >-
+      How many provider requests — detection, drafting and judging combined —
+      one run may spend before it stops asking for more, or `none` for no
+      bound. A self-imposed ceiling, deliberately not the same thing `starved`
+      reports: `starved` is the provider running dry, weather from its own
+      side; this is a budget this run chose for itself, working exactly as
+      configured. Checked at every clean-cut boundary a text or a thread
+      reaches — before detection starts, before each language, before each
+      reply, before a sweep's next thread — never mid-language, so a language
+      already being translated always finishes atomically: what was already
+      drafted and published still stands, and only the work not yet started
+      is left for a later run. See `budget-exhausted`.
+
+      Every request made counts against this, whatever it answered — a 429 a
+      model rotation left behind still spent one, the same as a request that
+      came back with a usable draft. This is a count of asks, not a count of
+      answers.
+    required: false
+    default: none
 
   endpoints:
     description: >-
@@ -276,12 +341,16 @@ outputs:
 
   skipped:
     description: >-
-      Outside `sweep`: JSON array of the language codes no model could
-      translate this run. `[]` on the run where everything worked, never
-      unset — a language that failed does not fail the job, so this is what a
-      workflow branches on. Under `sweep`: a count of threads already carrying
-      this duty's marker, left alone at no cost beyond the listing itself. The
-      two modes never run in the same job — `sweep` and `number` are mutually
+      Outside `sweep`: JSON array of the language codes not translated this
+      run — combining two different reasons a workflow branching on this
+      output does not need to tell apart: no model produced a draft, or
+      `max-requests` was reached before this language was reached. `[]` on
+      the run where everything worked, never unset — a language that failed
+      does not fail the job, so this is what a workflow branches on. The job
+      summary's own table does distinguish the two, for a maintainer reading
+      by eye. Under `sweep`: a count of threads already carrying this duty's
+      marker, left alone at no cost beyond the listing itself. The two modes
+      never run in the same job — `sweep` and `number` are mutually
       exclusive — so the name answers whichever question this run actually
       asked.
 
@@ -297,6 +366,18 @@ outputs:
       `remaining` for what is left. Worth alerting on if a schedule keeps
       producing it, because that is a quota worth raising rather than a run
       worth retrying.
+
+  budget-exhausted:
+    description: >-
+      `true` when this run's own `max-requests` ceiling genuinely turned work
+      away — never `true` when `max-requests` is `none`, the default, and not
+      simply whether the meter ended the run sitting at or past the ceiling:
+      a thread that needed exactly `max-requests` requests and had nothing
+      left to ask for reports `false` here, the same as a run that never came
+      close. Distinct from `starved`: this is a bound the run chose for
+      itself, not the provider running dry. Outside `sweep` this run still
+      published whatever it drafted before the budget ran out; under `sweep`
+      see `remaining` for what is left.
 
   processed:
     description: >-

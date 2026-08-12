@@ -144,6 +144,22 @@ interface State {
    * exact number of failed attempts it wants before success.
    */
   contentsConflictsRemaining: number;
+  /**
+   * A thread's `labeled`/`unlabeled` timeline, keyed by issue number — read
+   * only by a migration sweep's self-training guard. Empty for every case
+   * that does not set it, which answers every issue's events as "none",
+   * leaving the guard nothing to exclude.
+   */
+  labelEvents: Record<number, { label: string; event: "labeled" | "unlabeled"; bot: boolean }[]>;
+  /**
+   * Thread numbers whose timeline the stub answers as longer than one run
+   * reads — every page full, straight through `listLabelEvents`'s own page
+   * ceiling, rather than the real (short) `labelEvents` fixture for that
+   * thread. Simulates a thread with a thousand-plus events without a
+   * thousand-plus-line fixture: the guard only cares that the walk never
+   * reaches a short page to stop on.
+   */
+  truncatedLabelHistory: Set<number>;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -190,6 +206,8 @@ async function startStub(): Promise<Stub> {
     contentsWrites: [],
     contentsForbidden: false,
     contentsConflictsRemaining: 0,
+    labelEvents: {},
+    truncatedLabelHistory: new Set(),
   };
 
   const server = createServer((request, response) => {
@@ -240,6 +258,46 @@ async function route(
     const payload = parsed(raw) as { state?: string; state_reason?: string };
     stub.effects.closed = payload.state === "closed" && payload.state_reason === "not_planned";
     send(response, 200, { number: Number(issue[1]) });
+    return;
+  }
+
+  // A migration sweep's self-training guard — read once per candidate, and
+  // only there. Unset for a thread answers "no events", the same as a real
+  // repository whose timeline the stub never populated.
+  const events = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/events$/.exec(path);
+  if (method === "GET" && events) {
+    const number = Number(events[1]);
+    if (stub.truncatedLabelHistory.has(number)) {
+      // Every page full, forever — `listLabelEvents` stops asking on its own
+      // page ceiling, never on a short page, so this never needs to answer a
+      // real event to simulate a timeline longer than one run reads.
+      send(
+        response,
+        200,
+        Array.from({ length: 100 }, () => ({
+          event: "labeled",
+          label: { name: "filler" },
+          actor: { login: "maintainer", type: "User" },
+        })),
+      );
+      return;
+    }
+    const page = Number(query.get("page") ?? "1");
+    const forThread = stub.labelEvents[number] ?? [];
+    send(
+      response,
+      200,
+      page === 1
+        ? forThread.map((entry) => ({
+            event: entry.event,
+            label: { name: entry.label },
+            actor: {
+              login: entry.bot ? "reeve[bot]" : "maintainer",
+              type: entry.bot ? "Bot" : "User",
+            },
+          }))
+        : [],
+    );
     return;
   }
 
@@ -454,6 +512,7 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     sweep: "false",
     since: "",
     limit: "50",
+    "sweep-state": "open",
     endpoints: "",
     "api-keys": "",
     "request-timeout": "120s",
@@ -992,6 +1051,21 @@ describe("the action", () => {
     expect(stub.effects.applied).toEqual(["bug"]);
   });
 
+  it("honours `memory.recall: 0` by never reading the corrections store at all", async () => {
+    // A malformed line the store would normally warn about by name — proof,
+    // if the warning never appears, that `readStore` was never called rather
+    // than merely called and told to recall nothing.
+    await mkdir(correctionsPath, { recursive: true });
+    await writeFile(join(correctionsPath, "broken.ndjson"), "{not json\n");
+    await writeFile(warrantPath, `${WARRANT}\nmemory:\n  recall: 0\n`);
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).not.toContain("corrections:");
+    expect(run.summary).toContain("Memory: 0 of 0 corrections reached the prompt");
+  });
+
   it("changes nothing on a dry run, and reports what it would have done", async () => {
     const run = await runAction(stub, { "dry-run": "true" });
 
@@ -1054,6 +1128,113 @@ describe("the action", () => {
 
     expect(run.code).toBe(1);
     expect(run.log).toContain("this event (schedule) names no issue or pull request");
+  });
+});
+
+describe("labels", () => {
+  // `WARRANT` (top of file) names `bug` and `docs`. Every case below narrows
+  // to `docs` alone, so `bug` — a real entry in the file — is the one this
+  // suite uses to prove the subset actually excludes something.
+
+  it("shows the model only the subset's names, not the warrant's whole taxonomy", async () => {
+    const run = await runAction(stub, { labels: "docs" });
+
+    expect(run.code).toBe(0);
+    const asked = stub.asked.find((ask) => ask.system.includes("chosen from exactly these names"));
+    expect(asked?.system).toContain("chosen from exactly these names: docs.");
+    expect(asked?.system).not.toContain("- bug:");
+  });
+
+  it(
+    "refuses a proposal outside the `labels` subset even though the warrant itself names it " +
+      "— the security boundary, not only the prompt",
+    async () => {
+      // The model proposes `bug`, which the file names — but this run was
+      // scoped to `docs` alone, so `enforceLabels` has to refuse it exactly as
+      // it would refuse a name the file never had.
+      stub.answer = triaging(verdict({ labels: ["bug"] }));
+
+      const run = await runAction(stub, { labels: "docs" });
+
+      expect(run.code).toBe(0);
+      expect(stub.effects.applied).toEqual([]);
+      expect(run.outputs.labels).toBe(JSON.stringify([]));
+      expect(run.summary).toContain("| `bug` | **refused** |");
+    },
+  );
+
+  it("fails loudly when `labels` names something not in the warrant's taxonomy, before spending anything", async () => {
+    const run = await runAction(stub, { labels: "bug, wontfix" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("labels: `wontfix` is not in");
+    expect(run.log).toContain("taxonomy");
+    expect(stub.asked).toHaveLength(0);
+  });
+
+  it("reads a comma or newline separated list the same way `apply` does", async () => {
+    const run = await runAction(stub, { labels: "docs\nbug" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
+  it(
+    "does not skip a sweep candidate labelled from outside this run's own `labels` subset " +
+      "— another area's taxonomy entry is not this run's idea of already-decided",
+    async () => {
+      stub.issues = [
+        {
+          number: 501,
+          title: "Thread 501",
+          body: REPORT,
+          labels: ["bug"],
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      ];
+      // `bug` is a real, whole taxonomy entry — just not one this run's
+      // `labels` named — so the ordinary sweep skip (`thread.labels.some`
+      // against `settings.taxonomy`) must not treat it as already triaged.
+      stub.answer = triaging(verdict({ labels: ["docs"] }));
+
+      const run = await runAction(stub, { sweep: "true", number: "", labels: "docs" });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.skipped).toBe("0");
+      expect(stub.asked).toHaveLength(1);
+    },
+  );
+
+  describe("with `record`", () => {
+    const RECORDING_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record]");
+    const CORRECTIONS = ".reeve/corrections";
+
+    function shardPath(): string {
+      return `${CORRECTIONS}/${currentShard()}.ndjson`;
+    }
+
+    it(
+      "only imports the labels within this run's own `labels` subset, leaving a label from " +
+        "outside it out of the correction",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.labels = ["bug", "docs"];
+        const event = await labelEvent();
+
+        const run = await runAction(
+          stub,
+          { labels: "docs", apply: "label, record", corrections: CORRECTIONS },
+          { GITHUB_EVENT_PATH: event },
+        );
+
+        expect(run.code).toBe(0);
+        const shard = stub.contentsFiles.get(shardPath());
+        expect(shard).toBeDefined();
+        const written = JSON.parse(shard?.content.trim() ?? "") as { decided: string[] };
+        expect(written.decided).toEqual(["docs"]);
+      },
+    );
   });
 });
 
@@ -1126,6 +1307,7 @@ describe("record", () => {
   it("replaces the prior entry for this thread rather than duplicating it", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({
+      repo: "ecoma-io/reeve",
       thread: 42,
       at: "2026-07-01T00:00:00Z",
       title: "Old title",
@@ -1138,6 +1320,7 @@ describe("record", () => {
       pivot: null,
     });
     const other = JSON.stringify({
+      repo: "ecoma-io/reeve",
       thread: 99,
       at: "2026-07-01T00:00:00Z",
       title: "Someone else's thread",
@@ -1172,9 +1355,176 @@ describe("record", () => {
     expect(lines.find((line) => line.thread === 99)?.title).toBe("Someone else's thread");
   });
 
+  it(
+    'treats a legacy `repo: ""` line as this thread\'s own entry, and replaces it in place ' +
+      "with the current repo",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      // A line written before `repo` existed on the dedup key — parses with
+      // `repo: ""`, and would otherwise never be matched by a fresh write for
+      // the same thread, duplicating it on every record from here on.
+      const legacy = JSON.stringify({
+        repo: "",
+        thread: 42,
+        at: "2026-07-01T00:00:00Z",
+        title: "Old title",
+        excerpt: "old excerpt",
+        language: "en",
+        proposed: [],
+        decided: ["docs"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      stub.contentsFiles.set(shardPath(), { content: `${legacy}\n`, sha: "sha-seed" });
+      stub.labels = ["docs"];
+      const event = await labelEvent();
+
+      const run = await runAction(
+        stub,
+        { apply: "label, record", corrections: CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).toBe(0);
+      const shard = stub.contentsFiles.get(shardPath());
+      const lines = (shard?.content.trim().split("\n") ?? []).map(
+        (line) => JSON.parse(line) as { repo: string; thread: number; title: string },
+      );
+      // Replaced in place — one line for #42, now carrying the real repo —
+      // not a second, duplicate line appended alongside the legacy one.
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ repo: "ecoma-io/reeve", thread: 42 });
+      expect(lines[0]?.title).not.toBe("Old title");
+    },
+  );
+
+  it(
+    'leaves a legacy `repo: ""` line alone in a store that also holds another ' +
+      "repository's history, rather than steal it on a colliding thread number",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      // This store has recorded for more than one repository — `other-org/
+      // other-repo`'s own explicit line proves it. The legacy line for #42
+      // predates the `repo` field and could belong to either repository's
+      // history; only a store that has only ever seen today's repo may
+      // widen it as today's own.
+      const legacy = JSON.stringify({
+        repo: "",
+        thread: 42,
+        at: "2026-07-01T00:00:00Z",
+        title: "Old title",
+        excerpt: "old excerpt",
+        language: "en",
+        proposed: [],
+        decided: ["docs"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      const foreign = JSON.stringify({
+        repo: "other-org/other-repo",
+        thread: 7,
+        at: "2026-07-01T00:00:00Z",
+        title: "A different repository's own thread",
+        excerpt: "unrelated",
+        language: "en",
+        proposed: [],
+        decided: ["bug"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      stub.contentsFiles.set(shardPath(), { content: `${legacy}\n${foreign}\n`, sha: "sha-seed" });
+      stub.labels = ["docs"];
+      const event = await labelEvent();
+
+      const run = await runAction(
+        stub,
+        { apply: "label, record", corrections: CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).toBe(0);
+      const shard = stub.contentsFiles.get(shardPath());
+      const lines = (shard?.content.trim().split("\n") ?? []).map(
+        (line) => JSON.parse(line) as { repo: string; thread: number; title: string },
+      );
+      // Not replaced: the legacy line for #42 stands untouched, the foreign
+      // repository's own #7 stands untouched, and today's write appends a
+      // third line carrying `correction.repo` explicit rather than merging
+      // into either.
+      expect(lines).toHaveLength(3);
+      expect(lines.find((line) => line.repo === "" && line.thread === 42)?.title).toBe("Old title");
+      expect(
+        lines.find((line) => line.repo === "other-org/other-repo" && line.thread === 7)?.title,
+      ).toBe("A different repository's own thread");
+      const written = lines.find((line) => line.repo === "ecoma-io/reeve" && line.thread === 42);
+      expect(written).toBeDefined();
+      expect(written?.title).not.toBe("Old title");
+    },
+  );
+
+  it(
+    "leaves a legacy line alone when the store also holds a line it cannot parse — " +
+      "garbage is not proof the store is single-repository",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      // The malformed line could be anything — including the mangled remains
+      // of another repository's entry, repo field and all. A store carrying
+      // one cannot prove it has only ever seen today's repo, so the legacy
+      // line for #42 is not widened as today's own; it stands, and the write
+      // appends with `correction.repo` explicit, same as any shared store.
+      const legacy = JSON.stringify({
+        repo: "",
+        thread: 42,
+        at: "2026-07-01T00:00:00Z",
+        title: "Old title",
+        excerpt: "old excerpt",
+        language: "en",
+        proposed: [],
+        decided: ["docs"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      const malformed = '{"repo": "other-org/other-repo", "thread": 42, ...truncated';
+      stub.contentsFiles.set(shardPath(), {
+        content: `${legacy}\n${malformed}\n`,
+        sha: "sha-seed",
+      });
+      stub.labels = ["docs"];
+      const event = await labelEvent();
+
+      const run = await runAction(
+        stub,
+        { apply: "label, record", corrections: CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).toBe(0);
+      const shard = stub.contentsFiles.get(shardPath());
+      const rawLines = shard?.content.trim().split("\n") ?? [];
+      // The malformed line survives byte for byte, the legacy line stands
+      // untouched, and today's write is a third line — appended, not merged.
+      expect(rawLines).toHaveLength(3);
+      expect(rawLines).toContain(malformed);
+      const parsed = rawLines
+        .filter((line) => line !== malformed)
+        .map((line) => JSON.parse(line) as { repo: string; thread: number; title: string });
+      expect(parsed.find((line) => line.repo === "" && line.thread === 42)?.title).toBe(
+        "Old title",
+      );
+      const written = parsed.find((line) => line.repo === "ecoma-io/reeve" && line.thread === 42);
+      expect(written).toBeDefined();
+      expect(written?.title).not.toBe("Old title");
+    },
+  );
+
   it("replaces the prior entry in a healthy shard past an oversized sibling, warning rather than failing", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({
+      repo: "ecoma-io/reeve",
       thread: 42,
       at: "2026-07-01T00:00:00Z",
       title: "Old title",
@@ -1217,6 +1567,177 @@ describe("record", () => {
     expect(run.log).toContain("::warning::corrections:");
     expect(run.log).toContain(`\`${oversizedPath}\``);
     expect(run.log).toContain("Split the corrections store into smaller shards.");
+  });
+
+  it("rolls over to a numbered sibling once this month's shard is past the soft size limit", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // Just over the soft limit — still comfortably under the 1 MB the
+    // Contents API can inline, so this is the rollover case, not the
+    // `UnreadableContentsFile` one covered above.
+    const full = "x".repeat(900_001);
+    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-full" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // The full shard was never appended to.
+    expect(stub.contentsFiles.get(shardPath())?.content).toBe(full);
+    const sibling = `${CORRECTIONS}/${currentShard()}.2.ndjson`;
+    const shard = stub.contentsFiles.get(sibling);
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written.thread).toBe(42);
+  });
+
+  it("keeps rolling forward past a second full sibling to a third, rather than stopping at one", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const full = "x".repeat(900_001);
+    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-full-1" });
+    stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.2.ndjson`, {
+      content: full,
+      sha: "sha-full-2",
+    });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    const shard = stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.3.ndjson`);
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written.thread).toBe(42);
+  });
+
+  it("rolls over once a shard reaches exactly the soft limit — the check is a strict less-than", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // The boundary itself: `existing.text.length < SHARD_SOFT_LIMIT_BYTES`
+    // (900,000) is false once the shard is exactly at the limit, not only once
+    // it is past it — so this, not `900_001`, is the smallest size that rolls
+    // over.
+    const exactlyAtLimit = "x".repeat(900_000);
+    stub.contentsFiles.set(shardPath(), { content: exactlyAtLimit, sha: "sha-at-limit" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // The full shard was never appended to.
+    expect(stub.contentsFiles.get(shardPath())?.content).toBe(exactlyAtLimit);
+    const sibling = `${CORRECTIONS}/${currentShard()}.2.ndjson`;
+    const shard = stub.contentsFiles.get(sibling);
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written.thread).toBe(42);
+  });
+
+  it("appends to this month's shard, without rolling over, one byte under the soft limit", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const oneUnderLimit = "x".repeat(899_999);
+    stub.contentsFiles.set(shardPath(), { content: oneUnderLimit, sha: "sha-under-limit" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // Appended to the same shard — no numbered sibling was created.
+    const content = stub.contentsFiles.get(shardPath())?.content ?? "";
+    expect(content.startsWith(oneUnderLimit)).toBe(true);
+    const appended = content.slice(oneUnderLimit.length).trim();
+    expect(JSON.parse(appended)).toMatchObject({ thread: 42, decided: ["bug"] });
+    expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.2.ndjson`)).toBeUndefined();
+  });
+
+  it("fails red, naming the limit, once every numbered sibling up to the cap is already full", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const full = "x".repeat(900_001);
+    // Seed this month's shard and every numbered sibling through the cap
+    // (`MAX_SHARD_ATTEMPTS`, 500) already full — there is nowhere left to
+    // roll forward to, so a 501st shard must never be tried.
+    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-1" });
+    for (let n = 2; n <= 500; n += 1) {
+      stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.${String(n)}.ndjson`, {
+        content: full,
+        sha: `sha-${String(n)}`,
+      });
+    }
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("500 shards");
+    expect(run.log).toContain("shard 501");
+    // No 501st shard was ever written.
+    expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.501.ndjson`)).toBeUndefined();
+  });
+
+  it("finds and replaces an existing entry sitting in a numbered sibling shard, not only the first", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const previous = JSON.stringify({
+      repo: "ecoma-io/reeve",
+      thread: 42,
+      at: "2026-07-01T00:00:00Z",
+      title: "Old title",
+      excerpt: "old excerpt",
+      language: "en",
+      proposed: [],
+      decided: ["docs"],
+      by: "ana",
+      note: null,
+      pivot: null,
+    });
+    stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.2.ndjson`, {
+      content: `${previous}\n`,
+      sha: "sha-seed",
+    });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    // Replaced in place, in the sibling it was already in — not appended
+    // fresh to `shardPath()`.
+    expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+    const shard = stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.2.ndjson`);
+    const lines = (shard?.content.trim().split("\n") ?? []).map(
+      (line) => JSON.parse(line) as { thread: number; decided: string[] },
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ thread: 42, decided: ["bug"] });
   });
 
   it("fails red, naming the unreadable shard, when the thread cannot be found anywhere readable", async () => {
@@ -1876,4 +2397,180 @@ describe("the sweep", () => {
       expect(run.summary).toContain("**Dry run** — nothing was applied.");
     },
   );
+
+  describe("bulk migration", () => {
+    // Same grant `describe("record", ...)` above uses — `record` never fires
+    // from `triage: [label]` alone, sweep or not.
+    const RECORDING_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record]");
+    const CORRECTIONS = ".reeve/corrections";
+
+    function shardPath(): string {
+      return `${CORRECTIONS}/${currentShard()}.ndjson`;
+    }
+
+    it(
+      "records every candidate's standing labels instead of triaging them, attributed to " +
+        "`sweep`, when `record` composes with `sweep`",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [
+          candidate(701, "2026-01-02T00:00:00Z", { labels: ["bug"] }),
+          candidate(702, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
+        ];
+
+        const run = await runAction(
+          stub,
+          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        );
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.recorded).toBe("true");
+        expect(run.outputs.processed).toBe("2");
+        // Never a fresh verdict — a sweep composing `record` reads what already
+        // stands, same as a single labelled event does.
+        expect(stub.asked).toHaveLength(0);
+        expect(stub.effects.applied).toEqual([]);
+
+        const shard = stub.contentsFiles.get(shardPath());
+        expect(shard).toBeDefined();
+        const written = (shard?.content.trim().split("\n") ?? []).map(
+          (line) =>
+            JSON.parse(line) as { repo: string; thread: number; decided: string[]; by: string },
+        );
+        expect(written).toHaveLength(2);
+        expect(written.find((line) => line.thread === 701)).toMatchObject({
+          repo: "ecoma-io/reeve",
+          decided: ["bug"],
+          by: "sweep",
+        });
+        expect(written.find((line) => line.thread === 702)).toMatchObject({
+          repo: "ecoma-io/reeve",
+          decided: ["docs"],
+          by: "sweep",
+        });
+        expect(run.summary).toContain("recorded as `bug`");
+        expect(run.summary).toContain("recorded as `docs`");
+      },
+    );
+
+    it("skips a candidate carrying no taxonomy label — nothing on it to import", async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      stub.issues = [
+        candidate(801, "2026-01-02T00:00:00Z", { labels: ["triage-needed"] }),
+        candidate(802, "2026-01-01T00:00:00Z", { labels: ["bug"] }),
+      ];
+
+      const run = await runAction(
+        stub,
+        sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+      );
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.skipped).toBe("1");
+      const shard = stub.contentsFiles.get(shardPath());
+      const written = (shard?.content.trim().split("\n") ?? []).map(
+        (line) => JSON.parse(line) as { thread: number },
+      );
+      expect(written).toHaveLength(1);
+      expect(written[0]?.thread).toBe(802);
+      expect(run.summary).toContain("| #802 |");
+      expect(run.summary).not.toContain("| #801 |");
+    });
+
+    it(
+      "excludes a machine-applied label from what it imports, and skips a candidate left with " +
+        "nothing decidable — the self-training guard",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [
+          // `bug` was applied by a maintainer, `docs` by this duty's own past
+          // sweep — only `bug` is a correction worth importing.
+          candidate(901, "2026-01-02T00:00:00Z", { labels: ["bug", "docs"] }),
+          // Every taxonomy label here is machine-applied — nothing to import.
+          candidate(902, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
+        ];
+        stub.labelEvents = {
+          901: [
+            { label: "bug", event: "labeled", bot: false },
+            { label: "docs", event: "labeled", bot: true },
+          ],
+          902: [{ label: "docs", event: "labeled", bot: true }],
+        };
+
+        const run = await runAction(
+          stub,
+          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        );
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.processed).toBe("1");
+        expect(run.outputs.skipped).toBe("1");
+
+        const shard = stub.contentsFiles.get(shardPath());
+        const written = (shard?.content.trim().split("\n") ?? []).map(
+          (line) => JSON.parse(line) as { thread: number; decided: string[] },
+        );
+        expect(written).toHaveLength(1);
+        expect(written[0]).toMatchObject({ thread: 901, decided: ["bug"] });
+        expect(run.summary).toContain("| #901 |");
+        expect(run.summary).not.toContain("| #902 |");
+      },
+    );
+
+    it(
+      "skips a candidate whose label history is longer than one run reads, rather than " +
+        "guess who applied it",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [
+          candidate(901, "2026-01-02T00:00:00Z", { labels: ["bug"] }),
+          // This thread's own timeline never answers a short page — the walk
+          // hits `listLabelEvents`'s own ceiling with the last page still
+          // full, so nothing here can be attributed to a human or a bot.
+          candidate(902, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
+        ];
+        stub.truncatedLabelHistory = new Set([902]);
+
+        const run = await runAction(
+          stub,
+          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        );
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.processed).toBe("1");
+        expect(run.outputs.skipped).toBe("1");
+
+        const shard = stub.contentsFiles.get(shardPath());
+        const written = (shard?.content.trim().split("\n") ?? []).map(
+          (line) => JSON.parse(line) as { thread: number },
+        );
+        expect(written).toHaveLength(1);
+        expect(written[0]?.thread).toBe(901);
+        expect(run.summary).toContain("| #901 |");
+        expect(run.summary).not.toContain("| #902 |");
+        expect(run.log).toContain(
+          "#902: label history is longer than one run reads — cannot attribute, nothing imported.",
+        );
+      },
+    );
+
+    it(
+      "leaves an ordinary sweep triaging, and `recorded` false, when `apply` does not " +
+        "grant `record`",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [candidate(901, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
+
+        const run = await runAction(stub, sweepInputs({ corrections: CORRECTIONS }));
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.recorded).toBe("false");
+        // Already labelled with a taxonomy entry, so the ordinary triaging
+        // sweep's own idempotent skip takes it, not a model call.
+        expect(run.outputs.skipped).toBe("1");
+        expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+      },
+    );
+  });
 });

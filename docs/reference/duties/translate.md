@@ -89,6 +89,14 @@ no warrant file at all. Once a `capabilities:` block is written into
 of it grants this duty nothing, and the run says so rather than guessing. See
 [the capabilities table](../../guides/warrant.md#capabilities).
 
+**`apply`** is the workflow's own half of the same gate — `edit-body`, or
+`none` for a run that detects, drafts and judges but never writes. The
+narrower of `apply` and the warrant always wins: a capability the warrant
+withholds is a reason not to publish, not a reason not to have decided, so
+detection, drafting and judging spend exactly what they would spend either
+way and only the write at the end is gated. `apply: none` is a good way to
+watch what a run would have published before it is allowed to.
+
 ## Required inputs
 
 `models` is the only input this action requires — model ids, comma or
@@ -110,15 +118,19 @@ Every input `translate/action.yml` declares.
 | `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                      |
 | `languages`         | no       | `en, vi, zh`                | What to translate **into**. Says nothing about what an author may write in. Ignored once the warrant's own `languages:` key is written.                                    |
 | `warrant`           | no       | `.github/reeve.yml`         | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at this default path is not a failure.                                               |
+| `apply`             | no       | `edit-body`                 | What this run may do: `edit-body`, or `none` to decide and report without touching the thread. The narrower of this and the warrant file wins.                             |
 | `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                 |
 | `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                                                              |
 | `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
+| `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                     |
 | `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                           |
+| `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                          |
 | `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                         |
 | `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                |
 | `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                 |
 | `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                    |
 | `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                            |
+| `max-requests`      | no       | `none`                      | How many provider requests — detection, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                         |
 | `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
 | `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
 | `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
@@ -131,8 +143,14 @@ limit later translates the rest, because the fingerprint is over the part
 that was actually read.
 
 Whatever `max-body-chars` reads, it is never sent to a model in one piece.
-The body is split into chunks a few thousand characters wide before drafting
-starts, each translated in its own draft-and-judge pass, one at a time. A
+The body is split into chunks up to `chunk-chars` wide (`6000` by default)
+before drafting starts, each translated in its own draft-and-judge pass, one
+at a time. `chunk-chars` is refused below `500` — a chunk that small stops
+paying for translation and starts paying a whole request's fixed overhead
+(the system prompt, the glossary, the examples) for a shrinking sliver of
+actual text — and has no ceiling: a larger value trades fewer requests for a
+coarser failure grain, one chunk failing losing more of a language's
+translation. A
 fenced code block is never split across two chunks — a chunk that would cut
 one in half is grown past the budget instead — and a chunk that is entirely
 code is reused verbatim rather than spent on an answer already known: the
@@ -179,6 +197,34 @@ id. The name is cut at the first `=`, since an id is never an assignment and
 a name may well contain one. This is presentation, not masking — put ids in
 secrets if they are secret.
 
+**`translate-replies` and `max-replies` bound a real ceiling, not a
+formality.** Off by default: every reply, times every language it is
+missing, and a very active thread has a lot of both. One run reads the most
+recent replies — `max-replies`, a hundred by default — and warns when there
+were more, so a long thread is translated from its newest end rather than
+silently in part. GitHub's own comment listing has no reverse-chronological
+order, so finding "most recent" means walking forward from the start of the
+thread within the run; `none` lifts the count but not the walk, and a thread
+of thousands of replies is the case even `none` will not fully read in one
+run. **Review comments on a pull request's diff are deliberately not
+included** — a translation appended to a line comment moves the review
+conversation away from the line it is about.
+
+**`max-requests` is a ceiling this run sets for itself, not the provider
+running dry.** `starved` (below) is weather — every model in `models` failed
+on capacity, something happened on the provider's side. `max-requests`
+reaching its bound is the opposite: the roster is healthy, and the run simply
+chose to stop asking for more, on request count alone across detection,
+drafting and judging together — every request made counts against it,
+whatever it answered, so a 429 a model rotation left behind spends the same
+one request a usable draft would have. It is checked at every clean-cut
+boundary a text or a thread reaches — before detection starts, before the
+next language, before the next reply, before a sweep's next thread — never
+partway through a language, so a language already being translated always
+finishes atomically: what already published stands, and only the work not
+yet started is left for a later run (or, under `sweep`, counted into
+`remaining`). `none`, the default, never trips it.
+
 **The run report** is written to the job's own summary, not the thread: what
 was translated (model, score, votes), what was not and why, and cost —
 requests and tokens, by stage and by model. `show-attribution` stays `none`
@@ -189,15 +235,16 @@ not to everyone the thread notifies.
 
 Every output `translate/action.yml` declares.
 
-| Output               | Value                                                                                                                                                       |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source-language`    | The detected language code of the thread's body, or empty — empty means none of the configured languages wrote it.                                          |
-| `translated`         | JSON array of the language codes that were published.                                                                                                       |
-| `skipped`            | Outside `sweep`: JSON array of the language codes no model could translate this run. Under `sweep`: a count of threads already carrying this duty's marker. |
-| `replies-translated` | How many replies got a translation. `0` when `translate-replies` is off.                                                                                    |
-| `starved`            | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                        |
-| `processed`          | How many threads a sweep actually processed this run. `0` outside `sweep`.                                                                                  |
-| `remaining`          | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                  |
+| Output               | Value                                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `source-language`    | The detected language code of the thread's body, or empty — empty means none of the configured languages wrote it.                                                                                                                                                                                                                         |
+| `translated`         | JSON array of the language codes that were published.                                                                                                                                                                                                                                                                                      |
+| `skipped`            | Outside `sweep`: JSON array of the language codes not translated this run — no model could draft it, or `max-requests` was reached first; the run summary's table tells the two apart, this output does not need to. Under `sweep`: a count of threads already carrying this duty's marker.                                                |
+| `replies-translated` | How many replies got a translation. `0` when `translate-replies` is off.                                                                                                                                                                                                                                                                   |
+| `starved`            | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                                                                                                                       |
+| `budget-exhausted`   | `true` only when `max-requests` genuinely turned work away this run — not simply whether the meter ended at or past the ceiling, which a thread that spent exactly `max-requests` with nothing left to ask for also does. Never `true` when `max-requests` is `none`. Distinct from `starved` — this run's own budget, not the provider's. |
+| `processed`          | How many threads a sweep actually processed this run. `0` outside `sweep`.                                                                                                                                                                                                                                                                 |
+| `remaining`          | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                                                                                                                                                 |
 
 All are written on every path that reaches an answer, including the ones
 that answer "nothing" — a step branching on `skipped` reads `[]` on the run
@@ -218,16 +265,25 @@ line: a language nobody could translate does not fail the job.
 
 ## Failure behavior
 
-| What happened                                   | What you get                                                     |
-| ----------------------------------------------- | ---------------------------------------------------------------- |
-| One language had no working model this run      | Warning, that code in `skipped`, the others published, **green** |
-| No language worked                              | Warning per language, `translated: []`, **green**                |
-| The thread cannot be read                       | **Red**                                                          |
-| The configuration is broken                     | **Red**, naming the input                                        |
-| The event names no thread and `number` is empty | **Red**, naming the event                                        |
+| What happened                                                     | What you get                                                                                                                                                                            |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One language had no working model this run                        | Warning, that code in `skipped`, the others published, **green**                                                                                                                        |
+| No language worked                                                | Warning per language, `translated: []`, **green**                                                                                                                                       |
+| Another run's write landed between this run's write and its check | Warning naming the race, the write already stands, **green** — see [Installation](../../getting-started/installation.md#2-pick-a-trigger) for the `concurrency:` group that prevents it |
+| The thread cannot be read                                         | **Red**                                                                                                                                                                                 |
+| The configuration is broken                                       | **Red**, naming the input                                                                                                                                                               |
+| The event names no thread and `number` is empty                   | **Red**, naming the event                                                                                                                                                               |
 
 A skipped language is not in the fingerprint, so the next run tries it
 again rather than reading its own claim and stopping.
+
+**Running on the unconfigured `languages` default is noted, once, rather
+than left silent.** `en, vi, zh` is `languages`'s own default in
+`action.yml`, meant to make a first run cheap to try — but a project that
+never comes back to choose on purpose is making a decision without knowing
+it made one. A run that reaches this default with no `languages:` key in the
+warrant either logs a `notice` saying so; writing either one, to whatever
+value, clears it for good.
 
 ## Dry-run behavior
 

@@ -331,13 +331,23 @@ export interface SweepRun {
   readonly dryRun: boolean;
   readonly warrant: string;
   readonly results: readonly SweptThread[];
-  /** Threads already carrying a taxonomy label — the idempotent skip. */
+  /**
+   * Threads this run had no reason to touch — already carrying a taxonomy
+   * label, under ordinary triage; carrying none at all, under bulk migration.
+   * See `recording`.
+   */
   readonly skipped: number;
   /** Candidates this run did not reach: the limit, or the roster running dry. */
   readonly remaining: number;
   /** Every model starved on capacity before `limit` was reached. */
   readonly starvedRun: boolean;
   readonly ungranted: string | null;
+  /**
+   * `true` when this sweep composed `record` with `sweep` — bulk migration —
+   * rather than triaging its candidates. Changes only how `skipped` is
+   * explained: the count is the same idempotent-skip mechanism either way.
+   */
+  readonly recording: boolean;
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly screenNames: Names;
@@ -363,10 +373,12 @@ export function summarizeSweep(run: SweepRun): string {
   const rendered = table(["Thread", "Outcome"], rows);
 
   const parts = [
-    "## Reeve · triage — sweep",
+    `## Reeve · triage — sweep${run.recording ? " (bulk migration)" : ""}`,
     "",
     `${run.dryRun ? "**Dry run** — nothing was applied. " : ""}Processed ${String(run.results.length)}, ` +
-      `skipped ${String(run.skipped)} (already labelled), ${String(run.remaining)} remaining.`,
+      `skipped ${String(run.skipped)} ` +
+      `(${run.recording ? "no taxonomy label to import" : "already labelled"}), ` +
+      `${String(run.remaining)} remaining.`,
     "",
     rendered.length === 0 ? "Nothing was processed this run." : rendered,
   ];

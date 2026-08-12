@@ -25,6 +25,15 @@ export interface Looked {
   readonly posted: readonly Posted[];
   readonly skipped: readonly Language[];
   /**
+   * The subset of `skipped` left for `max-requests` rather than for no model
+   * producing a draft — always a subset, never a separate count: whatever
+   * else reads `skipped` (the published footer, the fingerprint) has no use
+   * for the distinction and keeps seeing the combined set unchanged. Only
+   * this table does, because "no model could do it" and "this run never
+   * tried" call for different next steps from whoever reads it.
+   */
+  readonly budgetSkipped: readonly Language[];
+  /**
    * Why nothing was translated, when nothing was. An empty body, a body with no
    * prose in it, a fingerprint that already matched: each is a decision worth
    * reporting, and each is invisible in a table of translations because it
@@ -126,13 +135,16 @@ function translations(looked: readonly Looked[]): string {
           : cell(decision.votes.map((vote) => `${vote.model}→${vote.pick}`).join(", ")),
       ]);
     }
+    const budgetSkipped = new Set(text.budgetSkipped.map((language) => language.code));
     for (const language of text.skipped) {
       // A skipped language is the row worth reading twice: it is the one the
-      // next run will try again, and the one a configuration change is for.
+      // next run will try again, and the one a configuration change is for —
+      // except that "no model could do it" and "this run never tried" call
+      // for different changes, so the two are not the same row.
       rows.push([
         cell(text.what),
         cell(`${language.label} (${language.code})`),
-        "**no draft**",
+        budgetSkipped.has(language.code) ? "**budget**" : "**no draft**",
         "—",
         "—",
         "—",
@@ -187,6 +199,8 @@ export interface SweepRun {
   readonly remaining: number;
   /** Every model starved on capacity before `limit` was reached. */
   readonly starvedRun: boolean;
+  /** This run's own `max-requests` ceiling was reached before `limit` was. */
+  readonly budgetExhausted: boolean;
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly judgeNames: Names;
@@ -236,8 +250,17 @@ export function summarizeSweep(run: SweepRun): string {
     parts.push(
       "",
       "The roster ran out of capacity partway through — every model in `models` failed on " +
-        "capacity this run. What is above was delivered; the rest is `remaining`, and the next " +
+        "capacity this run. What is above was processed; the rest is `remaining`, and the next " +
         "sweep picks up where this one stopped. Weather, not a failure.",
+    );
+  }
+
+  if (run.budgetExhausted) {
+    parts.push(
+      "",
+      "`max-requests` was reached partway through — this run's own ceiling, not the provider's. " +
+        "What is above was processed; the rest is `remaining`, and the next sweep picks up where " +
+        "this one stopped.",
     );
   }
 

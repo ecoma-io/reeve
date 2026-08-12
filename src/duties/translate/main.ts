@@ -57,6 +57,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage, residue } from "../../core/detect.js";
+import { narrow, parseApply } from "../../core/enforce.js";
 import {
   createReply,
   createThread,
@@ -86,7 +87,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
-import { createMeter, metered } from "../../core/meter.js";
+import { createMeter, metered, total, type Meter } from "../../core/meter.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
@@ -125,6 +126,16 @@ const DEFAULT_CAPABILITIES: readonly Capability[] = ["edit-body"];
  */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
+/**
+ * `languages`'s own default in `action.yml`, repeated here for the same
+ * reason `DEFAULT_WARRANT_PATH` is. Used only to tell "this is the input
+ * nobody touched" from "this is what somebody typed, and it happens to match"
+ * — the two are not otherwise distinguishable once the input has already
+ * been filled in, and the run treats the coincidence as harmless rather than
+ * try to detect it.
+ */
+const DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
+
 interface Settings {
   readonly token: string;
   /** The thread to work on, or null in `sweep`. */
@@ -134,7 +145,12 @@ interface Settings {
   readonly modelNames: Names;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  /** What the warrant grants this duty. Checked once per run, not per text. */
+  /** The `apply` input, parsed. This run's half of the double-gate — see `permitted`. */
+  readonly apply: readonly Capability[];
+  /**
+   * The narrower of what the warrant grants and what `apply` asks for.
+   * Checked once per run, not per text — see `core/enforce.ts`'s `narrow`.
+   */
   readonly permitted: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   /** What to call each seat, keyed by every model that seat may be filled by. */
@@ -143,6 +159,16 @@ interface Settings {
   /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
   readonly maxBodyChars: number | null;
   readonly replies: boolean;
+  /** How many of a thread's newest replies one run reads. `null` is no bound. */
+  readonly maxReplies: number | null;
+  /** How large one chunk of a body can be before it is its own request. See `parseChunkChars`. */
+  readonly chunkChars: number;
+  /**
+   * How many provider requests — detection, drafting and judging combined —
+   * this run may spend before it stops asking for more. `null` is no bound.
+   * See `budgetExhausted`.
+   */
+  readonly maxRequests: number | null;
   readonly attribution: Attribution;
   readonly dryRun: boolean;
   readonly baseUrl: string;
@@ -176,11 +202,15 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
   return {
     ...shared,
     warrant: core.getInput("warrant", { required: true }),
+    apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
     replies: core.getBooleanInput("translate-replies"),
+    maxReplies: bounded("max-replies", core.getInput("max-replies")),
+    chunkChars: parseChunkChars(core.getInput("chunk-chars")),
+    maxRequests: bounded("max-requests", core.getInput("max-requests")),
     attribution: readAttribution(),
   };
 }
@@ -250,19 +280,85 @@ interface Stages {
 }
 
 /**
- * How large one chunk of a body can be before it is asked for as its own
- * request rather than folded into a larger one.
+ * `chunk-chars`'s own floor.
  *
- * Matches `max-body-chars`'s own default deliberately: it is the size every
- * body this duty was built for already fit inside a single request, back
- * when `max-body-chars: none` meant "translate it whole in one request" and
- * anything past a bound meant "the tail is lost". A body under this size is
- * one chunk and behaves exactly as it always has; a larger one — which used
- * to mean a truncated tail whenever a bound was configured — is now split
- * rather than cut, and `none` can mean "translate every character" without
- * asking one model to answer for an unbounded body in one request.
+ * Below this, a chunk stops being a request-sizing decision and starts being
+ * a way to ask a model to translate one sentence at a time — more requests
+ * than the body could ever need, each one paying a fixed cost (system
+ * prompt, glossary, examples) for a shrinking amount of actual text. There is
+ * no ceiling: a maintainer who wants larger chunks is trading the failure
+ * granularity `chunks()`'s own doc comment describes, a trade this duty is
+ * not in a position to refuse on their behalf.
  */
-const CHUNK_CHARS = 6000;
+const MIN_CHUNK_CHARS = 500;
+
+/**
+ * `chunk-chars`, refused below `MIN_CHUNK_CHARS` rather than clamped — the
+ * same reasoning as every other refused-not-clamped input in this project:
+ * a typo that silently produced thousands of one-paragraph requests would be
+ * far more expensive to notice than a run that fails on the first thread.
+ */
+function parseChunkChars(raw: string): number {
+  const trimmed = raw.trim();
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < MIN_CHUNK_CHARS) {
+    throw new Error(
+      `chunk-chars: expected a whole number of ${String(MIN_CHUNK_CHARS)} or more, got \`${raw}\`.`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Whether this run ever genuinely turned work away for `max-requests` —
+ * the one thing `budget-exhausted` reports, distinct from whether the meter
+ * happens to sit at or past the ceiling once the run is over.
+ *
+ * A single mutable object rather than a `boolean` recomputed at the end,
+ * because recomputing from the final meter reading gets both directions
+ * wrong: a thread that needed exactly `max-requests` requests and had
+ * nothing left to ask for reads identically, at the end, to one that had a
+ * language turned away — the meter sits at the ceiling either way — and a
+ * sweep's last candidate can deny work inside its own per-language or
+ * per-reply checkpoint with no further candidate left for the sweep's own
+ * pre-thread check to ever run again and notice. `denied` is set exactly
+ * once, at the moment `budgetExhausted` itself answers `true` — every call
+ * site below only asks the question immediately before a real piece of work
+ * it would otherwise do, so that answer is always a genuine denial.
+ */
+interface Budget {
+  denied: boolean;
+}
+
+function createBudget(): Budget {
+  return { denied: false };
+}
+
+/**
+ * Whether this run has already spent `max-requests`, across every purpose —
+ * detection, drafting and judging combined, the same total the summary's own
+ * spend table adds up to. `null` is no bound, the default, and never
+ * exhausted.
+ *
+ * A different kind of stop than `starved`, deliberately: a roster out of
+ * capacity is weather from the provider's own side, something happened to it.
+ * A budget this run set for itself running out is not that — it is a ceiling
+ * this run chose, working exactly as configured. Conflating the two would
+ * have a maintainer watching `starved` for exactly the wrong reason once
+ * `max-requests` started tripping it instead of a real outage.
+ *
+ * Checked at each place a fresh request is about to be spent — before
+ * detection, a language, a reply, a sweep's next thread — rather than once
+ * up front, because the budget can run out partway through any of those, and
+ * what already happened stands: a translation already drafted and published
+ * is not un-published because the next language could not be started.
+ */
+function budgetExhausted(settings: Settings, meter: Meter, budget: Budget): boolean {
+  const exhausted =
+    settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
+  if (exhausted) budget.denied = true;
+  return exhausted;
+}
 
 /** One chunk's own draft-and-judge pass — everything a single-chunk body used to get, once. */
 interface ChunkResult {
@@ -379,7 +475,7 @@ async function translateInto(
   source: string,
   weather: Weather,
 ): Promise<Posted | null> {
-  const pieces = chunks(source, CHUNK_CHARS);
+  const pieces = chunks(source, settings.chunkChars);
   const results: ChunkResult[] = [];
 
   for (const piece of pieces) {
@@ -401,7 +497,7 @@ async function translateInto(
     results.push(outcome);
   }
 
-  // Almost always one entry — a body under `CHUNK_CHARS` is one chunk and
+  // Almost always one entry — a body under `chunk-chars` is one chunk and
   // every chunk of it was won by the same model, which is what makes the
   // common case read exactly as it always has. A body chunked across more
   // than one model reports every one of them rather than picking a winner
@@ -440,7 +536,7 @@ interface Report extends Looked {
 }
 
 function nothing(what: string, note: string): Report {
-  return { what, from: null, posted: [], skipped: [], note, published: false };
+  return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
 
 /**
@@ -458,6 +554,8 @@ async function translateText(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  meter: Meter,
+  budget: Budget,
 ): Promise<Report> {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
@@ -500,6 +598,16 @@ async function translateText(
     );
   }
 
+  // Before detection, same as every other checkpoint below: the free checks
+  // above already ran (they cost nothing to make, whatever the budget), but
+  // detection is the first thing that would actually spend a request, and a
+  // budget already at its ceiling has no business starting a text it cannot
+  // finish deciding about.
+  if (budgetExhausted(settings, meter, budget)) {
+    core.warning(`${what}: \`max-requests\` was reached, so this text was not attempted this run.`);
+    return nothing(what, "budget exhausted");
+  }
+
   const detection = await detectLanguage(
     source,
     settings.languages,
@@ -511,9 +619,26 @@ async function translateText(
       : `${what}: source language ${detection.language.code} (by ${detection.by}).`,
   );
 
+  const toTranslate = targets(settings.languages, detection.language);
   const posted: Posted[] = [];
   const skipped: Language[] = [];
-  for (const to of targets(settings.languages, detection.language)) {
+  const budgetSkipped: Language[] = [];
+  for (const [index, to] of toTranslate.entries()) {
+    // Checked before spending the request a language is about to cost, not
+    // after — so a budget set tight enough to stop mid-thread stops before
+    // the request that would have gone over it, not after.
+    if (budgetExhausted(settings, meter, budget)) {
+      const remaining = toTranslate.slice(index);
+      skipped.push(...remaining);
+      budgetSkipped.push(...remaining);
+      core.warning(
+        `${what}: \`max-requests\` was reached, so ${remaining.map((language) => language.code).join(", ")} ` +
+          `${remaining.length === 1 ? "was" : "were"} not attempted this run. ` +
+          "What was already drafted still publishes.",
+      );
+      break;
+    }
+
     const translated = await translateInto(
       to,
       settings,
@@ -557,22 +682,35 @@ async function translateText(
         ? `Dry run — ${what} would have been left alone: no language produced a translation.`
         : `Dry run — ${what} would have become:\n${assemble(official, marker, would)}`,
     );
-    return { what, from: detection.language, posted, skipped, note: null, published: false };
+    return {
+      what,
+      from: detection.language,
+      posted,
+      skipped,
+      budgetSkipped,
+      note: null,
+      published: false,
+    };
   }
 
   // Guarded here and nowhere earlier: detection, drafting and judging all ran
   // and all spent whatever they were going to spend, exactly as they would
-  // under an `apply: none` narrowing in triage — a capability the warrant
+  // under an `apply: none` narrowing — a capability the warrant or `apply`
   // withheld is a reason not to write, not a reason not to have decided.
   if (!settings.permitted.includes("edit-body")) {
     // The note reaches the summary and the sweep's outcome column, so a
-    // reader can tell a write the warrant blocked from a run where no draft
-    // survived — the two look identical once `posted` is emptied. Only set
-    // when something was actually withheld: with no drafts, "no draft
-    // survived" is the true story whatever the warrant says.
+    // reader can tell a write the double-gate blocked from a run where no
+    // draft survived — the two look identical once `posted` is emptied. Only
+    // set when something was actually withheld: with no drafts, "no draft
+    // survived" is the true story whatever `apply` and the warrant say.
+    //
+    // Named generically rather than blaming one half — `apply: none` and a
+    // warrant that never named `translate` both land here the same way, and
+    // the upfront `withheld` warning above is where the specific one, if
+    // there is one, was already said.
     if (posted.length > 0) {
       core.warning(
-        `${what}: \`${settings.warrant}\` does not grant \`edit-body\` to translate, so ` +
+        `${what}: \`edit-body\` is not permitted this run, so ` +
           `${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} ` +
           `drafted this run ${posted.length === 1 ? "was" : "were"} not published.`,
       );
@@ -581,14 +719,23 @@ async function translateText(
         from: detection.language,
         posted: [],
         skipped,
+        budgetSkipped,
         note:
-          `\`${settings.warrant}\` does not grant \`edit-body\`, so the ` +
+          `\`edit-body\` is not permitted this run, so the ` +
           `${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} ` +
           `drafted this run ${posted.length === 1 ? "was" : "were"} not published`,
         published: false,
       };
     }
-    return { what, from: detection.language, posted: [], skipped, note: null, published: false };
+    return {
+      what,
+      from: detection.language,
+      posted: [],
+      skipped,
+      budgetSkipped,
+      note: null,
+      published: false,
+    };
   }
 
   const outcome = await publish(thread, marker, publication(translated));
@@ -597,12 +744,24 @@ async function translateText(
       ? `${what}: nothing written — ${outcome.reason}.`
       : `${what}: ${outcome.action}.`,
   );
+  // Not red: the write already landed, and whatever raced it is a fact about
+  // this run's timing, not about whether it was allowed to happen.
+  // `docs/getting-started/installation.md`'s `concurrency:` group is the fix;
+  // this is the run saying it hit exactly the gap that guidance closes.
+  if (outcome.action === "published" && outcome.mismatched) {
+    core.warning(
+      `${what}: another write landed on this thread between this run's write and its check — ` +
+        "the body may not be exactly what this run published. Add a `concurrency:` group keyed " +
+        "on the thread (see the installation guide) to stop two runs from racing the same body.",
+    );
+  }
 
   return {
     what,
     from: detection.language,
     posted,
     skipped,
+    budgetSkipped,
     note: null,
     published: outcome.action === "published",
   };
@@ -626,8 +785,13 @@ async function translateReplies(
   stages: Stages,
   looked: Looked[],
   weather: Weather,
+  meter: Meter,
+  budget: Budget,
 ): Promise<number> {
-  const { replies, more } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at, {
+    max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
+    order: "newest",
+  });
   if (more) {
     core.warning(
       `#${String(at.number)} has more replies than one run reads, so the oldest were not ` +
@@ -637,6 +801,17 @@ async function translateReplies(
 
   let published = 0;
   for (const reply of replies) {
+    // Checked before the reply's own first request, same as the per-language
+    // check inside `translateText` — a reply not yet started is cheaper to
+    // leave for a later run than one translated into half its languages.
+    if (budgetExhausted(settings, meter, budget)) {
+      core.warning(
+        `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not ` +
+          "attempted this run.",
+      );
+      break;
+    }
+
     const translated = await translateText(
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
@@ -644,6 +819,8 @@ async function translateReplies(
       settings,
       stages,
       weather,
+      meter,
+      budget,
     );
     looked.push(translated);
     if (translated.published) published += 1;
@@ -680,6 +857,8 @@ async function processThread(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  meter: Meter,
+  budget: Budget,
 ): Promise<ThreadResult> {
   const thread = createThread(api, at);
   const translated = await translateText(
@@ -689,11 +868,13 @@ async function processThread(
     settings,
     stages,
     weather,
+    meter,
+    budget,
   );
   const looked: Looked[] = [translated];
 
   const replies = settings.replies
-    ? await translateReplies(api, at, settings, stages, looked, weather)
+    ? await translateReplies(api, at, settings, stages, looked, weather, meter, budget)
     : 0;
 
   return { looked, translated, replies, ungranted: null };
@@ -780,6 +961,8 @@ async function runSweep(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  meter: Meter,
+  budget: Budget,
 ): Promise<void> {
   // Once, before the listing — exactly as triage's sweep — because the warrant
   // is checked once per run, not once per thread, and a listing this duty was
@@ -797,10 +980,10 @@ async function runSweep(
 
     // The idempotent skip: a body already carrying this duty's marker has been
     // translated at least once before, whatever the exact language set was
-    // that run — the same "already decided about" reading `alreadyTaxonomized`
-    // gives triage's skip, and free for the same reason: nothing here calls
-    // the tracker or a model, only `marker.split` on text the listing already
-    // fetched.
+    // that run — the same "already decided about" reading triage's own
+    // marker-carrying skip gives it, and free for the same reason: nothing
+    // here calls the tracker or a model, only `marker.split` on text the
+    // listing already fetched.
     if (marker.split(thread.body).fingerprint !== null) {
       acc.skipped += 1;
       continue;
@@ -811,8 +994,27 @@ async function runSweep(
       break;
     }
 
+    // The same self-imposed ceiling `translateText` and `translateReplies`
+    // check within one thread, checked here as well so a sweep never starts a
+    // thread it cannot even begin — leaving it for `remaining` is cheaper
+    // than starting it and stopping mid-language. `budget.denied` is what
+    // `run`'s `finally` reads back; nothing here needs its own copy of the
+    // answer, including when the very last candidate is the one that denies
+    // work inside its own per-language or per-reply checkpoint with no
+    // further iteration left to notice — `budget` already has it by then.
+    if (budgetExhausted(settings, meter, budget)) break;
+
     const at = { ...context.repo, number: thread.number };
-    const result = await processThread(api, at, thread.body, settings, stages, weather);
+    const result = await processThread(
+      api,
+      at,
+      thread.body,
+      settings,
+      stages,
+      weather,
+      meter,
+      budget,
+    );
     acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
   }
 }
@@ -823,6 +1025,11 @@ export async function run(): Promise<void> {
   // early by capacity starvation, which leaves `bulk` holding every thread
   // already processed before the loop broke.
   const meter = createMeter();
+  // The one place `budget.denied` is set — inside `budgetExhausted` itself —
+  // and the one place it is read — `finally`, below — so both the
+  // single-thread path and the sweep answer `budget-exhausted` off the same
+  // genuine-denial tracker rather than each recomputing its own guess.
+  const budget = createBudget();
   // Reassigned once `readSettings` has answered, inside the `try` below —
   // `endpoints` is not known until then. Left at its empty-alias default if
   // reading the settings themselves is what fails, which is fine: nothing
@@ -858,20 +1065,52 @@ export async function run(): Promise<void> {
     // run is promised a green no-op, and a duty that will never translate has
     // no business failing red over a `languages` nobody configured for it.
     const denied = authority.warrant.unnamed("translate");
-    const resolution = denied
-      ? null
-      : resolveLanguages(authority.warrant, core.getInput("languages"));
+    const rawLanguages = core.getInput("languages");
+    const resolution = denied ? null : resolveLanguages(authority.warrant, rawLanguages);
     if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+
+    // Once, and only for the run nobody has configured at all: the warrant
+    // never wrote `languages:`, and the input is exactly the default
+    // `action.yml` fills in when a workflow leaves it out. A repository that
+    // typed this on purpose gets the same notice — indistinguishable from
+    // here, and saying so once is cheap next to staying silent forever about
+    // a choice nobody actually made.
+    if (
+      resolution !== null &&
+      authority.warrant.languages === null &&
+      rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
+    ) {
+      core.notice(
+        "languages: running on the default (`en, vi, zh`) — nobody has set this yet. " +
+          "Write the `languages` input, or `languages:` in the warrant, to choose on purpose.",
+      );
+    }
+
+    // The narrower of the two authorities, exactly as triage computes it — the
+    // file may restrict what `apply` asked for, never widen it. `withheld` is
+    // reported once here, up front, rather than per thread: a run that never
+    // reaches a single translatable thread should still say why `apply`'s own
+    // request is not the whole story.
+    const { permitted, withheld } = narrow(
+      authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
+      base.apply,
+    );
+    for (const capability of withheld) {
+      core.warning(
+        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. ` +
+          "The narrower of the two wins.",
+      );
+    }
 
     settings = {
       ...base,
       languages: resolution === null ? [] : resolution.languages,
-      permitted: authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
+      permitted,
     };
 
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, authority, settings, stages, weather);
+      await runSweep(bulk, api, authority, settings, stages, weather, meter, budget);
     } else {
       const number = settings.number;
       // `readShared` refuses `sweep` combined with `number`, but a bare
@@ -893,6 +1132,7 @@ export async function run(): Promise<void> {
             from: null,
             posted: [],
             skipped: [],
+            budgetSkipped: [],
             note: null,
             published: false,
           },
@@ -901,7 +1141,7 @@ export async function run(): Promise<void> {
         };
       } else {
         const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather);
+        result = await processThread(api, at, body, settings, stages, weather, meter, budget);
       }
       single = { number, result };
     }
@@ -929,13 +1169,34 @@ export async function run(): Promise<void> {
         );
       }
 
+      // `budget.denied` answers this the same way for both modes — set the
+      // moment any checkpoint, in either mode, first turned real work away —
+      // rather than recomputed here from the meter's final reading, which
+      // gets both directions wrong: a thread that needed exactly
+      // `max-requests` requests and had nothing left to deny reads
+      // identically, at the end, to one that actually had a language turned
+      // away, and a sweep's last candidate can deny work inside its own
+      // per-language or per-reply checkpoint with no further candidate left
+      // for the sweep's own pre-thread check to notice.
+      const budgetSpent = budget.denied;
+      if (budgetSpent) {
+        core.warning(
+          "`max-requests` was reached this run. " +
+            (settings.sweep
+              ? "The sweep delivered what it could before the budget ran out, and " +
+                "stopped early — see `remaining`."
+              : "What was already drafted still publishes; anything past the budget " +
+                "was left for a later run."),
+        );
+      }
+
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, rosterStarved);
+        reportSweep(bulk, rosterStarved, budgetSpent);
         await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
+          sweepPage(settings, bulk, meter.spent(), budgetSpent) + authSection(weather.authFailures),
         );
       } else if (!settings.sweep && single !== null) {
-        report(single.result.translated, single.result.replies, rosterStarved);
+        report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
         await writeSummary(
           page(settings, authority, single.number, single.result, meter.spent()) +
             authSection(weather.authFailures),
@@ -956,12 +1217,18 @@ export async function run(): Promise<void> {
  * — so replies report the one thing that is answerable across all of them: how
  * many got a translation written.
  */
-function report(translated: Report, replies: number, rosterStarved: boolean): void {
+function report(
+  translated: Report,
+  replies: number,
+  rosterStarved: boolean,
+  budgetSpent: boolean,
+): void {
   core.setOutput("source-language", translated.from?.code ?? "");
   core.setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   core.setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   core.setOutput("replies-translated", String(replies));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("budget-exhausted", String(budgetSpent));
   // `0`, not unset: `processed`/`remaining` are a sweep's own outputs, and a
   // single-thread run answers both honestly at zero rather than leaving a
   // workflow that reads them on every run reading an empty string on this one.
@@ -981,11 +1248,12 @@ function report(translated: Report, replies: number, rosterStarved: boolean): vo
  * actually has, and `action.yml` documents both readings under it rather than
  * inventing a second output nobody would think to look for.
  */
-function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
+function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean, budgetSpent: boolean): void {
   core.setOutput("processed", String(bulk.results.length));
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("budget-exhausted", String(budgetSpent));
 }
 
 function page(
@@ -1008,13 +1276,19 @@ function page(
   });
 }
 
-function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
+function sweepPage(
+  settings: Settings,
+  bulk: SweepAccumulator,
+  spent: Run["spent"],
+  budgetSpent: boolean,
+): string {
   return summarizeSweep({
     dryRun: settings.dryRun,
     results: bulk.results,
     skipped: bulk.skipped,
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
+    budgetExhausted: budgetSpent,
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

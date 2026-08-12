@@ -32954,6 +32954,10 @@ function residue(text2) {
   return clean;
 }
 
+// src/core/warrant.ts
+var import_yaml = __toESM(require_dist2(), 1);
+import { readFile } from "node:fs/promises";
+
 // src/core/forge.ts
 function createThread(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
@@ -32971,27 +32975,82 @@ function isBotAuthor(author) {
   return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
 }
 var REPLY_PAGE = 100;
-async function listReplies(api, at) {
-  const { data } = await api.rest.issues.listComments({
+var REPLY_PAGES = 10;
+function lastPageFrom(link) {
+  if (link === void 0) return null;
+  const match = /<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/.exec(link);
+  return match?.[1] === void 0 ? null : Number(match[1]);
+}
+function toReply(comment) {
+  return {
+    id: comment.id,
+    body: comment.body ?? "",
+    login: comment.user?.login ?? "",
+    isBot: isBotAuthor(comment.user)
+  };
+}
+async function listReplies(api, at, options) {
+  const max = options?.max ?? REPLY_PAGE;
+  const order = options?.order ?? "oldest";
+  const page2 = (n) => api.rest.issues.listComments({
     owner: at.owner,
     repo: at.repo,
     issue_number: at.number,
-    per_page: REPLY_PAGE
+    per_page: REPLY_PAGE,
+    page: n
   });
-  const replies = data.map((comment) => {
-    const login = comment.user?.login ?? "";
-    return {
-      id: comment.id,
-      body: comment.body ?? "",
-      login,
-      isBot: isBotAuthor(comment.user)
-    };
-  });
-  return { replies, more: data.length === REPLY_PAGE };
+  if (order === "oldest") {
+    const pageCap = Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE));
+    const all = [];
+    let lastPageFull = false;
+    for (let n = 1; n <= pageCap; n += 1) {
+      const { data } = await page2(n);
+      all.push(...data.map(toReply));
+      lastPageFull = data.length === REPLY_PAGE;
+      if (!lastPageFull || all.length >= max) break;
+    }
+    return { replies: all.slice(0, max), more: all.length > max || lastPageFull };
+  }
+  const first = await page2(1);
+  const lastPage = lastPageFrom(first.headers?.link);
+  if (lastPage === null || lastPage <= 1) {
+    const all = first.data.map(toReply);
+    return { replies: all.slice(-max), more: all.length > max };
+  }
+  const collected = [];
+  let firstPageWalked;
+  let pagesFetched = 0;
+  for (let n = lastPage; ; n -= 1) {
+    const { data } = n === 1 ? first : await page2(n);
+    collected.unshift(...data.map(toReply));
+    firstPageWalked = n;
+    pagesFetched += 1;
+    if (collected.length >= max || n === 1 || pagesFetched >= REPLY_PAGES) break;
+  }
+  return {
+    replies: collected.slice(-max),
+    more: firstPageWalked > 1 || collected.length > max
+  };
 }
 function createReply(api, at, reply) {
+  let read2 = false;
   return {
-    read: () => Promise.resolve(reply.body),
+    // The first read answers from what `listReplies` already fetched — one
+    // request for the page rather than one per comment, still, which is why a
+    // forty-reply thread costs forty reads and not eighty. Only a second read
+    // goes back to GitHub, and `publish` only ever asks for one after it has
+    // written: that is its re-read-after-write (see `core/publish.ts`),
+    // there to notice another write landing on this comment in between. The
+    // closure's original `reply.body` cannot answer that question — it never
+    // moves, so it would call every publish "mismatched" whether or not
+    // anything raced it.
+    read() {
+      if (read2) {
+        return api.rest.issues.getComment({ owner: at.owner, repo: at.repo, comment_id: reply.id }).then(({ data }) => data.body ?? "");
+      }
+      read2 = true;
+      return Promise.resolve(reply.body);
+    },
     async write(body) {
       await api.rest.issues.updateComment({
         owner: at.owner,
@@ -33021,13 +33080,13 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since) {
+async function listOpenThreads(api, at, since, state = "open") {
   const listed = [];
   for (let page2 = 1; ; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
-      state: "open",
+      state,
       sort: "created",
       direction: "desc",
       per_page: SWEEP_PAGE,
@@ -33052,6 +33111,358 @@ async function listOpenThreads(api, at, since) {
     if (stop || data.length < SWEEP_PAGE) break;
   }
   return listed;
+}
+
+// src/core/warrant.ts
+var CAPABILITIES = [
+  "label",
+  "edit-body",
+  "comment",
+  "close",
+  "assign",
+  "record"
+];
+var VERSION7 = 1;
+var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
+async function readWarrant(path, options) {
+  let source;
+  try {
+    source = await readFile(path, "utf8");
+  } catch (error2) {
+    if (path === options.defaultPath && isNotFound(error2)) return null;
+    const reason = error2 instanceof Error ? error2.message : String(error2);
+    throw new Error(
+      `warrant: \`${path}\` could not be read, so this run has no authority \u2014 ${reason}. Write one, or point \`warrant\` at where yours lives.`,
+      { cause: error2 }
+    );
+  }
+  return parseWarrant(path, source);
+}
+function isNotFound(error2) {
+  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
+}
+function parseWarrant(path, source) {
+  const document2 = load(path, source);
+  const version = document2.version;
+  if (version !== VERSION7) {
+    throw new Error(
+      `warrant: \`${path}\` declares version ${describe(version)}, and this build understands ${String(VERSION7)}.`
+    );
+  }
+  const labels = readLabels(path, document2.labels);
+  const languages = readLanguages(path, document2.languages);
+  const pivot = readPivot(path, document2.pivot);
+  const memory = readMemory(path, document2.memory);
+  const about = readAbout(path, document2.about);
+  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
+  const names = new Set(labels.map((label) => label.name));
+  for (const label of labels) {
+    for (const other of label.exclusiveWith) {
+      if (!names.has(other)) {
+        throw new Error(
+          `warrant: \`${path}\` has \`${label.name}\` exclusive with \`${other}\`, which is not a label in this file.`
+        );
+      }
+    }
+  }
+  const byName = new Map(labels.map((label) => [label.name, label]));
+  return {
+    path,
+    labels,
+    languages,
+    pivot,
+    memory,
+    about,
+    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    unnamed: (duty) => declared && !capabilities.has(duty),
+    labelNamed: (name) => byName.get(name)
+  };
+}
+function implicitWarrant(path, repositoryLabels) {
+  const labels = [];
+  const excluded = [];
+  for (const label of repositoryLabels) {
+    const description = label.description?.trim() ?? "";
+    if (description.length === 0) {
+      excluded.push(label.name);
+      continue;
+    }
+    labels.push({
+      name: label.name,
+      description,
+      not: null,
+      examples: [],
+      owner: null,
+      exclusiveWith: [],
+      confidence: null
+    });
+  }
+  const byName = new Map(labels.map((label) => [label.name, label]));
+  return {
+    warrant: {
+      path,
+      labels,
+      languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
+      granted: (_duty, fallback) => fallback,
+      unnamed: () => false,
+      labelNamed: (name) => byName.get(name)
+    },
+    excluded
+  };
+}
+async function resolveAuthority(read2, path, api, at) {
+  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
+  const repositoryLabels = await listRepositoryLabels(api, at);
+  const built = implicitWarrant(path, repositoryLabels);
+  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
+function resolveLanguages(warrant, rawInput) {
+  if (warrant.languages !== null) {
+    return {
+      languages: warrant.languages,
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
+    };
+  }
+  if (rawInput.trim().length === 0) {
+    throw new Error(
+      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
+    );
+  }
+  return { languages: parseLanguages(rawInput), notice: null };
+}
+function load(path, source) {
+  let document2;
+  try {
+    document2 = (0, import_yaml.parse)(source);
+  } catch (error2) {
+    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
+  }
+  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
+    throw new Error(
+      `warrant: \`${path}\` is not a warrant \u2014 expected a YAML mapping with \`version\` and \`labels\`.`
+    );
+  }
+  return document2;
+}
+function readLabels(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`labels\` as ${describe(raw)}, expected a list.`);
+  }
+  const labels = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const [index, entry] of raw.entries()) {
+    const at = `\`${path}\` label ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    const name = text(at, "name", fields.name, { required: true });
+    if (seen.has(name.toLowerCase())) {
+      throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
+    }
+    seen.add(name.toLowerCase());
+    const owner = text(`${at} (\`${name}\`)`, "owner", fields.owner, { required: false });
+    if (owner.length > 0 && !HANDLE.test(owner)) {
+      throw new Error(
+        `warrant: \`${path}\` gives \`${name}\` the owner \`${owner}\`, which is not a handle. Expected \`@user\` or \`@org/team\`.`
+      );
+    }
+    labels.push({
+      name,
+      description: text(`${at} (\`${name}\`)`, "description", fields.description, {
+        required: true
+      }),
+      not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
+      examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
+      owner: nullable(owner),
+      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
+    });
+  }
+  return labels;
+}
+function readLanguages(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+    );
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
+  }
+  const entries = raw.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
+      );
+    }
+    if (entry.trim().length === 0) {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
+      );
+    }
+    return entry.trim();
+  });
+  return parseLanguages(entries);
+}
+function readPivot(path, raw) {
+  if (raw === void 0) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
+    );
+  }
+  return raw.trim();
+}
+function readMemory(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const recall = fields.recall;
+  if (recall === void 0 || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
+    );
+  }
+  return { recall };
+}
+function readAbout(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
+}
+function readCapabilities(path, raw) {
+  const granted = /* @__PURE__ */ new Map();
+  if (raw === void 0 || raw === null) return { declared: false, granted };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+    );
+  }
+  for (const [duty, value] of Object.entries(raw)) {
+    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const entries = strings(at, duty, value);
+    if (entries.length === 0) {
+      throw new Error(
+        `warrant: ${at} is empty. Use \`[none]\` to grant nothing, explicitly, or remove the entry to take this duty's own default.`
+      );
+    }
+    if (entries.length === 1 && entries[0] === "none") {
+      granted.set(duty, []);
+      continue;
+    }
+    const permitted = [];
+    for (const entry of entries) {
+      const capability = CAPABILITIES.find((known) => known === entry);
+      if (capability === void 0) {
+        throw new Error(
+          `warrant: ${at} names \`${entry}\`, which is not something a duty can be granted. Expected any of ${CAPABILITIES.join(", ")}, or \`none\` on its own.`
+        );
+      }
+      if (!permitted.includes(capability)) permitted.push(capability);
+    }
+    granted.set(duty, permitted);
+  }
+  return { declared: true, granted };
+}
+function text(at, key, raw, options) {
+  if (raw === void 0 || raw === null) {
+    if (!options.required) return "";
+    throw new Error(`warrant: ${at} has no \`${key}\`.`);
+  }
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  if (value.length === 0 && options.required) {
+    throw new Error(`warrant: ${at} has an empty \`${key}\`.`);
+  }
+  return value;
+}
+function strings(at, key, raw) {
+  if (raw === void 0 || raw === null) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `warrant: ${at} has \`${key}\` entry ${String(index + 1)} as ${describe(entry)}, expected text.`
+      );
+    }
+    const value = entry.trim();
+    if (value.length === 0) {
+      throw new Error(`warrant: ${at} has an empty \`${key}\` entry.`);
+    }
+    return value;
+  });
+}
+function nullable(value) {
+  return value.length === 0 ? null : value;
+}
+function confidenceField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
+    );
+  }
+  return raw;
+}
+function describe(value) {
+  if (value === null) return "empty";
+  if (value === void 0) return "absent";
+  if (Array.isArray(value)) return "a list";
+  if (typeof value === "object") return "a mapping";
+  if (typeof value === "string") return `the text \`${value}\``;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return `\`${String(value)}\``;
+  }
+  return "a value of a kind this file cannot hold";
+}
+
+// src/core/enforce.ts
+function parseApply(raw) {
+  const value = raw.trim().toLowerCase();
+  if (value === "none") return [];
+  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  if (requested.length === 0) {
+    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
+  }
+  const granted = [];
+  for (const entry of requested) {
+    const capability = CAPABILITIES.find((known) => known === entry);
+    if (capability === void 0) {
+      throw new Error(
+        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
+      );
+    }
+    if (!granted.includes(capability)) granted.push(capability);
+  }
+  return granted;
+}
+function narrow(granted, requested) {
+  return {
+    permitted: granted.filter((capability) => requested.includes(capability)),
+    withheld: requested.filter((capability) => !granted.includes(capability))
+  };
 }
 
 // src/core/inputs.ts
@@ -33304,7 +33715,15 @@ async function publish(thread, marker2, publication2) {
   const body = assemble(official, marker2, publication2);
   if (current === body) return { action: "unchanged" };
   await thread.write(body);
-  return { action: "published" };
+  try {
+    const after = await thread.read();
+    return { action: "published", mismatched: after !== body };
+  } catch (error2) {
+    warning(
+      `published, but the verification read failed \u2014 treating as delivered: ${String(error2)}`
+    );
+    return { action: "published", mismatched: false };
+  }
 }
 
 // src/core/meter.ts
@@ -33465,274 +33884,6 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
-}
-
-// src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
-import { readFile } from "node:fs/promises";
-var CAPABILITIES = [
-  "label",
-  "edit-body",
-  "comment",
-  "close",
-  "assign",
-  "record"
-];
-var VERSION7 = 1;
-var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
-async function readWarrant(path, options) {
-  let source;
-  try {
-    source = await readFile(path, "utf8");
-  } catch (error2) {
-    if (path === options.defaultPath && isNotFound(error2)) return null;
-    const reason = error2 instanceof Error ? error2.message : String(error2);
-    throw new Error(
-      `warrant: \`${path}\` could not be read, so this run has no authority \u2014 ${reason}. Write one, or point \`warrant\` at where yours lives.`,
-      { cause: error2 }
-    );
-  }
-  return parseWarrant(path, source);
-}
-function isNotFound(error2) {
-  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
-}
-function parseWarrant(path, source) {
-  const document2 = load(path, source);
-  const version = document2.version;
-  if (version !== VERSION7) {
-    throw new Error(
-      `warrant: \`${path}\` declares version ${describe(version)}, and this build understands ${String(VERSION7)}.`
-    );
-  }
-  const labels = readLabels(path, document2.labels);
-  const languages = readLanguages(path, document2.languages);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
-  const names = new Set(labels.map((label) => label.name));
-  for (const label of labels) {
-    for (const other of label.exclusiveWith) {
-      if (!names.has(other)) {
-        throw new Error(
-          `warrant: \`${path}\` has \`${label.name}\` exclusive with \`${other}\`, which is not a label in this file.`
-        );
-      }
-    }
-  }
-  const byName = new Map(labels.map((label) => [label.name, label]));
-  return {
-    path,
-    labels,
-    languages,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
-    unnamed: (duty) => declared && !capabilities.has(duty),
-    labelNamed: (name) => byName.get(name)
-  };
-}
-function implicitWarrant(path, repositoryLabels) {
-  const labels = [];
-  const excluded = [];
-  for (const label of repositoryLabels) {
-    const description = label.description?.trim() ?? "";
-    if (description.length === 0) {
-      excluded.push(label.name);
-      continue;
-    }
-    labels.push({
-      name: label.name,
-      description,
-      not: null,
-      examples: [],
-      owner: null,
-      exclusiveWith: []
-    });
-  }
-  const byName = new Map(labels.map((label) => [label.name, label]));
-  return {
-    warrant: {
-      path,
-      labels,
-      languages: null,
-      granted: (_duty, fallback) => fallback,
-      unnamed: () => false,
-      labelNamed: (name) => byName.get(name)
-    },
-    excluded
-  };
-}
-async function resolveAuthority(read2, path, api, at) {
-  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
-  const repositoryLabels = await listRepositoryLabels(api, at);
-  const built = implicitWarrant(path, repositoryLabels);
-  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
-}
-function resolveLanguages(warrant, rawInput) {
-  if (warrant.languages !== null) {
-    return {
-      languages: warrant.languages,
-      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
-    };
-  }
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
-    );
-  }
-  return { languages: parseLanguages(rawInput), notice: null };
-}
-function load(path, source) {
-  let document2;
-  try {
-    document2 = (0, import_yaml.parse)(source);
-  } catch (error2) {
-    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
-    throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
-  }
-  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
-    throw new Error(
-      `warrant: \`${path}\` is not a warrant \u2014 expected a YAML mapping with \`version\` and \`labels\`.`
-    );
-  }
-  return document2;
-}
-function readLabels(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`labels\` as ${describe(raw)}, expected a list.`);
-  }
-  const labels = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const [index, entry] of raw.entries()) {
-    const at = `\`${path}\` label ${String(index + 1)}`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
-    }
-    const fields = entry;
-    const name = text(at, "name", fields.name, { required: true });
-    if (seen.has(name.toLowerCase())) {
-      throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
-    }
-    seen.add(name.toLowerCase());
-    const owner = text(`${at} (\`${name}\`)`, "owner", fields.owner, { required: false });
-    if (owner.length > 0 && !HANDLE.test(owner)) {
-      throw new Error(
-        `warrant: \`${path}\` gives \`${name}\` the owner \`${owner}\`, which is not a handle. Expected \`@user\` or \`@org/team\`.`
-      );
-    }
-    labels.push({
-      name,
-      description: text(`${at} (\`${name}\`)`, "description", fields.description, {
-        required: true
-      }),
-      not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
-      examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
-      owner: nullable(owner),
-      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with)
-    });
-  }
-  return labels;
-}
-function readLanguages(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
-    );
-  }
-  if (!Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
-  }
-  const entries = raw.map((entry, index) => {
-    if (typeof entry !== "string") {
-      throw new Error(
-        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
-      );
-    }
-    if (entry.trim().length === 0) {
-      throw new Error(
-        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
-      );
-    }
-    return entry.trim();
-  });
-  return parseLanguages(entries);
-}
-function readCapabilities(path, raw) {
-  const granted = /* @__PURE__ */ new Map();
-  if (raw === void 0 || raw === null) return { declared: false, granted };
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
-    );
-  }
-  for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
-    const entries = strings(at, duty, value);
-    if (entries.length === 0) {
-      throw new Error(
-        `warrant: ${at} is empty. Use \`[none]\` to grant nothing, explicitly, or remove the entry to take this duty's own default.`
-      );
-    }
-    if (entries.length === 1 && entries[0] === "none") {
-      granted.set(duty, []);
-      continue;
-    }
-    const permitted = [];
-    for (const entry of entries) {
-      const capability = CAPABILITIES.find((known) => known === entry);
-      if (capability === void 0) {
-        throw new Error(
-          `warrant: ${at} names \`${entry}\`, which is not something a duty can be granted. Expected any of ${CAPABILITIES.join(", ")}, or \`none\` on its own.`
-        );
-      }
-      if (!permitted.includes(capability)) permitted.push(capability);
-    }
-    granted.set(duty, permitted);
-  }
-  return { declared: true, granted };
-}
-function text(at, key, raw, options) {
-  if (raw === void 0 || raw === null) {
-    if (!options.required) return "";
-    throw new Error(`warrant: ${at} has no \`${key}\`.`);
-  }
-  if (typeof raw !== "string") {
-    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected text.`);
-  }
-  const value = raw.trim();
-  if (value.length === 0 && options.required) {
-    throw new Error(`warrant: ${at} has an empty \`${key}\`.`);
-  }
-  return value;
-}
-function strings(at, key, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.map((entry, index) => {
-    if (typeof entry !== "string") {
-      throw new Error(
-        `warrant: ${at} has \`${key}\` entry ${String(index + 1)} as ${describe(entry)}, expected text.`
-      );
-    }
-    const value = entry.trim();
-    if (value.length === 0) {
-      throw new Error(`warrant: ${at} has an empty \`${key}\` entry.`);
-    }
-    return value;
-  });
-}
-function nullable(value) {
-  return value.length === 0 ? null : value;
-}
-function describe(value) {
-  if (value === null) return "empty";
-  if (value === void 0) return "absent";
-  if (Array.isArray(value)) return "a list";
-  if (typeof value === "object") return "a mapping";
-  if (typeof value === "string") return `the text \`${value}\``;
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return `\`${String(value)}\``;
-  }
-  return "a value of a kind this file cannot hold";
 }
 
 // src/core/sanitize.ts
@@ -34260,11 +34411,12 @@ function translations(looked) {
         decision === void 0 || decision.votes.length === 0 ? "\u2014" : cell(decision.votes.map((vote) => `${vote.model}\u2192${vote.pick}`).join(", "))
       ]);
     }
+    const budgetSkipped = new Set(text2.budgetSkipped.map((language) => language.code));
     for (const language of text2.skipped) {
       rows.push([
         cell(text2.what),
         cell(`${language.label} (${language.code})`),
-        "**no draft**",
+        budgetSkipped.has(language.code) ? "**budget**" : "**no draft**",
         "\u2014",
         "\u2014",
         "\u2014",
@@ -34311,7 +34463,13 @@ function summarizeSweep(run2) {
   if (run2.starvedRun) {
     parts.push(
       "",
-      "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
+      "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was processed; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
+    );
+  }
+  if (run2.budgetExhausted) {
+    parts.push(
+      "",
+      "`max-requests` was reached partway through \u2014 this run's own ceiling, not the provider's. What is above was processed; the rest is `remaining`, and the next sweep picks up where this one stopped."
     );
   }
   parts.push(
@@ -34408,17 +34566,22 @@ function escapeHtml(text2) {
 // src/duties/translate/main.ts
 var DEFAULT_CAPABILITIES = ["edit-body"];
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+var DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
 function readSettings() {
   const shared2 = readShared();
   const panel = parseSeats(getInput("judge-models"));
   return {
     ...shared2,
     warrant: getInput("warrant", { required: true }),
+    apply: parseApply(getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", getInput("drafts")),
     maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
     replies: getBooleanInput("translate-replies"),
+    maxReplies: bounded("max-replies", getInput("max-replies")),
+    chunkChars: parseChunkChars(getInput("chunk-chars")),
+    maxRequests: bounded("max-requests", getInput("max-requests")),
     attribution: readAttribution()
   };
 }
@@ -34441,7 +34604,25 @@ function targets(languages, from) {
   const source = from.code.toLowerCase();
   return languages.filter((language) => language.code.toLowerCase() !== source);
 }
-var CHUNK_CHARS = 6e3;
+var MIN_CHUNK_CHARS = 500;
+function parseChunkChars(raw) {
+  const trimmed = raw.trim();
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < MIN_CHUNK_CHARS) {
+    throw new Error(
+      `chunk-chars: expected a whole number of ${String(MIN_CHUNK_CHARS)} or more, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
+function createBudget() {
+  return { denied: false };
+}
+function budgetExhausted(settings, meter, budget) {
+  const exhausted2 = settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
+  if (exhausted2) budget.denied = true;
+  return exhausted2;
+}
 async function translateChunk(to, settings, stages, from, source, weather) {
   const drafted = await translate({
     provider: stages.draft,
@@ -34494,7 +34675,7 @@ async function translateChunk(to, settings, stages, from, source, weather) {
   };
 }
 async function translateInto(to, settings, stages, from, source, weather) {
-  const pieces = chunks(source, CHUNK_CHARS);
+  const pieces = chunks(source, settings.chunkChars);
   const results = [];
   for (const piece of pieces) {
     if (isCodeOnly(piece)) {
@@ -34530,9 +34711,9 @@ async function translateInto(to, settings, stages, from, source, weather) {
   };
 }
 function nothing(what, note) {
-  return { what, from: null, posted: [], skipped: [], note, published: false };
+  return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
-async function translateText(what, body, thread, settings, stages, weather) {
+async function translateText(what, body, thread, settings, stages, weather, meter, budget) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -34552,6 +34733,10 @@ async function translateText(what, body, thread, settings, stages, weather) {
       `${what}: only the first ${String(settings.maxBodyChars)} characters were translated. Raise \`max-body-chars\` to translate the rest.`
     );
   }
+  if (budgetExhausted(settings, meter, budget)) {
+    warning(`${what}: \`max-requests\` was reached, so this text was not attempted this run.`);
+    return nothing(what, "budget exhausted");
+  }
   const detection = await detectLanguage(
     source,
     settings.languages,
@@ -34560,9 +34745,20 @@ async function translateText(what, body, thread, settings, stages, weather) {
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
   );
+  const toTranslate = targets(settings.languages, detection.language);
   const posted = [];
   const skipped = [];
-  for (const to of targets(settings.languages, detection.language)) {
+  const budgetSkipped = [];
+  for (const [index, to] of toTranslate.entries()) {
+    if (budgetExhausted(settings, meter, budget)) {
+      const remaining2 = toTranslate.slice(index);
+      skipped.push(...remaining2);
+      budgetSkipped.push(...remaining2);
+      warning(
+        `${what}: \`max-requests\` was reached, so ${remaining2.map((language) => language.code).join(", ")} ${remaining2.length === 1 ? "was" : "were"} not attempted this run. What was already drafted still publishes.`
+      );
+      break;
+    }
     const translated2 = await translateInto(
       to,
       settings,
@@ -34596,39 +34792,65 @@ async function translateText(what, body, thread, settings, stages, weather) {
       would.sections.length === 0 ? `Dry run \u2014 ${what} would have been left alone: no language produced a translation.` : `Dry run \u2014 ${what} would have become:
 ${assemble(official, marker, would)}`
     );
-    return { what, from: detection.language, posted, skipped, note: null, published: false };
+    return {
+      what,
+      from: detection.language,
+      posted,
+      skipped,
+      budgetSkipped,
+      note: null,
+      published: false
+    };
   }
   if (!settings.permitted.includes("edit-body")) {
     if (posted.length > 0) {
       warning(
-        `${what}: \`${settings.warrant}\` does not grant \`edit-body\` to translate, so ${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} drafted this run ${posted.length === 1 ? "was" : "were"} not published.`
+        `${what}: \`edit-body\` is not permitted this run, so ${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} drafted this run ${posted.length === 1 ? "was" : "were"} not published.`
       );
       return {
         what,
         from: detection.language,
         posted: [],
         skipped,
-        note: `\`${settings.warrant}\` does not grant \`edit-body\`, so the ${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} drafted this run ${posted.length === 1 ? "was" : "were"} not published`,
+        budgetSkipped,
+        note: `\`edit-body\` is not permitted this run, so the ${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} drafted this run ${posted.length === 1 ? "was" : "were"} not published`,
         published: false
       };
     }
-    return { what, from: detection.language, posted: [], skipped, note: null, published: false };
+    return {
+      what,
+      from: detection.language,
+      posted: [],
+      skipped,
+      budgetSkipped,
+      note: null,
+      published: false
+    };
   }
   const outcome = await publish(thread, marker, publication(translated));
   info(
     outcome.action === "none" ? `${what}: nothing written \u2014 ${outcome.reason}.` : `${what}: ${outcome.action}.`
   );
+  if (outcome.action === "published" && outcome.mismatched) {
+    warning(
+      `${what}: another write landed on this thread between this run's write and its check \u2014 the body may not be exactly what this run published. Add a \`concurrency:\` group keyed on the thread (see the installation guide) to stop two runs from racing the same body.`
+    );
+  }
   return {
     what,
     from: detection.language,
     posted,
     skipped,
+    budgetSkipped,
     note: null,
     published: outcome.action === "published"
   };
 }
-async function translateReplies(api, at, settings, stages, looked, weather) {
-  const { replies, more } = await listReplies(api, at);
+async function translateReplies(api, at, settings, stages, looked, weather, meter, budget) {
+  const { replies, more } = await listReplies(api, at, {
+    max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
+    order: "newest"
+  });
   if (more) {
     warning(
       `#${String(at.number)} has more replies than one run reads, so the oldest were not translated. They are picked up by editing them, or by a run against a smaller thread.`
@@ -34636,20 +34858,28 @@ async function translateReplies(api, at, settings, stages, looked, weather) {
   }
   let published = 0;
   for (const reply of replies) {
+    if (budgetExhausted(settings, meter, budget)) {
+      warning(
+        `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not attempted this run.`
+      );
+      break;
+    }
     const translated = await translateText(
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
       createReply(api, at, reply),
       settings,
       stages,
-      weather
+      weather,
+      meter,
+      budget
     );
     looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
-async function processThread(api, at, body, settings, stages, weather) {
+async function processThread(api, at, body, settings, stages, weather, meter, budget) {
   const thread = createThread(api, at);
   const translated = await translateText(
     `#${String(at.number)}`,
@@ -34657,10 +34887,12 @@ async function processThread(api, at, body, settings, stages, weather) {
     thread,
     settings,
     stages,
-    weather
+    weather,
+    meter,
+    budget
   );
   const looked = [translated];
-  const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked, weather) : 0;
+  const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked, weather, meter, budget) : 0;
   return { looked, translated, replies, ungranted: null };
 }
 function notGranted(warrant) {
@@ -34687,7 +34919,7 @@ function describeOutcome(result) {
   }
   return parts.join("; ");
 }
-async function runSweep(acc, api, authority2, settings, stages, weather) {
+async function runSweep(acc, api, authority2, settings, stages, weather, meter, budget) {
   if (authority2.warrant.unnamed("translate")) {
     acc.ungranted = notGranted(authority2.warrant);
     return;
@@ -34704,13 +34936,24 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       acc.starvedRun = true;
       break;
     }
+    if (budgetExhausted(settings, meter, budget)) break;
     const at = { ...context2.repo, number: thread.number };
-    const result = await processThread(api, at, thread.body, settings, stages, weather);
+    const result = await processThread(
+      api,
+      at,
+      thread.body,
+      settings,
+      stages,
+      weather,
+      meter,
+      budget
+    );
     acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
   }
 }
 async function run() {
   const meter = createMeter();
+  const budget = createBudget();
   let weather = createWeather();
   let settings = null;
   let authority2 = null;
@@ -34732,16 +34975,31 @@ async function run() {
     const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
     const denied = authority2.warrant.unnamed("translate");
-    const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
+    const rawLanguages = getInput("languages");
+    const resolution = denied ? null : resolveLanguages(authority2.warrant, rawLanguages);
     if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
+    if (resolution !== null && authority2.warrant.languages === null && rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT) {
+      notice(
+        "languages: running on the default (`en, vi, zh`) \u2014 nobody has set this yet. Write the `languages` input, or `languages:` in the warrant, to choose on purpose."
+      );
+    }
+    const { permitted, withheld } = narrow(
+      authority2.warrant.granted("translate", DEFAULT_CAPABILITIES),
+      base.apply
+    );
+    for (const capability of withheld) {
+      warning(
+        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. The narrower of the two wins.`
+      );
+    }
     settings = {
       ...base,
       languages: resolution === null ? [] : resolution.languages,
-      permitted: authority2.warrant.granted("translate", DEFAULT_CAPABILITIES)
+      permitted
     };
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, authority2, settings, stages, weather);
+      await runSweep(bulk, api, authority2, settings, stages, weather, meter, budget);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
@@ -34755,6 +35013,7 @@ async function run() {
             from: null,
             posted: [],
             skipped: [],
+            budgetSkipped: [],
             note: null,
             published: false
           },
@@ -34763,7 +35022,7 @@ async function run() {
         };
       } else {
         const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather);
+        result = await processThread(api, at, body, settings, stages, weather, meter, budget);
       }
       single = { number, result };
     }
@@ -34778,13 +35037,19 @@ async function run() {
           "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
         );
       }
+      const budgetSpent = budget.denied;
+      if (budgetSpent) {
+        warning(
+          "`max-requests` was reached this run. " + (settings.sweep ? "The sweep delivered what it could before the budget ran out, and stopped early \u2014 see `remaining`." : "What was already drafted still publishes; anything past the budget was left for a later run.")
+        );
+      }
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, rosterStarved);
+        reportSweep(bulk, rosterStarved, budgetSpent);
         await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
+          sweepPage(settings, bulk, meter.spent(), budgetSpent) + authSection(weather.authFailures)
         );
       } else if (!settings.sweep && single !== null) {
-        report(single.result.translated, single.result.replies, rosterStarved);
+        report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
         await writeSummary(
           page(settings, authority2, single.number, single.result, meter.spent()) + authSection(weather.authFailures)
         );
@@ -34792,20 +35057,22 @@ async function run() {
     }
   }
 }
-function report(translated, replies, rosterStarved) {
+function report(translated, replies, rosterStarved, budgetSpent) {
   setOutput("source-language", translated.from?.code ?? "");
   setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   setOutput("replies-translated", String(replies));
   setOutput("starved", String(rosterStarved));
+  setOutput("budget-exhausted", String(budgetSpent));
   setOutput("processed", "0");
   setOutput("remaining", "0");
 }
-function reportSweep(bulk, rosterStarved) {
+function reportSweep(bulk, rosterStarved, budgetSpent) {
   setOutput("processed", String(bulk.results.length));
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
+  setOutput("budget-exhausted", String(budgetSpent));
 }
 function page(settings, authority2, thread, result, spent) {
   return summarize({
@@ -34820,13 +35087,14 @@ function page(settings, authority2, thread, result, spent) {
     ungranted: result.ungranted
   });
 }
-function sweepPage(settings, bulk, spent) {
+function sweepPage(settings, bulk, spent, budgetSpent) {
   return summarizeSweep({
     dryRun: settings.dryRun,
     results: bulk.results,
     skipped: bulk.skipped,
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
+    budgetExhausted: budgetSpent,
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

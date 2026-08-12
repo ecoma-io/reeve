@@ -32950,13 +32950,13 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since) {
+async function listOpenThreads(api, at, since, state = "open") {
   const listed = [];
   for (let page2 = 1; ; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
-      state: "open",
+      state,
       sort: "created",
       direction: "desc",
       per_page: SWEEP_PAGE,
@@ -32981,6 +32981,30 @@ async function listOpenThreads(api, at, since) {
     if (stop || data.length < SWEEP_PAGE) break;
   }
   return listed;
+}
+var EVENT_PAGE = 100;
+var EVENT_PAGES = 10;
+async function listLabelEvents(api, at) {
+  const events = [];
+  let complete = true;
+  for (let page2 = 1; page2 <= EVENT_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listEvents({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: EVENT_PAGE,
+      page: page2
+    });
+    for (const entry of data) {
+      if (entry.event !== "labeled" && entry.event !== "unlabeled") continue;
+      const name = entry.label?.name;
+      if (name === void 0 || name.length === 0) continue;
+      events.push({ label: name, action: entry.event, isBot: isBotAuthor(entry.actor) });
+    }
+    if (data.length < EVENT_PAGE) break;
+    if (page2 === EVENT_PAGES) complete = false;
+  }
+  return { events, complete };
 }
 function isMissing(error2) {
   return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
@@ -33093,6 +33117,9 @@ function parseWarrant(path, source) {
   }
   const labels = readLabels(path, document2.labels);
   const languages = readLanguages(path, document2.languages);
+  const pivot = readPivot(path, document2.pivot);
+  const memory = readMemory(path, document2.memory);
+  const about = readAbout(path, document2.about);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -33109,14 +33136,17 @@ function parseWarrant(path, source) {
     path,
     labels,
     languages,
+    pivot,
+    memory,
+    about,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
 }
-function checkLabelsExist(warrant, existing) {
+function checkLabelsExist(warrant, existing, taxonomy = warrant.labels) {
   const present = new Set(existing);
-  const missing = warrant.labels.map((label) => label.name).filter((name) => !present.has(name));
+  const missing = taxonomy.map((label) => label.name).filter((name) => !present.has(name));
   if (missing.length === 0) return;
   throw new Error(
     `warrant: \`${warrant.path}\` names ${missing.length === 1 ? "a label" : "labels"} this repository does not have \u2014 ${missing.map((name) => `\`${name}\``).join(", ")}. Create them, or correct the taxonomy.`
@@ -33137,7 +33167,8 @@ function implicitWarrant(path, repositoryLabels) {
       not: null,
       examples: [],
       owner: null,
-      exclusiveWith: []
+      exclusiveWith: [],
+      confidence: null
     });
   }
   const byName = new Map(labels.map((label) => [label.name, label]));
@@ -33146,6 +33177,9 @@ function implicitWarrant(path, repositoryLabels) {
       path,
       labels,
       languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
@@ -33172,6 +33206,31 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function resolvePivot(warrant, languages) {
+  const first = languages[0];
+  if (warrant.pivot === null) {
+    if (first === void 0) {
+      throw new Error("pivot: no languages are configured to choose one from.");
+    }
+    return first;
+  }
+  const found = findLanguage(languages, warrant.pivot);
+  if (found === void 0) {
+    throw new Error(
+      `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured languages (${languages.map((language) => language.code).join(", ")}).`
+    );
+  }
+  return found;
+}
+function resolveAbout(warrant, rawInput) {
+  if (warrant.about !== null) {
+    return {
+      about: warrant.about,
+      notice: `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input \u2014 the file is the whole answer once that key is written.`
+    };
+  }
+  return { about: rawInput.trim(), notice: null };
 }
 function load(path, source) {
   let document2;
@@ -33220,7 +33279,8 @@ function readLabels(path, raw) {
       not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
-      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with)
+      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
     });
   }
   return labels;
@@ -33249,6 +33309,45 @@ function readLanguages(path, raw) {
     return entry.trim();
   });
   return parseLanguages(entries);
+}
+function readPivot(path, raw) {
+  if (raw === void 0) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
+    );
+  }
+  return raw.trim();
+}
+function readMemory(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const recall = fields.recall;
+  if (recall === void 0 || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
+    );
+  }
+  return { recall };
+}
+function readAbout(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33317,6 +33416,15 @@ function strings(at, key, raw) {
 function nullable(value) {
   return value.length === 0 ? null : value;
 }
+function confidenceField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
+    );
+  }
+  return raw;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -33355,7 +33463,8 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
-function enforceLabels(warrant, proposed, onThread) {
+function enforceLabels(path, taxonomy, proposed, onThread, confidence, floor) {
+  const byName = new Map(taxonomy.map((label) => [label.name, label]));
   const applied = [];
   const refused = [];
   const seen = /* @__PURE__ */ new Set();
@@ -33363,9 +33472,17 @@ function enforceLabels(warrant, proposed, onThread) {
   for (const name of proposed) {
     if (seen.has(name)) continue;
     seen.add(name);
-    const entry = warrant.labelNamed(name);
+    const entry = byName.get(name);
     if (entry === void 0) {
-      refused.push({ what: name, why: `\`${warrant.path}\` does not name it` });
+      refused.push({ what: name, why: `\`${path}\` does not name it` });
+      continue;
+    }
+    const labelFloor = entry.confidence ?? floor;
+    if (confidence < labelFloor) {
+      refused.push({
+        what: name,
+        why: entry.confidence === null ? `confidence ${confidence.toFixed(2)} is under the floor of ${labelFloor.toFixed(2)}` : `confidence ${confidence.toFixed(2)} is under \`${name}\`'s own floor of ${labelFloor.toFixed(2)}`
+      });
       continue;
     }
     if (already.has(name)) {
@@ -33381,7 +33498,7 @@ function enforceLabels(warrant, proposed, onThread) {
       continue;
     }
     const conflict = applied.find(
-      (kept) => entry.exclusiveWith.includes(kept) || (warrant.labelNamed(kept)?.exclusiveWith.includes(name) ?? false)
+      (kept) => entry.exclusiveWith.includes(kept) || (byName.get(kept)?.exclusiveWith.includes(name) ?? false)
     );
     if (conflict !== void 0) {
       refused.push({ what: name, why: `it cannot be applied alongside \`${conflict}\`` });
@@ -33390,9 +33507,6 @@ function enforceLabels(warrant, proposed, onThread) {
     applied.push(name);
   }
   return { applied, refused };
-}
-function alreadyTaxonomized(warrant, labels) {
-  return labels.some((name) => warrant.labelNamed(name) !== void 0);
 }
 function owners(warrant, applied) {
   const users = [];
@@ -33769,6 +33883,7 @@ function parseCorrection(line) {
   const decided = strings2(record.decided);
   if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
   return {
+    repo: typeof record.repo === "string" ? record.repo : "",
     thread,
     at: typeof record.at === "string" ? record.at : "",
     title: typeof record.title === "string" ? record.title : "",
@@ -33778,14 +33893,14 @@ function parseCorrection(line) {
     decided,
     by: typeof record.by === "string" ? record.by : "",
     note: typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
-    pivot: readPivot(record.pivot)
+    pivot: readPivot2(record.pivot)
   };
 }
 function strings2(raw) {
   if (!Array.isArray(raw)) return null;
   return raw.every((entry) => typeof entry === "string") ? raw : null;
 }
-function readPivot(raw) {
+function readPivot2(raw) {
   if (raw === null || raw === void 0 || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
@@ -33797,6 +33912,7 @@ function readPivot(raw) {
 }
 function formatCorrection(correction) {
   return JSON.stringify({
+    repo: correction.repo,
     thread: correction.thread,
     at: correction.at,
     title: correction.title,
@@ -34331,9 +34447,9 @@ function summarizeSweep(run2) {
   const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
   const rendered = table(["Thread", "Outcome"], rows);
   const parts = [
-    "## Reeve \xB7 triage \u2014 sweep",
+    `## Reeve \xB7 triage \u2014 sweep${run2.recording ? " (bulk migration)" : ""}`,
     "",
-    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (already labelled), ${String(run2.remaining)} remaining.`,
+    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, skipped ${String(run2.skipped)} (${run2.recording ? "no taxonomy label to import" : "already labelled"}), ${String(run2.remaining)} remaining.`,
     "",
     rendered.length === 0 ? "Nothing was processed this run." : rendered
   ];
@@ -34488,6 +34604,31 @@ function differs(correction) {
 var DEFAULT_CAPABILITIES = ["label"];
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
+var SWEEP_STATES = ["open", "closed", "all"];
+function parseSweepState(raw) {
+  const value = raw.trim().toLowerCase();
+  const match = SWEEP_STATES.find((state) => state === value);
+  if (match === void 0) {
+    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
+  }
+  return match;
+}
+function resolveTaxonomy(warrant, raw) {
+  const requested = raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  if (requested.length === 0) return warrant.labels;
+  for (const name of requested) {
+    if (warrant.labelNamed(name) === void 0) {
+      throw new Error(
+        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. Add it there, or correct the name.`
+      );
+    }
+  }
+  const wanted = new Set(requested);
+  return warrant.labels.filter((label) => wanted.has(label.name));
+}
+function taxonomyNames(settings) {
+  return new Set(settings.taxonomy.map((label) => label.name));
+}
 function readSettings() {
   const shared = readShared();
   const cheap = parseModels(getInput("screen-models"));
@@ -34501,12 +34642,20 @@ function readSettings() {
     corrections: getInput("corrections", { required: true }),
     about: getInput("about"),
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars"))
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
+    sweepState: parseSweepState(getInput("sweep-state"))
   };
 }
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+  return {
+    results: [],
+    skipped: 0,
+    starvedRun: false,
+    candidates: 0,
+    ungranted: null,
+    recording: false
+  };
 }
 async function runSweep(acc, api, authority2, settings, stages, weather) {
   if (authority2.warrant.unnamed("triage")) {
@@ -34516,15 +34665,27 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   if (!authority2.implicit) {
     checkLabelsExist(
       authority2.warrant,
-      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name)
+      (await listRepositoryLabels(api, context2.repo)).map((label) => label.name),
+      settings.taxonomy
     );
   }
-  const listed = await listOpenThreads(api, context2.repo, settings.since);
+  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  const recording = permitted.includes("record");
+  acc.recording = recording;
+  const listed = await listOpenThreads(api, context2.repo, settings.since, settings.sweepState);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
+  const names = taxonomyNames(settings);
   for (const thread of candidates) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (alreadyTaxonomized(authority2.warrant, thread.labels)) {
+    if (recording) {
+      const decidable = thread.labels.some((name) => names.has(name));
+      if (!decidable) {
+        acc.skipped += 1;
+        continue;
+      }
+    } else if (thread.labels.some((name) => names.has(name))) {
       acc.skipped += 1;
       continue;
     }
@@ -34543,10 +34704,31 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       // inspected, only `respond`'s bot-author guard reads `author` at all.
       author: { login: "", isBot: false }
     };
-    const outcome = await decide(authority2, standing, settings, stages, weather);
-    const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+    if (recording) {
+      const outcome = await recordCorrection(
+        api,
+        at,
+        standing,
+        authority2,
+        settings,
+        stages,
+        weather,
+        "sweep"
+      );
+      if (outcome.machineOnly || outcome.unattributable) {
+        acc.skipped += 1;
+      } else {
+        acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+      }
+    } else {
+      const outcome = await decide(authority2, standing, settings, stages, weather);
+      const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
+      acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+    }
   }
+}
+function describeRecordOutcome(outcome) {
+  return outcome.decided.length > 0 ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}` : "recorded with no taxonomy labels";
 }
 function remainingOf(acc) {
   return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
@@ -34586,7 +34768,15 @@ async function run() {
     const denied = authority2.warrant.unnamed("triage");
     const resolution = denied ? null : resolveLanguages(authority2.warrant, getInput("languages"));
     if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
-    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
+    const about = resolveAbout(authority2.warrant, base.about);
+    if (about.notice !== null) notice(about.notice);
+    const taxonomy = denied ? [] : resolveTaxonomy(authority2.warrant, getInput("labels"));
+    settings = {
+      ...base,
+      languages: resolution === null ? [] : resolution.languages,
+      about: about.about,
+      taxonomy
+    };
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority2, settings, stages, weather);
@@ -34603,7 +34793,8 @@ async function run() {
         if (!authority2.implicit) {
           checkLabelsExist(
             authority2.warrant,
-            (await listRepositoryLabels(api, at)).map((label) => label.name)
+            (await listRepositoryLabels(api, at)).map((label) => label.name),
+            settings.taxonomy
           );
         }
         const trigger = recordTrigger();
@@ -34625,7 +34816,8 @@ async function run() {
             authority2,
             settings,
             stages,
-            weather
+            weather,
+            senderLogin()
           );
         } else {
           outcome = await decide(authority2, standing, settings, stages, weather);
@@ -34740,56 +34932,67 @@ async function decide(authority2, standing, settings, stages, weather) {
     info(`Screened out as ${sifted.dropped.reason} \u2014 ${sifted.dropped.note}.`);
     return stopped(sifted.dropped, language);
   }
-  const store = await readStore(settings.corrections);
-  for (const line of store.unreadable) {
-    warning(`corrections: ${line}`);
-  }
-  const memory = createMemory(store.corrections);
-  const queries = [{ text: `${standing.title}
-${body}`, against: "own" }];
-  const pivotLanguage = settings.languages[0] ?? null;
+  const recallCount = warrant.memory?.recall ?? RECALLED;
   const threadLanguage = detection.language;
-  const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
-  if (worthBridging) {
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const pivot = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-    });
-    for (const failure of pivot.failures) {
-      warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+  let recalled = [];
+  let memorySize = 0;
+  let pivotRecalled = 0;
+  if (recallCount > 0) {
+    const store = await readStore(settings.corrections);
+    for (const line of store.unreadable) {
+      warning(`corrections: ${line}`);
     }
-    if (pivot.draft !== null) {
-      queries.push({
-        text: `${pivot.draft.title}
-${pivot.draft.body}`,
-        against: { pivot: pivotLanguage.code }
+    const memory = createMemory(store.corrections);
+    memorySize = memory.size;
+    const queries = [{ text: `${standing.title}
+${body}`, against: "own" }];
+    const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+    const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
+    if (worthBridging) {
+      const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+      const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+      const pivot = await translateToPivot({
+        provider: stages.pivot,
+        models: pivotModels,
+        title: standing.title,
+        body,
+        to: pivotLanguage,
+        weather,
+        ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
       });
-    } else {
-      info(
-        "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-      );
+      for (const failure of pivot.failures) {
+        warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+      }
+      if (pivot.draft !== null) {
+        queries.push({
+          text: `${pivot.draft.title}
+${pivot.draft.body}`,
+          against: { pivot: pivotLanguage.code }
+        });
+      } else {
+        info(
+          "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
+        );
+      }
     }
+    recalled = memory.recallAcrossQueries(queries, recallCount);
+    pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
+      (correction) => correction.language !== null && correction.language !== threadLanguage.code
+    ).length;
+    info(
+      `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
+    );
+  } else {
+    info(
+      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
+    );
   }
-  const recalled = memory.recallAcrossQueries(queries, RECALLED);
-  const pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
-    (correction) => correction.language !== null && correction.language !== threadLanguage.code
-  ).length;
-  info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
-  );
   const triaged = await triage({
     provider: stages.triage,
     models: settings.models,
     title: standing.title,
     body,
-    taxonomy: warrant.labels,
+    taxonomy: settings.taxonomy,
     language,
     recalled,
     weather,
@@ -34812,20 +35015,19 @@ ${pivot.draft.body}`,
     permitted,
     withheld: withheld2,
     note,
-    memory: { size: memory.size, recalled: recalled.length, pivotRecalled },
+    memory: { size: memorySize, recalled: recalled.length, pivotRecalled },
     implicit: authority2.implicit,
     excludedLabels: authority2.excludedLabels,
     ungranted: null
   };
-  if (verdict2.confidence < settings.confidence) {
-    if (verdict2.labels.length > 0) {
-      info(
-        `Confidence ${verdict2.confidence.toFixed(2)} is under the floor of ${settings.confidence.toFixed(2)} \u2014 reported, not applied.`
-      );
-    }
-    return { ...decided, applied: [], refused: [] };
-  }
-  const decision = enforceLabels(warrant, verdict2.labels, standing.labels);
+  const decision = enforceLabels(
+    warrant.path,
+    settings.taxonomy,
+    verdict2.labels,
+    standing.labels,
+    verdict2.confidence,
+    settings.confidence
+  );
   for (const refusal of decision.refused) {
     info(`\`${refusal.what}\` was not applied \u2014 ${refusal.why}.`);
   }
@@ -34853,8 +35055,45 @@ function senderLogin() {
   const payload = context2.payload;
   return payload.sender?.login ?? "";
 }
-async function recordCorrection(contentsApi, at, standing, authority2, settings, stages, weather) {
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by) {
   const warrant = authority2.warrant;
+  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  if (by === "sweep" && decidedLabels.length > 0) {
+    const history = await listLabelEvents(api, at);
+    if (!history.complete) {
+      info(
+        `#${String(at.number)}: label history is longer than one run reads \u2014 cannot attribute, nothing imported.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: false,
+        unattributable: true
+      };
+    }
+    const lastLabeledByBot = /* @__PURE__ */ new Map();
+    for (const event of history.events) {
+      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
+    }
+    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
+    if (decidedLabels.length === 0) {
+      info(
+        `#${String(at.number)}: every taxonomy label here was machine-applied \u2014 nothing to import.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: true,
+        unattributable: false
+      };
+    }
+  }
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
   const detection = await detectLanguage(
@@ -34868,8 +35107,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     )
   );
   const code = detection.language?.code ?? null;
-  const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== void 0);
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   let pivot = null;
   let pivotNote = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
@@ -34899,6 +35137,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     }
   }
   const correction = {
+    repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     at: (/* @__PURE__ */ new Date()).toISOString(),
     title: standing.title,
@@ -34906,7 +35145,7 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
     language: code,
     proposed: [],
     decided: decidedLabels,
-    by: senderLogin(),
+    by,
     note: null,
     pivot
   };
@@ -34915,14 +35154,16 @@ async function recordCorrection(contentsApi, at, standing, authority2, settings,
       `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
     );
   } else {
-    await writeCorrection(contentsApi, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction);
   }
   return {
     recorded: true,
     language: detection.language?.label ?? null,
     decided: decidedLabels,
     pivot: pivot !== null,
-    pivotNote
+    pivotNote,
+    machineOnly: false,
+    unattributable: false
   };
 }
 var WRITE_ATTEMPTS = 3;
@@ -34943,6 +35184,8 @@ async function writeCorrection(contentsApi, at, path, correction) {
 async function attemptWrite(contentsApi, at, path, correction) {
   const files = await listCorrectionFiles(contentsApi, at, path);
   const unreadable = [];
+  let provenShared = false;
+  let legacyCandidate = null;
   for (const file of files) {
     let read2;
     try {
@@ -34957,32 +35200,54 @@ async function attemptWrite(contentsApi, at, path, correction) {
     }
     if (read2 === null) continue;
     const lines = read2.text.split("\n");
-    const index = lines.findIndex((line) => {
-      if (line.trim().length === 0) return false;
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (line.trim().length === 0) continue;
       const existing2 = parseCorrection(line);
-      return existing2 !== null && existing2.thread === correction.thread;
-    });
-    if (index !== -1) {
-      lines[index] = formatCorrection(correction);
-      await writeContentsFile(
-        contentsApi,
-        at,
-        file.path,
-        `${lines.join("\n").replace(/\n*$/, "")}
+      if (existing2 === null) {
+        provenShared = true;
+        continue;
+      }
+      if (existing2.thread === correction.thread && existing2.repo === correction.repo) {
+        const updated = [...lines];
+        updated[index] = formatCorrection(correction);
+        await writeContentsFile(
+          contentsApi,
+          at,
+          file.path,
+          `${updated.join("\n").replace(/\n*$/, "")}
 `,
-        commitMessage(correction),
-        file.sha
-      );
-      return;
+          commitMessage(correction),
+          read2.sha
+        );
+        return;
+      }
+      if (existing2.repo !== "" && existing2.repo !== correction.repo) provenShared = true;
+      if (existing2.repo === "" && existing2.thread === correction.thread && legacyCandidate === null) {
+        legacyCandidate = { path: file.path, lines, sha: read2.sha, index };
+      }
     }
+  }
+  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
+    const lines = [...legacyCandidate.lines];
+    lines[legacyCandidate.index] = formatCorrection(correction);
+    await writeContentsFile(
+      contentsApi,
+      at,
+      legacyCandidate.path,
+      `${lines.join("\n").replace(/\n*$/, "")}
+`,
+      commitMessage(correction),
+      legacyCandidate.sha
+    );
+    return;
   }
   if (unreadable.length > 0) {
     throw new Error(
       `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
     );
   }
-  const shard = `${path.replace(/\/+$/, "")}/${monthShard()}.ndjson`;
-  const existing = await readContentsFile(contentsApi, at, shard);
+  const { shard, existing } = await selectShard(contentsApi, at, path);
   const text2 = existing === null ? `${formatCorrection(correction)}
 ` : `${existing.text.replace(/\n*$/, "")}
 ${formatCorrection(correction)}
@@ -34994,6 +35259,30 @@ ${formatCorrection(correction)}
     text2,
     commitMessage(correction),
     existing?.sha ?? null
+  );
+}
+var SHARD_SOFT_LIMIT_BYTES = 9e5;
+var MAX_SHARD_ATTEMPTS = 500;
+async function selectShard(contentsApi, at, path) {
+  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
+  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
+    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
+    let existing;
+    try {
+      existing = await readContentsFile(contentsApi, at, shard);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the next shard instead. Split the corrections store into smaller shards.`
+      );
+      continue;
+    }
+    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
+      return { shard, existing };
+    }
+  }
+  throw new Error(
+    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
   );
 }
 function isShaConflict(error2) {
@@ -35115,7 +35404,7 @@ function reportSweep(bulk, rosterStarved) {
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
-  setOutput("recorded", "false");
+  setOutput("recorded", String(bulk.recording));
 }
 function reportRecordRun(outcome, rosterStarved) {
   setOutput("labels", JSON.stringify([]));
@@ -35181,6 +35470,7 @@ function sweepPage(settings, bulk, spent) {
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
     ungranted: bulk.ungranted,
+    recording: bulk.recording,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames

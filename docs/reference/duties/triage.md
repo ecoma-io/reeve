@@ -117,16 +117,18 @@ narrower one would only be free to drift from it.
 | `screen-models`   | no       | _(empty)_                   | A cheaper roster asked which language a thread is in and whether it is spam or off-topic, before `models` is spent.                                                        |
 | `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. Ignored once the warrant's own `languages:` key is written.                                                                          |
 | `warrant`         | no       | `.github/reeve.yml`         | Where the taxonomy and permissions live. Missing at this default path is not a failure — see [The warrant](../../guides/warrant.md).                                       |
+| `labels`          | no       | _(empty)_                   | Which of the warrant's taxonomy this run may propose, or empty for all of it. A name not in the taxonomy fails red — see below.                                            |
 | `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, or `none`. Narrowed by the warrant, never widened past it.                         |
 | `confidence`      | no       | `0.75`                      | How sure the verdict has to be before anything is applied, between 0 and 1.                                                                                                |
 | `corrections`     | no       | `.reeve/corrections`        | Directory of `.ndjson` files recording maintainer corrections, shown to the model as examples.                                                                             |
 | `min-body-chars`  | no       | `40`                        | How much authored text is enough to be worth a model, in characters. `0` turns the length screen off.                                                                      |
 | `max-body-chars`  | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
-| `about`           | no       | _(empty)_                   | What this repository is about, in one sentence. Used only by the spam screen.                                                                                              |
+| `about`           | no       | _(empty)_                   | What this repository is about, in one sentence. Used only by the spam screen. Ignored once the warrant's own `about:` key is written.                                      |
 | `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                |
 | `sweep`           | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                 |
 | `since`           | no       | _(empty)_                   | The oldest issue a sweep will consider, bounded by when it was opened.                                                                                                     |
 | `limit`           | no       | `50`                        | The most issues one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                             |
+| `sweep-state`     | no       | `open`                      | Which issues a sweep considers, by tracker state: `open`, `closed`, or `all`. A resource filter, not a mode — see below.                                                   |
 | `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
 | `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
 | `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
@@ -195,24 +197,77 @@ that thread's taxonomy-filtered current labels to the store, replacing any
 earlier entry for the same thread, through GitHub's Contents API with no
 checkout.
 
+**`record` also composes with `sweep`, for a one-time bulk migration** — the
+same double grant above, but on a backlog walk instead of a single labelled
+event. Every candidate the sweep finds carrying a taxonomy label is recorded
+rather than triaged, attributed to `sweep` rather than to whoever triggered
+the run, and `sweep-state: all` (or `closed`) reaches the closed issues a
+`sweep-state: open` backlog walk never sees — importing a project's
+already-decided history into the store in one run rather than one label
+change at a time from here on. Run it once by hand, via `workflow_dispatch`,
+rather than on a schedule.
+
+**A taxonomy entry may carry its own `confidence:` floor**, standing in for
+this run's own `confidence` input for that label alone — see
+[the warrant format reference](../warrant-format.md#label-fields).
+
+**The action input `labels` narrows which of the file's `labels:` taxonomy this
+run may propose** — two different things sharing one name, so keep them
+apart: the file's `labels:` key, below, defines the whole taxonomy this
+project has; the input of the same name, in the workflow that follows it,
+picks a subset of it for one run. This exists for the monorepo with one area
+per directory and one shared `.github/reeve.yml`: point every area's workflow
+at the same file, and give each one its own `labels` _input_ rather than
+maintaining a taxonomy file per area.
+
+```yaml
+# .github/reeve.yml — one shared taxonomy, both areas' labels in it
+capabilities:
+  triage: [label]
+
+labels:
+  - name: frontend-bug
+    description: A defect in the web client.
+  - name: backend-bug
+    description: A defect in the API server.
+```
+
+```yaml
+# .github/workflows/reeve-triage-frontend.yml — this area's own subset
+- uses: ecoma-io/reeve/triage@v0.1
+  with:
+    models: gpt-5-mini
+    labels: frontend-bug
+```
+
+A name `labels` asks for that is not in the file's taxonomy fails the run red,
+naming it, before a single request is made — the same "fail on the
+configuration mistake" reasoning as a taxonomy naming a renamed repository
+label. Narrowing which labels reach the verdict prompt narrows everything
+downstream of it too: a `sweep` scoped to `labels: frontend-bug` treats a
+thread another area already labelled as undecided from its own point of
+view, and a bulk-migration `record` composed with it only imports the labels
+its own slice named — the file is shared, but each area's history in the
+corrections store stays its own.
+
 ## Outputs
 
 Every output `triage/action.yml` declares.
 
-| Output         | Value                                                                                                                                                       |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `labels`       | JSON array of the labels that were applied. `[]` is the ordinary answer on a thread nobody could label, never unset.                                        |
-| `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                          |
-| `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                          |
-| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                      |
-| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close`.                                                  |
-| `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.               |
-| `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                          |
-| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                        |
-| `processed`    | How many issues a sweep actually processed this run. `0` outside `sweep`.                                                                                   |
-| `skipped`      | How many issues a sweep found already labelled and left alone. `0` outside `sweep`.                                                                         |
-| `remaining`    | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                  |
-| `recorded`     | `true` when a labelled or unlabelled event, with `record` granted, wrote this thread's current labels to the corrections store. `false` on every other run. |
+| Output         | Value                                                                                                                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `labels`       | JSON array of the labels that were applied. `[]` is the ordinary answer on a thread nobody could label, never unset.                                                                                       |
+| `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                                                                         |
+| `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                                                                         |
+| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                                                                     |
+| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close`.                                                                                                 |
+| `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.                                                              |
+| `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                                                                         |
+| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                       |
+| `processed`    | How many issues a sweep actually processed this run — under bulk migration, how many it recorded. `0` outside `sweep`.                                                                                     |
+| `skipped`      | How many issues a sweep found already labelled and left alone — under bulk migration, how many carried no taxonomy label to import. `0` outside `sweep`.                                                   |
+| `remaining`    | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                 |
+| `recorded`     | `true` when a labelled or unlabelled event, with `record` granted, wrote this thread's current labels to the corrections store — also `true` for a whole bulk-migration sweep. `false` on every other run. |
 
 **The difference between `proposed` and `labels` is what the guardrails
 stopped.** That is the output to watch while tuning `confidence` or a `not`
@@ -227,6 +282,7 @@ field — it is the only place a refused verdict is visible.
 | The verdict did not parse                            | Loud warning, empty verdict, nothing applied, **green**           |
 | Confidence below the floor                           | `proposed` populated, `labels: []`, **green**                     |
 | The warrant does not parse, or names a missing label | **Red**, naming the file and the label                            |
+| `labels` names something not in the taxonomy         | **Red**, naming the file and the name, before a request is made   |
 | The thread cannot be read                            | **Red**                                                           |
 
 **The failure mode of this duty is doing nothing.** Every branch above ends

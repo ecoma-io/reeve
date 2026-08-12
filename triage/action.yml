@@ -111,6 +111,31 @@ inputs:
     required: false
     default: .github/reeve.yml
 
+  labels:
+    description: >-
+      Which of the warrant's taxonomy this run may propose, comma or newline
+      separated by name. Empty is the whole taxonomy, unchanged — this exists
+      for the monorepo with one area per directory and one shared
+      `.github/reeve.yml`: point every area's workflow at the same file and
+      use this to keep each one proposing only the labels its own area owns,
+      rather than maintaining a taxonomy file per area.
+
+      A name here that the file's taxonomy does not have fails the run red,
+      naming it, before a single request — a typo would otherwise triage
+      forever with one label quietly missing from the roster. The order named
+      in the file, not the order written here, is what survives: that order is
+      what breaks a tie between two proposals, and this input only narrows the
+      set, it does not resequence it.
+
+      This is a different narrowing than `apply`: `apply` says what this run
+      may **do** with a verdict, this says what verdicts it may **reach** at
+      all — a thread another area already labelled from its own slice of this
+      same file is not "already triaged" from this run's point of view, and a
+      `record` sweep composed with this only imports the labels its own slice
+      named.
+    required: false
+    default: ""
+
   apply:
     description: >-
       What this run may do, comma separated: any of `label`, `comment`,
@@ -125,6 +150,16 @@ inputs:
       unlabelled event only records when both halves grant it, and with the
       default of `label` alone a labelled event re-triages instead — see
       `docs/reference/duties/triage.md`.
+
+      `record` composes with `sweep` too, and means something different
+      there: a backlog walk that already carries `record` in both halves
+      imports each candidate's standing labels as history instead of
+      triaging it — bulk migration, in one run, of decisions this project
+      already made before this action existed. Not every standing label,
+      unconditionally: one whose most recent `labeled` event was a bot rather
+      than a human is excluded, so months of this duty's own past output
+      cannot be imported back in as though a maintainer had decided it. See
+      `sweep-state` below.
     required: false
     default: label
 
@@ -138,6 +173,11 @@ inputs:
       Refused rather than clamped: `75` is a typo that would otherwise mean
       `1`, and a duty that silently stopped labelling anything is worse than a
       red run.
+
+      This is the run's own floor, not every label's: a taxonomy entry in the
+      warrant may carry its own `confidence:` between 0 and 1, which answers
+      for that label alone and leaves this input as the floor for every label
+      that did not — see `docs/reference/warrant-format.md#label-fields`.
     required: false
     default: "0.75"
 
@@ -228,6 +268,21 @@ inputs:
       a hidden ceiling.
     required: false
     default: "50"
+
+  sweep-state:
+    description: >-
+      Which issues a sweep considers, by their state on the tracker: `open`,
+      `closed`, or `all`. A resource filter, not a mode — it changes what a
+      sweep fetches, nothing about what it is allowed to do with what it
+      finds.
+
+      `open` is the default and the ordinary case. `closed` and `all` exist
+      for bulk migration — `record` granted in both the warrant and `apply`,
+      composed with `sweep` — so a one-time backfill can import a project's
+      already-decided history, closed issues included, into the corrections
+      store instead of only the backlog still waiting on a verdict.
+    required: false
+    default: open
 
   endpoints:
     description: >-
@@ -337,13 +392,15 @@ outputs:
 
   processed:
     description: >-
-      How many issues a sweep actually processed this run — decided about,
-      whether or not anything was applied. `0` outside `sweep`.
+      How many issues a sweep actually processed this run — decided about, or
+      under bulk migration recorded, whether or not anything was applied. `0`
+      outside `sweep`.
 
   skipped:
     description: >-
-      How many issues a sweep found already labelled and left alone, at no
-      cost beyond the listing itself. `0` outside `sweep`.
+      How many issues a sweep left alone at no cost beyond the listing
+      itself: already labelled, under ordinary triage, or carrying no
+      taxonomy label to import, under bulk migration. `0` outside `sweep`.
 
   remaining:
     description: >-
@@ -355,9 +412,12 @@ outputs:
     description: >-
       `true` when a labelled or unlabelled event from a human, with `record`
       granted, wrote (or under `dry-run`, would have written) this thread's
-      current labels to the corrections store. `false` on every other run —
-      including an ordinary verdict, a sweep, and a labelled event where
-      `record` is not granted — never unset.
+      current labels to the corrections store. Also `true` for a whole `sweep`
+      run composing `record` with it — bulk migration — regardless of how many
+      individual candidates were skipped for carrying nothing to import.
+      `false` on every other run — including an ordinary verdict, an ordinary
+      triaging sweep, and a labelled event where `record` is not granted —
+      never unset.
 
 runs:
   using: node24

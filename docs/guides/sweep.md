@@ -145,6 +145,46 @@ the day I installed this" and a backfill of everything older stays a
 deliberate, separate decision — run once, by hand, with `limit` set to
 whatever you are willing to spend finding out what it costs.
 
+## Bulk migration: `record` composed with `sweep`
+
+Triage-only, and the one place `sweep` changes what a run is allowed to do
+rather than only how much of it looks for work. Grant `record` in both the
+warrant and `apply` on a `sweep` run, and the backlog walk stops triaging and
+starts importing instead — every candidate's standing labels are written to
+the corrections store as history, the same shape a single labelled event
+records, but attributed to `"sweep"` rather than to whoever last touched the
+label:
+
+```yaml
+with:
+  sweep: true
+  sweep-state: all
+  limit: 500
+  apply: record
+```
+
+```yaml
+# .github/reeve.yml
+capabilities:
+  triage: [record]
+```
+
+`sweep-state` is what makes this worth having: an ordinary sweep only ever
+lists `open` threads, because triaging a thread nobody is going to look at
+again is wasted work. Bulk migration is the opposite case — the decisions
+worth importing are exactly the ones a maintainer already closed the book on
+— so `sweep-state: closed` or `sweep-state: all` reaches those too. It is a
+filter on what the listing fetches, nothing more; the taxonomy and the
+capabilities that bound an ordinary sweep bound this one identically.
+
+A candidate carrying none of the taxonomy's labels is skipped — there is
+nothing on it to import — and every other guardrail applies exactly as it
+does to a single `record` run: taxonomy-filtered labels, the same pivot
+rendering, the same idempotent replace-by-thread write. Run it once, by hand,
+the same way a `since` backfill is: a deliberate `workflow_dispatch`, not a
+recurring schedule — once a project's history is in the store, the ordinary
+per-event `record` path is what keeps it current.
+
 ## What this replaces
 
 Working through an existing backlog one thread at a time, from a

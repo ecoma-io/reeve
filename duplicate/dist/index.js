@@ -32947,13 +32947,13 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since) {
+async function listOpenThreads(api, at, since, state = "open") {
   const listed = [];
   for (let page2 = 1; ; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
-      state: "open",
+      state,
       sort: "created",
       direction: "desc",
       per_page: SWEEP_PAGE,
@@ -33018,6 +33018,9 @@ function parseWarrant(path, source) {
   }
   const labels = readLabels(path, document2.labels);
   const languages = readLanguages(path, document2.languages);
+  const pivot = readPivot(path, document2.pivot);
+  const memory = readMemory(path, document2.memory);
+  const about = readAbout(path, document2.about);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -33034,6 +33037,9 @@ function parseWarrant(path, source) {
     path,
     labels,
     languages,
+    pivot,
+    memory,
+    about,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -33054,7 +33060,8 @@ function implicitWarrant(path, repositoryLabels) {
       not: null,
       examples: [],
       owner: null,
-      exclusiveWith: []
+      exclusiveWith: [],
+      confidence: null
     });
   }
   const byName = new Map(labels.map((label) => [label.name, label]));
@@ -33063,6 +33070,9 @@ function implicitWarrant(path, repositoryLabels) {
       path,
       labels,
       languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
@@ -33089,6 +33099,22 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function resolvePivot(warrant, languages) {
+  const first = languages[0];
+  if (warrant.pivot === null) {
+    if (first === void 0) {
+      throw new Error("pivot: no languages are configured to choose one from.");
+    }
+    return first;
+  }
+  const found = findLanguage(languages, warrant.pivot);
+  if (found === void 0) {
+    throw new Error(
+      `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured languages (${languages.map((language) => language.code).join(", ")}).`
+    );
+  }
+  return found;
 }
 function load(path, source) {
   let document2;
@@ -33137,7 +33163,8 @@ function readLabels(path, raw) {
       not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
-      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with)
+      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
     });
   }
   return labels;
@@ -33166,6 +33193,45 @@ function readLanguages(path, raw) {
     return entry.trim();
   });
   return parseLanguages(entries);
+}
+function readPivot(path, raw) {
+  if (raw === void 0) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
+    );
+  }
+  return raw.trim();
+}
+function readMemory(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const recall = fields.recall;
+  if (recall === void 0 || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
+    );
+  }
+  return { recall };
+}
+function readAbout(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33233,6 +33299,15 @@ function strings(at, key, raw) {
 }
 function nullable(value) {
   return value.length === 0 ? null : value;
+}
+function confidenceField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
+    );
+  }
+  return raw;
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -34431,7 +34506,7 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
 ${body}`];
   let pivotUsed = false;
   let pivotNote = null;
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(authority.warrant, settings.languages) : null;
   const threadLanguage = detection.language;
   if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache)) {
     const pivot = await translateToPivot({

@@ -48,7 +48,7 @@ import { parse, YAMLParseError } from "yaml";
 
 import type { Location, TrackerApi } from "./forge.js";
 import { listRepositoryLabels } from "./forge.js";
-import { parseLanguages, type Language } from "./languages.js";
+import { findLanguage, parseLanguages, type Language } from "./languages.js";
 
 /**
  * What a duty may do to a thread. The closed set; a name outside it is refused.
@@ -74,6 +74,11 @@ export const CAPABILITIES: readonly Capability[] = [
 
 /** The only version this reader understands. */
 const VERSION = 1;
+
+/** The `memory:` block's shape — see {@link Warrant.memory}. */
+export interface MemorySettings {
+  readonly recall: number;
+}
 
 /**
  * A handle, syntactically.
@@ -101,6 +106,17 @@ export interface Label {
   readonly owner: string | null;
   /** Labels that may not be applied alongside this one. Enforced in code. */
   readonly exclusiveWith: readonly string[];
+  /**
+   * This label's own confidence floor, between 0 and 1, or `null` to fall
+   * back to the run's `confidence` input.
+   *
+   * Some labels are cheap to get wrong and some are not — a `needs
+   * reproduction` mislabelled costs a re-read, a `security` mislabelled costs
+   * a false alarm a maintainer has to notice is one. This is what lets a
+   * taxonomy say that in the file, per label, rather than every label sharing
+   * one run-wide number tuned to the riskiest one.
+   */
+  readonly confidence: number | null;
 }
 
 /** The parsed file, and the questions the rest of Reeve is allowed to ask it. */
@@ -121,6 +137,28 @@ export interface Warrant {
    * has any reason to look at the `languages` input.
    */
   readonly languages: readonly Language[] | null;
+  /**
+   * The `pivot:` key: the language corrections are bridged through for
+   * cross-language recall, as written — not yet resolved against the final
+   * `languages` list, which is `resolvePivot`'s job once that list exists.
+   * `null` when the file never named one, which leaves the first-listed
+   * language the pivot, exactly as before this key existed.
+   */
+  readonly pivot: string | null;
+  /**
+   * The `memory:` key's `recall` field: how many corrections a duty puts in
+   * front of a model, or `null` when the file never wrote the block — the
+   * duty's own default applies then, same as before this key existed. `0` is
+   * meaningful here rather than refused: a project that wants the store kept
+   * but never consulted writes it.
+   */
+  readonly memory: MemorySettings | null;
+  /**
+   * The `about:` key: what this repository is about, in the maintainer's own
+   * words, or `null` when the file never wrote one — `resolveAbout` falls
+   * back to the `about` input then, the same input every duty already reads.
+   */
+  readonly about: string | null;
   /**
    * What this duty was granted.
    *
@@ -224,6 +262,9 @@ export function parseWarrant(path: string, source: string): Warrant {
 
   const labels = readLabels(path, document.labels);
   const languages = readLanguages(path, document.languages);
+  const pivot = readPivot(path, document.pivot);
+  const memory = readMemory(path, document.memory);
+  const about = readAbout(path, document.about);
   const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
@@ -246,6 +287,9 @@ export function parseWarrant(path: string, source: string): Warrant {
     path,
     labels,
     languages,
+    pivot,
+    memory,
+    about,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
@@ -265,10 +309,21 @@ export function parseWarrant(path: string, source: string): Warrant {
  * Case-sensitive, because GitHub applies a label by its exact name. It is also
  * where a rename that only changed case gets caught, which is otherwise
  * invisible in the tracker's own UI.
+ *
+ * Checks `taxonomy`, not `warrant.labels`, and defaults to the latter only
+ * because most callers have not narrowed anything. A run scoped by the
+ * `labels` input has already narrowed its taxonomy before this is called —
+ * checking the warrant's whole one instead would fail a run over a label
+ * renamed in an area it was never asked to touch, which is exactly the
+ * isolation this narrowing exists to give it.
  */
-export function checkLabelsExist(warrant: Warrant, existing: readonly string[]): void {
+export function checkLabelsExist(
+  warrant: Warrant,
+  existing: readonly string[],
+  taxonomy: readonly Label[] = warrant.labels,
+): void {
   const present = new Set(existing);
-  const missing = warrant.labels.map((label) => label.name).filter((name) => !present.has(name));
+  const missing = taxonomy.map((label) => label.name).filter((name) => !present.has(name));
   if (missing.length === 0) return;
 
   // Every missing name at once. Reporting the first would make fixing a
@@ -340,6 +395,7 @@ export function implicitWarrant(
       examples: [],
       owner: null,
       exclusiveWith: [],
+      confidence: null,
     });
   }
 
@@ -350,6 +406,9 @@ export function implicitWarrant(
       path,
       labels,
       languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name),
@@ -440,6 +499,61 @@ export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesR
   return { languages: parseLanguages(rawInput), notice: null };
 }
 
+/**
+ * The pivot language corrections are bridged through, resolved against the
+ * final list of configured languages — whichever of `languages:` or the
+ * `languages` input answered that.
+ *
+ * The warrant's `pivot:` wins outright when written, refused if it names a
+ * language that is not in `languages` — a pivot nothing translates into or
+ * out of cannot bridge anything. Absent, the first-listed language is the
+ * pivot, exactly the behaviour this key made explicit rather than changed.
+ */
+export function resolvePivot(warrant: Warrant, languages: readonly Language[]): Language {
+  const first = languages[0];
+  if (warrant.pivot === null) {
+    if (first === undefined) {
+      throw new Error("pivot: no languages are configured to choose one from.");
+    }
+    return first;
+  }
+
+  const found = findLanguage(languages, warrant.pivot);
+  if (found === undefined) {
+    throw new Error(
+      `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured ` +
+        `languages (${languages.map((language) => language.code).join(", ")}).`,
+    );
+  }
+  return found;
+}
+
+/** What resolving `about` against the warrant and the input decided. */
+export interface AboutResolution {
+  readonly about: string;
+  /** Set only when the warrant's key won — see {@link resolveLanguages}'s identical field. */
+  readonly notice: string | null;
+}
+
+/**
+ * Which of the two sources answers "what this repository is about" this run —
+ * the same warrant-wins, input-falls-back pattern as {@link resolveLanguages},
+ * on a field where both an absent warrant key and an absent input are
+ * legitimate: an empty answer just leaves the spam screen asking from the
+ * title alone, as it always has.
+ */
+export function resolveAbout(warrant: Warrant, rawInput: string): AboutResolution {
+  if (warrant.about !== null) {
+    return {
+      about: warrant.about,
+      notice:
+        `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input — the file ` +
+        "is the whole answer once that key is written.",
+    };
+  }
+  return { about: rawInput.trim(), notice: null };
+}
+
 /** The document, or a parse error that says where in the file it is. */
 function load(path: string, source: string): Record<string, unknown> {
   let document: unknown;
@@ -513,6 +627,7 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
       exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence),
     });
   }
 
@@ -564,6 +679,72 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
   });
 
   return parseLanguages(entries);
+}
+
+/**
+ * The `pivot:` key: a language code, or `null` when the file never wrote one.
+ *
+ * Not resolved against the final `languages` list here — that list may still
+ * come from the `languages` input rather than this file, and `readWarrant`
+ * runs before either duty has decided which. `resolvePivot` does that once
+ * the caller has the real list in hand.
+ *
+ * `pivot:` with nothing under it parses as YAML `null`, which is refused
+ * rather than read as absence — the same distinction `readLanguages` draws:
+ * once the key is in the file, an unfinished edit is not the same fact as
+ * the key never having been written.
+ */
+function readPivot(path: string, raw: unknown): string | null {
+  if (raw === undefined) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`,
+    );
+  }
+  return raw.trim();
+}
+
+/**
+ * The `memory:` block. Absent entirely is `null`, which leaves a duty's own
+ * default in charge — see {@link Warrant.memory}. Present, `recall` is
+ * required: a block with nothing in it — including `memory:` written with
+ * nothing under it, which parses as YAML `null` — is the same half-finished-
+ * edit shape `capabilities:` and `languages:` both refuse rather than guess
+ * at.
+ */
+function readMemory(path: string, raw: unknown): MemorySettings | null {
+  if (raw === undefined) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, ` +
+        "or remove the key to leave the duty's own default in charge.",
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+
+  const fields = raw as Record<string, unknown>;
+  const recall = fields.recall;
+  if (recall === undefined || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`,
+    );
+  }
+  return { recall };
+}
+
+/** The `about:` key. Absent or empty are both `null` — see {@link Warrant.about}. */
+function readAbout(path: string, raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
 }
 
 /** Whether the block existed at all, and what it named if it did. */
@@ -669,6 +850,24 @@ function strings(at: string, key: string, raw: unknown): readonly string[] {
 
 function nullable(value: string): string | null {
   return value.length === 0 ? null : value;
+}
+
+/**
+ * A label's own `confidence:` floor — a fraction between 0 and 1, or absent
+ * to fall back on the run's floor, the same `confidence` input every label
+ * has always shared. Written to raise or lower one label's own bar without
+ * moving everyone else's: a label costly to get wrong can ask for more
+ * certainty than the run's floor requires, without the run's floor having to
+ * move for every other label to get it.
+ */
+function confidenceField(at: string, key: string, raw: unknown): number | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`,
+    );
+  }
+  return raw;
 }
 
 /** What a wrong value is, for a message that helps rather than quotes YAML at somebody. */
