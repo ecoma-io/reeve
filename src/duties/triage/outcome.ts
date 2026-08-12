@@ -207,6 +207,16 @@ export interface Gate {
    * two are treated alike.
    */
   readonly refuse: boolean;
+  /**
+   * `true` when the refusal is because a matching reversal record was
+   * actually found, as opposed to an unreadable shard the run could not rule
+   * out. The caller needs this to pick the right explanation: a scan can
+   * find the record on one shard after already failing to read an earlier
+   * one, in which case `unreadable` is non-empty *and* the record was
+   * found — `refuse` alone cannot tell those two stories apart, only this
+   * can. `false` whenever `refuse` is `false` too.
+   */
+  readonly found: boolean;
   /** Shards this run could not read while checking — logged by the caller, never by this module. */
   readonly unreadable: readonly string[];
 }
@@ -268,10 +278,10 @@ export async function gateClose(
         correction.outcome === "overruled" &&
         correction.duplicateOf !== null
       ) {
-        return { refuse: true, unreadable };
+        return { refuse: true, found: true, unreadable };
       }
     }
   }
 
-  return { refuse: unreadable.length > 0, unreadable };
+  return { refuse: unreadable.length > 0, found: false, unreadable };
 }

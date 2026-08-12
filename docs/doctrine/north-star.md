@@ -256,8 +256,9 @@ Reeve closed as a duplicate, or removes a label Reeve applied, has just done the
 same kind of work this doctrine already protects — and triage's enforce stage
 refuses in code, not only in a prompt, to re-close a thread against a reversal
 already on record: whatever a model proposes next, a human's reversal of
-Reeve's own prior action is itself inviolable. See `docs/reference/duties/
-triage.md`'s section on memory for the mechanism.
+Reeve's own prior action is itself inviolable. See
+[triage's own reference page](../reference/duties/triage.md#configuration)
+for the mechanism.
 
 _Costs us:_ the tidy-the-backlog features that demo best are the ones we refuse.
 

@@ -2199,19 +2199,28 @@ async function act(
       at.number,
     );
     if (gate.refuse) {
-      if (gate.unreadable.length > 0) {
+      if (gate.found) {
+        // The record was actually found, whatever else this scan could or
+        // could not read along the way — an unreadable shard elsewhere does
+        // not make this refusal any less certain, so it is named here only
+        // as extra context, never as the reason.
+        const aside =
+          gate.unreadable.length > 0
+            ? ` (${gate.unreadable.map((shard) => `\`${shard}\``).join(", ")} could not be read ` +
+              "while checking, but that is not why this was refused)"
+            : "";
+        core.notice(
+          `#${String(at.number)}: a human already reopened this thread after Reeve closed it as ` +
+            "a duplicate — that close was recorded as reversed, and the gate refuses to repeat " +
+            `it. The model's verdict is not what decides this; D3 is.${aside}`,
+        );
+      } else {
         core.warning(
           `#${String(at.number)}: the hard gate could not fully check whether this close was ` +
             `already reversed — ${gate.unreadable.map((shard) => `\`${shard}\``).join(", ")} ` +
             "could not be read, and an unreadable shard refuses the same as a found record " +
             "would. The close was refused rather than risk re-closing a thread a human already " +
             "reopened.",
-        );
-      } else {
-        core.notice(
-          `#${String(at.number)}: a human already reopened this thread after Reeve closed it as ` +
-            "a duplicate — that close was recorded as reversed, and the gate refuses to repeat " +
-            "it. The model's verdict is not what decides this; D3 is.",
         );
       }
     } else {

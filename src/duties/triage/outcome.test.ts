@@ -395,7 +395,7 @@ describe("gateClose", () => {
 
     const gate = await gateClose(contentsApi, AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: false, unreadable: [] });
+    expect(gate).toEqual({ refuse: false, found: false, unreadable: [] });
   });
 
   it("does not refuse an empty (never-recorded) store", async () => {
@@ -403,7 +403,7 @@ describe("gateClose", () => {
 
     const gate = await gateClose(contentsApi, AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: false, unreadable: [] });
+    expect(gate).toEqual({ refuse: false, found: false, unreadable: [] });
   });
 
   it("refuses when the store carries a matching overruled close reversal", async () => {
@@ -412,7 +412,7 @@ describe("gateClose", () => {
 
     const gate = await gateClose(contentsOf(files), AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: true, unreadable: [] });
+    expect(gate).toEqual({ refuse: true, found: true, unreadable: [] });
   });
 
   it("does not refuse an overruled record for a different thread or repo", async () => {
@@ -424,7 +424,7 @@ describe("gateClose", () => {
 
     const gate = await gateClose(contentsOf(files), AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: false, unreadable: [] });
+    expect(gate).toEqual({ refuse: false, found: false, unreadable: [] });
   });
 
   it("does not refuse an S1 label reversal — only a close reversal names `duplicateOf`", async () => {
@@ -433,7 +433,7 @@ describe("gateClose", () => {
 
     const gate = await gateClose(contentsOf(files), AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: false, unreadable: [] });
+    expect(gate).toEqual({ refuse: false, found: false, unreadable: [] });
   });
 
   it("skips an unparseable line rather than refusing over it", async () => {
@@ -441,7 +441,7 @@ describe("gateClose", () => {
 
     const gate = await gateClose(contentsOf(files), AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: false, unreadable: [] });
+    expect(gate).toEqual({ refuse: false, found: false, unreadable: [] });
   });
 
   it("refuses, and names the shard, on an unreadable (oversized) shard", async () => {
@@ -465,6 +465,48 @@ describe("gateClose", () => {
 
     const gate = await gateClose(combined, AT, "corrections", "acme/widgets", 42);
 
-    expect(gate).toEqual({ refuse: true, unreadable: ["corrections/2026-08.ndjson"] });
+    expect(gate).toEqual({
+      refuse: true,
+      found: false,
+      unreadable: ["corrections/2026-08.ndjson"],
+    });
+  });
+
+  it("reports `found`, not the unreadable shard, when a matching record turns up after one", async () => {
+    // Two shards: an earlier one this run cannot decode at all, and a later
+    // one that carries the matching reversal. `refuse` alone cannot tell a
+    // caller which of those is why the close was refused — `found` is the
+    // field that answers that, and this is the case that motivates it: an
+    // unreadable shard elsewhere must not steal the explanation from an
+    // actually-found record.
+    const overruled = correction({ thread: 42, outcome: "overruled", duplicateOf: 7 });
+    const listing = contentsOf({
+      "corrections/2026-07.ndjson": "placeholder",
+      "corrections/2026-08.ndjson": `${formatCorrection(overruled)}\n`,
+    });
+    const unreadableShard = unreadableContentsOf("sha-unreadable");
+    const combined: ContentsApi = {
+      rest: {
+        repos: {
+          getContent: (params) => {
+            if (params.path === "corrections/2026-07.ndjson") {
+              return unreadableShard.rest.repos.getContent(params);
+            }
+            return listing.rest.repos.getContent(params);
+          },
+          createOrUpdateFileContents: () => {
+            throw new Error("not used by outcome.ts");
+          },
+        },
+      },
+    };
+
+    const gate = await gateClose(combined, AT, "corrections", "acme/widgets", 42);
+
+    expect(gate).toEqual({
+      refuse: true,
+      found: true,
+      unreadable: ["corrections/2026-07.ndjson"],
+    });
   });
 });
