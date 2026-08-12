@@ -51,9 +51,22 @@
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API, which is what a runner does — see
  * `main.integration.test.ts`.
+ *
+ * What is left here is the order above, the two `Outcome`/`SweepAccumulator`
+ * shapes every step of it reads and writes, and `run`/`runSweep`'s own
+ * control flow — everything else has its own module, tested on its own:
+ * `inputs.ts` (settings parsing, `readSettings` itself stays here — see its
+ * doc comment for why), `store.ts` (the corrections store's write path),
+ * `record.ts` (the `record` capability's trigger, gates and both write
+ * paths), `outputs.ts` (every `core.setOutput` call and every summary page
+ * this duty renders), `capabilities.ts` (the cheapest-reversible-action
+ * default a missing warrant falls back to), `outcome.ts` (what Reeve's own
+ * past actions on a thread were, for the S1/S3 signals recall needs),
+ * `propose.ts` (the `propose` capability's workspace-drift pull requests),
+ * `summary.ts` (the page `outputs.ts` renders onto), and `verdict.ts` (the
+ * one stage that talks to a model, and the only one whose answer is treated
+ * as a suggestion).
  */
-import { isAbsolute, relative } from "node:path";
-
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
@@ -63,42 +76,19 @@ import { enforceLabels, narrow, owners, parseApply, type Refusal } from "../../c
 import {
   createEffects,
   createRepositoryLabel,
-  isBotAuthor,
   isCapacityError,
-  listCorrectionFiles,
-  listLabelEvents,
   listOpenThreads,
   listRepositoryLabels,
-  readContentsFile,
   readStanding,
-  writeContentsFile,
-  UnreadableContentsFile,
   type ContentsApi,
   type Effects,
   type Location,
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import {
-  bounded,
-  counted,
-  fraction,
-  readShared,
-  resolveEndpoints,
-  type ApiKeySpec,
-  type EndpointSpec,
-} from "../../core/inputs.js";
-import { type Language } from "../../core/languages.js";
+import { bounded, counted, fraction, readShared, resolveEndpoints } from "../../core/inputs.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import {
-  createMemory,
-  formatCorrection,
-  parseCorrection,
-  readStore,
-  EXCERPT,
-  type Correction,
-  type WeightedQuery,
-} from "../../core/memory.js";
+import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
@@ -108,7 +98,6 @@ import {
   settleAuth,
   shown,
   starved,
-  type Names,
   type Provider,
   type Weather,
 } from "../../core/provider.js";
@@ -128,15 +117,30 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { checkReversal, closeMarker, gateClose, removedByAutomation } from "./outcome.js";
+import { parseSweepState, resolveTaxonomy, taxonomyNames, type Settings } from "./inputs.js";
+import { checkReversal, closeMarker, gateClose } from "./outcome.js";
 import {
-  summarize,
-  summarizeRecord,
-  summarizeSweep,
-  type Done,
-  type Run,
-  type SweptThread,
-} from "./summary.js";
+  describeRecordOutcome,
+  labelChange,
+  recordCorrection,
+  recordGrantedByFile,
+  recordGrantedByRun,
+  recordReversal,
+  recordTrigger,
+  senderLogin,
+  type RecordOutcome,
+} from "./record.js";
+import { repoRelativePath } from "./store.js";
+import { type Done, type SweptThread } from "./summary.js";
+import {
+  NOTHING_DONE,
+  page,
+  recordPage,
+  report,
+  reportRecordRun,
+  reportSweep,
+  sweepPage,
+} from "./outputs.js";
 import {
   report as buildProposeReport,
   proposeSection,
@@ -173,135 +177,6 @@ const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
  */
 const RECALLED = 4;
 
-interface Settings {
-  readonly token: string;
-  /** The thread to work on, or null in `sweep`. */
-  readonly number: number | null;
-  readonly models: readonly string[];
-  readonly modelNames: Names;
-  /** The cheap roster. Empty turns the model-backed screen off, which is the default. */
-  readonly screenModels: readonly string[];
-  readonly screenNames: Names;
-  readonly languages: readonly Language[];
-  readonly warrant: string;
-  /**
-   * The subset of `warrant.labels` this run may propose — `labels`'s own
-   * answer, in the warrant's order. The whole taxonomy when `labels` named
-   * nothing. See `resolveTaxonomy`.
-   */
-  readonly taxonomy: readonly Label[];
-  readonly apply: readonly Capability[];
-  readonly confidence: number;
-  readonly corrections: string;
-  readonly about: string;
-  readonly minBodyChars: number;
-  /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
-  readonly maxBodyChars: number | null;
-  readonly dryRun: boolean;
-  readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly sweep: boolean;
-  readonly since: Date | null;
-  /** `null` is no ceiling at all — see `bounded`'s doc comment for the sentinel rule. */
-  readonly limit: number | null;
-  readonly endpoints: readonly EndpointSpec[];
-  readonly apiKeys: readonly ApiKeySpec[];
-  readonly requestTimeoutMs: number;
-  readonly temperature: number | undefined;
-  /**
-   * Which resource state a sweep considers — a filter on what it fetches, not
-   * a different mode of the duty. See `parseSweepState`.
-   */
-  readonly sweepState: SweepState;
-}
-
-/** `sweep-state`'s three spellings, as `parseSweepState` reads them. */
-type SweepState = "open" | "closed" | "all";
-const SWEEP_STATES: readonly SweepState[] = ["open", "closed", "all"];
-
-/**
- * Which resource state a sweep considers.
- *
- * A resource filter, not a mode: it changes what `listOpenThreads` fetches,
- * nothing about how a fetched thread is decided. `open` is the default and
- * the ordinary case — a sweep keeping a fresh backlog triaged. `closed` and
- * `all` exist for the case this duty's `record` capability makes possible
- * when it composes with `sweep`: a one-time bulk migration that imports a
- * project's already-decided history — including threads a maintainer closed
- * long before this action existed — into the corrections store in one run,
- * rather than one label event at a time from here on.
- */
-function parseSweepState(raw: string): SweepState {
-  const value = raw.trim().toLowerCase();
-  const match = SWEEP_STATES.find((state) => state === value);
-  if (match === undefined) {
-    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
-  }
-  return match;
-}
-
-/**
- * `labels`, narrowed against the warrant's own taxonomy — in the warrant's
- * order, because that order is what breaks a tie between two proposals, not
- * the input's.
- *
- * Empty is the whole taxonomy, unchanged: a monorepo with one area per
- * directory and one shared `.github/reeve.yml` points every area's workflow
- * at the same file and uses this to keep each one proposing only the labels
- * its own area owns, without maintaining a taxonomy file per area. A name
- * this asks for that the file does not have is refused rather than quietly
- * dropped — a typo here would otherwise triage forever with one label
- * missing from the roster and nothing saying so.
- */
-function resolveTaxonomy(warrant: Warrant, raw: string): readonly Label[] {
-  const requested = raw
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  if (requested.length === 0) return warrant.labels;
-
-  for (const name of requested) {
-    if (warrant.labelNamed(name) === undefined) {
-      throw new Error(
-        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. ` +
-          "Add it there, or correct the name.",
-      );
-    }
-  }
-  const wanted = new Set(requested);
-  return warrant.labels.filter((label) => wanted.has(label.name));
-}
-
-/** `settings.taxonomy`'s own names, for the places that check membership rather than shape. */
-function taxonomyNames(settings: Settings): ReadonlySet<string> {
-  return new Set(settings.taxonomy.map((label) => label.name));
-}
-
-/**
- * Everything but `languages` and `taxonomy`, neither of which can be read
- * here: both need the warrant, and `readWarrant`'s own result is only
- * available once `resolveAuthority` has answered, while every other input
- * here is not async at all. `run` completes the object once it has.
- */
-function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
-  const shared = readShared();
-  const cheap = parseModels(core.getInput("screen-models"));
-
-  return {
-    ...shared,
-    screenModels: cheap.models,
-    screenNames: cheap.names,
-    warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
-    confidence: fraction("confidence", core.getInput("confidence")),
-    corrections: core.getInput("corrections", { required: true }),
-    about: core.getInput("about"),
-    minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
-    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
-    sweepState: parseSweepState(core.getInput("sweep-state")),
-  };
-}
-
 /**
  * One provider per stage, each counting its own requests.
  *
@@ -309,7 +184,7 @@ function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
  * `triage` is the expensive one, and a maintainer deciding whether the cheap
  * pass is earning its keep needs those as two rows rather than one.
  */
-interface Stages {
+export interface Stages {
   readonly detect: Provider;
   readonly screen: Provider;
   readonly triage: Provider;
@@ -318,7 +193,7 @@ interface Stages {
 }
 
 /** Everything the run concluded, whatever path it took to conclude it. */
-interface Outcome {
+export interface Outcome {
   readonly language: string | null;
   readonly screenedOut: { readonly reason: string; readonly note: string } | null;
   readonly verdict: Verdict;
@@ -353,9 +228,6 @@ interface Outcome {
   readonly ungranted: string | null;
 }
 
-/** What a run that touched nothing did. Also what every dry run reports. */
-const NOTHING_DONE: Done = { labels: [], commented: false, assigned: [], closed: false };
-
 /**
  * A sweep's progress, mutated in place rather than assembled and returned.
  *
@@ -366,7 +238,7 @@ const NOTHING_DONE: Done = { labels: [], commented: false, assigned: [], closed:
  * only on success cannot do that — an object mutated as the loop goes can,
  * because the caller already holds the same reference.
  */
-interface SweepAccumulator {
+export interface SweepAccumulator {
   readonly results: SweptThread[];
   skipped: number;
   starvedRun: boolean;
@@ -407,10 +279,10 @@ function newAccumulator(): SweepAccumulator {
  * triggering event — a label change is a correction, anything else is a
  * verdict — but a sweep has no such event per thread, only a warrant and an
  * `apply` that either grant `record` or do not. So the same test single-thread
- * mode uses at its own branch point (`permitted.includes("record")`) is made
- * once here, for the whole run: granted, every candidate is recorded as
- * bulk-migrated history; not granted, every candidate is triaged, exactly as
- * before this capability existed.
+ * mode uses at its own branch point (`recordGrantedByRun`) is made once here,
+ * for the whole run: granted, every candidate is recorded as bulk-migrated
+ * history; not granted, every candidate is triaged, exactly as before this
+ * capability existed.
  */
 async function runSweep(
   acc: SweepAccumulator,
@@ -427,7 +299,7 @@ async function runSweep(
 
   const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
   const { permitted } = narrow(grantedCapabilities, settings.apply);
-  const recording = permitted.includes("record");
+  const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
 
   if (!authority.implicit) {
@@ -644,18 +516,6 @@ function noticeProposeSweepOnly(authority: Authority): void {
   }
 }
 
-/** One sweep row's outcome under bulk migration, in the fewest words that are true. */
-function describeRecordOutcome(outcome: RecordOutcome): string {
-  return outcome.decided.length > 0
-    ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}`
-    : "recorded with no taxonomy labels";
-}
-
-/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
-function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
-
 /** One sweep row's outcome, in the fewest words that are true. */
 function describeOutcome(outcome: Outcome, done: Done): string {
   if (outcome.ungranted !== null) return "not granted";
@@ -665,6 +525,38 @@ function describeOutcome(outcome: Outcome, done: Done): string {
   }
   if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
   return "no label";
+}
+
+/**
+ * Everything but `languages` and `taxonomy`, neither of which can be read
+ * here: both need the warrant, and `readWarrant`'s own result is only
+ * available once `resolveAuthority` has answered, while every other input
+ * here is not async at all. `run` completes the object once it has.
+ *
+ * Kept here rather than in `./inputs.js` alongside the rest of this duty's
+ * input contract: `main.integration.test.ts`'s "reads every input it
+ * declares" test finds every `getInput` call by scanning this file's own
+ * source text (and `core/inputs.ts`'s), so a `core.getInput` call moved out
+ * of this file would still run correctly but would go invisible to that
+ * check. `./inputs.js` carries the pure transforms this calls into instead.
+ */
+function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
+  const shared = readShared();
+  const cheap = parseModels(core.getInput("screen-models"));
+
+  return {
+    ...shared,
+    screenModels: cheap.models,
+    screenNames: cheap.names,
+    warrant: core.getInput("warrant", { required: true }),
+    apply: parseApply(core.getInput("apply", { required: true })),
+    confidence: fraction("confidence", core.getInput("confidence")),
+    corrections: core.getInput("corrections", { required: true }),
+    about: core.getInput("about"),
+    minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
+    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
+    sweepState: parseSweepState(core.getInput("sweep-state")),
+  };
 }
 
 export async function run(): Promise<void> {
@@ -805,19 +697,14 @@ export async function run(): Promise<void> {
             );
           }
 
-          // The asymmetric half of the same double-gate: `withheld` (used inside
-          // `decide` below) only ever names what `apply` asked for and the file
-          // refused, because that is the direction a run takes without saying so
-          // otherwise. This is the other direction — the file grants `record`,
-          // `apply` simply never names it, `apply` defaults to `label` alone — and
-          // without this notice a maintainer who granted `record` in the file and
-          // stopped there gets a silent full re-triage on every label change or
-          // reopen instead of the recording they configured, with nothing in the
-          // log explaining why.
+          // The file grants `record` but `apply` narrowed it away — the one
+          // direction `withheld` (used inside `decide` below) does not already
+          // cover, so a maintainer who granted it in the file and stopped there
+          // does not get a silent full re-triage with nothing explaining why.
           if (
             trigger.eligible &&
-            grantedCapabilities.includes("record") &&
-            !permitted.includes("record")
+            recordGrantedByFile(grantedCapabilities) &&
+            !recordGrantedByRun(permitted)
           ) {
             core.notice(
               `\`${authority.warrant.path}\` grants \`record\`, but \`apply\` does not name it, ` +
@@ -826,14 +713,10 @@ export async function run(): Promise<void> {
             );
           }
 
-          // The other silent branch of the same gate — but only for the one
-          // ineligible case worth a maintainer's attention: `record` is fully
-          // granted, the event was a kind it fires on, and it still did not run
-          // because the sender was refused (a bot). A workflow that also runs
-          // on `opened` or a `push` is not misconfigured on those legs —
-          // `trigger.reason` is empty for both, deliberately, so this stays
-          // silent there.
-          if (trigger.reason !== "" && permitted.includes("record")) {
+          // The other silent branch: fully granted and a firing event, but the
+          // sender was refused (a bot). Events `record` never fires on at all
+          // leave `trigger.reason` empty, so those stay silent here too.
+          if (trigger.reason !== "" && recordGrantedByRun(permitted)) {
             core.info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
           }
 
@@ -842,7 +725,7 @@ export async function run(): Promise<void> {
           // shape as the two notices above.
           noticeProposeSweepOnly(authority);
 
-          if (trigger.eligible && permitted.includes("record") && trigger.kind === "reopen") {
+          if (trigger.eligible && recordGrantedByRun(permitted) && trigger.kind === "reopen") {
             const check = await checkReversal(api, at, standing, senderLogin());
             if (check.authorReopen) {
               core.notice(
@@ -866,7 +749,7 @@ export async function run(): Promise<void> {
             } else {
               outcome = await decide(authority, standing, settings, stages, weather);
             }
-          } else if (trigger.eligible && permitted.includes("record")) {
+          } else if (trigger.eligible && recordGrantedByRun(permitted)) {
             recordOutcome = await recordCorrection(
               api,
               at,
@@ -1207,812 +1090,6 @@ async function decide(
 }
 
 /**
- * Whether the event that triggered this run is one `record` fires on, and —
- * for the one case worth saying anything about — why not.
- *
- * Two kinds of event, and `kind` tells them apart because the two write
- * completely different shapes: `labeled`/`unlabeled` on `issues`, from a
- * human, is a standing-label correction (`recordCorrection`); `reopened` on
- * `issues`, from a human, is a candidate reversal of one of Reeve's own
- * closes (`checkReversal`, `recordReversal`) and needs the API evidence
- * `checkReversal` gathers before it is known whether there is anything to
- * record at all. Not `opened`, not `edited`, not a re-triage on either kind
- * — `record` never re-triages, it takes an event as a maintainer's word for
- * something and writes that down. And not a bot on either kind: a label
- * another automation applied, or a reopen a second bot performed, is not a
- * maintainer's word for anything.
- */
-interface RecordTrigger {
-  readonly eligible: boolean;
-  readonly kind: "label" | "reopen";
-  /**
-   * Why the sender disqualified an otherwise-eligible event — empty on every
-   * other path, including the one that fires and the ones that were never
-   * going to: the wrong event entirely, or an `issues` action besides the
-   * three this fires on. Those are not worth a maintainer's attention — a
-   * workflow granting `record` that also runs on `opened` or a `push` is not
-   * misconfigured, that leg was simply never going to record — so only a
-   * human-shaped event that turned out to come from a bot is the reason
-   * anything gets logged over.
-   */
-  readonly reason: string;
-}
-
-function recordTrigger(): RecordTrigger {
-  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
-
-  const payload = context.payload as {
-    action?: string;
-    sender?: { login?: string; type?: string };
-  };
-
-  if (payload.action === "reopened") {
-    if (isBotAuthor(payload.sender)) {
-      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
-    }
-    return { eligible: true, kind: "reopen", reason: "" };
-  }
-
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return { eligible: false, kind: "label", reason: "" };
-  }
-
-  if (isBotAuthor(payload.sender)) {
-    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
-  }
-
-  return { eligible: true, kind: "label", reason: "" };
-}
-
-/** The human behind this run's triggering event — a handle, without the `@`. */
-function senderLogin(): string {
-  const payload = context.payload as { sender?: { login?: string } };
-  return payload.sender?.login ?? "";
-}
-
-/**
- * The taxonomy label a `labeled`/`unlabeled` event named, for the one call
- * site that turns it into `proposed`'s honest before/after delta —
- * `recordCorrection`. `null` for every event this is not, including a sweep,
- * which has no single event to read at all, and including a `reopened`
- * event, which names no label.
- */
-function labelChange(): {
-  readonly label: string;
-  readonly action: "labeled" | "unlabeled";
-} | null {
-  const payload = context.payload as { action?: string; label?: { name?: string } };
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
-  const label = payload.label?.name;
-  if (label === undefined || label.length === 0) return null;
-  return { label, action: payload.action };
-}
-
-/** What a `record` run concluded — a mirror of `Outcome`, sized for the much smaller pipeline it took. */
-interface RecordOutcome {
-  readonly recorded: boolean;
-  readonly language: string | null;
-  readonly decided: readonly string[];
-  readonly pivot: boolean;
-  /** Why a pivot rendering was not produced, when one was attempted and it was not. */
-  readonly pivotNote: string | null;
-  /**
-   * Set when a migration sweep found every taxonomy label on this thread
-   * machine-applied — see `recordCorrection`'s guard. `recorded` is `false`
-   * alongside it: nothing here was a maintainer's own decision, so nothing
-   * was written. Never set outside a migration sweep.
-   */
-  readonly machineOnly: boolean;
-  /**
-   * Set when a migration sweep could not read this thread's whole label
-   * history — `listLabelEvents` hit its page ceiling with the last page
-   * still full. `recorded` is `false` alongside it, the same fail-closed
-   * choice as `machineOnly`: a label with no event this run could see is not
-   * proof a human applied it, only proof this run stopped reading before it
-   * got there, and importing it as a maintainer's correction on that basis
-   * would be exactly the self-training loop the guard exists to prevent.
-   * Never set outside a migration sweep.
-   */
-  readonly unattributable: boolean;
-}
-
-/**
- * The pivot-language rendering for a correction about to be written, shared
- * by `recordCorrection` and `recordReversal` so a store's two record paths
- * stay identical about what "no pivot" means and why — see `Correction.pivot`'s
- * own doc comment for what a `null` here means to a reader downstream.
- */
-async function computePivot(
-  warrant: Warrant,
-  standing: Standing,
-  body: string,
-  code: string | null,
-  settings: Settings,
-  stages: Stages,
-  weather: Weather,
-): Promise<{ readonly pivot: Correction["pivot"]; readonly pivotNote: string | null }> {
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
-    return { pivot: null, pivotNote: null };
-  }
-
-  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-  const rendered = await translateToPivot({
-    provider: stages.pivot,
-    models: pivotModels,
-    title: standing.title,
-    body,
-    to: pivotLanguage,
-    weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-  });
-  for (const failure of rendered.failures) {
-    core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
-  }
-  if (rendered.draft !== null) {
-    return {
-      pivot: {
-        language: pivotLanguage.code,
-        title: rendered.draft.title,
-        excerpt: rendered.draft.body.slice(0, EXCERPT),
-      },
-      pivotNote: null,
-    };
-  }
-
-  // Weather, not a broken configuration — the write below still happens. A
-  // correction without a pivot rendering is still a correction; a run that
-  // refused to record over a starved translation would be trading a sure
-  // thing for a nice-to-have.
-  const pivotNote =
-    "A pivot-language rendering could not be produced this run, so the correction was " +
-    "recorded without one.";
-  core.info(pivotNote);
-  return { pivot: null, pivotNote };
-}
-
-/**
- * Records the current state of a thread as a correction — the taxonomy-
- * filtered labels standing on it now, its title and body, its language —
- * rather than asking for a fresh verdict. `record` never re-triages: a label
- * event already carries the maintainer's decision, and asking a model to
- * reproduce it would be asking it to guess at something already known.
- *
- * `dry-run` runs every step below except the commit itself, so the log and
- * the `recorded` output both say what a real run would have done.
- *
- * `by` is who this correction is attributed to — the human who changed the
- * label on a single-thread run, or the literal `"sweep"` when this is bulk
- * migration composing `record` with `sweep`: there is no one sender to name
- * for a thread nobody just relabelled, only a run that decided to import what
- * was already decided.
- *
- * **Bulk migration guards against training on its own past output.** A
- * migration sweep imports whatever labels stand on a thread as though they
- * were a maintainer's correction — but months of ordinary triage sweeps
- * running with `apply: label` leave plenty of threads carrying labels this
- * duty applied itself, not a maintainer. Importing those is a self-training
- * loop, not history: this run's own old verdicts, re-taught back to it as
- * ground truth. `by === "sweep"` is the one path this can happen on — a
- * single-thread run is always triggered by a human's own label change, and
- * has nothing to distrust — and there alone, each candidate taxonomy label is
- * checked against its most recent `labeled` event; one whose actor is a bot
- * is excluded. A thread left with nothing decidable is not recorded at all.
- *
- * The guard fails closed on a thread whose label history is longer than one
- * run reads, too: `listLabelEvents` reports `complete: false` when it hit its
- * own page ceiling without reaching the start of the timeline, and a label
- * with no event in what this run did see is not proof a human applied it —
- * only proof the read stopped before it got there. Nothing is imported from
- * that thread this run rather than guess.
- */
-async function recordCorrection(
-  api: TrackerApi & ContentsApi,
-  at: Location,
-  standing: Standing,
-  authority: Authority,
-  settings: Settings,
-  stages: Stages,
-  weather: Weather,
-  by: string,
-  changed: { readonly label: string; readonly action: "labeled" | "unlabeled" } | null,
-): Promise<RecordOutcome> {
-  const warrant = authority.warrant;
-
-  // Taxonomy-filtered against `settings.taxonomy`, not the whole warrant: a
-  // label some other tool or automation applied is not a maintainer
-  // correcting this duty's taxonomy, and neither is a label from another
-  // area's slice of a shared file this run's own `labels` never named —
-  // recording either would teach recall a category this run was never asked
-  // to propose.
-  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
-
-  if (by === "sweep" && decidedLabels.length > 0) {
-    const history = await listLabelEvents(api, at);
-
-    if (!history.complete) {
-      core.info(
-        `#${String(at.number)}: label history is longer than one run reads — cannot attribute, ` +
-          "nothing imported.",
-      );
-      return {
-        recorded: false,
-        language: null,
-        decided: [],
-        pivot: false,
-        pivotNote: null,
-        machineOnly: false,
-        unattributable: true,
-      };
-    }
-
-    // Oldest first, so the last write into this map for a given label is its
-    // most recent `labeled` event — exactly the one the guard cares about.
-    const lastLabeledByBot = new Map<string, boolean>();
-    for (const event of history.events) {
-      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
-    }
-    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
-
-    if (decidedLabels.length === 0) {
-      core.info(
-        `#${String(at.number)}: every taxonomy label here was machine-applied — nothing to import.`,
-      );
-      return {
-        recorded: false,
-        language: null,
-        decided: [],
-        pivot: false,
-        pivotNote: null,
-        machineOnly: true,
-        unattributable: false,
-      };
-    }
-  }
-
-  const limit = settings.maxBodyChars;
-  const body = limit === null ? standing.body : standing.body.slice(0, limit);
-
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather,
-      settings.temperature,
-    ),
-  );
-  // The code, because that is what the store and the pivot comparison below
-  // both compare against — the same convention `decide`'s recall path reads
-  // corrections by. The output-facing `language` a maintainer reads on this
-  // run's page is a different value, further down: the same label the
-  // ordinary `decide` path reports, so a workflow reading this action's
-  // `language` output sees the same shape whichever path produced it.
-  const code = detection.language?.code ?? null;
-
-  const { pivot, pivotNote } = await computePivot(
-    warrant,
-    standing,
-    body,
-    code,
-    settings,
-    stages,
-    weather,
-  );
-
-  // A genuine single-thread record — never a sweep — carries the label event
-  // that triggered it, which is what turns `proposed` from an empty list
-  // into an honest before/after delta: the taxonomy-filtered labels standing
-  // on the thread a moment before this event landed. Only a change to a
-  // taxonomy label is worth computing this for — a `labeled`/`unlabeled`
-  // event on a label outside the taxonomy already left `decidedLabels`
-  // untouched, and a delta around a label this duty never proposes would say
-  // nothing a maintainer corrected.
-  let proposed: readonly string[] = [];
-  let outcomeField: Correction["outcome"] = null;
-  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
-    const before = new Set(decidedLabels);
-    if (changed.action === "unlabeled") before.add(changed.label);
-    else before.delete(changed.label);
-    proposed = [...before];
-
-    // S1: a taxonomy label a human just removed, when it was Reeve's own
-    // prior run that applied it — the enrichment on top of the ordinary
-    // (S2) correction this function already writes for every human relabel.
-    // See `removedByAutomation`'s own doc comment for why an incomplete
-    // history answers "not automation" rather than "unknown".
-    if (changed.action === "unlabeled") {
-      outcomeField = (await removedByAutomation(api, at, changed.label)) ? "overruled" : null;
-    }
-  }
-
-  const correction: Correction = {
-    repo: `${at.owner}/${at.repo}`,
-    thread: at.number,
-    duty: "triage",
-    at: new Date().toISOString(),
-    title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed,
-    decided: decidedLabels,
-    by,
-    note: null,
-    outcome: outcomeField,
-    duplicateOf: null,
-    pivot,
-  };
-
-  if (settings.dryRun) {
-    core.info(
-      `Would record #${String(at.number)} as ` +
-        (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") +
-        `${pivot !== null ? ", with a pivot rendering" : ""} — dry run, nothing committed.`,
-    );
-  } else {
-    await writeCorrection(api, at, settings.corrections, correction);
-  }
-
-  return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote,
-    machineOnly: false,
-    unattributable: false,
-  };
-}
-
-/**
- * Records a human's reopen of a thread Reeve closed as a duplicate — S3 in
- * the outcome taxonomy `recall.ts` renders. Written under `duty: "duplicate"`
- * rather than `"triage"`, deliberately: the replacement key is (repo,
- * thread, duty), so this reversal lives in its own slot and can never
- * silently overwrite — or be overwritten by — whatever `recordCorrection`
- * last wrote for this thread's standing labels. See `Correction.duty`'s doc
- * comment.
- *
- * The caller (`run()`) only reaches this function after `checkReversal` has
- * already established both halves of the evidence — the close really was
- * Reeve's own, and the reopener has the standing to reverse it — so nothing
- * here re-checks either; this function's only job is turning that finding
- * into the record.
- *
- * Title, excerpt, language and pivot are gathered the same way
- * `recordCorrection` gathers them for an ordinary correction — S3 gets the
- * same cross-language reach as every other record, not a second-class one.
- */
-async function recordReversal(
-  api: TrackerApi & ContentsApi,
-  at: Location,
-  standing: Standing,
-  authority: Authority,
-  settings: Settings,
-  stages: Stages,
-  weather: Weather,
-  by: string,
-  duplicateOf: number,
-): Promise<RecordOutcome> {
-  const warrant = authority.warrant;
-
-  const limit = settings.maxBodyChars;
-  const body = limit === null ? standing.body : standing.body.slice(0, limit);
-
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather,
-      settings.temperature,
-    ),
-  );
-  const code = detection.language?.code ?? null;
-
-  const { pivot, pivotNote } = await computePivot(
-    warrant,
-    standing,
-    body,
-    code,
-    settings,
-    stages,
-    weather,
-  );
-
-  // `decided` is incidental standing on a reversal line, not the correction
-  // itself — see `Correction.decided`'s own doc comment on that distinction.
-  // Kept anyway, filtered the same way an ordinary correction's `decided` is,
-  // so a reader never has to special-case a reversal line to know what the
-  // thread carries.
-  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
-
-  const correction: Correction = {
-    repo: `${at.owner}/${at.repo}`,
-    thread: at.number,
-    duty: "duplicate",
-    at: new Date().toISOString(),
-    title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed: [],
-    decided: decidedLabels,
-    by,
-    note: null,
-    outcome: "overruled",
-    duplicateOf,
-    pivot,
-  };
-
-  if (settings.dryRun) {
-    core.info(
-      `Would record #${String(at.number)}'s reopen as reversing a close that named it a ` +
-        `duplicate of #${String(duplicateOf)} — dry run, nothing committed.`,
-    );
-  } else {
-    await writeCorrection(api, at, settings.corrections, correction);
-  }
-
-  return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote,
-    machineOnly: false,
-    unattributable: false,
-  };
-}
-
-/**
- * How many times a record write may retry after losing a race on a shard's
- * `sha` — the read-modify-write sequence run again from the top, not just the
- * final write, because a concurrent commit can have changed which shard holds
- * this thread as easily as it changed one shard's contents.
- */
-const WRITE_ATTEMPTS = 3;
-
-/**
- * Commits `correction` to the store at `path` — replacing the line for this
- * thread wherever it already lives, appending a fresh one when it does not.
- *
- * No checkout, no git binary: every shard already committed is read through
- * the Contents API to look for an existing entry for this thread, the same
- * way a maintainer opening the store by hand would look — one file at a time,
- * because there is no index to consult instead. `contents: write` is what
- * this needs on the token, and its absence is left to fail the way any other
- * authentication problem does: loud, and uncaught.
- *
- * Two record runs racing the same shard is the one failure this retries: the
- * Contents API answers a stale `sha` with a conflict, and re-reading before
- * trying again is the whole fix, because the second run's write was computed
- * against a version of the file that no longer exists. Every other failure —
- * a missing scope, a network error, anything that is not that specific
- * conflict — propagates on the first attempt, the same as it always did.
- */
-async function writeCorrection(
-  contentsApi: ContentsApi,
-  at: Location,
-  path: string,
-  correction: Correction,
-): Promise<void> {
-  const relativePath = repoRelativePath(path);
-
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
-      return;
-    } catch (error) {
-      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error)) throw error;
-      core.info(
-        `Recording #${String(correction.thread)} lost a race on the store — another commit ` +
-          `landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`,
-      );
-    }
-  }
-}
-
-/**
- * One read-modify-write pass, the unit `writeCorrection` retries whole on a
- * conflict.
- *
- * A shard too large for the Contents API to inline (`UnreadableContentsFile`)
- * does not fail the write outright — it is skipped, warned about by name, and
- * the search continues through the rest of the store, so one oversized shard
- * does not brick every recording from now on. What it does refuse is
- * appending: if the thread's existing entry, if it has one, might be sitting
- * in exactly the shard this run could not read, appending a fresh line
- * elsewhere cannot be told apart from silently duplicating it — so that path
- * throws instead, naming the shard that made the answer unknowable.
- */
-async function attemptWrite(
-  contentsApi: ContentsApi,
-  at: Location,
-  path: string,
-  correction: Correction,
-): Promise<void> {
-  const files = await listCorrectionFiles(contentsApi, at, path);
-  const unreadable: string[] = [];
-
-  // The walk stops the moment a line carrying this exact (repo, thread, duty)
-  // triple turns up: nothing later in the store can change what an explicit
-  // match means, so the shards past it are never read at all — the common
-  // case, a repeat correction on a thread already recorded, costs the reads
-  // it takes to find the line and not one more. Only a write that finds no
-  // explicit match anywhere has, by then, necessarily read the whole store —
-  // which is exactly the knowledge the loose rule below needs, gathered as a
-  // side-effect of the search rather than as an extra pass. And no shard is
-  // retained past its own visit except the single candidate line the loose
-  // rule might still rewrite, so a store of many large shards is never held
-  // in memory whole.
-  //
-  // The loose rule: `repo` as well as `thread`, and now `duty` alongside both
-  // — the dedup key widened twice, once when a store could hold more than one
-  // repository's history and again when a single thread could carry more
-  // than one kind of correction (`Correction.duty`'s own doc comment). A line
-  // written before `repo` existed parses as `repo: ""`, and in a store that
-  // has only ever recorded for today's repo, a stored empty repo can only
-  // mean "written before this field existed" — read as this thread number's
-  // own legacy entry, and rewritten in place with today's repo on it. That is
-  // what lets a single-repo store self-migrate: the first write a thread sees
-  // after the field shipped leaves nothing legacy to match loosely the next
-  // time. `duty` is checked here too, deliberately: a legacy `repo: ""` line
-  // predates `duty` as well and reads as `"triage"` by default, so a reversal
-  // write (`duty: "duplicate"`) never loosely claims a thread's pre-`repo`
-  // standing-label line as though it were the same correction — the two are
-  // not, and only the exact-match branch above, which already compares
-  // `duty`, is allowed to treat two lines as one entry.
-  //
-  // A store that also carries a *different* explicit repo — the whole reason
-  // `repo` exists — cannot make that same assumption: an empty-repo line for
-  // this thread number could belong to that other repository's own history
-  // from before it, too, recorded when both repositories shared this store
-  // and neither had `repo` yet. Matching it loosely there would let today's
-  // repo silently steal another repository's legacy entry whenever their
-  // thread numbers happened to collide. A shard this run could not read
-  // leaves that unknowable the same way a foreign repo would, and so does a
-  // line this run could not parse — garbage proves nothing about whose
-  // history it was, so it counts against the loose match rather than for
-  // it. In every such case the legacy line is left alone and a fresh line
-  // is appended below with `correction.repo` explicit — the widened key's
-  // ordinary semantics, and nothing lost.
-  let provenShared = false;
-  let legacyCandidate: {
-    readonly path: string;
-    readonly lines: string[];
-    readonly sha: string;
-    readonly index: number;
-  } | null = null;
-
-  for (const file of files) {
-    let read: { readonly text: string; readonly sha: string } | null;
-    try {
-      read = await readContentsFile(contentsApi, at, file.path);
-    } catch (error) {
-      if (!(error instanceof UnreadableContentsFile)) throw error;
-      core.warning(
-        `corrections: \`${file.path}\` could not be read, so it was skipped rather than ` +
-          "failing the whole write — the search continued through the rest of the store. " +
-          "Split the corrections store into smaller shards.",
-      );
-      unreadable.push(file.path);
-      continue;
-    }
-    if (read === null) continue;
-    const lines = read.text.split("\n");
-
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? "";
-      if (line.trim().length === 0) continue;
-      const existing = parseCorrection(line);
-      if (existing === null) {
-        provenShared = true;
-        continue;
-      }
-      if (
-        existing.thread === correction.thread &&
-        existing.repo === correction.repo &&
-        existing.duty === correction.duty
-      ) {
-        const updated = [...lines];
-        updated[index] = formatCorrection(correction);
-        await writeContentsFile(
-          contentsApi,
-          at,
-          file.path,
-          `${updated.join("\n").replace(/\n*$/, "")}\n`,
-          commitMessage(correction),
-          read.sha,
-        );
-        return;
-      }
-      if (existing.repo !== "" && existing.repo !== correction.repo) provenShared = true;
-      if (
-        existing.repo === "" &&
-        existing.thread === correction.thread &&
-        existing.duty === correction.duty &&
-        legacyCandidate === null
-      ) {
-        legacyCandidate = { path: file.path, lines, sha: read.sha, index };
-      }
-    }
-  }
-
-  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
-    const lines = [...legacyCandidate.lines];
-    lines[legacyCandidate.index] = formatCorrection(correction);
-    await writeContentsFile(
-      contentsApi,
-      at,
-      legacyCandidate.path,
-      `${lines.join("\n").replace(/\n*$/, "")}\n`,
-      commitMessage(correction),
-      legacyCandidate.sha,
-    );
-    return;
-  }
-
-  if (unreadable.length > 0) {
-    throw new Error(
-      `#${String(correction.thread)} was not found in any shard this run could read, and ` +
-        `${unreadable.map((shard) => `\`${shard}\``).join(", ")} could not be read at all. ` +
-        "Appending a fresh entry cannot rule out duplicating one already sitting in the shard " +
-        "this run could not see, so nothing was written — split the corrections store into " +
-        "smaller shards.",
-    );
-  }
-
-  // Not found in any existing shard: append to this month's, the same
-  // sharding a store filled in by hand already uses — small enough that two
-  // maintainers correcting different threads the same week append to the same
-  // file and git resolves it, rather than every correction becoming a
-  // conflict on one file that never rolls over.
-  const { shard, existing } = await selectShard(contentsApi, at, path);
-  const text =
-    existing === null
-      ? `${formatCorrection(correction)}\n`
-      : `${existing.text.replace(/\n*$/, "")}\n${formatCorrection(correction)}\n`;
-  await writeContentsFile(
-    contentsApi,
-    at,
-    shard,
-    text,
-    commitMessage(correction),
-    existing?.sha ?? null,
-  );
-}
-
-/**
- * A soft ceiling on one shard's own size, not a hard one — the Contents API's
- * real limit is the 1 MB `readContentsFile` already treats as unreadable, and
- * this is well under it on purpose, so a shard rolls over while it can still
- * be read and written normally rather than only once it has already crossed
- * into `UnreadableContentsFile` territory.
- */
-const SHARD_SOFT_LIMIT_BYTES = 900_000;
-
-/**
- * How many numbered siblings one calendar month's shard may grow before this
- * gives up — not a real ceiling on how much a project may record, only a
- * bound on the loop below, because a bounded loop is one that cannot hang a
- * run over a store that has gone genuinely, unexpectedly enormous.
- */
-const MAX_SHARD_ATTEMPTS = 500;
-
-/**
- * This month's shard, and whatever is already in it — `monthShard().ndjson`
- * for the first correction of the month, `monthShard().2.ndjson` once that
- * one has grown past `SHARD_SOFT_LIMIT_BYTES`, and so on. Read once per
- * candidate rather than sized off a directory listing, because size is a
- * property of a shard's own content, not of its name.
- *
- * Rolling over by size rather than only by month keeps `writeCorrection`'s
- * read-modify-write pass — and `attemptWrite`'s search before it — working
- * against files small enough for the Contents API to inline, on a project
- * recording enough corrections that one calendar month would otherwise grow
- * past that on its own.
- */
-async function selectShard(
-  contentsApi: ContentsApi,
-  at: Location,
-  path: string,
-): Promise<{
-  readonly shard: string;
-  readonly existing: { readonly text: string; readonly sha: string } | null;
-}> {
-  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
-
-  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
-    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
-    let existing: { readonly text: string; readonly sha: string } | null;
-    try {
-      existing = await readContentsFile(contentsApi, at, shard);
-    } catch (error) {
-      // Unreadable — over the 1 MB the Contents API can inline — is read the
-      // same way `attemptWrite`'s own search treats it: not proof the shard
-      // is full, but not a shard this run can safely append to either, so
-      // the roll-over moves past it exactly as it would past one merely over
-      // the soft limit.
-      if (!(error instanceof UnreadableContentsFile)) throw error;
-      core.warning(
-        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the ` +
-          "next shard instead. Split the corrections store into smaller shards.",
-      );
-      continue;
-    }
-    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
-      return { shard, existing };
-    }
-  }
-
-  throw new Error(
-    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, ` +
-      `every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft ` +
-      "limit. That is almost certainly a runaway write loop rather than a genuinely enormous " +
-      "month, so this stops here rather than trying a shard 501.",
-  );
-}
-
-/**
- * Whether `error` is the Contents API's way of saying this write's `sha` is
- * already stale — a 409 always means that, and a 422 means it only when the
- * message names the `sha` field, the same distinction GitHub itself draws
- * between "this ref changed under you" and "this request is simply malformed".
- */
-function isShaConflict(error: unknown): boolean {
-  const status = (error as { status?: unknown } | null)?.status;
-  if (status === 409) return true;
-  if (status !== 422) return false;
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("sha");
-}
-
-/**
- * `path`, guaranteed repo-relative before it reaches the Contents API.
- *
- * Recall reads the store straight off disk, where an absolute path resolves
- * the same as a relative one — but record sends this path to the Contents
- * API, which only understands one relative to the repository root. A
- * workflow built with `${{ github.workspace }}` produces exactly this
- * absolute-but-still-inside-the-checkout shape, so that one case is stripped
- * back to relative rather than refused; any other absolute path names
- * somewhere the API cannot express at all, and is rejected rather than
- * half-handled.
- */
-function repoRelativePath(path: string): string {
-  if (!isAbsolute(path)) return path;
-
-  const workspace = process.env.GITHUB_WORKSPACE;
-  if (workspace !== undefined && workspace.length > 0) {
-    const stripped = relative(workspace, path);
-    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
-  }
-
-  throw new Error(
-    `\`corrections\` (\`${path}\`) is an absolute path record cannot use — the Contents API only ` +
-      "understands a path relative to the repository root. Use a repo-relative path, or one " +
-      "under `GITHUB_WORKSPACE` if the workflow built it from `${{ github.workspace }}`.",
-  );
-}
-
-/** This run's shard name — the store rolls over by calendar month. */
-function monthShard(): string {
-  const now = new Date();
-  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-/** The commit message a recorded correction lands with. House voice: plain about what changed. */
-function commitMessage(correction: Correction): string {
-  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
-  return `memory: record #${String(correction.thread)} as ${decided}`;
-}
-
-/**
  * The outcome of a run this duty was never going to be allowed to act on.
  *
  * Green, not red — enumerating who may act is a maintainer's decision, and a
@@ -2272,147 +1349,6 @@ function comment(outcome: Outcome, done: Done): string {
 function excerpt(answer: string): string {
   const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}…`;
-}
-
-/**
- * Every output, written on every path that reaches an answer — including the
- * ones that answer "nothing". A workflow branching on `screened-out` needs it to
- * be an empty string rather than an unset output on the run where everything
- * worked.
- */
-function report(outcome: Outcome, done: Done, dryRun: boolean, rosterStarved: boolean): void {
-  core.setOutput("labels", JSON.stringify(outcome.applied));
-  core.setOutput("proposed", JSON.stringify(outcome.verdict.labels));
-  core.setOutput("confidence", outcome.verdict.confidence.toFixed(2));
-  core.setOutput("language", outcome.language ?? "");
-  core.setOutput(
-    "duplicate-of",
-    outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf),
-  );
-  core.setOutput("screened-out", outcome.screenedOut?.reason ?? "");
-  // Empty under a rehearsal, which is how a workflow tells one from a run: `{}`
-  // is a shape no real run produces, because a real run always reports all four
-  // keys whether or not it did anything with them.
-  core.setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
-  core.setOutput("starved", String(rosterStarved));
-  // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
-  // outputs, and a single-thread run answers all three honestly at zero rather
-  // than leaving a workflow that reads them on every run reading an empty
-  // string on this one.
-  core.setOutput("processed", "0");
-  core.setOutput("skipped", "0");
-  core.setOutput("remaining", "0");
-  // `false` here always: this is the ordinary decide/act pipeline, which
-  // never writes to the corrections store. `recorded` only ever reads `true`
-  // from the dedicated record path below.
-  core.setOutput("recorded", "false");
-}
-
-/**
- * `processed`, `skipped` and `remaining` — a sweep's own outputs, distinct
- * from every output above because none of those name one thread. `starved` is
- * shared vocabulary between the two modes, so it keeps the same name here.
- */
-function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
-  core.setOutput("processed", String(bulk.results.length));
-  core.setOutput("skipped", String(bulk.skipped));
-  core.setOutput("remaining", String(remainingOf(bulk)));
-  core.setOutput("starved", String(rosterStarved));
-  // `true` only for bulk migration — `record` composed with `sweep`, decided
-  // once for the whole run and carried on the accumulator. An ordinary
-  // triaging sweep never records, the same as it always did.
-  core.setOutput("recorded", String(bulk.recording));
-}
-
-/**
- * Every output, on a `record` run — the full contract every path answers, so
- * a workflow that reads `labels` or `confidence` on every run of this action
- * finds the neutral values a run that never triaged actually produced, rather
- * than an output some other path simply never set.
- */
-function reportRecordRun(outcome: RecordOutcome, rosterStarved: boolean): void {
-  core.setOutput("labels", JSON.stringify([]));
-  core.setOutput("proposed", JSON.stringify([]));
-  core.setOutput("confidence", "0.00");
-  core.setOutput("language", outcome.language ?? "");
-  core.setOutput("duplicate-of", "");
-  core.setOutput("screened-out", "");
-  core.setOutput("applied", JSON.stringify(NOTHING_DONE));
-  core.setOutput("starved", String(rosterStarved));
-  core.setOutput("processed", "0");
-  core.setOutput("skipped", "0");
-  core.setOutput("remaining", "0");
-  core.setOutput("recorded", String(outcome.recorded));
-}
-
-function page(
-  settings: Settings,
-  thread: number,
-  outcome: Outcome,
-  done: Done,
-  spent: Run["spent"],
-): string {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    screenedOut: outcome.screenedOut,
-    proposed: outcome.verdict.labels,
-    confidence: outcome.verdict.confidence,
-    floor: settings.confidence,
-    applied: outcome.applied,
-    refused: outcome.refused,
-    duplicateOf: outcome.verdict.duplicateOf,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    done,
-    memory: outcome.memory,
-    note: outcome.note,
-    implicit: outcome.implicit,
-    excludedLabels: outcome.excludedLabels,
-    ungranted: outcome.ungranted,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames,
-  });
-}
-
-function recordPage(
-  settings: Settings,
-  thread: number,
-  outcome: RecordOutcome,
-  spent: Run["spent"],
-): string {
-  return summarizeRecord({
-    thread,
-    dryRun: settings.dryRun,
-    recorded: outcome.recorded,
-    language: outcome.language,
-    decided: outcome.decided,
-    pivot: outcome.pivot,
-    pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames,
-  });
-}
-
-function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    skipped: bulk.skipped,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    recording: bulk.recording,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames,
-  });
 }
 
 await run();

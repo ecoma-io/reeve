@@ -27071,9 +27071,6 @@ var require_dist2 = __commonJS({
   }
 });
 
-// src/duties/triage/main.ts
-import { isAbsolute, relative } from "node:path";
-
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 import * as os from "os";
 
@@ -35066,6 +35063,33 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/duties/triage/inputs.ts
+var SWEEP_STATES = ["open", "closed", "all"];
+function parseSweepState(raw) {
+  const value = raw.trim().toLowerCase();
+  const match = SWEEP_STATES.find((state) => state === value);
+  if (match === void 0) {
+    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
+  }
+  return match;
+}
+function resolveTaxonomy(warrant, raw) {
+  const requested = raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  if (requested.length === 0) return warrant.labels;
+  for (const name of requested) {
+    if (warrant.labelNamed(name) === void 0) {
+      throw new Error(
+        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. Add it there, or correct the name.`
+      );
+    }
+  }
+  const wanted = new Set(requested);
+  return warrant.labels.filter((label) => wanted.has(label.name));
+}
+function taxonomyNames(settings) {
+  return new Set(settings.taxonomy.map((label) => label.name));
+}
+
 // src/duties/triage/outcome.ts
 var closeMarker = closeMarkerFor("triage");
 async function removedByAutomation(api, at, label) {
@@ -35133,6 +35157,397 @@ async function gateClose(contentsApi, at, path, repo, thread) {
     }
   }
   return { refuse: unreadable.length > 0, found: false, unreadable };
+}
+
+// src/duties/triage/store.ts
+import { relative, isAbsolute } from "node:path";
+var WRITE_ATTEMPTS = 3;
+async function writeCorrection(contentsApi, at, path, correction) {
+  const relativePath = repoRelativePath(path);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await attemptWrite(contentsApi, at, relativePath, correction);
+      return;
+    } catch (error2) {
+      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error2)) throw error2;
+      info(
+        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`
+      );
+    }
+  }
+}
+function findExactLine(existing, correction) {
+  return existing.thread === correction.thread && existing.repo === correction.repo && existing.duty === correction.duty;
+}
+function isProvenShared(existing, correction) {
+  if (existing === null) return true;
+  return existing.repo !== "" && existing.repo !== correction.repo;
+}
+function legacyCandidate(existing, correction) {
+  return existing.repo === "" && existing.thread === correction.thread && existing.duty === correction.duty;
+}
+async function attemptWrite(contentsApi, at, path, correction) {
+  const files = await listCorrectionFiles(contentsApi, at, path);
+  const unreadable = [];
+  let provenShared = false;
+  let candidate = null;
+  for (const file of files) {
+    let read2;
+    try {
+      read2 = await readContentsFile(contentsApi, at, file.path);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${file.path}\` could not be read, so it was skipped rather than failing the whole write \u2014 the search continued through the rest of the store. Split the corrections store into smaller shards.`
+      );
+      unreadable.push(file.path);
+      continue;
+    }
+    if (read2 === null) continue;
+    const lines = read2.text.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (line.trim().length === 0) continue;
+      const existing2 = parseCorrection(line);
+      if (isProvenShared(existing2, correction)) provenShared = true;
+      if (existing2 === null) continue;
+      if (findExactLine(existing2, correction)) {
+        const updated = [...lines];
+        updated[index] = formatCorrection(correction);
+        await writeContentsFile(
+          contentsApi,
+          at,
+          file.path,
+          `${updated.join("\n").replace(/\n*$/, "")}
+`,
+          commitMessage(correction),
+          read2.sha
+        );
+        return;
+      }
+      if (legacyCandidate(existing2, correction) && candidate === null) {
+        candidate = { path: file.path, lines, sha: read2.sha, index };
+      }
+    }
+  }
+  if (candidate !== null && !provenShared && unreadable.length === 0) {
+    const lines = [...candidate.lines];
+    lines[candidate.index] = formatCorrection(correction);
+    await writeContentsFile(
+      contentsApi,
+      at,
+      candidate.path,
+      `${lines.join("\n").replace(/\n*$/, "")}
+`,
+      commitMessage(correction),
+      candidate.sha
+    );
+    return;
+  }
+  if (unreadable.length > 0) {
+    throw new Error(
+      `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
+    );
+  }
+  const { shard, existing } = await selectShard(contentsApi, at, path);
+  const text2 = existing === null ? `${formatCorrection(correction)}
+` : `${existing.text.replace(/\n*$/, "")}
+${formatCorrection(correction)}
+`;
+  await writeContentsFile(
+    contentsApi,
+    at,
+    shard,
+    text2,
+    commitMessage(correction),
+    existing?.sha ?? null
+  );
+}
+var SHARD_SOFT_LIMIT_BYTES = 9e5;
+var MAX_SHARD_ATTEMPTS = 500;
+async function selectShard(contentsApi, at, path) {
+  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
+  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
+    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
+    let existing;
+    try {
+      existing = await readContentsFile(contentsApi, at, shard);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the next shard instead. Split the corrections store into smaller shards.`
+      );
+      continue;
+    }
+    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
+      return { shard, existing };
+    }
+  }
+  throw new Error(
+    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
+  );
+}
+function isShaConflict(error2) {
+  const status = error2?.status;
+  if (status === 409) return true;
+  if (status !== 422) return false;
+  const message = error2 instanceof Error ? error2.message : String(error2);
+  return message.toLowerCase().includes("sha");
+}
+function repoRelativePath(path) {
+  if (!isAbsolute(path)) return path;
+  const workspace = process.env.GITHUB_WORKSPACE;
+  if (workspace !== void 0 && workspace.length > 0) {
+    const stripped = relative(workspace, path);
+    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
+  }
+  throw new Error(
+    `\`corrections\` (\`${path}\`) is an absolute path record cannot use \u2014 the Contents API only understands a path relative to the repository root. Use a repo-relative path, or one under \`GITHUB_WORKSPACE\` if the workflow built it from \`\${{ github.workspace }}\`.`
+  );
+}
+function monthShard() {
+  const now = /* @__PURE__ */ new Date();
+  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function commitMessage(correction) {
+  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
+  return `memory: record #${String(correction.thread)} as ${decided}`;
+}
+
+// src/duties/triage/record.ts
+function recordTrigger() {
+  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
+  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
+  const payload = context2.payload;
+  if (payload.action === "reopened") {
+    if (isBotAuthor(payload.sender)) {
+      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
+    }
+    return { eligible: true, kind: "reopen", reason: "" };
+  }
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
+    return { eligible: false, kind: "label", reason: "" };
+  }
+  if (isBotAuthor(payload.sender)) {
+    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
+  }
+  return { eligible: true, kind: "label", reason: "" };
+}
+function senderLogin() {
+  const payload = context2.payload;
+  return payload.sender?.login ?? "";
+}
+function labelChange() {
+  const payload = context2.payload;
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
+  const label = payload.label?.name;
+  if (label === void 0 || label.length === 0) return null;
+  return { label, action: payload.action };
+}
+function recordGrantedByFile(grantedCapabilities) {
+  return grantedCapabilities.includes("record");
+}
+function recordGrantedByRun(permitted) {
+  return permitted.includes("record");
+}
+async function computePivot(warrant, standing, body, code, settings, stages, weather) {
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
+    return { pivot: null, pivotNote: null };
+  }
+  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+  const rendered = await translateToPivot({
+    provider: stages.pivot,
+    models: pivotModels,
+    title: standing.title,
+    body,
+    to: pivotLanguage,
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+  });
+  for (const failure of rendered.failures) {
+    warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (rendered.draft !== null) {
+    return {
+      pivot: {
+        language: pivotLanguage.code,
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT)
+      },
+      pivotNote: null
+    };
+  }
+  const pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
+  info(pivotNote);
+  return { pivot: null, pivotNote };
+}
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed) {
+  const warrant = authority2.warrant;
+  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  if (by === "sweep" && decidedLabels.length > 0) {
+    const history = await listLabelEvents(api, at);
+    if (!history.complete) {
+      info(
+        `#${String(at.number)}: label history is longer than one run reads \u2014 cannot attribute, nothing imported.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: false,
+        unattributable: true
+      };
+    }
+    const lastLabeledByBot = /* @__PURE__ */ new Map();
+    for (const event of history.events) {
+      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
+    }
+    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
+    if (decidedLabels.length === 0) {
+      info(
+        `#${String(at.number)}: every taxonomy label here was machine-applied \u2014 nothing to import.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: true,
+        unattributable: false
+      };
+    }
+  }
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+      settings.temperature
+    )
+  );
+  const code = detection.language?.code ?? null;
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather
+  );
+  let proposed = [];
+  let outcomeField = null;
+  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
+    const before = new Set(decidedLabels);
+    if (changed.action === "unlabeled") before.add(changed.label);
+    else before.delete(changed.label);
+    proposed = [...before];
+    if (changed.action === "unlabeled") {
+      outcomeField = await removedByAutomation(api, at, changed.label) ? "overruled" : null;
+    }
+  }
+  const correction = {
+    repo: `${at.owner}/${at.repo}`,
+    thread: at.number,
+    duty: "triage",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed,
+    decided: decidedLabels,
+    by,
+    note: null,
+    outcome: outcomeField,
+    duplicateOf: null,
+    pivot
+  };
+  if (settings.dryRun) {
+    info(
+      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
+    );
+  } else {
+    await writeCorrection(api, at, settings.corrections, correction);
+  }
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+    machineOnly: false,
+    unattributable: false
+  };
+}
+async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf) {
+  const warrant = authority2.warrant;
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+      settings.temperature
+    )
+  );
+  const code = detection.language?.code ?? null;
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather
+  );
+  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  const correction = {
+    repo: `${at.owner}/${at.repo}`,
+    thread: at.number,
+    duty: "duplicate",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed: [],
+    decided: decidedLabels,
+    by,
+    note: null,
+    outcome: "overruled",
+    duplicateOf,
+    pivot
+  };
+  if (settings.dryRun) {
+    info(
+      `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
+    );
+  } else {
+    await writeCorrection(api, at, settings.corrections, correction);
+  }
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+    machineOnly: false,
+    unattributable: false
+  };
+}
+function describeRecordOutcome(outcome) {
+  return outcome.decided.length > 0 ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}` : "recorded with no taxonomy labels";
 }
 
 // src/duties/triage/summary.ts
@@ -35302,12 +35717,137 @@ function summarizeSweep(run2) {
 `;
 }
 
+// src/duties/triage/outputs.ts
+var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function writeOutputs(values) {
+  setOutput("labels", values.labels);
+  setOutput("proposed", values.proposed);
+  setOutput("confidence", values.confidence);
+  setOutput("language", values.language);
+  setOutput("duplicate-of", values["duplicate-of"]);
+  setOutput("screened-out", values["screened-out"]);
+  setOutput("applied", values.applied);
+  setOutput("starved", values.starved);
+  setOutput("processed", values.processed);
+  setOutput("skipped", values.skipped);
+  setOutput("remaining", values.remaining);
+  setOutput("recorded", values.recorded);
+}
+function report(outcome, done, dryRun, rosterStarved) {
+  writeOutputs({
+    labels: JSON.stringify(outcome.applied),
+    proposed: JSON.stringify(outcome.verdict.labels),
+    confidence: outcome.verdict.confidence.toFixed(2),
+    language: outcome.language ?? "",
+    "duplicate-of": outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf),
+    "screened-out": outcome.screenedOut?.reason ?? "",
+    // Empty under a rehearsal, which is how a workflow tells one from a run: `{}`
+    // is a shape no real run produces, because a real run always reports all four
+    // keys whether or not it did anything with them.
+    applied: dryRun ? "{}" : JSON.stringify(done),
+    starved: String(rosterStarved),
+    // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
+    // outputs, and a single-thread run answers all three honestly at zero rather
+    // than leaving a workflow that reads them on every run reading an empty
+    // string on this one.
+    processed: "0",
+    skipped: "0",
+    remaining: "0",
+    // `false` here always: this is the ordinary decide/act pipeline, which
+    // never writes to the corrections store. `recorded` only ever reads `true`
+    // from the dedicated record path below.
+    recorded: "false"
+  });
+}
+function reportSweep(bulk, rosterStarved) {
+  setOutput("processed", String(bulk.results.length));
+  setOutput("skipped", String(bulk.skipped));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(rosterStarved));
+  setOutput("recorded", String(bulk.recording));
+}
+function reportRecordRun(outcome, rosterStarved) {
+  writeOutputs({
+    labels: JSON.stringify([]),
+    proposed: JSON.stringify([]),
+    confidence: "0.00",
+    language: outcome.language ?? "",
+    "duplicate-of": "",
+    "screened-out": "",
+    applied: JSON.stringify(NOTHING_DONE),
+    starved: String(rosterStarved),
+    processed: "0",
+    skipped: "0",
+    remaining: "0",
+    recorded: String(outcome.recorded)
+  });
+}
+function page(settings, thread, outcome, done, spent) {
+  return summarize({
+    thread,
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    language: outcome.language,
+    screenedOut: outcome.screenedOut,
+    proposed: outcome.verdict.labels,
+    confidence: outcome.verdict.confidence,
+    floor: settings.confidence,
+    applied: outcome.applied,
+    refused: outcome.refused,
+    duplicateOf: outcome.verdict.duplicateOf,
+    permitted: outcome.permitted,
+    withheld: outcome.withheld,
+    done,
+    memory: outcome.memory,
+    note: outcome.note,
+    implicit: outcome.implicit,
+    excludedLabels: outcome.excludedLabels,
+    ungranted: outcome.ungranted,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+function recordPage(settings, thread, outcome, spent) {
+  return summarizeRecord({
+    thread,
+    dryRun: settings.dryRun,
+    recorded: outcome.recorded,
+    language: outcome.language,
+    decided: outcome.decided,
+    pivot: outcome.pivot,
+    pivotNote: outcome.pivotNote,
+    corrections: settings.corrections,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+function sweepPage(settings, bulk, spent) {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    results: bulk.results,
+    skipped: bulk.skipped,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    ungranted: bulk.ungranted,
+    recording: bulk.recording,
+    spent,
+    modelNames: settings.modelNames,
+    screenNames: settings.screenNames
+  });
+}
+
 // src/duties/triage/propose.ts
 var BRANCH = "reeve/propose";
 var MARKER = markerFor("propose");
 var LABEL_NAME_MAX = 50;
 var LIST_PAGES = 10;
-var WRITE_ATTEMPTS = 3;
+var WRITE_ATTEMPTS2 = 3;
 var SCOPE_PREFIX = /^@[^/]+\//;
 function packageSlug(name) {
   return name.replace(SCOPE_PREFIX, "").toLowerCase();
@@ -35651,7 +36191,7 @@ function renderBody(path, entries, fp) {
   lines.push(MARKER.render(fp));
   return lines.join("\n");
 }
-function isShaConflict(error2) {
+function isShaConflict2(error2) {
   if (typeof error2 !== "object" || error2 === null || !("status" in error2)) return false;
   const status = error2.status;
   if (status === 409) return true;
@@ -35668,7 +36208,7 @@ async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
     warrant.labels.map((label) => label.name),
     entries
   );
-  for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= WRITE_ATTEMPTS2; attempt += 1) {
     const { data } = await api.rest.repos.getContent({
       owner: at.owner,
       repo: at.repo,
@@ -35700,7 +36240,7 @@ async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
       });
       break;
     } catch (error2) {
-      if (isShaConflict(error2) && attempt < WRITE_ATTEMPTS) continue;
+      if (isShaConflict2(error2) && attempt < WRITE_ATTEMPTS2) continue;
       throw error2;
     }
   }
@@ -35739,7 +36279,7 @@ async function defaultBranchAndReset(api, at) {
   await resetBranch(api, at, base);
   return base;
 }
-function report(over) {
+function report2(over) {
   return {
     eligible: true,
     additions: 0,
@@ -35780,7 +36320,7 @@ function proposeSection(report3) {
 }
 async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dryRun) {
   if (implicit) {
-    return report({
+    return report2({
       eligible: false,
       notes: [
         "`propose` needs an explicit warrant file to edit \u2014 this repository has none, so it did nothing."
@@ -35811,7 +36351,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
   }
   let entries = buildEntries(evidenced2, retirements);
   if (entries.length === 0) {
-    return report({ notes: [...notes, "No workspace drift found this run."] });
+    return report2({ notes: [...notes, "No workspace drift found this run."] });
   }
   try {
     const struck = await struckEntries(api, at);
@@ -35823,7 +36363,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       );
     }
     if (entries.length === 0) {
-      return report({
+      return report2({
         notes: [...notes, "Every candidate this run found was already struck."],
         struck: strikeCount
       });
@@ -35834,7 +36374,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     const existing = await findOwnOpenPr(api, at);
     if (existing !== null) {
       if (MARKER.split(existing.body).fingerprint === fp) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             `The open proposal (#${String(existing.number)}) already carries this exact change-set.`
@@ -35848,7 +36388,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       }
       const frozen = await branchFrozen(api, at, existing.headSha);
       if (frozen.frozen) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             frozen.errorReason === null ? `The proposal branch (#${String(existing.number)}) carries a commit from someone other than this run \u2014 left untouched.` : `The proposal branch (#${String(existing.number)})'s freshness could not be checked (${frozen.errorReason}) \u2014 treated as frozen and left untouched.`
@@ -35861,7 +36401,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
         });
       }
       if (dryRun) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             `Dry run \u2014 would update the open proposal (#${String(existing.number)}).`
@@ -35876,7 +36416,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       const base2 = await defaultBranchAndReady(api, at);
       const updated = await writeProposal(api, at, warrant, entries, fp, existing.number, base2);
       if (updated === null) {
-        return report({
+        return report2({
           notes: [
             ...notes,
             "The proposed change-set would not parse back cleanly \u2014 aborted, nothing was written."
@@ -35884,7 +36424,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
           pr: existing.number
         });
       }
-      return report({
+      return report2({
         notes: [...notes, `Updated the open proposal \u2014 #${String(updated)}.`],
         additions,
         retirements: retiring,
@@ -35893,7 +36433,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
       });
     }
     if (dryRun) {
-      return report({
+      return report2({
         notes: [...notes, "Dry run \u2014 would open a new proposal."],
         additions,
         retirements: retiring,
@@ -35904,14 +36444,14 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     const base = await defaultBranchAndReset(api, at);
     const created = await writeProposal(api, at, warrant, entries, fp, null, base);
     if (created === null) {
-      return report({
+      return report2({
         notes: [
           ...notes,
           "The proposed change-set would not parse back cleanly \u2014 aborted, nothing was written."
         ]
       });
     }
-    return report({
+    return report2({
       notes: [...notes, `Opened a new proposal \u2014 #${String(created)}.`],
       additions,
       retirements: retiring,
@@ -35920,7 +36460,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     });
   } catch (error2) {
     if (isWeather(error2)) {
-      return report({
+      return report2({
         notes: [
           ...notes,
           `\`propose\` hit a capacity error and stopped rather than partially publish \u2014 ${error2 instanceof Error ? error2.message : String(error2)}.`
@@ -36099,49 +36639,6 @@ var DEFAULT_CAPABILITIES = ["label"];
 // src/duties/triage/main.ts
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
-var SWEEP_STATES = ["open", "closed", "all"];
-function parseSweepState(raw) {
-  const value = raw.trim().toLowerCase();
-  const match = SWEEP_STATES.find((state) => state === value);
-  if (match === void 0) {
-    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
-  }
-  return match;
-}
-function resolveTaxonomy(warrant, raw) {
-  const requested = raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) return warrant.labels;
-  for (const name of requested) {
-    if (warrant.labelNamed(name) === void 0) {
-      throw new Error(
-        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. Add it there, or correct the name.`
-      );
-    }
-  }
-  const wanted = new Set(requested);
-  return warrant.labels.filter((label) => wanted.has(label.name));
-}
-function taxonomyNames(settings) {
-  return new Set(settings.taxonomy.map((label) => label.name));
-}
-function readSettings() {
-  const shared = readShared();
-  const cheap = parseModels(getInput("screen-models"));
-  return {
-    ...shared,
-    screenModels: cheap.models,
-    screenNames: cheap.names,
-    warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
-    confidence: fraction("confidence", getInput("confidence")),
-    corrections: getInput("corrections", { required: true }),
-    about: getInput("about"),
-    minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
-    sweepState: parseSweepState(getInput("sweep-state"))
-  };
-}
-var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 function newAccumulator() {
   return {
     results: [],
@@ -36159,7 +36656,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   }
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
   const { permitted } = narrow(grantedCapabilities, settings.apply);
-  const recording = permitted.includes("record");
+  const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
   if (!authority2.implicit) {
     await resolveMissingLabels(
@@ -36253,7 +36750,7 @@ async function runProposeSweep(api, authority2, settings) {
     notice(
       `\`${authority2.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep did not propose anything. The narrower of the two wins \u2014 add \`propose\` to \`apply\` as well to enable it.`
     );
-    return report({
+    return report2({
       notes: [
         "`apply` does not name `propose`, so this sweep declined to propose anything this run."
       ]
@@ -36268,7 +36765,7 @@ async function runProposeSweep(api, authority2, settings) {
     if (!isCapacityError(error2)) throw error2;
     const note = "`propose` hit a capacity error before it could read the workspace or its evidence \u2014 nothing was proposed this run; the next sweep starts fresh.";
     warning(note);
-    return report({ notes: [note] });
+    return report2({ notes: [note] });
   }
   const proposeReport = await runPropose(
     api,
@@ -36296,12 +36793,6 @@ function noticeProposeSweepOnly(authority2) {
     );
   }
 }
-function describeRecordOutcome(outcome) {
-  return outcome.decided.length > 0 ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}` : "recorded with no taxonomy labels";
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
 function describeOutcome(outcome, done) {
   if (outcome.ungranted !== null) return "not granted";
   if (outcome.screenedOut !== null) return `screened out \u2014 ${outcome.screenedOut.reason}`;
@@ -36310,6 +36801,23 @@ function describeOutcome(outcome, done) {
   }
   if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
   return "no label";
+}
+function readSettings() {
+  const shared = readShared();
+  const cheap = parseModels(getInput("screen-models"));
+  return {
+    ...shared,
+    screenModels: cheap.models,
+    screenNames: cheap.names,
+    warrant: getInput("warrant", { required: true }),
+    apply: parseApply(getInput("apply", { required: true })),
+    confidence: fraction("confidence", getInput("confidence")),
+    corrections: getInput("corrections", { required: true }),
+    about: getInput("about"),
+    minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
+    sweepState: parseSweepState(getInput("sweep-state"))
+  };
 }
 async function run() {
   const meter = createMeter();
@@ -36380,16 +36888,16 @@ async function run() {
               settings.dryRun
             );
           }
-          if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
+          if (trigger.eligible && recordGrantedByFile(grantedCapabilities) && !recordGrantedByRun(permitted)) {
             notice(
               `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
             );
           }
-          if (trigger.reason !== "" && permitted.includes("record")) {
+          if (trigger.reason !== "" && recordGrantedByRun(permitted)) {
             info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
           }
           noticeProposeSweepOnly(authority2);
-          if (trigger.eligible && permitted.includes("record") && trigger.kind === "reopen") {
+          if (trigger.eligible && recordGrantedByRun(permitted) && trigger.kind === "reopen") {
             const check = await checkReversal(api, at, standing, senderLogin());
             if (check.authorReopen) {
               notice(
@@ -36411,7 +36919,7 @@ async function run() {
             } else {
               outcome = await decide(authority2, standing, settings, stages, weather);
             }
-          } else if (trigger.eligible && permitted.includes("record")) {
+          } else if (trigger.eligible && recordGrantedByRun(permitted)) {
             recordOutcome = await recordCorrection(
               api,
               at,
@@ -36464,7 +36972,7 @@ async function run() {
           recordPage(settings, recorded.number, recorded.outcome, meter.spent()) + authSection(weather.authFailures)
         );
       } else if (!settings.sweep && single !== null) {
-        report2(single.outcome, single.done, settings.dryRun, rosterStarved);
+        report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(
           page(settings, single.number, single.outcome, single.done, meter.spent()) + authSection(weather.authFailures)
         );
@@ -36651,376 +37159,6 @@ ${pivot.draft.body}`,
     refused: decision.refused
   };
 }
-function recordTrigger() {
-  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
-  const payload = context2.payload;
-  if (payload.action === "reopened") {
-    if (isBotAuthor(payload.sender)) {
-      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
-    }
-    return { eligible: true, kind: "reopen", reason: "" };
-  }
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return { eligible: false, kind: "label", reason: "" };
-  }
-  if (isBotAuthor(payload.sender)) {
-    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
-  }
-  return { eligible: true, kind: "label", reason: "" };
-}
-function senderLogin() {
-  const payload = context2.payload;
-  return payload.sender?.login ?? "";
-}
-function labelChange() {
-  const payload = context2.payload;
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
-  const label = payload.label?.name;
-  if (label === void 0 || label.length === 0) return null;
-  return { label, action: payload.action };
-}
-async function computePivot(warrant, standing, body, code, settings, stages, weather) {
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
-    return { pivot: null, pivotNote: null };
-  }
-  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-  const rendered = await translateToPivot({
-    provider: stages.pivot,
-    models: pivotModels,
-    title: standing.title,
-    body,
-    to: pivotLanguage,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-  });
-  for (const failure of rendered.failures) {
-    warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
-  }
-  if (rendered.draft !== null) {
-    return {
-      pivot: {
-        language: pivotLanguage.code,
-        title: rendered.draft.title,
-        excerpt: rendered.draft.body.slice(0, EXCERPT)
-      },
-      pivotNote: null
-    };
-  }
-  const pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
-  info(pivotNote);
-  return { pivot: null, pivotNote };
-}
-async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed) {
-  const warrant = authority2.warrant;
-  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
-  if (by === "sweep" && decidedLabels.length > 0) {
-    const history = await listLabelEvents(api, at);
-    if (!history.complete) {
-      info(
-        `#${String(at.number)}: label history is longer than one run reads \u2014 cannot attribute, nothing imported.`
-      );
-      return {
-        recorded: false,
-        language: null,
-        decided: [],
-        pivot: false,
-        pivotNote: null,
-        machineOnly: false,
-        unattributable: true
-      };
-    }
-    const lastLabeledByBot = /* @__PURE__ */ new Map();
-    for (const event of history.events) {
-      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
-    }
-    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
-    if (decidedLabels.length === 0) {
-      info(
-        `#${String(at.number)}: every taxonomy label here was machine-applied \u2014 nothing to import.`
-      );
-      return {
-        recorded: false,
-        language: null,
-        decided: [],
-        pivot: false,
-        pivotNote: null,
-        machineOnly: true,
-        unattributable: false
-      };
-    }
-  }
-  const limit = settings.maxBodyChars;
-  const body = limit === null ? standing.body : standing.body.slice(0, limit);
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather,
-      settings.temperature
-    )
-  );
-  const code = detection.language?.code ?? null;
-  const { pivot, pivotNote } = await computePivot(
-    warrant,
-    standing,
-    body,
-    code,
-    settings,
-    stages,
-    weather
-  );
-  let proposed = [];
-  let outcomeField = null;
-  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
-    const before = new Set(decidedLabels);
-    if (changed.action === "unlabeled") before.add(changed.label);
-    else before.delete(changed.label);
-    proposed = [...before];
-    if (changed.action === "unlabeled") {
-      outcomeField = await removedByAutomation(api, at, changed.label) ? "overruled" : null;
-    }
-  }
-  const correction = {
-    repo: `${at.owner}/${at.repo}`,
-    thread: at.number,
-    duty: "triage",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed,
-    decided: decidedLabels,
-    by,
-    note: null,
-    outcome: outcomeField,
-    duplicateOf: null,
-    pivot
-  };
-  if (settings.dryRun) {
-    info(
-      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
-    );
-  } else {
-    await writeCorrection(api, at, settings.corrections, correction);
-  }
-  return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote,
-    machineOnly: false,
-    unattributable: false
-  };
-}
-async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf) {
-  const warrant = authority2.warrant;
-  const limit = settings.maxBodyChars;
-  const body = limit === null ? standing.body : standing.body.slice(0, limit);
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather,
-      settings.temperature
-    )
-  );
-  const code = detection.language?.code ?? null;
-  const { pivot, pivotNote } = await computePivot(
-    warrant,
-    standing,
-    body,
-    code,
-    settings,
-    stages,
-    weather
-  );
-  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
-  const correction = {
-    repo: `${at.owner}/${at.repo}`,
-    thread: at.number,
-    duty: "duplicate",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed: [],
-    decided: decidedLabels,
-    by,
-    note: null,
-    outcome: "overruled",
-    duplicateOf,
-    pivot
-  };
-  if (settings.dryRun) {
-    info(
-      `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
-    );
-  } else {
-    await writeCorrection(api, at, settings.corrections, correction);
-  }
-  return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote,
-    machineOnly: false,
-    unattributable: false
-  };
-}
-var WRITE_ATTEMPTS2 = 3;
-async function writeCorrection(contentsApi, at, path, correction) {
-  const relativePath = repoRelativePath(path);
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
-      return;
-    } catch (error2) {
-      if (attempt >= WRITE_ATTEMPTS2 || !isShaConflict2(error2)) throw error2;
-      info(
-        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS2)}).`
-      );
-    }
-  }
-}
-async function attemptWrite(contentsApi, at, path, correction) {
-  const files = await listCorrectionFiles(contentsApi, at, path);
-  const unreadable = [];
-  let provenShared = false;
-  let legacyCandidate = null;
-  for (const file of files) {
-    let read2;
-    try {
-      read2 = await readContentsFile(contentsApi, at, file.path);
-    } catch (error2) {
-      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
-      warning(
-        `corrections: \`${file.path}\` could not be read, so it was skipped rather than failing the whole write \u2014 the search continued through the rest of the store. Split the corrections store into smaller shards.`
-      );
-      unreadable.push(file.path);
-      continue;
-    }
-    if (read2 === null) continue;
-    const lines = read2.text.split("\n");
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? "";
-      if (line.trim().length === 0) continue;
-      const existing2 = parseCorrection(line);
-      if (existing2 === null) {
-        provenShared = true;
-        continue;
-      }
-      if (existing2.thread === correction.thread && existing2.repo === correction.repo && existing2.duty === correction.duty) {
-        const updated = [...lines];
-        updated[index] = formatCorrection(correction);
-        await writeContentsFile(
-          contentsApi,
-          at,
-          file.path,
-          `${updated.join("\n").replace(/\n*$/, "")}
-`,
-          commitMessage(correction),
-          read2.sha
-        );
-        return;
-      }
-      if (existing2.repo !== "" && existing2.repo !== correction.repo) provenShared = true;
-      if (existing2.repo === "" && existing2.thread === correction.thread && existing2.duty === correction.duty && legacyCandidate === null) {
-        legacyCandidate = { path: file.path, lines, sha: read2.sha, index };
-      }
-    }
-  }
-  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
-    const lines = [...legacyCandidate.lines];
-    lines[legacyCandidate.index] = formatCorrection(correction);
-    await writeContentsFile(
-      contentsApi,
-      at,
-      legacyCandidate.path,
-      `${lines.join("\n").replace(/\n*$/, "")}
-`,
-      commitMessage(correction),
-      legacyCandidate.sha
-    );
-    return;
-  }
-  if (unreadable.length > 0) {
-    throw new Error(
-      `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
-    );
-  }
-  const { shard, existing } = await selectShard(contentsApi, at, path);
-  const text2 = existing === null ? `${formatCorrection(correction)}
-` : `${existing.text.replace(/\n*$/, "")}
-${formatCorrection(correction)}
-`;
-  await writeContentsFile(
-    contentsApi,
-    at,
-    shard,
-    text2,
-    commitMessage(correction),
-    existing?.sha ?? null
-  );
-}
-var SHARD_SOFT_LIMIT_BYTES = 9e5;
-var MAX_SHARD_ATTEMPTS = 500;
-async function selectShard(contentsApi, at, path) {
-  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
-  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
-    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
-    let existing;
-    try {
-      existing = await readContentsFile(contentsApi, at, shard);
-    } catch (error2) {
-      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
-      warning(
-        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the next shard instead. Split the corrections store into smaller shards.`
-      );
-      continue;
-    }
-    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
-      return { shard, existing };
-    }
-  }
-  throw new Error(
-    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
-  );
-}
-function isShaConflict2(error2) {
-  const status = error2?.status;
-  if (status === 409) return true;
-  if (status !== 422) return false;
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return message.toLowerCase().includes("sha");
-}
-function repoRelativePath(path) {
-  if (!isAbsolute(path)) return path;
-  const workspace = process.env.GITHUB_WORKSPACE;
-  if (workspace !== void 0 && workspace.length > 0) {
-    const stripped = relative(workspace, path);
-    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
-  }
-  throw new Error(
-    `\`corrections\` (\`${path}\`) is an absolute path record cannot use \u2014 the Contents API only understands a path relative to the repository root. Use a repo-relative path, or one under \`GITHUB_WORKSPACE\` if the workflow built it from \`\${{ github.workspace }}\`.`
-  );
-}
-function monthShard() {
-  const now = /* @__PURE__ */ new Date();
-  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-function commitMessage(correction) {
-  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
-  return `memory: record #${String(correction.thread)} as ${decided}`;
-}
 async function createMissingLabels(api, at, toCreate) {
   for (const label of toCreate) {
     try {
@@ -37159,100 +37297,6 @@ function comment(outcome, done) {
 function excerpt2(answer2) {
   const flat = answer2.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
-}
-function report2(outcome, done, dryRun, rosterStarved) {
-  setOutput("labels", JSON.stringify(outcome.applied));
-  setOutput("proposed", JSON.stringify(outcome.verdict.labels));
-  setOutput("confidence", outcome.verdict.confidence.toFixed(2));
-  setOutput("language", outcome.language ?? "");
-  setOutput(
-    "duplicate-of",
-    outcome.verdict.duplicateOf === null ? "" : String(outcome.verdict.duplicateOf)
-  );
-  setOutput("screened-out", outcome.screenedOut?.reason ?? "");
-  setOutput("applied", dryRun ? "{}" : JSON.stringify(done));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("skipped", "0");
-  setOutput("remaining", "0");
-  setOutput("recorded", "false");
-}
-function reportSweep(bulk, rosterStarved) {
-  setOutput("processed", String(bulk.results.length));
-  setOutput("skipped", String(bulk.skipped));
-  setOutput("remaining", String(remainingOf(bulk)));
-  setOutput("starved", String(rosterStarved));
-  setOutput("recorded", String(bulk.recording));
-}
-function reportRecordRun(outcome, rosterStarved) {
-  setOutput("labels", JSON.stringify([]));
-  setOutput("proposed", JSON.stringify([]));
-  setOutput("confidence", "0.00");
-  setOutput("language", outcome.language ?? "");
-  setOutput("duplicate-of", "");
-  setOutput("screened-out", "");
-  setOutput("applied", JSON.stringify(NOTHING_DONE));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("skipped", "0");
-  setOutput("remaining", "0");
-  setOutput("recorded", String(outcome.recorded));
-}
-function page(settings, thread, outcome, done, spent) {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    screenedOut: outcome.screenedOut,
-    proposed: outcome.verdict.labels,
-    confidence: outcome.verdict.confidence,
-    floor: settings.confidence,
-    applied: outcome.applied,
-    refused: outcome.refused,
-    duplicateOf: outcome.verdict.duplicateOf,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    done,
-    memory: outcome.memory,
-    note: outcome.note,
-    implicit: outcome.implicit,
-    excludedLabels: outcome.excludedLabels,
-    ungranted: outcome.ungranted,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
-}
-function recordPage(settings, thread, outcome, spent) {
-  return summarizeRecord({
-    thread,
-    dryRun: settings.dryRun,
-    recorded: outcome.recorded,
-    language: outcome.language,
-    decided: outcome.decided,
-    pivot: outcome.pivot,
-    pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
-}
-function sweepPage(settings, bulk, spent) {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    skipped: bulk.skipped,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    recording: bulk.recording,
-    spent,
-    modelNames: settings.modelNames,
-    screenNames: settings.screenNames
-  });
 }
 await run();
 export {
