@@ -34473,6 +34473,42 @@ function escapeHtml(text2) {
   return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// src/duties/duplicate/proposal.ts
+function matchShortlist(duplicateOf, confidence, rawRationale, ranked, query, confidenceFloor, attribution, model, language) {
+  const matched = ranked.find((entry) => entry.candidate.number === duplicateOf);
+  if (matched === void 0) return { ok: false };
+  const lexicalScore = matched.score;
+  const rationale = sanitize(rawRationale);
+  const eligible = confidence >= confidenceFloor;
+  const fp = proposalFingerprint(
+    query,
+    ranked.map((entry) => entry.candidate.number)
+  );
+  const proposal = eligible ? {
+    duplicateOf,
+    confidence,
+    lexicalScore,
+    rationale,
+    model,
+    attribution,
+    // The judge writes `rationale` in the thread's own language (see
+    // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
+    // same code — not the pivot language cross-language corpus matching
+    // uses.
+    language
+  } : null;
+  return {
+    ok: true,
+    lexicalScore,
+    rationale,
+    eligible,
+    // Under the floor, `duplicate-of`/`score` still answer, but there is
+    // nothing eligible to fingerprint against a write that will never happen.
+    fingerprint: eligible ? fp : null,
+    proposal
+  };
+}
+
 // src/core/memory.ts
 var K1 = 1.2;
 var B = 0.75;
@@ -34955,7 +34991,7 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
       `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. The narrower of the two wins.`
     );
   }
-  const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence = 0) => ({
+  const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence) => ({
     language: language2,
     duplicateOf: null,
     confidence,
@@ -35021,7 +35057,7 @@ ${pivot.draft.body}`);
   const ranked = rank(queries, corpus, settings.candidates);
   const rankInfo = { corpusSize: corpus.length, offered: ranked.length };
   const pivotInfo = { used: pivotUsed, note: pivotNote };
-  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null);
+  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null, 0);
   const judged = await judge({
     provider: stages.duplicate,
     models: settings.models,
@@ -35045,8 +35081,19 @@ ${pivot.draft.body}`);
   if (verdict2.duplicateOf === null) {
     return nothing(language, rankInfo, pivotInfo, note, verdict2.confidence);
   }
-  const matched = ranked.find((entry) => entry.candidate.number === verdict2.duplicateOf);
-  if (matched === void 0) {
+  const match = matchShortlist(
+    verdict2.duplicateOf,
+    verdict2.confidence,
+    verdict2.rationale,
+    ranked,
+    `${standing.title}
+${body}`,
+    settings.confidence,
+    settings.attribution,
+    judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    detection.language?.code ?? null
+  );
+  if (!match.ok) {
     warning(
       "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. That shape \u2014 a number the ranking never offered \u2014 is what a thread body trying to steer the verdict at an arbitrary target looks like, and it is refused the same as an answer that failed to parse."
     );
@@ -35054,50 +35101,28 @@ ${pivot.draft.body}`);
       language,
       rankInfo,
       pivotInfo,
-      "the verdict named a thread outside the shortlist"
+      "the verdict named a thread outside the shortlist",
+      0
     );
   }
-  const lexicalScore = matched.score;
-  const rationale = sanitize(verdict2.rationale);
-  const eligible = verdict2.confidence >= settings.confidence;
-  if (!eligible) {
+  if (!match.eligible) {
     info(
       `Confidence ${verdict2.confidence.toFixed(2)} is under the floor of ${settings.confidence.toFixed(2)} \u2014 reported, not applied.`
     );
   }
-  const fp = proposalFingerprint(
-    `${standing.title}
-${body}`,
-    ranked.map((entry) => entry.candidate.number)
-  );
-  const proposal = eligible ? {
-    duplicateOf: verdict2.duplicateOf,
-    confidence: verdict2.confidence,
-    lexicalScore,
-    rationale,
-    model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
-    attribution: settings.attribution,
-    // The judge writes `rationale` in the thread's own language (see
-    // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
-    // same code — not the pivot language `pivotLanguage`/`threadLanguage`
-    // below only use for cross-language corpus matching.
-    language: detection.language?.code ?? null
-  } : null;
   return {
     language,
     duplicateOf: verdict2.duplicateOf,
     confidence: verdict2.confidence,
-    lexicalScore,
+    lexicalScore: match.lexicalScore,
     permitted,
     withheld: withheld2,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
-    proposal,
-    // Under the floor, `duplicate-of`/`score` still answer, but there is
-    // nothing eligible to fingerprint against a write that will never happen.
-    fingerprint: eligible ? fp : null,
-    rationale,
+    proposal: match.proposal,
+    fingerprint: match.fingerprint,
+    rationale: match.rationale,
     ungranted: null
   };
 }

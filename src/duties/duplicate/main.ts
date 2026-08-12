@@ -86,7 +86,6 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { sanitize } from "../../core/sanitize.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
@@ -99,9 +98,9 @@ import {
 } from "../../core/warrant.js";
 
 import { authorText, listCorpus, type CorpusThread } from "./corpus.js";
+import { matchShortlist } from "./proposal.js";
 import {
   postOrReplace,
-  proposalFingerprint,
   rehearse,
   type Attribution,
   type CommentApi,
@@ -543,22 +542,25 @@ async function decide(
    * A run that reached no proposal: the guardrails still reported, nothing
    * else is.
    *
-   * `confidence` defaults to `0`, which is the honest answer for every caller
-   * that has no real verdict to report — no candidates reached the judge,
-   * every model failed, the answer did not parse, or the answer named a
-   * candidate outside the shortlist it was shown. But a verdict that *did*
-   * parse and named no duplicate is a real, confident answer of its own — a
-   * model sure this is not a duplicate is a different outcome from a judge
-   * that was never actually asked, and `0` would make the two indistinguishable
-   * to a reader of `score`. Callers that have a real verdict in hand pass its
-   * `confidence` through explicitly instead of taking this default.
+   * `confidence` is required, not defaulted, so every call site names its own
+   * answer rather than inheriting one silently. `0` is the honest answer for
+   * every caller that has no real verdict to report — no candidates reached
+   * the judge, every model failed, the answer did not parse, or the answer
+   * named a candidate outside the shortlist it was shown — and those callers
+   * pass it explicitly. A verdict that *did* parse and named no duplicate is
+   * a real, confident answer of its own — a model sure this is not a
+   * duplicate is a different outcome from a judge that was never actually
+   * asked, and a default of `0` would have made the two indistinguishable to
+   * a reader of `score` without a caller ever having to notice it was relying
+   * on one. Callers that have a real verdict in hand pass its `confidence`
+   * through instead.
    */
   const nothing = (
     language: string | null,
     rankInfo: RankInfo,
     pivotInfo: PivotInfo,
     note: string | null,
-    confidence = 0,
+    confidence: number,
   ): Outcome => ({
     language,
     duplicateOf: null,
@@ -643,7 +645,7 @@ async function decide(
   const rankInfo: RankInfo = { corpusSize: corpus.length, offered: ranked.length };
   const pivotInfo: PivotInfo = { used: pivotUsed, note: pivotNote };
 
-  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null);
+  if (ranked.length === 0) return nothing(language, rankInfo, pivotInfo, null, 0);
 
   const judged = await judge({
     provider: stages.duplicate,
@@ -685,19 +687,22 @@ async function decide(
     return nothing(language, rankInfo, pivotInfo, note, verdict.confidence);
   }
 
-  // `parseVerdict` already refuses a `duplicate_of` that does not name one of
-  // the `candidates` it was given — that is what makes an injected "this
-  // duplicates #999" in a thread body unable to steer a verdict at a thread
-  // the ranking never surfaced. This re-checks the same fact against `ranked`
-  // — the exact shortlist this call passed as those `candidates` — on
-  // purpose: the number that reaches `Outcome`, an output, or a published
-  // comment must be traceable to a candidate this run's own ranking offered,
-  // not merely to a candidate `verdict.ts` was trusted to have checked. A
-  // miss here can only mean that invariant broke somewhere upstream, and the
-  // right response to that is the same as an unparseable answer — discard,
-  // never best-effort — not to fall back to a `0` score and publish anyway.
-  const matched = ranked.find((entry) => entry.candidate.number === verdict.duplicateOf);
-  if (matched === undefined) {
+  // Re-validates `duplicateOf` against `ranked` — the exact shortlist the
+  // judge was shown — then computes the fingerprint and assembles the
+  // proposal. See `matchShortlist`'s own `ShortlistMatch` doc comment for the
+  // full argument for why the re-validation exists at all.
+  const match = matchShortlist(
+    verdict.duplicateOf,
+    verdict.confidence,
+    verdict.rationale,
+    ranked,
+    `${standing.title}\n${body}`,
+    settings.confidence,
+    settings.attribution,
+    judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
+    detection.language?.code ?? null,
+  );
+  if (!match.ok) {
     core.warning(
       "The verdict named a thread outside the shortlist it was shown, so nothing was proposed. " +
         "That shape — a number the ranking never offered — is what a thread body trying to steer " +
@@ -709,64 +714,29 @@ async function decide(
       rankInfo,
       pivotInfo,
       "the verdict named a thread outside the shortlist",
+      0,
     );
   }
-  const lexicalScore = matched.score;
-  // Sanitised once, used both by `proposal` below (only when eligible) and by
-  // `Outcome.rationale` (always, once a verdict named a candidate the
-  // shortlist actually offered) — a report-only run under the floor still
-  // owes a reader *why*, which `proposal` alone cannot answer since it is
-  // null there.
-  const rationale = sanitize(verdict.rationale);
-
-  const eligible = verdict.confidence >= settings.confidence;
-  if (!eligible) {
+  if (!match.eligible) {
     core.info(
       `Confidence ${verdict.confidence.toFixed(2)} is under the floor of ` +
         `${settings.confidence.toFixed(2)} — reported, not applied.`,
     );
   }
 
-  // Over the thread's own text and the shortlist the judge was actually
-  // shown — see `proposalFingerprint`'s own doc comment for why that, and not
-  // the static config knobs that produced the shortlist, is what makes a
-  // grown corpus re-ask and an identical rerun stop.
-  const fp = proposalFingerprint(
-    `${standing.title}\n${body}`,
-    ranked.map((entry) => entry.candidate.number),
-  );
-
-  const proposal: Proposal | null = eligible
-    ? {
-        duplicateOf: verdict.duplicateOf,
-        confidence: verdict.confidence,
-        lexicalScore,
-        rationale,
-        model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
-        attribution: settings.attribution,
-        // The judge writes `rationale` in the thread's own language (see
-        // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
-        // same code — not the pivot language `pivotLanguage`/`threadLanguage`
-        // below only use for cross-language corpus matching.
-        language: detection.language?.code ?? null,
-      }
-    : null;
-
   return {
     language,
     duplicateOf: verdict.duplicateOf,
     confidence: verdict.confidence,
-    lexicalScore,
+    lexicalScore: match.lexicalScore,
     permitted,
     withheld,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
-    proposal,
-    // Under the floor, `duplicate-of`/`score` still answer, but there is
-    // nothing eligible to fingerprint against a write that will never happen.
-    fingerprint: eligible ? fp : null,
-    rationale,
+    proposal: match.proposal,
+    fingerprint: match.fingerprint,
+    rationale: match.rationale,
     ungranted: null,
   };
 }
