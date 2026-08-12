@@ -17,16 +17,15 @@ import * as core from "@actions/core";
 
 import type { RecordOutcome } from "./record.js";
 import type { Settings } from "./inputs.js";
+import { remainingOf } from "../../core/sweep.js";
+
 import type { Outcome, SweepAccumulator } from "./main.js";
 import { summarize, summarizeRecord, summarizeSweep, type Done, type Run } from "./summary.js";
 
 /** What a run that touched nothing did. Also what every dry run reports. */
 export const NOTHING_DONE: Done = { labels: [], commented: false, assigned: [], closed: false };
 
-/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
-export function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
+export { remainingOf };
 
 interface OutputValues {
   readonly labels: string;

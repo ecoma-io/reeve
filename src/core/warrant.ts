@@ -44,6 +44,7 @@
  */
 import { readFile } from "node:fs/promises";
 
+import * as core from "@actions/core";
 import { parse, YAMLParseError } from "yaml";
 
 import type { Location, TrackerApi } from "./forge.js";
@@ -618,6 +619,51 @@ export async function resolveAuthority(
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
 
+/**
+ * Where every duty's `action.yml` defaults its `warrant` input to.
+ *
+ * Declared once, here, rather than repeated as a private constant in five
+ * `main.ts` files. `readWarrant` has to be told which path is the default so
+ * it can tell a consumer's silence from a consumer's choice — an absent file
+ * at this path is the implicit warrant, an absent file at a path somebody
+ * typed is an error — and there is no version of that comparison where the
+ * five duties should be free to disagree about the value.
+ */
+export const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+
+/** The authority a run acts under, and what it already knows about its own grant. */
+export interface Opened {
+  readonly authority: Authority;
+  /**
+   * True when a written `capabilities:` block never named this duty at all —
+   * decided once per run, before anything is spent, because no verdict
+   * downstream can change it.
+   */
+  readonly denied: boolean;
+}
+
+/**
+ * The three lines every duty's `run` opens with: read the warrant, resolve
+ * the absent one into the implicit one, and ask whether a written block named
+ * this duty at all.
+ *
+ * First, and before anything is spent, in every duty. A file that does not
+ * parse is a run with no allowlist and the fail-safe direction is to stop —
+ * but a file that is simply not there, at the path nobody moved it from, is
+ * not that failure, and `resolveAuthority` is what turns that absence into
+ * the implicit warrant rather than an error.
+ */
+export async function openAuthority(
+  path: string,
+  api: TrackerApi,
+  at: Pick<Location, "owner" | "repo">,
+  duty: string,
+): Promise<Opened> {
+  const read = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority = await resolveAuthority(read, path, api, at);
+  return { authority, denied: authority.warrant.unnamed(duty) };
+}
+
 /** What resolving `languages` against the warrant and the input decided. */
 export interface LanguagesResolution {
   readonly languages: readonly Language[];
@@ -662,6 +708,33 @@ export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesR
 }
 
 /**
+ * {@link resolveLanguages} as the four duties that share a `denied` gate
+ * actually call it: resolved, its notice said once, and skipped entirely for
+ * a run the warrant already refused.
+ *
+ * A denied run is promised a green no-op. Resolving `languages` for it would
+ * red-fail it over configuration it was never going to use — a repository
+ * that never intended to grant this duty anything has no reason to have
+ * configured a language for it, and the honest answer for a run that will
+ * read nothing is that it reads no languages.
+ *
+ * `rawInput` is passed rather than read here, because a duty's `main.ts` is
+ * where its own `action.yml` inputs are read — see any duty's
+ * `main.integration.test.ts` for the audit that keeps it that way.
+ */
+export function dutyLanguages(
+  warrant: Warrant,
+  denied: boolean,
+  rawInput: string,
+): readonly Language[] {
+  if (denied) return [];
+
+  const resolution = resolveLanguages(warrant, rawInput);
+  if (resolution.notice !== null) core.notice(resolution.notice);
+  return resolution.languages;
+}
+
+/**
  * The pivot language corrections are bridged through, resolved against the
  * final list of configured languages — whichever of `languages:` or the
  * `languages` input answered that.
@@ -688,6 +761,21 @@ export function resolvePivot(warrant: Warrant, languages: readonly Language[]): 
     );
   }
   return found;
+}
+
+/**
+ * {@link resolvePivot}, for the four call sites that have to cope with a run
+ * that configured no languages at all.
+ *
+ * There is no pivot to resolve when nothing is configured to bridge between,
+ * and that is not an error: a single-language project recalls in its own
+ * language and never spends a request on a translation. `resolvePivot` throws
+ * on an empty list because a caller that has already committed to bridging
+ * needs to hear about it; a caller still deciding whether to bridge asks this
+ * instead and reads `null` as "there is nothing here worth a bridge".
+ */
+export function pivotOrNone(warrant: Warrant, languages: readonly Language[]): Language | null {
+  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
 }
 
 /** What resolving `about` against the warrant and the input decided. */

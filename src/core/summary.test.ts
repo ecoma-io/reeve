@@ -6,8 +6,19 @@ import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Spend } from "./meter.js";
-import type { Failure } from "./provider.js";
-import { authSection, cell, cost, count, fence, table, writeSummary } from "./summary.js";
+import { createWeather, type Failure } from "./provider.js";
+import {
+  authSection,
+  cell,
+  cost,
+  count,
+  fence,
+  starvedWarning,
+  table,
+  warnIfStarved,
+  writeRunSummary,
+  writeSummary,
+} from "./summary.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is what the runner actually gives an action: `GITHUB_STEP_SUMMARY`
@@ -243,5 +254,74 @@ describe("authSection", () => {
     // The refusal's reason is a provider's response body — log material, not
     // markdown this page should render.
     expect(authSection([refused("fast")])).not.toContain("whatever the provider said");
+  });
+});
+describe("starvedWarning", () => {
+  it("points a sweep at `remaining`, which is where the rest of the backlog went", () => {
+    expect(starvedWarning(true)).toContain("see `remaining`");
+  });
+
+  it("says weather rather than misconfiguration, on both modes", () => {
+    // D12: a run that delivered what it could is not a run that failed.
+    expect(starvedWarning(false)).toContain("not a broken configuration");
+    expect(starvedWarning(true)).toContain("Every model in `models` failed on capacity this run.");
+  });
+});
+
+describe("warnIfStarved", () => {
+  it("says nothing, and answers false, while any model is still worth asking", () => {
+    const weather = createWeather();
+    weather.ground("a");
+
+    expect(warnIfStarved(["a", "b"], weather, false)).toBe(false);
+    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
+  });
+
+  it("warns once and answers true when every model on the roster is grounded", () => {
+    const weather = createWeather();
+    weather.ground("a");
+    weather.ground("b");
+
+    expect(warnIfStarved(["a", "b"], weather, true)).toBe(true);
+    expect(vi.mocked(core.warning)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(starvedWarning(true));
+  });
+
+  it("is not starvation when there was no roster to run dry", () => {
+    // An empty `models` is a duty that asks no model, not a duty that has been
+    // refused by all of them.
+    expect(warnIfStarved([], createWeather(), false)).toBe(false);
+    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
+  });
+});
+
+describe("writeRunSummary", () => {
+  it("writes the page as it was given, when no endpoint refused a key", async () => {
+    await writeRunSummary("### The run", createWeather());
+
+    const written = await readFile(file, "utf8");
+    expect(written).toContain("### The run");
+    expect(written).not.toContain("### Endpoints that failed to authenticate");
+  });
+
+  it("names the endpoints that refused a key underneath the page", async () => {
+    // The multi-endpoint half of D12 only holds up if a run that carried on
+    // without an endpoint says which one it carried on without.
+    const weather = createWeather(new Set(["fast"]));
+    weather.failAuth("fast", {
+      ok: false,
+      model: "m",
+      kind: "auth",
+      usage: null,
+      reason: "HTTP 401",
+      endpoint: "fast",
+    });
+
+    await writeRunSummary("### The run", weather);
+
+    const written = await readFile(file, "utf8");
+    expect(written).toContain("### The run");
+    expect(written).toContain("### Endpoints that failed to authenticate");
+    expect(written).toContain("`fast`");
   });
 });

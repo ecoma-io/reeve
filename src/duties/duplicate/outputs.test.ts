@@ -77,6 +77,7 @@ describe("remainingOf", () => {
   it("is the candidates a sweep has not yet reached", () => {
     const acc: SweepAccumulator = {
       results: [{ number: 1, outcome: "no duplicate" }],
+      skipped: 0,
       starvedRun: false,
       candidates: 5,
       ungranted: null,
@@ -91,6 +92,7 @@ describe("remainingOf", () => {
         { number: 1, outcome: "no duplicate" },
         { number: 2, outcome: "no duplicate" },
       ],
+      skipped: 0,
       starvedRun: false,
       candidates: 1,
       ungranted: null,
@@ -132,6 +134,7 @@ describe("reportSweep", () => {
         { number: 1, outcome: "no duplicate" },
         { number: 2, outcome: "proposed #1" },
       ],
+      skipped: 0,
       starvedRun: true,
       candidates: 5,
       ungranted: null,
@@ -195,6 +198,7 @@ describe("sweepPage", () => {
   it("passes the sweep state through to summarizeSweep, remaining computed from the accumulator", () => {
     const acc: SweepAccumulator = {
       results: [{ number: 1, outcome: "no duplicate" }],
+      skipped: 0,
       starvedRun: false,
       candidates: 3,
       ungranted: null,

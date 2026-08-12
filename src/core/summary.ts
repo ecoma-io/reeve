@@ -14,11 +14,16 @@
  * already done; a runner too old to set the variable, a summary file that has
  * hit its size limit, and a permissions oddity are all reasons to lose the
  * report and none of them are reasons to lose the run.
+ *
+ * **How a run concludes is here too.** The capacity warning every duty writes
+ * before its outputs, and the auth section every duty appends to its page,
+ * are both things a fifth duty has to get right by default rather than by
+ * remembering — see {@link warnIfStarved} and {@link writeRunSummary}.
  */
 import * as core from "@actions/core";
 
 import { STAGE, total, type Spend } from "./meter.js";
-import { type Failure } from "./provider.js";
+import { starved, type Failure, type Weather } from "./provider.js";
 
 /**
  * The endpoints whose keys were refused, named on the page — the half of the
@@ -68,6 +73,59 @@ export async function writeSummary(markdown: string): Promise<void> {
         "The run itself was unaffected.",
     );
   }
+}
+
+/**
+ * What a run says when every model on its roster ran dry.
+ *
+ * D12, in one sentence: this is weather, not a broken configuration, so the
+ * run reports whatever it delivered rather than failing red. The second half
+ * differs by mode because the honest thing to tell the reader differs — a
+ * sweep points at `remaining`, which is where the rest of the backlog went; a
+ * single-thread run has no such place to point.
+ */
+export function starvedWarning(sweep: boolean): string {
+  return (
+    "Every model in `models` failed on capacity this run. " +
+    (sweep
+      ? "The sweep delivered what it could before the roster ran dry, and " +
+        "stopped early — see `remaining`."
+      : "This run delivered what it could rather than failing red — weather, " +
+        "not a broken configuration.")
+  );
+}
+
+/**
+ * Whether the roster ran dry this run — and, if it did, the one warning that
+ * says so.
+ *
+ * Both halves together because a run that discovers it was starved and does
+ * not say so is a run whose `starved` output is the only place the fact
+ * survives, and an output nobody reads is not a report. The answer is returned
+ * as well as warned about, because every duty also writes it as an output and
+ * a second `starved(...)` call could disagree with the first.
+ */
+export function warnIfStarved(
+  models: readonly string[],
+  weather: Weather,
+  sweep: boolean,
+): boolean {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) core.warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+
+/**
+ * This run's page, with the endpoints that refused its key named underneath.
+ *
+ * Every duty that asks a model appends {@link authSection} to whatever it
+ * rendered, and it has to be every one of them: the multi-endpoint half of D12
+ * only holds up if a run that carried on without an endpoint says which one it
+ * carried on without, and a duty that forgot the suffix would report a clean
+ * run that was not clean.
+ */
+export async function writeRunSummary(page: string, weather: Weather): Promise<void> {
+  await writeSummary(page + authSection(weather.authFailures));
 }
 
 /**

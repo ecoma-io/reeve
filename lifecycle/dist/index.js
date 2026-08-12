@@ -32530,8 +32530,8 @@ function residue(text2) {
 }
 
 // src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
 
 // src/core/forge.ts
 function isBotAuthor(author) {
@@ -32790,6 +32790,12 @@ async function resolveAuthority(read, path, api, at) {
   const repositoryLabels = await listRepositoryLabels(api, at);
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority = await resolveAuthority(read, path, api, at);
+  return { authority, denied: authority.warrant.unnamed(duty) };
 }
 function load(path, source) {
   let document2;
@@ -33332,6 +33338,15 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
 
 // src/core/inputs.ts
 function parseSince(raw) {
@@ -33451,6 +33466,18 @@ function table(headers, rows) {
 var COUNT = new Intl.NumberFormat("en-US");
 function cell(text2) {
   return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
 
 // src/duties/lifecycle/clock.ts
@@ -33846,7 +33873,7 @@ function chromeGap(outcome, done, dryRun) {
   if (dryRun || !done.commented) return "";
   return chromeFallbackNote([outcome.language]) ?? "";
 }
-function renderSweepPage(warrantPath, dryRun, results, ungranted, starved = false) {
+function renderSweepPage(warrantPath, dryRun, results, ungranted, starved2 = false) {
   if (ungranted !== null) {
     return `${["## Reeve \xB7 lifecycle \u2014 sweep", "", ungranted].join("\n").trimEnd()}
 `;
@@ -33858,7 +33885,7 @@ function renderSweepPage(warrantPath, dryRun, results, ungranted, starved = fals
     "",
     `${dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(results.length)} thread${results.length === 1 ? "" : "s"}.`
   ];
-  if (starved) {
+  if (starved2) {
     parts.push(
       "",
       "**Stopped early** \u2014 GitHub's own capacity (rate limit, or a slow/unavailable request) ran out mid-sweep. Everything above this line was actually done; the rest of the backlog is still there for the next run."
@@ -33973,7 +34000,6 @@ var DEFAULT_CAPABILITIES = ["label", "comment"];
 var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 
 // src/duties/lifecycle/main.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var MARKER2 = markerFor("lifecycle");
 function readSettings() {
   const sweep = getBooleanInput("sweep");
@@ -34155,9 +34181,6 @@ ${marker}`
   }
   return { labeled, commented, closed, unstaled, dueNotGranted };
 }
-function newSweepAccumulator() {
-  return { results: [], candidates: 0, skipped: 0, ungranted: null, starved: false };
-}
 async function runSweep(acc, api, authority, settings, ctx) {
   if (authority.warrant.lifecycle === null) {
     acc.ungranted = `\`${authority.warrant.path}\` writes no \`lifecycle:\` key, so this duty has no policy to run.`;
@@ -34186,7 +34209,7 @@ async function runSweep(acc, api, authority, settings, ctx) {
       acc.results.push({ number: thread.number, outcome, done });
     } catch (error2) {
       if (isCapacityError(error2)) {
-        acc.starved = true;
+        acc.starvedRun = true;
         break;
       }
       throw error2;
@@ -34196,13 +34219,12 @@ async function runSweep(acc, api, authority, settings, ctx) {
 async function run() {
   let settings = null;
   let single = null;
-  const bulk = newSweepAccumulator();
+  const bulk = newAccumulator();
   let ranSweep = false;
   try {
     const base = readSettings();
     const api = getOctokit(base.token);
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context2.repo);
+    const { authority } = await openAuthority(base.warrant, api, context2.repo, "lifecycle");
     const languages = resolveThreadLanguages(authority.warrant, getInput("languages"));
     settings = { ...base, languages };
     if (authority.warrant.lifecycle !== null) {
@@ -34221,12 +34243,12 @@ async function run() {
         `\`${authority.warrant.path}\` grants lifecycle ${grantedButUnused.map((capability) => `\`${capability}\``).join(", ")}, which this duty has no use for.`
       );
     }
-    const { permitted, withheld } = narrow(granted, settings.apply);
-    for (const capability of withheld) {
-      warning(
-        `\`apply\` asks for \`${capability}\`, which \`${settings.warrant}\` does not grant to lifecycle. The narrower of the two wins.`
-      );
-    }
+    const { permitted, withheld } = narrowWarned(
+      granted,
+      settings.apply,
+      "lifecycle",
+      settings.warrant
+    );
     const ownLogin = await resolveOwnLogin(api);
     const ctx = { permitted, withheld, ownLogin };
     if (settings.sweep) {
@@ -34258,7 +34280,7 @@ async function run() {
             settings.dryRun,
             bulk.results,
             bulk.ungranted,
-            bulk.starved
+            bulk.starvedRun
           )
         );
       } else if (single !== null) {
@@ -34277,8 +34299,7 @@ async function run() {
   }
 }
 function reportSingle(outcome, done) {
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
+  reportNoSweep();
   setOutput("starved", "false");
   setOutput(
     "skipped",
@@ -34295,11 +34316,8 @@ function report(bulk) {
     (row) => row.outcome.ungranted !== null || row.outcome.permanentlyExempt !== null
   ).length;
   setOutput("processed", String(bulk.results.length));
-  setOutput(
-    "remaining",
-    String(Math.max(bulk.candidates - bulk.results.length - bulk.skipped, 0))
-  );
-  setOutput("starved", String(bulk.starved));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(bulk.starvedRun));
   setOutput("skipped", String(bulk.skipped + evaluatedSkipped));
   setOutput("reminded", String(bulk.results.filter((row) => row.done.commented).length));
   setOutput(

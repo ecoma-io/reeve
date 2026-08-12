@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   bounded,
-  checkApiKeysDeclared,
   counted,
   fraction,
   parseApiKeys,
@@ -11,8 +10,8 @@ import {
   parseSince,
   parseTemperature,
   parseTimeout,
+  readCore,
   readShared,
-  resolveEndpoints,
   threadNumber,
   whole,
 } from "./inputs.js";
@@ -531,88 +530,47 @@ describe("parseApiKeys", () => {
   });
 });
 
-describe("checkApiKeysDeclared", () => {
-  it("passes when every api-keys alias is declared in endpoints", () => {
-    const endpoints = parseEndpoints("fast = https://api.example.com/v1");
-    const apiKeys = parseApiKeys("fast = sk-secret");
+describe("readCore", () => {
+  it("reads everything a duty needs whether or not it sweeps", () => {
+    given(COMPLETE);
 
-    expect(() => {
-      checkApiKeysDeclared(endpoints, apiKeys);
-    }).not.toThrow();
+    // The three sweep inputs are `readShared`'s, not this — a duty that
+    // answers one thread never declares them.
+    expect(readCore()).toEqual({
+      token: "ghs_token",
+      models: ["gpt-4o-mini", "gpt-4o"],
+      modelNames: new Map(),
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-secret",
+      dryRun: false,
+      endpoints: [],
+      apiKeys: [],
+      requestTimeoutMs: 120_000,
+      temperature: undefined,
+    });
+  });
+
+  it("registers `api-key` as a secret before anything can log it", () => {
+    given(COMPLETE);
+
+    readCore();
+
+    expect(vi.mocked(core.setSecret)).toHaveBeenCalledWith("sk-secret");
+  });
+
+  it("passes when every api-keys alias is declared in endpoints", () => {
+    given({
+      ...COMPLETE,
+      endpoints: "fast = https://api.example.com/v1",
+      "api-keys": "fast = sk-secret",
+    });
+
+    expect(readCore().apiKeys).toEqual([{ alias: "fast", key: "sk-secret" }]);
   });
 
   it("refuses an api-keys alias endpoints never declared", () => {
-    const apiKeys = parseApiKeys("fast = sk-secret");
+    given({ ...COMPLETE, "api-keys": "fast = sk-secret" });
 
-    expect(() => {
-      checkApiKeysDeclared([], apiKeys);
-    }).toThrow("api-keys: `fast` is not declared in `endpoints`.");
-  });
-});
-
-describe("resolveEndpoints", () => {
-  it("always leads with the default `base-url`/`api-key` pair, aliased null", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: [],
-      apiKeys: [],
-    });
-
-    expect(resolved).toEqual([
-      {
-        alias: null,
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: "sk-default",
-        timeoutMs: 120_000,
-      },
-    ]);
-  });
-
-  it("keys every configured endpoint from api-keys by alias", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: parseEndpoints("fast = https://a.example.com/v1"),
-      apiKeys: parseApiKeys("fast = sk-fast"),
-    });
-
-    expect(resolved).toContainEqual({
-      alias: "fast",
-      baseUrl: "https://a.example.com/v1",
-      apiKey: "sk-fast",
-      timeoutMs: 120_000,
-    });
-  });
-
-  it("falls back to an empty key for an endpoint api-keys never named", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: parseEndpoints("open = https://a.example.com/v1"),
-      apiKeys: [],
-    });
-
-    expect(resolved).toContainEqual({
-      alias: "open",
-      baseUrl: "https://a.example.com/v1",
-      apiKey: "",
-      timeoutMs: 120_000,
-    });
-  });
-
-  it("prefers an endpoint's own `timeout=` over `request-timeout`", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: parseEndpoints("fast = https://a.example.com/v1 timeout=5s"),
-      apiKeys: [],
-    });
-
-    expect(resolved.find((endpoint) => endpoint.alias === "fast")?.timeoutMs).toBe(5000);
+    expect(() => readCore()).toThrow("api-keys: `fast` is not declared in `endpoints`.");
   });
 });

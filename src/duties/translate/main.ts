@@ -66,6 +66,17 @@
  * load-bearing; the three duties' three placements are an accepted
  * divergence (design §1.2), not something this wave unifies.
  *
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), walking the backlog (`sweepThreads`), and ending the run
+ * (`warnIfStarved`, `writeRunSummary`, `reportNoSweep`). Each of those was a
+ * near-copy in four or five duties; each is now one tested module, called
+ * from here.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API, which is what a runner does — see
@@ -74,12 +85,11 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrow, parseApply } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { listOpenThreads, readStanding } from "../../core/forge.js";
 import {
   bounded,
   readShared,
-  resolveEndpoints,
   whole,
   type ApiKeySpec,
   type EndpointSpec,
@@ -87,20 +97,25 @@ import {
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   parseSeats,
   settleAuth,
-  starved,
   type Names,
   type Weather,
 } from "../../core/provider.js";
-import { createMeter, metered, type Meter } from "../../core/meter.js";
-import { authSection, writeSummary } from "../../core/summary.js";
+import { createMeter, type Meter } from "../../core/meter.js";
+import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import {
-  readWarrant,
-  resolveAuthority,
-  resolveLanguages,
+  newAccumulator,
+  remainingOf,
+  reportNoSweep,
+  sweepThreads,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
+  dutyLanguages,
+  openAuthority,
   type Authority,
   type Capability,
   type Warrant,
@@ -114,19 +129,17 @@ import { processThread, type Report, type ThreadResult } from "./text.js";
 import { marker, type Attribution } from "./publish.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
-/**
- * `warrant`'s own default in `action.yml`, repeated here rather than read
- * back out of it — see triage's identical constant for why.
- */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+/** This sweep's progress: the shared accumulator, holding this duty's own rows. */
+type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * `languages`'s own default in `action.yml`, repeated here for the same
- * reason `DEFAULT_WARRANT_PATH` is. Used only to tell "this is the input
- * nobody touched" from "this is what somebody typed, and it happens to match"
- * — the two are not otherwise distinguishable once the input has already
- * been filled in, and the run treats the coincidence as harmless rather than
- * try to detect it.
+ * reason `core/warrant.ts` keeps `DEFAULT_WARRANT_PATH`: a default this file
+ * has to compare against is a value this file needs. Used only to tell "this
+ * is the input nobody touched" from "this is what somebody typed, and it
+ * happens to match" — the two are not otherwise distinguishable once the
+ * input has already been filled in, and the run treats the coincidence as
+ * harmless rather than try to detect it.
  */
 const DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
 
@@ -269,32 +282,6 @@ function skippedResult(number: number, reason: string): ThreadResult {
 const RECURSION_GUARD_REASON =
   "This is Reeve's own proposal pull request — every duty skips it, translate included.";
 
-/**
- * A sweep's progress, mutated in place rather than assembled and returned.
- *
- * The reason is the same as triage's: nothing here throws an
- * `AuthenticationFailure` past this point that a `finally` block still needs
- * to report from, but `runSweep` can stop early on capacity starvation, and
- * `run`'s `finally` reports whatever was built up to that point either way.
- */
-interface SweepAccumulator {
-  readonly results: SweptThread[];
-  skipped: number;
-  starvedRun: boolean;
-  candidates: number;
-  /** Set once, before the listing, when the warrant never named this duty at all. */
-  ungranted: string | null;
-}
-
-function newAccumulator(): SweepAccumulator {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-
-/** Candidates neither processed nor skipped — what a next sweep still has to look at. */
-function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
-
 /** One sweep row's outcome, in the fewest words that are true. */
 function describeOutcome(result: ThreadResult): string {
   if (result.translated.note !== null) return result.translated.note;
@@ -346,35 +333,20 @@ async function runSweep(
   }
 
   const listed = await listOpenThreads(api, context.repo, settings.since);
-  acc.candidates = listed.length;
 
-  for (const thread of listed) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-
-    // The idempotent skip: a body already carrying this duty's marker has been
-    // translated at least once before, whatever the exact language set was
-    // that run — the same "already decided about" reading triage's own
-    // marker-carrying skip gives it, and free for the same reason: nothing
-    // here calls the tracker or a model, only `marker.split` on text the
-    // listing already fetched.
-    if (marker.split(thread.body).fingerprint !== null) {
-      acc.skipped += 1;
-      continue;
-    }
-
-    // Recursion guard: Reeve never translates its own proposal pull request
-    // — the listing already carries `isPullRequest` and `body`, so this
-    // costs nothing beyond the marker check just above it.
-    if (isReeveProposalPr(thread)) {
-      acc.skipped += 1;
-      continue;
-    }
-
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-
+  await sweepThreads(acc, listed, settings, weather, {
+    alreadyDone: (thread) =>
+      // The idempotent skip: a body already carrying this duty's marker has
+      // been translated at least once before, whatever the exact language set
+      // was that run — the same "already decided about" reading triage's own
+      // marker-carrying skip gives it, and free for the same reason: nothing
+      // here calls the tracker or a model, only `marker.split` on text the
+      // listing already fetched.
+      //
+      // Recursion guard on the same line: Reeve never translates its own
+      // proposal pull request, and the listing already carries `isPullRequest`
+      // and `body`, so this costs nothing beyond the marker check.
+      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
     // thread it cannot even begin — leaving it for `remaining` is cheaper
@@ -383,21 +355,22 @@ async function runSweep(
     // answer, including when the very last candidate is the one that denies
     // work inside its own per-language or per-reply checkpoint with no
     // further iteration left to notice — `budget` already has it by then.
-    if (budgetExhausted(settings, meter, budget)) break;
-
-    const at = { ...context.repo, number: thread.number };
-    const result = await processThread(
-      api,
-      at,
-      thread.body,
-      settings,
-      stages,
-      weather,
-      meter,
-      budget,
-    );
-    acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
-  }
+    exhausted: () => budgetExhausted(settings, meter, budget),
+    processOne: async (thread) => {
+      const at = { ...context.repo, number: thread.number };
+      const result = await processThread(
+        api,
+        at,
+        thread.body,
+        settings,
+        stages,
+        weather,
+        meter,
+        budget,
+      );
+      return { number: thread.number, outcome: describeOutcome(result) };
+    },
+  });
 }
 
 export async function run(): Promise<void> {
@@ -422,21 +395,16 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
-      ...base.models,
-      ...base.judges.flat(),
+    const client = assembleClient(base, meter, ["detect", "draft", "judge"] as const, [
+      base.judges.flat(),
     ]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
+    const stages: Stages = client.stages;
 
-    const stages: Stages = {
-      detect: metered(provider, meter, "detect"),
-      draft: metered(provider, meter, "draft"),
-      judge: metered(provider, meter, "judge"),
-    };
-
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    const opened = await openAuthority(base.warrant, api, context.repo, "translate");
+    authority = opened.authority;
+    const denied = opened.denied;
 
     // Only now, for the same reason triage waits: whether the warrant or the
     // input answers `languages` is the authority's to decide, and only once it
@@ -444,10 +412,8 @@ export async function run(): Promise<void> {
     // Except when the same authority already denied this duty outright — that
     // run is promised a green no-op, and a duty that will never translate has
     // no business failing red over a `languages` nobody configured for it.
-    const denied = authority.warrant.unnamed("translate");
     const rawLanguages = core.getInput("languages");
-    const resolution = denied ? null : resolveLanguages(authority.warrant, rawLanguages);
-    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+    const languages = dutyLanguages(authority.warrant, denied, rawLanguages);
 
     // Once, and only for the run nobody has configured at all: the warrant
     // never wrote `languages:`, and the input is exactly the default
@@ -456,7 +422,7 @@ export async function run(): Promise<void> {
     // here, and saying so once is cheap next to staying silent forever about
     // a choice nobody actually made.
     if (
-      resolution !== null &&
+      !denied &&
       authority.warrant.languages === null &&
       rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
     ) {
@@ -471,25 +437,23 @@ export async function run(): Promise<void> {
     // reported once here, up front, rather than per thread: a run that never
     // reaches a single translatable thread should still say why `apply`'s own
     // request is not the whole story.
-    const { permitted, withheld } = narrow(
+    const { permitted } = narrowWarned(
       authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
       base.apply,
+      "translate",
+      // The raw input, not `authority.warrant.path`, which is what the other
+      // four duties quote. Kept exactly as it was; see `narrowWarned`.
+      base.warrant,
     );
-    for (const capability of withheld) {
-      core.warning(
-        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. ` +
-          "The narrower of the two wins.",
-      );
-    }
 
     settings = {
       ...base,
-      languages: resolution === null ? [] : resolution.languages,
+      languages,
       permitted,
     };
 
     if (settings.sweep) {
-      bulk = newAccumulator();
+      bulk = newAccumulator<SweptThread>();
       await runSweep(bulk, api, authority, settings, stages, weather, meter, budget);
     } else {
       const number = settings.number;
@@ -529,17 +493,7 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null && authority !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        core.warning(
-          "Every model in `models` failed on capacity this run. " +
-            (settings.sweep
-              ? "The sweep delivered what it could before the roster ran dry, and " +
-                "stopped early — see `remaining`."
-              : "This run delivered what it could rather than failing red — weather, " +
-                "not a broken configuration."),
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
 
       // `budget.denied` answers this the same way for both modes — see
       // `createBudget`'s doc comment in `budget.ts`.
@@ -557,14 +511,12 @@ export async function run(): Promise<void> {
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved, budgetSpent);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent(), budgetSpent) + authSection(weather.authFailures),
-        );
+        await writeRunSummary(sweepPage(settings, bulk, meter.spent(), budgetSpent), weather);
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
-        await writeSummary(
-          page(settings, authority, single.number, single.result, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          page(settings, authority, single.number, single.result, meter.spent()),
+          weather,
         );
       }
     }
@@ -594,13 +546,9 @@ function report(
   core.setOutput("replies-translated", String(replies));
   core.setOutput("starved", String(rosterStarved));
   core.setOutput("budget-exhausted", String(budgetSpent));
-  // `0`, not unset: `processed`/`remaining` are a sweep's own outputs, and a
-  // single-thread run answers both honestly at zero rather than leaving a
-  // workflow that reads them on every run reading an empty string on this one.
-  // `skipped` is not repeated here — this mode already gave it its own meaning
-  // two lines up.
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
+  // `skipped` is not repeated by `reportNoSweep` — this mode already gave it
+  // its own meaning two lines up.
+  reportNoSweep();
 }
 
 /**

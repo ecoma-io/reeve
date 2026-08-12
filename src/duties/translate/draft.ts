@@ -90,12 +90,10 @@ export interface TranslateRequest {
    * list rather than being asked again to fail the same way.
    */
   readonly weather?: Weather;
-  /** Passed to every draft request. Omitted from the request when not set. */
-  readonly temperature?: number;
 }
 
 export async function translate(request: TranslateRequest): Promise<Translation> {
-  const { provider, models, source, from, to, languages, drafts, weather, temperature } = request;
+  const { provider, models, source, from, to, languages, drafts, weather } = request;
   const messages = prompt(source, from, to);
 
   const attempts: Attempt[] = [];
@@ -114,7 +112,7 @@ export async function translate(request: TranslateRequest): Promise<Translation>
 
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages, temperature),
+      (model) => answer(provider, model, messages),
       weather,
     );
     for (const failure of rotation.failures) {
@@ -175,13 +173,8 @@ async function answer(
   provider: Provider,
   model: string,
   messages: readonly Message[],
-  temperature?: number,
 ): Promise<Completion> {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === undefined ? undefined : { temperature },
-  );
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,

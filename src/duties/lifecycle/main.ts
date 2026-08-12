@@ -25,6 +25,19 @@
  * would leave a state neither this run nor the next could tell from a step
  * that simply had not fired yet.
  *
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), and answering a sweep's two outputs at zero when this run
+ * did not sweep (`reportNoSweep`). Both were near-copies in four or five
+ * duties; both are now one tested module, called from here.
+ *
+ * The rest of the shared ending is not this duty's: with no provider it has
+ * no `Weather`, so it writes a plain `writeSummary` where the other four
+ * append the endpoints that refused a key, and it walks its own backlog
+ * rather than `sweepThreads` — see `SweepAccumulator`'s own note for why.
+ *
  * This file is excluded from coverage because it calls `run()` at import —
  * `clock.ts` and `message.ts` carry this duty's tested logic.
  */
@@ -32,7 +45,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { detectLanguage } from "../../core/detect.js";
-import { narrow, parseApply } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   createLifecycleEffects,
   isCapacityError,
@@ -47,9 +60,14 @@ import { parseLanguages, type Language } from "../../core/languages.js";
 import { isReeveProposalPr, markerFor } from "../../core/marker.js";
 import { writeSummary } from "../../core/summary.js";
 import {
+  newAccumulator,
+  remainingOf,
+  reportNoSweep,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
   checkLifecycleLabelsExist,
-  readWarrant,
-  resolveAuthority,
+  openAuthority,
   type Authority,
   type Capability,
   type LifecycleExempt,
@@ -69,9 +87,6 @@ import {
   type LifecycleApi,
 } from "./timeline.js";
 import { DEFAULT_CAPABILITIES, LIFECYCLE_CAPABILITIES } from "./capabilities.js";
-
-/** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 const MARKER = markerFor("lifecycle");
 
@@ -380,19 +395,18 @@ interface SweptThread {
   readonly done: Done;
 }
 
-interface SweepAccumulator {
-  readonly results: SweptThread[];
-  candidates: number;
-  /** Pre-filtered before a single per-thread read was spent — `threads:` kind mismatch or the recursion guard. Never counts toward `limit`. */
-  skipped: number;
-  ungranted: string | null;
-  /** GitHub's own capacity ran out mid-sweep (429/5xx/timeout) — see D12. Everything in `results` up to that point is real and already reported; the rest of the backlog waits for the next run. */
-  starved: boolean;
-}
-
-function newSweepAccumulator(): SweepAccumulator {
-  return { results: [], candidates: 0, skipped: 0, ungranted: null, starved: false };
-}
+/**
+ * This sweep's progress: the shared accumulator, holding this duty's own rows.
+ *
+ * `starvedRun` means something different here than it does for the three
+ * duties that sweep with a model roster. They run dry when every model is
+ * grounded, which `starved` can be asked about for free before each thread;
+ * lifecycle asks a model nothing at all, so the only capacity that can run out
+ * on it is GitHub's own — a 429, a 5xx, a timeout — which is a fact only a
+ * failed request can report. That is why this duty keeps its own loop rather
+ * than `sweepThreads`: the check it needs is a `catch`, not a predicate.
+ */
+type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * Mutates `acc` in place rather than building and returning a fresh one, so
@@ -460,7 +474,7 @@ async function runSweep(
       acc.results.push({ number: thread.number, outcome, done });
     } catch (error) {
       if (isCapacityError(error)) {
-        acc.starved = true;
+        acc.starvedRun = true;
         break;
       }
       // Auth errors (401/403) are configuration, not weather — D12 says
@@ -475,15 +489,20 @@ export async function run(): Promise<void> {
   let settings: Settings | null = null;
   let single: { readonly number: number; readonly outcome: Outcome; readonly done: Done } | null =
     null;
-  const bulk = newSweepAccumulator();
+  const bulk = newAccumulator<SweptThread>();
   let ranSweep = false;
 
   try {
     const base = readSettings();
     const api = getOctokit(base.token) as unknown as LifecycleApi;
 
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    // `denied` is not read here: unlike the four duties that decide it once up
+    // front, lifecycle asks `unnamed("lifecycle")` per thread inside
+    // `evaluateThread`, because a sweep that is denied still has threads to
+    // report on. And `languages` is resolved leniently — an unconfigured pair
+    // is not refused here, it reads as English — so this is
+    // `resolveThreadLanguages` rather than the strict `dutyLanguages`.
+    const { authority } = await openAuthority(base.warrant, api, context.repo, "lifecycle");
     const languages = resolveThreadLanguages(authority.warrant, core.getInput("languages"));
     settings = { ...base, languages };
 
@@ -511,13 +530,12 @@ export async function run(): Promise<void> {
           "has no use for.",
       );
     }
-    const { permitted, withheld } = narrow(granted, settings.apply);
-    for (const capability of withheld) {
-      core.warning(
-        `\`apply\` asks for \`${capability}\`, which \`${settings.warrant}\` does not grant to ` +
-          "lifecycle. The narrower of the two wins.",
-      );
-    }
+    const { permitted, withheld } = narrowWarned(
+      granted,
+      settings.apply,
+      "lifecycle",
+      settings.warrant,
+    );
 
     // Resolved once per run and cached — the attribution gate every
     // un-staling decision reads needs to know who "our own actor" is before
@@ -558,7 +576,7 @@ export async function run(): Promise<void> {
             settings.dryRun,
             bulk.results,
             bulk.ungranted,
-            bulk.starved,
+            bulk.starvedRun,
           ),
         );
       } else if (single !== null) {
@@ -578,8 +596,7 @@ export async function run(): Promise<void> {
 }
 
 function reportSingle(outcome: Outcome, done: Done): void {
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
+  reportNoSweep();
   core.setOutput("starved", "false");
   core.setOutput(
     "skipped",
@@ -601,11 +618,8 @@ function report(bulk: SweepAccumulator): void {
     (row) => row.outcome.ungranted !== null || row.outcome.permanentlyExempt !== null,
   ).length;
   core.setOutput("processed", String(bulk.results.length));
-  core.setOutput(
-    "remaining",
-    String(Math.max(bulk.candidates - bulk.results.length - bulk.skipped, 0)),
-  );
-  core.setOutput("starved", String(bulk.starved));
+  core.setOutput("remaining", String(remainingOf(bulk)));
+  core.setOutput("starved", String(bulk.starvedRun));
   core.setOutput("skipped", String(bulk.skipped + evaluatedSkipped));
   core.setOutput("reminded", String(bulk.results.filter((row) => row.done.commented).length));
   core.setOutput(

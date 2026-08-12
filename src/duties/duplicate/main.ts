@@ -70,6 +70,18 @@
  * instead. Three placements for one knob, an accepted divergence (design
  * §1.2), not something this wave unifies.
  *
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), walking the backlog (`sweepThreads`), resolving the pivot
+ * language (`pivotOrNone`), and ending the run (`warnIfStarved`,
+ * `writeRunSummary`, and `reportNoSweep` in `outputs.ts`). Each of those was
+ * a near-copy in four or five duties; each is now one tested module, called
+ * from here.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API — see `main.integration.test.ts`.
@@ -78,7 +90,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import { narrow, parseApply } from "../../core/enforce.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   listOpenThreads,
   readStanding,
@@ -91,17 +103,16 @@ import {
   fraction,
   parseSince,
   readShared,
-  resolveEndpoints,
   whole,
   type ApiKeySpec,
   type EndpointSpec,
 } from "../../core/inputs.js";
 import type { Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import { createMeter, metered } from "../../core/meter.js";
+import { createMeter } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   settleAuth,
   shown,
@@ -110,12 +121,17 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { authSection, writeSummary } from "../../core/summary.js";
+import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import {
-  readWarrant,
-  resolveAuthority,
-  resolveLanguages,
-  resolvePivot,
+  newAccumulator,
+  standingFromListing,
+  sweepThreads,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
+import {
+  dutyLanguages,
+  openAuthority,
+  pivotOrNone,
   type Authority,
   type Capability,
   type Warrant,
@@ -136,9 +152,6 @@ import { rank } from "./rank.js";
 import { type Done, type PivotInfo, type RankInfo, type SweptThread } from "./summary.js";
 import { judge } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-
-/** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 export interface Settings {
   readonly token: string;
@@ -255,22 +268,8 @@ export interface Outcome {
   readonly ungranted: string | null;
 }
 
-/**
- * A sweep's progress, mutated in place rather than assembled and returned —
- * the same reason `triage/main.ts`'s accumulator is: an `AuthenticationFailure`
- * thrown partway down the loop still leaves whatever was already processed
- * readable from `run`'s `finally` block.
- */
-export interface SweepAccumulator {
-  readonly results: SweptThread[];
-  starvedRun: boolean;
-  candidates: number;
-  ungranted: string | null;
-}
-
-function newAccumulator(): SweepAccumulator {
-  return { results: [], starvedRun: false, candidates: 0, ungranted: null };
-}
+/** This sweep's progress: the shared accumulator, holding this duty's own rows. */
+export type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * The whole backlog, one thread at a time, through the identical pipeline a
@@ -300,7 +299,6 @@ async function runSweep(
   // request implementing something is not that, the same exclusion the
   // corpus itself makes.
   const candidates = listed.filter((thread) => !thread.isPullRequest);
-  acc.candidates = candidates.length;
 
   // Listed once for the whole walk, not once per thread this sweep checks —
   // every candidate here is ranked against the same corpus, and re-listing
@@ -322,55 +320,35 @@ async function runSweep(
   // sweep — see `crossLanguageCorpus`.
   const languageCache = new Map<number, Language | null>();
 
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-
-    const at = { ...context.repo, number: thread.number };
-    const standing: Standing = {
-      title: thread.title,
-      body: thread.body,
-      labels: thread.labels,
-      closed: false,
-      // The sweep listing this candidate came from does not carry who opened
-      // it — only `readStanding`'s single-thread fetch does — and nothing in
-      // `duplicate`'s own decision reads it: ranking a candidate against the
-      // thread in hand never turns on who either one's author is.
-      author: { login: "", isBot: false },
-      // Nor does it carry milestone/assignee state — `duplicate` never reads
-      // either, so both are left at their honest "unknown" value.
-      milestone: null,
-      assignees: [],
-      createdAt: thread.createdAt,
-      isPullRequest: thread.isPullRequest,
-    };
-    const outcome = await decide(
-      api,
-      authority,
-      thread.number,
-      standing,
-      settings,
-      stages,
-      weather,
-      corpus,
-      languageCache,
-    );
-    const acted = await act(api, at, outcome, settings.dryRun);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
-
-    // The pre-loop check above only catches the roster running dry *before*
-    // a thread is decided. `decide` and `act` are exactly where a model
-    // actually gets asked anything, so the roster can just as easily run out
-    // grounding the last thread this walk was ever going to reach — the one
-    // iteration after which the loop simply ends rather than looping back to
-    // ask again. Checked here too, every iteration, so that case still marks
-    // `starvedRun` rather than leaving the job summary silent about a
-    // starvation the `starved` output already reported.
-    if (starved(settings.models, weather)) acc.starvedRun = true;
-  }
+  await sweepThreads(acc, candidates, settings, weather, {
+    processOne: async (thread) => {
+      const at = { ...context.repo, number: thread.number };
+      const outcome = await decide(
+        api,
+        authority,
+        thread.number,
+        standingFromListing(thread),
+        settings,
+        stages,
+        weather,
+        corpus,
+        languageCache,
+      );
+      const acted = await act(api, at, outcome, settings.dryRun);
+      return { number: thread.number, outcome: describeOutcome(outcome, acted.done) };
+    },
+    // The walk's own check only catches the roster running dry *before* a
+    // thread is decided. `decide` and `act` are exactly where a model actually
+    // gets asked anything, so the roster can just as easily run out grounding
+    // the last thread this walk was ever going to reach — the one iteration
+    // after which the loop simply ends rather than looping back to ask again.
+    // Checked here too, every iteration, so that case still marks `starvedRun`
+    // rather than leaving the job summary silent about a starvation the
+    // `starved` output already reported.
+    afterEach: () => {
+      if (starved(settings.models, weather)) acc.starvedRun = true;
+    },
+  });
 }
 
 /** One sweep row's outcome, in the fewest words that are true. */
@@ -399,30 +377,22 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), base.models);
+    const client = assembleClient(base, meter, ["detect", "duplicate", "pivot"] as const);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-
-    const stages: Stages = {
-      detect: metered(provider, meter, "detect"),
-      duplicate: metered(provider, meter, "duplicate"),
-      pivot: metered(provider, meter, "pivot"),
-    };
+    const stages: Stages = client.stages;
 
     // The authority first, and before anything is spent — the same order and
     // the same reason `triage/main.ts` reads it in.
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    const { authority, denied } = await openAuthority(base.warrant, api, context.repo, "duplicate");
 
-    const denied = authority.warrant.unnamed("duplicate");
-    const resolution = denied
-      ? null
-      : resolveLanguages(authority.warrant, core.getInput("languages"));
-    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
-    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
+    settings = {
+      ...base,
+      languages: dutyLanguages(authority.warrant, denied, core.getInput("languages")),
+    };
 
     if (settings.sweep) {
-      bulk = newAccumulator();
+      bulk = newAccumulator<SweptThread>();
       await runSweep(bulk, api, authority, settings, stages, weather);
     } else {
       const number = settings.number;
@@ -464,28 +434,16 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        core.warning(
-          "Every model in `models` failed on capacity this run. " +
-            (settings.sweep
-              ? "The sweep delivered what it could before the roster ran dry, and stopped " +
-                "early — see `remaining`."
-              : "This run delivered what it could rather than failing red — weather, not a " +
-                "broken configuration."),
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
-        );
+        await writeRunSummary(sweepPage(settings, bulk, meter.spent()), weather);
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, rosterStarved);
-        await writeSummary(
-          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent()),
+          weather,
         );
       }
     }
@@ -539,16 +497,12 @@ async function decide(
     );
   }
 
-  const { permitted, withheld } = narrow(
+  const { permitted, withheld } = narrowWarned(
     warrant.granted("duplicate", DEFAULT_CAPABILITIES),
     settings.apply,
+    "duplicate",
+    warrant.path,
   );
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to duplicate. ` +
-        "The narrower of the two wins.",
-    );
-  }
 
   /**
    * A run that reached no proposal: the guardrails still reported, nothing
@@ -593,7 +547,7 @@ async function decide(
     // The title when there is no body — a one-line issue is a real issue.
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
+    createLanguagePicker(stages.detect, settings.models, weather),
   );
   const language = detection.language?.label ?? null;
   core.info(
@@ -618,8 +572,7 @@ async function decide(
   let pivotUsed = false;
   let pivotNote: string | null = null;
 
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(authority.warrant, settings.languages) : null;
+  const pivotLanguage = pivotOrNone(authority.warrant, settings.languages);
   const threadLanguage = detection.language;
 
   if (
@@ -635,7 +588,6 @@ async function decide(
       body,
       to: pivotLanguage,
       weather,
-      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
     });
     for (const failure of pivot.failures) {
       core.warning(`match: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
@@ -667,7 +619,6 @@ async function decide(
     language,
     candidates: ranked.map((entry) => entry.candidate),
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of judged.failures) {
     core.warning(`duplicate: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);

@@ -2,17 +2,23 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as core from "@actions/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { TrackerApi } from "./forge.js";
 import {
   checkLabelsExist,
   checkLifecycleLabelsExist,
+  dutyLanguages,
   implicitWarrant,
+  openAuthority,
   parseWarrant,
+  pivotOrNone,
   readWarrant,
   resolveAbout,
   resolveLanguages,
   resolvePivot,
+  DEFAULT_WARRANT_PATH,
   type Warrant,
 } from "./warrant.js";
 
@@ -21,8 +27,19 @@ import {
 // what this module does with what it returns. `readWarrant`'s own suite is
 // the exception: absence is a filesystem fact, and a fake one would be a fact
 // about a mock rather than about ENOENT.
+//
+// `core.notice` is the other exception: it is an effect on the runner rather
+// than a value, and whether a run says something once is exactly what
+// `dutyLanguages` is responsible for.
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  notice: vi.fn(),
+}));
 
 const PATH = ".github/reeve.yml";
+
+/** The repository every authority here is resolved against. */
+const AT = { owner: "ecoma-io", repo: "reeve" };
 
 const FULL = `
 version: 1
@@ -423,6 +440,122 @@ describe("resolveLanguages", () => {
   });
 });
 
+describe("dutyLanguages", () => {
+  beforeEach(() => {
+    vi.mocked(core.notice).mockClear();
+  });
+
+  it("resolves against the warrant and says once when the warrant's key won", () => {
+    const languages = dutyLanguages(warrant(`${MINIMAL}languages:\n  - en\n`), false, "vi, zh");
+
+    expect(languages).toEqual([{ code: "en", label: "English", scripts: ["Latn"] }]);
+    expect(vi.mocked(core.notice)).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays silent when the input answered and there was nothing to explain", () => {
+    expect(dutyLanguages(warrant(MINIMAL), false, "en")).toHaveLength(1);
+    expect(vi.mocked(core.notice)).not.toHaveBeenCalled();
+  });
+
+  it("answers a denied duty with no languages rather than resolving at all", () => {
+    // The point of the guard: this input would refuse a duty that was granted
+    // something, and a run promised a green no-op has no business failing red
+    // over configuration it was never going to reach.
+    expect(dutyLanguages(warrant(MINIMAL), true, "  ")).toEqual([]);
+    expect(vi.mocked(core.notice)).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a granted duty that neither source named a language for", () => {
+    expect(() => dutyLanguages(warrant(MINIMAL), false, "  ")).toThrow(
+      `Write \`languages:\` in the warrant (\`${PATH}\`)`,
+    );
+  });
+});
+
+describe("openAuthority", () => {
+  let scratch: string;
+  let cwd: string;
+
+  beforeEach(async () => {
+    scratch = await mkdtemp(join(tmpdir(), "reeve-open-"));
+    // `openAuthority` names `DEFAULT_WARRANT_PATH` itself — that is the point
+    // of it — so the only way to put a run at that path, or to leave it
+    // genuinely absent, is to run from a directory of this suite's own.
+    cwd = process.cwd();
+    process.chdir(scratch);
+    await mkdir(".github");
+  });
+
+  afterEach(async () => {
+    process.chdir(cwd);
+    await rm(scratch, { recursive: true, force: true });
+  });
+
+  /** A `TrackerApi` answering the repository's own labels — page two ends the walk. */
+  function labelsApi(names: readonly string[]): TrackerApi {
+    return {
+      rest: {
+        issues: {
+          listLabelsForRepo: vi.fn(({ page }: { page?: number }) =>
+            Promise.resolve({
+              data: (page ?? 1) === 1 ? names.map((name) => ({ name, description: "d" })) : [],
+            }),
+          ),
+        },
+      },
+    } as unknown as TrackerApi;
+  }
+
+  it("reads a written warrant, and never asks the forge for labels", async () => {
+    await writeFile(DEFAULT_WARRANT_PATH, `${MINIMAL}capabilities:\n  triage: [label]\n`);
+    const api = labelsApi(["bug"]);
+
+    const opened = await openAuthority(DEFAULT_WARRANT_PATH, api, AT, "triage");
+
+    expect(opened.authority.implicit).toBe(false);
+    expect(opened.denied).toBe(false);
+    expect(vi.mocked(api.rest.issues.listLabelsForRepo)).not.toHaveBeenCalled();
+  });
+
+  it("reports a duty a written `capabilities:` block never named as denied", async () => {
+    // The block is the total enumeration, so silence about `translate` is a
+    // refusal rather than an omission — and deciding it here, once, is what
+    // lets a run spend nothing on a duty it was never granted.
+    await writeFile(DEFAULT_WARRANT_PATH, `${MINIMAL}capabilities:\n  triage: [label]\n`);
+
+    const opened = await openAuthority(DEFAULT_WARRANT_PATH, labelsApi(["bug"]), AT, "translate");
+
+    expect(opened.denied).toBe(true);
+  });
+
+  it("builds the implicit warrant from repository labels when the default path is absent", async () => {
+    // Absence at the path nobody moved it from is the narrowest authority,
+    // not an error — and the labels listing is the only place that authority
+    // can come from.
+    const opened = await openAuthority(
+      DEFAULT_WARRANT_PATH,
+      labelsApi(["bug", "docs"]),
+      AT,
+      "triage",
+    );
+
+    expect(opened.authority.implicit).toBe(true);
+    expect(opened.authority.warrant.labels.map((label) => label.name)).toEqual(["bug", "docs"]);
+  });
+
+  it("fails red when the path a consumer chose is the one that is missing", async () => {
+    // `DEFAULT_WARRANT_PATH` is what tells the two apart, and this proves the
+    // helper passes it rather than treating every absence as the implicit one.
+    await expect(
+      openAuthority(".github/elsewhere.yml", labelsApi([]), AT, "triage"),
+    ).rejects.toThrow(/this run has no authority/);
+  });
+
+  it("names the default path every duty's `action.yml` defaults to", () => {
+    expect(DEFAULT_WARRANT_PATH).toBe(".github/reeve.yml");
+  });
+});
+
 describe("pivot", () => {
   it("is null when the key was never written", () => {
     expect(warrant(MINIMAL).pivot).toBeNull();
@@ -520,6 +653,29 @@ describe("resolvePivot", () => {
 
   it("refuses when there are no languages to pivot among, even absent", () => {
     expect(() => resolvePivot(warrant(MINIMAL), [])).toThrow(/no languages are configured/);
+  });
+});
+
+describe("pivotOrNone", () => {
+  const EN = { code: "en", label: "English", scripts: ["Latn"] };
+  const VI = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
+
+  it("answers exactly what `resolvePivot` answers when there is a list to choose from", () => {
+    expect(pivotOrNone(warrant(`${MINIMAL}pivot: vi\n`), [EN, VI])).toBe(VI);
+  });
+
+  it("reads an empty list as nothing to bridge, rather than as a fault", () => {
+    // A single-language project recalls in its own language and never spends
+    // a request on a translation — that is not a misconfiguration to refuse.
+    expect(pivotOrNone(warrant(MINIMAL), [])).toBeNull();
+  });
+
+  it("still refuses a `pivot:` that names a language outside the list", () => {
+    // The leniency is about the empty list only. A pivot nothing translates
+    // into or out of is still a warrant that cannot mean what it says.
+    expect(() => pivotOrNone(warrant(`${MINIMAL}pivot: zh\n`), [EN, VI])).toThrow(
+      /`pivot: zh` is not one of the configured languages/,
+    );
   });
 });
 

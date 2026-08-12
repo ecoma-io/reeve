@@ -31576,8 +31576,8 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // src/core/warrant.ts
-var import_yaml = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
 
 // src/core/forge.ts
 function createThread(api, at) {
@@ -32003,6 +32003,12 @@ async function resolveAuthority(read2, path, api, at) {
   const built = implicitWarrant(path, repositoryLabels);
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read2 = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority2 = await resolveAuthority(read2, path, api, at);
+  return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
+}
 function resolveLanguages(warrant, rawInput) {
   if (warrant.languages !== null) {
     return {
@@ -32016,6 +32022,12 @@ function resolveLanguages(warrant, rawInput) {
     );
   }
   return { languages: parseLanguages(rawInput), notice: null };
+}
+function dutyLanguages(warrant, denied, rawInput) {
+  if (denied) return [];
+  const resolution = resolveLanguages(warrant, rawInput);
+  if (resolution.notice !== null) notice(resolution.notice);
+  return resolution.languages;
 }
 function load(path, source) {
   let document2;
@@ -32558,6 +32570,77 @@ function narrow(granted, requested) {
     withheld: requested.filter((capability) => !granted.includes(capability))
   };
 }
+function narrowWarned(granted, requested, duty, warrantPath) {
+  const narrowed = narrow(granted, requested);
+  for (const capability of narrowed.withheld) {
+    warning(
+      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
+    );
+  }
+  return narrowed;
+}
+
+// src/core/meter.ts
+var STAGE = {
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging",
+  screen: "Screening",
+  triage: "Triage",
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check"
+};
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
 
 // src/core/provider.ts
 var DEFAULT_TIMEOUT_MS = 12e4;
@@ -32690,6 +32773,37 @@ function createRoutedProvider(endpoints) {
       const completion = await provider.complete(id, messages, options);
       return { ...completion, model, endpoint: alias };
     }
+  };
+}
+function resolveEndpoints(shared2) {
+  const keyed = new Map(shared2.apiKeys.map((entry) => [entry.alias, entry.key]));
+  return [
+    {
+      alias: null,
+      baseUrl: shared2.baseUrl,
+      apiKey: shared2.apiKey,
+      timeoutMs: shared2.requestTimeoutMs
+    },
+    ...shared2.endpoints.map((endpoint2) => ({
+      alias: endpoint2.alias,
+      baseUrl: endpoint2.baseUrl,
+      apiKey: keyed.get(endpoint2.alias) ?? "",
+      timeoutMs: endpoint2.timeoutMs ?? shared2.requestTimeoutMs
+    }))
+  ];
+}
+function assembleClient(shared2, meter, purposes, extraRosters = []) {
+  const weather = createWeather(new Set(shared2.endpoints.map((endpoint2) => endpoint2.alias)), [
+    ...shared2.models,
+    ...extraRosters.flat()
+  ]);
+  const provider = createRoutedProvider(resolveEndpoints(shared2));
+  return {
+    weather,
+    provider,
+    stages: Object.fromEntries(
+      purposes.map((purpose) => [purpose, metered(provider, meter, purpose, shared2.temperature)])
+    )
   };
 }
 function readCompletion(model, status, text2) {
@@ -32870,13 +32984,30 @@ function excerpt(text2) {
 }
 
 // src/core/inputs.ts
-function readShared() {
+function readCore() {
   const apiKey = getInput("api-key");
   if (apiKey.length > 0) setSecret(apiKey);
   const roster = parseModels(getInput("models", { required: true }));
   if (roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+  return {
+    token: getInput("github-token", { required: true }),
+    models: roster.models,
+    modelNames: roster.names,
+    baseUrl: getInput("base-url", { required: true }),
+    apiKey,
+    dryRun: getBooleanInput("dry-run"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
+    temperature: parseTemperature(getInput("temperature"))
+  };
+}
+function readShared() {
   const sweep = getBooleanInput("sweep");
   const configuredNumber = getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -32884,24 +33015,12 @@ function readShared() {
       "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
     );
   }
-  const endpoints = parseEndpoints(getInput("endpoints"));
-  const apiKeys = parseApiKeys(getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
   return {
-    token: getInput("github-token", { required: true }),
+    ...readCore(),
     number: sweep ? null : threadNumber(),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: getBooleanInput("dry-run"),
     sweep,
     since: parseSince(getInput("since")),
-    limit: bounded("limit", getInput("limit")),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
-    temperature: parseTemperature(getInput("temperature"))
+    limit: bounded("limit", getInput("limit"))
   };
 }
 function parseEndpoints(raw) {
@@ -32998,23 +33117,6 @@ function parseTemperature(raw) {
   }
   return value;
 }
-function resolveEndpoints(shared2) {
-  const keyed = new Map(shared2.apiKeys.map((entry) => [entry.alias, entry.key]));
-  return [
-    {
-      alias: null,
-      baseUrl: shared2.baseUrl,
-      apiKey: shared2.apiKey,
-      timeoutMs: shared2.requestTimeoutMs
-    },
-    ...shared2.endpoints.map((endpoint2) => ({
-      alias: endpoint2.alias,
-      baseUrl: endpoint2.baseUrl,
-      apiKey: keyed.get(endpoint2.alias) ?? "",
-      timeoutMs: endpoint2.timeoutMs ?? shared2.requestTimeoutMs
-    }))
-  ];
-}
 function parseSince(raw) {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
@@ -33107,64 +33209,6 @@ function isReeveProposalPr(thread) {
   return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
 }
 
-// src/core/meter.ts
-var STAGE = {
-  detect: "Detection",
-  draft: "Drafting",
-  judge: "Judging",
-  screen: "Screening",
-  triage: "Triage",
-  pivot: "Pivot translation",
-  duplicate: "Duplicate check"
-};
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(model, messages, options);
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
-}
-
 // src/core/summary.ts
 function authSection(failures) {
   if (failures.length === 0) return "";
@@ -33189,6 +33233,17 @@ async function writeSummary(markdown) {
       `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
     );
   }
+}
+function starvedWarning(sweep) {
+  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
+}
+function warnIfStarved(models, weather, sweep) {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
 }
 function table(headers, rows) {
   if (rows.length === 0) return "";
@@ -33265,6 +33320,37 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
+}
+
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+async function sweepThreads(acc, candidates, settings, weather, hooks) {
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (hooks.alreadyDone?.(thread) === true) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    if (hooks.exhausted?.() === true) break;
+    const row = await hooks.processOne(thread);
+    if (row === null) acc.skipped += 1;
+    else acc.results.push(row);
+    hooks.afterEach?.();
+  }
 }
 
 // src/duties/translate/budget.ts
@@ -34199,15 +34285,11 @@ async function detectLanguage(text2, languages, pick) {
   }
   return { language: null, by: "none", candidates };
 }
-function createLanguagePicker(provider, models, weather, temperature) {
+function createLanguagePicker(provider, models, weather) {
   return async (text2, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) => provider.complete(
-        model,
-        question(text2, candidates),
-        temperature === void 0 ? void 0 : { temperature }
-      ),
+      (model) => provider.complete(model, question(text2, candidates)),
       weather
     );
     if (!rotation.success) return null;
@@ -34443,7 +34525,7 @@ function links(prose) {
 
 // src/duties/translate/draft.ts
 async function translate(request2) {
-  const { provider, models, source, from, to, languages, drafts, weather, temperature } = request2;
+  const { provider, models, source, from, to, languages, drafts, weather } = request2;
   const messages = prompt(source, from, to);
   const attempts = [];
   const refused2 = [];
@@ -34454,7 +34536,7 @@ async function translate(request2) {
     if (order.length === 0) break;
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages, temperature),
+      (model) => answer(provider, model, messages),
       weather
     );
     for (const failure of rotation.failures) {
@@ -34482,12 +34564,8 @@ function remaining(models, draft, exhausted2) {
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
 }
-async function answer(provider, model, messages, temperature) {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === void 0 ? void 0 : { temperature }
-  );
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,
@@ -34543,7 +34621,7 @@ function onlyFence(markdown) {
 
 // src/core/judge.ts
 async function judge(request2) {
-  const { provider, judges, candidates, by, ballot: ballot2, weather, temperature } = request2;
+  const { provider, judges, candidates, by, ballot: ballot2, weather } = request2;
   const [leader] = candidates;
   if (leader === void 0 || candidates.length < 2 || judges.length === 0) {
     return { winner: leader ?? null, decidedBy: "score", votes: [], failures: [] };
@@ -34560,7 +34638,7 @@ async function judge(request2) {
       continue;
     }
     const shown2 = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown2, ballot2, weather, temperature);
+    const cast = await fill(provider, order, shown2, ballot2, weather);
     for (const failure of cast.failures) {
       spent.add(failure.model);
       failures.push(failure);
@@ -34576,21 +34654,14 @@ async function judge(request2) {
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
-async function fill(provider, order, shown2, ballot2, weather, temperature) {
+async function fill(provider, order, shown2, ballot2, weather) {
   const failures = [];
   for (const model of order) {
     if (weather?.grounded(model) === true) {
       failures.push(weatherFailure(model));
       continue;
     }
-    const counted = read(
-      await provider.complete(
-        model,
-        ballot2(shown2),
-        temperature === void 0 ? void 0 : { temperature }
-      ),
-      shown2
-    );
+    const counted = read(await provider.complete(model, ballot2(shown2)), shown2);
     if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);
@@ -34646,15 +34717,14 @@ function excerpt2(text2) {
 
 // src/duties/translate/judge.ts
 async function judge2(request2) {
-  const { provider, judges, source, to, attempts, weather, temperature } = request2;
+  const { provider, judges, source, to, attempts, weather } = request2;
   const panel = {
     provider,
     judges,
     candidates: attempts,
     by: (attempt) => attempt.model,
     ballot: (shown2) => ballot(source, to, shown2),
-    ...weather === void 0 ? {} : { weather },
-    ...temperature === void 0 ? {} : { temperature }
+    ...weather === void 0 ? {} : { weather }
   };
   return judge(panel);
 }
@@ -34700,8 +34770,7 @@ async function translateChunk(to, settings, stages, from, source, weather) {
     to,
     languages: settings.languages,
     drafts: settings.drafts,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+    weather
   });
   const model = (id) => shown(settings.modelNames, id);
   for (const failure of drafted.failures) {
@@ -34718,8 +34787,7 @@ async function translateChunk(to, settings, stages, from, source, weather) {
     source,
     to,
     attempts: drafted.attempts,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+    weather
   });
   const seat = (id) => shown(settings.judgeNames, id);
   for (const failure of verdict.failures) {
@@ -35227,7 +35295,7 @@ async function translateText(what, body, thread, settings, stages, weather, mete
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature)
+    createLanguagePicker(stages.detect, settings.models, weather)
   );
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
@@ -35387,7 +35455,6 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
 var DEFAULT_CAPABILITIES = ["edit-body"];
 
 // src/duties/translate/main.ts
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
 function readSettings() {
   const shared2 = readShared();
@@ -35432,12 +35499,6 @@ function skippedResult(number, reason) {
   };
 }
 var RECURSION_GUARD_REASON = "This is Reeve's own proposal pull request \u2014 every duty skips it, translate included.";
-function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
 function describeOutcome(result) {
   if (result.translated.note !== null) return result.translated.note;
   const parts = [];
@@ -35459,35 +35520,44 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
     return;
   }
   const listed = await listOpenThreads(api, context2.repo, settings.since);
-  acc.candidates = listed.length;
-  for (const thread of listed) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (marker.split(thread.body).fingerprint !== null) {
-      acc.skipped += 1;
-      continue;
+  await sweepThreads(acc, listed, settings, weather, {
+    alreadyDone: (thread) => (
+      // The idempotent skip: a body already carrying this duty's marker has
+      // been translated at least once before, whatever the exact language set
+      // was that run — the same "already decided about" reading triage's own
+      // marker-carrying skip gives it, and free for the same reason: nothing
+      // here calls the tracker or a model, only `marker.split` on text the
+      // listing already fetched.
+      //
+      // Recursion guard on the same line: Reeve never translates its own
+      // proposal pull request, and the listing already carries `isPullRequest`
+      // and `body`, so this costs nothing beyond the marker check.
+      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread)
+    ),
+    // The same self-imposed ceiling `translateText` and `translateReplies`
+    // check within one thread, checked here as well so a sweep never starts a
+    // thread it cannot even begin — leaving it for `remaining` is cheaper
+    // than starting it and stopping mid-language. `budget.denied` is what
+    // `run`'s `finally` reads back; nothing here needs its own copy of the
+    // answer, including when the very last candidate is the one that denies
+    // work inside its own per-language or per-reply checkpoint with no
+    // further iteration left to notice — `budget` already has it by then.
+    exhausted: () => budgetExhausted(settings, meter, budget),
+    processOne: async (thread) => {
+      const at = { ...context2.repo, number: thread.number };
+      const result = await processThread(
+        api,
+        at,
+        thread.body,
+        settings,
+        stages,
+        weather,
+        meter,
+        budget
+      );
+      return { number: thread.number, outcome: describeOutcome(result) };
     }
-    if (isReeveProposalPr(thread)) {
-      acc.skipped += 1;
-      continue;
-    }
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-    if (budgetExhausted(settings, meter, budget)) break;
-    const at = { ...context2.repo, number: thread.number };
-    const result = await processThread(
-      api,
-      at,
-      thread.body,
-      settings,
-      stages,
-      weather,
-      meter,
-      budget
-    );
-    acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
-  }
+  });
 }
 async function run() {
   const meter = createMeter();
@@ -35499,40 +35569,33 @@ async function run() {
   let bulk = null;
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)), [
-      ...base.models,
-      ...base.judges.flat()
+    const client = assembleClient(base, meter, ["detect", "draft", "judge"], [
+      base.judges.flat()
     ]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-    const stages = {
-      detect: metered(provider, meter, "detect"),
-      draft: metered(provider, meter, "draft"),
-      judge: metered(provider, meter, "judge")
-    };
-    const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
-    const denied = authority2.warrant.unnamed("translate");
+    const stages = client.stages;
+    const opened = await openAuthority(base.warrant, api, context2.repo, "translate");
+    authority2 = opened.authority;
+    const denied = opened.denied;
     const rawLanguages = getInput("languages");
-    const resolution = denied ? null : resolveLanguages(authority2.warrant, rawLanguages);
-    if (resolution !== null && resolution.notice !== null) notice(resolution.notice);
-    if (resolution !== null && authority2.warrant.languages === null && rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT) {
+    const languages = dutyLanguages(authority2.warrant, denied, rawLanguages);
+    if (!denied && authority2.warrant.languages === null && rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT) {
       notice(
         "languages: running on the default (`en, vi, zh`) \u2014 nobody has set this yet. Write the `languages` input, or `languages:` in the warrant, to choose on purpose."
       );
     }
-    const { permitted, withheld } = narrow(
+    const { permitted } = narrowWarned(
       authority2.warrant.granted("translate", DEFAULT_CAPABILITIES),
-      base.apply
+      base.apply,
+      "translate",
+      // The raw input, not `authority.warrant.path`, which is what the other
+      // four duties quote. Kept exactly as it was; see `narrowWarned`.
+      base.warrant
     );
-    for (const capability of withheld) {
-      warning(
-        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. The narrower of the two wins.`
-      );
-    }
     settings = {
       ...base,
-      languages: resolution === null ? [] : resolution.languages,
+      languages,
       permitted
     };
     if (settings.sweep) {
@@ -35556,12 +35619,7 @@ async function run() {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null && authority2 !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        warning(
-          "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
       const budgetSpent = budget.denied;
       if (budgetSpent) {
         warning(
@@ -35570,13 +35628,12 @@ async function run() {
       }
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved, budgetSpent);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent(), budgetSpent) + authSection(weather.authFailures)
-        );
+        await writeRunSummary(sweepPage(settings, bulk, meter.spent(), budgetSpent), weather);
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
-        await writeSummary(
-          page(settings, authority2, single.number, single.result, meter.spent()) + authSection(weather.authFailures)
+        await writeRunSummary(
+          page(settings, authority2, single.number, single.result, meter.spent()),
+          weather
         );
       }
     }
@@ -35589,8 +35646,7 @@ function report(translated, replies, rosterStarved, budgetSpent) {
   setOutput("replies-translated", String(replies));
   setOutput("starved", String(rosterStarved));
   setOutput("budget-exhausted", String(budgetSpent));
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
+  reportNoSweep();
 }
 function reportSweep(bulk, rosterStarved, budgetSpent) {
   setOutput("processed", String(bulk.results.length));

@@ -68,12 +68,10 @@ export interface DraftRequest {
   /** How many independent attempts to draft. */
   readonly drafts: number;
   readonly weather?: Weather;
-  /** Passed to every draft request. Omitted from the request body when not set. */
-  readonly temperature?: number;
 }
 
 export async function draft(request: DraftRequest): Promise<Draft> {
-  const { provider, models, drafts, weather, temperature } = request;
+  const { provider, models, drafts, weather } = request;
   const messages = prompt(request);
 
   const attempts: Attempt[] = [];
@@ -92,7 +90,7 @@ export async function draft(request: DraftRequest): Promise<Draft> {
 
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages, temperature),
+      (model) => answer(provider, model, messages),
       weather,
     );
     for (const failure of rotation.failures) exhausted.add(failure.model);
@@ -137,17 +135,8 @@ function remaining(
   return [...live.slice(start), ...live.slice(0, start)];
 }
 
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: Message[],
-  temperature?: number,
-): Promise<Completion> {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === undefined ? undefined : { temperature },
-  );
+async function answer(provider: Provider, model: string, messages: Message[]): Promise<Completion> {
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,

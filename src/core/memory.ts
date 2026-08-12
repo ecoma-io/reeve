@@ -196,6 +196,24 @@ export interface WeightedQuery {
   readonly against: "own" | { readonly pivot: string };
 }
 
+/**
+ * How many corrections reach the prompt, when the warrant's `memory:` block
+ * never wrote a `recall` of its own.
+ *
+ * Not an input, deliberately. The number that matters is how many are close
+ * enough to be worth showing, and that is what retrieval already decides —
+ * anything scoring nothing is dropped before this cap applies. What is left is
+ * a ceiling on prompt length, and a consumer tuning it would be tuning a proxy
+ * for a cost the summary already shows them directly. `memory: { recall: }`
+ * exists for the one consumer who still wants to, without inventing an input
+ * for it.
+ *
+ * One number, here, for every duty that recalls: two duties disagreeing about
+ * how many examples "the default" means would be a difference no consumer
+ * asked for and no summary explains.
+ */
+export const RECALLED = 4;
+
 export interface Memory {
   /** How many corrections are in the store. `0` is the cold start. */
   readonly size: number;

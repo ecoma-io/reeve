@@ -25,7 +25,7 @@ import {
 import { EXCERPT, type Correction } from "../../core/memory.js";
 import { translateToPivot } from "../../core/pivot.js";
 import { shown, type Weather } from "../../core/provider.js";
-import { resolvePivot, type Authority, type Capability, type Warrant } from "../../core/warrant.js";
+import { pivotOrNone, type Authority, type Capability, type Warrant } from "../../core/warrant.js";
 
 import { taxonomyNames, type Settings } from "./inputs.js";
 import { removedByAutomation } from "./outcome.js";
@@ -184,8 +184,7 @@ async function computePivot(
   stages: Stages,
   weather: Weather,
 ): Promise<{ readonly pivot: Correction["pivot"]; readonly pivotNote: string | null }> {
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
   if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
     return { pivot: null, pivotNote: null };
   }
@@ -199,7 +198,6 @@ async function computePivot(
     body,
     to: pivotLanguage,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of rendered.failures) {
     core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
@@ -335,7 +333,6 @@ export async function recordCorrection(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
-      settings.temperature,
     ),
   );
   // The code, because that is what the store and the pivot comparison below
@@ -462,7 +459,6 @@ export async function recordReversal(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
-      settings.temperature,
     ),
   );
   const code = detection.language?.code ?? null;

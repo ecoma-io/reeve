@@ -71,8 +71,6 @@ export interface TriageRequest {
   readonly recalled: readonly Correction[];
   /** This run's memory of capacity failures — see `core/provider.ts`'s `Weather`. */
   readonly weather?: Weather;
-  /** Passed to every request. Omitted from the request body when not set. */
-  readonly temperature?: number;
 }
 
 export interface Triaged {
@@ -89,13 +87,12 @@ export interface Triaged {
 }
 
 export async function triage(request: TriageRequest): Promise<Triaged> {
-  const { provider, models, weather, temperature } = request;
+  const { provider, models, weather } = request;
   const messages = prompt(request);
 
   const rotation = await rotateModels(
     models,
-    (model) =>
-      provider.complete(model, messages, temperature === undefined ? undefined : { temperature }),
+    (model) => provider.complete(model, messages),
     weather,
   );
   if (!rotation.success) {

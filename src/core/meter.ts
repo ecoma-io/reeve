@@ -130,11 +130,26 @@ export function createMeter(): Meter {
  * property of the caller and not of the request: `draft` calls one provider and
  * every call it makes is drafting. Threading it through each call site would
  * put the same constant in three places and let one of them be wrong.
+ *
+ * `temperature` rides along for exactly that reason. It is the run's, read
+ * once from the run's own input, and every request a stage makes is that
+ * run's — so it is applied here rather than carried down through every stage
+ * helper's signature to every `provider.complete` call. A call site that
+ * names its own still wins; none does today.
  */
-export function metered(provider: Provider, meter: Meter, purpose: Purpose): Provider {
+export function metered(
+  provider: Provider,
+  meter: Meter,
+  purpose: Purpose,
+  temperature?: number,
+): Provider {
   return {
     async complete(model: string, messages: readonly Message[], options) {
-      const completion = await provider.complete(model, messages, options);
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === undefined ? options : { temperature, ...options },
+      );
       meter.record(purpose, completion);
       return completion;
     },

@@ -60,8 +60,6 @@ export interface JudgeRequest {
   readonly candidates: readonly Candidate[];
   /** This run's memory of capacity failures — see `core/provider.ts`'s `Weather`. */
   readonly weather?: Weather;
-  /** Passed to every request. Omitted from the request body when not set. */
-  readonly temperature?: number;
 }
 
 export interface Judged {
@@ -88,7 +86,7 @@ export interface Judged {
 const EXCERPT = 1000;
 
 export async function judge(request: JudgeRequest): Promise<Judged> {
-  const { provider, models, weather, candidates, temperature } = request;
+  const { provider, models, weather, candidates } = request;
   // Nothing to ask about is not a failure — it is the ordinary answer for a
   // thread whose corpus (after `corpus-limit`/`corpus-since`) or whose rank
   // (after `candidates`) came back empty, and asking a model to choose among
@@ -100,7 +98,7 @@ export async function judge(request: JudgeRequest): Promise<Judged> {
   const messages = prompt(request);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages, temperature),
+    (model) => answer(provider, model, messages),
     weather,
   );
   if (!rotation.success) {
@@ -132,13 +130,8 @@ async function answer(
   provider: Provider,
   model: string,
   messages: readonly Message[],
-  temperature?: number,
 ): Promise<Completion> {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === undefined ? undefined : { temperature },
-  );
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,

@@ -50,34 +50,38 @@
  * own control flow: settings, the guards in points 2 and 3 above (including
  * `walkReplies`, the reply-walk guard's own read), and the two functions that
  * turn one run's `Outcome` into `core.setOutput` calls and a summary page.
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), recalling corrections including the cross-language bridge
+ * (`recallCorrections`, and `RECALLED`), and writing the page with the
+ * endpoints that refused a key (`writeRunSummary`). Each of those was a
+ * near-copy in four or five duties; each is now one tested module, called
+ * from here.
+ *
+ * Two things it still does for itself, on purpose: its capacity warning is
+ * different prose from the sweeping duties' (this duty answers one thread,
+ * so there is no `remaining` to point at), and it withholds the
+ * cross-language bridge for a thread already written in the pivot language —
+ * which is why `recallCorrections` takes a bridge that may be `null` rather
+ * than deciding that for its callers.
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { createEffects, listReplies, readStanding, type Location } from "../../core/forge.js";
-import {
-  bounded,
-  checkApiKeysDeclared,
-  fraction,
-  parseApiKeys,
-  parseEndpoints,
-  parseTemperature,
-  parseTimeout,
-  resolveEndpoints,
-  threadNumber,
-  whole,
-  type ApiKeySpec,
-  type EndpointSpec,
-} from "../../core/inputs.js";
+import { bounded, fraction, readCore, threadNumber, whole, type Core } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
-import { createMeter, metered } from "../../core/meter.js";
-import { parseApply, narrow } from "../../core/enforce.js";
-import { translateToPivot } from "../../core/pivot.js";
+import { RECALLED } from "../../core/memory.js";
+import { createMeter } from "../../core/meter.js";
+import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   parseModels,
   parseSeats,
@@ -89,14 +93,14 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { assemble } from "../../core/publish.js";
+import { recallCorrections } from "../../core/recall.js";
 import { sift } from "../../core/spam.js";
-import { authSection, writeSummary } from "../../core/summary.js";
+import { writeRunSummary } from "../../core/summary.js";
 import {
-  readWarrant,
+  dutyLanguages,
+  openAuthority,
+  pivotOrNone,
   resolveAbout,
-  resolveAuthority,
-  resolveLanguages,
-  resolvePivot,
   type Authority,
   type Capability,
   type Label,
@@ -116,22 +120,10 @@ import {
 import { summarize, type Run } from "./summary.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
-/** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
-
-/** How many recalled corrections `draft.ts` is handed. Same figure triage uses. */
-const RECALLED = 4;
-
-interface Settings {
-  readonly token: string;
+interface Settings extends Core {
   readonly number: number;
-  readonly models: readonly string[];
-  readonly modelNames: Names;
   /** The languages this run reads. Resolved from the warrant or the input — see `resolveLanguages`. */
   readonly languages: readonly Language[];
-  readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly dryRun: boolean;
   readonly warrant: string;
   /** What this run may do, from the `apply` input alone — narrowed against the warrant per run. */
   readonly apply: readonly Capability[];
@@ -149,21 +141,17 @@ interface Settings {
   readonly screenNames: Names;
   /** What this repository is about, in the maintainer's own words — the same input triage reads. */
   readonly about: string;
-  readonly endpoints: readonly EndpointSpec[];
-  readonly apiKeys: readonly ApiKeySpec[];
-  readonly requestTimeoutMs: number;
-  readonly temperature: number | undefined;
 }
 
 /**
  * The inputs, parsed and rejected here rather than deeper in.
  *
- * Deliberately not built on `readShared` — that helper always reads `sweep`,
- * `since` and `limit`, which this duty does not have an opinion about at all.
- * `respond` answers one thread, the one that triggered it: an issue's first
- * reply is not something a backfill writes retroactively over a backlog, it
- * is something that happens once, when the thread is new. So this reads
- * exactly the inputs `action.yml` declares, no more.
+ * Built on `readCore` rather than `readShared` — that helper also reads
+ * `sweep`, `since` and `limit`, which this duty does not have an opinion
+ * about at all. `respond` answers one thread, the one that triggered it: an
+ * issue's first reply is not something a backfill writes retroactively over a
+ * backlog, it is something that happens once, when the thread is new. So this
+ * reads exactly the inputs `action.yml` declares, no more.
  *
  * `languages` is missing from what this returns, the same way it is missing
  * from translate's `readSettings`: it needs the warrant, and reading the
@@ -171,35 +159,15 @@ interface Settings {
  * object once `resolveAuthority` has answered.
  */
 function readSettings(): Omit<Settings, "languages"> {
-  const apiKey = core.getInput("api-key");
-  // Registered before anything can log it — see `core/inputs.ts`'s identical
-  // line for why a reason quoted back from a provider is the risk.
-  if (apiKey.length > 0) core.setSecret(apiKey);
-
-  const roster = parseModels(core.getInput("models", { required: true }));
-  if (roster.models.length === 0) {
-    throw new Error("models: no entries. Expected at least one model id.");
-  }
-
+  // First, so that `api-key` is registered as a secret before anything this
+  // duty adds on top of it can fail and get quoted into a log.
+  const base = readCore();
   const panel = parseSeats(core.getInput("judge-models"));
   const cheap = parseModels(core.getInput("screen-models"));
 
-  // The same `endpoints`/`api-keys` parsing and cross-check `readShared` does
-  // for every other duty, called directly rather than gained through it —
-  // this function's own doc comment already explains why `respond` builds its
-  // settings by hand instead of going through `readShared`.
-  const endpoints = parseEndpoints(core.getInput("endpoints"));
-  const apiKeys = parseApiKeys(core.getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
-
   return {
-    token: core.getInput("github-token", { required: true }),
+    ...base,
     number: threadNumber(),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: core.getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: core.getBooleanInput("dry-run"),
     warrant: core.getInput("warrant", { required: true }),
     apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
@@ -212,10 +180,6 @@ function readSettings(): Omit<Settings, "languages"> {
     screenModels: cheap.models,
     screenNames: cheap.names,
     about: core.getInput("about"),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", core.getInput("request-timeout")),
-    temperature: parseTemperature(core.getInput("temperature")),
   };
 }
 
@@ -324,16 +288,12 @@ async function decide(
   stages: Stages,
   weather: Weather,
 ): Promise<Outcome> {
-  const { permitted, withheld } = narrow(
+  const { permitted, withheld } = narrowWarned(
     warrant.granted("respond", DEFAULT_CAPABILITIES),
     settings.apply,
+    "respond",
+    warrant.path,
   );
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to respond. ` +
-        "The narrower of the two wins.",
-    );
-  }
 
   /**
    * Every one of this duty's thirteen `Outcome`-shaped returns goes through
@@ -403,7 +363,6 @@ async function decide(
     body,
     about: settings.about,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -422,7 +381,7 @@ async function decide(
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
+    createLanguagePicker(stages.detect, settings.models, weather),
   );
   const language = detection.language;
   core.info(
@@ -433,70 +392,36 @@ async function decide(
 
   const record = responseFingerprint(standing.title, body, language?.code ?? null);
 
-  // `recall: 0` (or a negative override) is a promise as much as a setting:
-  // the store is not touched at all, not merely searched-and-returns-nothing
-  // — the same contract triage's own recall gate honors.
-  const recallCount = warrant.memory?.recall ?? RECALLED;
-  let recalled: readonly Correction[] = [];
+  // The same pivot bridge triage uses: the first configured language is this
+  // project's pivot, and a store with corrections in other languages is worth
+  // bridging into it before recalling — see `core/pivot.ts`. A thread already
+  // written in the pivot language has nothing to gain from being translated
+  // into itself, so respond withholds the bridge in that case rather than
+  // paying to translate a thread into the language it is already in.
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
+  const memory = await recallCorrections({
+    count: warrant.memory?.recall ?? RECALLED,
+    path: settings.corrections,
+    title: standing.title,
+    body,
+    language,
+    bridge:
+      pivotLanguage === null || language === null || language.code === pivotLanguage.code
+        ? null
+        : {
+            provider: stages.pivot,
+            rosters: settings,
+            title: standing.title,
+            body,
+            to: pivotLanguage,
+            weather,
+          },
+  });
+  const recalled = memory.corrections;
 
-  if (recallCount > 0) {
-    const store = await readStore(settings.corrections);
-    for (const line of store.unreadable) core.warning(`corrections: ${line}`);
-    const memory = createMemory(store.corrections);
-
-    const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
-    // The same pivot bridge triage uses: the first configured language is this
-    // project's pivot, and a store with corrections in other languages is worth
-    // bridging into it before recalling — see `core/pivot.ts`. A thread already
-    // written in the pivot language has nothing to gain from being translated
-    // into itself, so that case spends no provider call here either.
-    const pivotLanguage =
-      settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-    const worthBridging =
-      language !== null &&
-      pivotLanguage !== null &&
-      language.code !== pivotLanguage.code &&
-      store.corrections.some((correction) => correction.language !== language.code);
-    if (worthBridging) {
-      // The cheap roster, same as triage's own bridge — a mechanical
-      // translation for recall does not need the roster a first reply is
-      // drafted with, and falls back to it only when `screen-models` was
-      // never configured.
-      const pivotModels =
-        settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-      const pivotNames =
-        settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-      const pivot = await translateToPivot({
-        provider: stages.pivot,
-        models: pivotModels,
-        title: standing.title,
-        body,
-        to: pivotLanguage,
-        weather,
-        ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-      });
-      for (const failure of pivot.failures) {
-        core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
-      }
-      if (pivot.draft !== null) {
-        queries.push({
-          text: `${pivot.draft.title}\n${pivot.draft.body}`,
-          against: { pivot: pivotLanguage.code },
-        });
-      } else {
-        core.info(
-          "Cross-language recall could not translate this thread into the pivot language this run " +
-            "— recall used the thread's own language only.",
-        );
-      }
-    }
-    recalled = memory.recallAcrossQueries(queries, recallCount);
+  if (memory.read) {
     core.info(
       `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`,
-    );
-  } else {
-    core.info(
-      "Recall is disabled (`memory.recall` is 0 or lower) — the corrections store was not read.",
     );
   }
 
@@ -517,7 +442,6 @@ async function decide(
     guidance,
     drafts: settings.drafts,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   const modelName = (id: string) => shown(settings.modelNames, id);
@@ -541,7 +465,6 @@ async function decide(
     body,
     attempts: drafted.attempts,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   const judgeName = (id: string) => shown(settings.judgeNames, id);
   for (const failure of verdict.failures)
@@ -649,42 +572,35 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
-      ...base.models,
-      ...base.screenModels,
-      ...base.judges.flat(),
-    ]);
+    const client = assembleClient(
+      base,
+      meter,
+      ["screen", "detect", "draft", "judge", "pivot"] as const,
+      [base.screenModels, base.judges.flat()],
+    );
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
+    const stages: Stages = client.stages;
 
-    const stages: Stages = {
-      screen: metered(provider, meter, "screen"),
-      detect: metered(provider, meter, "detect"),
-      draft: metered(provider, meter, "draft"),
-      judge: metered(provider, meter, "judge"),
-      pivot: metered(provider, meter, "pivot"),
-    };
-
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    const opened = await openAuthority(base.warrant, api, context.repo, "respond");
+    authority = opened.authority;
 
     // A duty the warrant does not name spends nothing deciding what to say,
     // including the request `resolveLanguages` might otherwise need to make
     // sense of a `languages` input a repository that never intended to grant
-    // this duty anything may never have configured at all.
-    const denied = authority.warrant.unnamed("respond");
+    // this duty anything may never have configured at all — which is exactly
+    // what `dutyLanguages` returns `[]` for rather than resolving.
+    const denied = opened.denied;
+    const languages = dutyLanguages(authority.warrant, denied, core.getInput("languages"));
     if (denied) {
       ungranted = notGranted(authority.warrant);
-      settings = { ...base, languages: [] };
+      settings = { ...base, languages };
     } else {
-      const resolution = resolveLanguages(authority.warrant, core.getInput("languages"));
-      if (resolution.notice !== null) core.notice(resolution.notice);
-
       // Same warrant-wins, input-falls-back pattern as `languages` above.
       const about = resolveAbout(authority.warrant, base.about);
       if (about.notice !== null) core.notice(about.notice);
 
-      settings = { ...base, languages: resolution.languages, about: about.about };
+      settings = { ...base, languages, about: about.about };
 
       const at: Location = { ...context.repo, number: settings.number };
       outcome = await decide(api, at, authority.warrant, settings, stages, weather);
@@ -708,10 +624,7 @@ export async function run(): Promise<void> {
       }
 
       report(outcome, rosterStarved);
-      await writeSummary(
-        page(settings, authority, outcome, ungranted, meter.spent()) +
-          authSection(weather.authFailures),
-      );
+      await writeRunSummary(page(settings, authority, outcome, ungranted, meter.spent()), weather);
     }
   }
 }

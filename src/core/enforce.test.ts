@@ -1,15 +1,26 @@
-import { describe, expect, it } from "vitest";
+import * as core from "@actions/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { enforceLabels, narrow, owners, parseApply } from "./enforce.js";
+import { enforceLabels, narrow, narrowWarned, owners, parseApply } from "./enforce.js";
 import { parseWarrant, type Warrant } from "./warrant.js";
 
 // Nothing is mocked, and nothing here can be: every function in this module is
 // a decision about a parsed file and a list of strings. That is the point of
 // the stage — it is the one place a verdict stops being a suggestion, so it is
 // the one place that must be decidable without a network.
+//
+// `core.warning` is the exception, and only because it is not a decision: it
+// is an effect on the runner, and `narrowWarned` exists precisely to own it.
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  warning: vi.fn(),
+}));
+
+/** The path a warrant is quoted by, everywhere a message names one. */
+const PATH = ".github/reeve.yml";
 
 const WARRANT = parseWarrant(
-  ".github/reeve.yml",
+  PATH,
   `
 version: 1
 labels:
@@ -100,6 +111,45 @@ describe("narrow", () => {
       "label",
       "close",
     ]);
+  });
+});
+
+describe("narrowWarned", () => {
+  beforeEach(() => {
+    vi.mocked(core.warning).mockClear();
+  });
+
+  it("narrows exactly as `narrow` does", () => {
+    expect(narrowWarned(["label", "comment"], ["label", "close"], "triage", PATH)).toEqual(
+      narrow(["label", "comment"], ["label", "close"]),
+    );
+  });
+
+  it("says once per withheld capability, naming the duty and the file quoted at it", () => {
+    narrowWarned(["label"], ["label", "comment", "close"], "triage", PATH);
+
+    expect(vi.mocked(core.warning).mock.calls.map(([message]) => message)).toEqual([
+      "`apply` asks for `comment`, which `.github/reeve.yml` does not grant to triage. " +
+        "The narrower of the two wins.",
+      "`apply` asks for `close`, which `.github/reeve.yml` does not grant to triage. " +
+        "The narrower of the two wins.",
+    ]);
+  });
+
+  it("quotes whatever path it was handed, not one it went looking for", () => {
+    // Translate names the raw `warrant` input where the other four name
+    // `warrant.path`, and this parameter is what lets both keep their bytes.
+    narrowWarned([], ["comment"], "translate", "./.github/reeve.yml");
+
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(
+      expect.stringContaining("`./.github/reeve.yml` does not grant to translate"),
+    );
+  });
+
+  it("stays silent when the file grants everything the workflow asked for", () => {
+    narrowWarned(["label", "comment"], ["label"], "triage", PATH);
+
+    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
   });
 });
 

@@ -14,13 +14,11 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { writeSummary } from "../core/summary.js";
+import { DEFAULT_WARRANT_PATH } from "../core/warrant.js";
 import { normalise } from "../refusal.js";
 
 import { diagnose, problems } from "./diagnose.js";
 import { summarize } from "./summary.js";
-
-/** Mirrors every duty's own copy of this constant — see `readWarrant`'s doc comment for why it is not shared. */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 export async function runDoctor(): Promise<void> {
   try {

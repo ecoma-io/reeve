@@ -66,13 +66,31 @@
  * `summary.ts` (the page `outputs.ts` renders onto), and `verdict.ts` (the
  * one stage that talks to a model, and the only one whose answer is treated
  * as a suggestion).
+ *
+ * **What this file no longer does, because `core/` does it for every duty
+ * that needs it.** Reading the shared inputs (`readCore`), assembling the
+ * provider client with its rotation, temperature and metering
+ * (`assembleClient`), opening the authority — warrant file or the implicit
+ * one — and warning about withheld capabilities (`openAuthority`,
+ * `narrowWarned`), walking the backlog (`sweepThreads`), recalling
+ * corrections including the cross-language bridge (`recallCorrections`, and
+ * `RECALLED` — the default every recalling duty now shares), and ending the
+ * run (`warnIfStarved`, `writeRunSummary`). Each of those was a near-copy in
+ * four or five duties; each is now one tested module, called from here.
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { readAtlas, type AtlasApi } from "../../core/atlas.js";
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import { enforceLabels, narrow, owners, parseApply, type Refusal } from "../../core/enforce.js";
+import {
+  enforceLabels,
+  narrow,
+  narrowWarned,
+  owners,
+  parseApply,
+  type Refusal,
+} from "../../core/enforce.js";
 import {
   createEffects,
   createRepositoryLabel,
@@ -86,31 +104,35 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import { bounded, counted, fraction, readShared, resolveEndpoints } from "../../core/inputs.js";
+import { bounded, counted, fraction, readShared } from "../../core/inputs.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
-import { createMeter, metered } from "../../core/meter.js";
-import { translateToPivot } from "../../core/pivot.js";
+import { RECALLED } from "../../core/memory.js";
+import { createMeter } from "../../core/meter.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   parseModels,
   settleAuth,
   shown,
-  starved,
   type Provider,
   type Weather,
 } from "../../core/provider.js";
+import { recallCorrections } from "../../core/recall.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
-import { authSection, writeSummary } from "../../core/summary.js";
+import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import {
+  newAccumulator as newCoreAccumulator,
+  standingFromListing,
+  sweepThreads,
+  type SweepAccumulator as Accumulator,
+} from "../../core/sweep.js";
 import {
   checkLabelsExist,
-  readWarrant,
+  dutyLanguages,
+  openAuthority,
+  pivotOrNone,
   resolveAbout,
-  resolveAuthority,
-  resolveLanguages,
-  resolvePivot,
   type Authority,
   type Capability,
   type Label,
@@ -150,32 +172,6 @@ import {
 } from "./propose.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-
-/**
- * `warrant`'s own default in `action.yml`, repeated here rather than read back
- * out of it.
- *
- * `readWarrant` has to be told which path is the default so it can tell a
- * consumer's silence from a consumer's choice — see `ReadOptions` — and this
- * is the one value in that comparison this file is actually responsible for.
- * A workflow that renamed `.github/reeve.yml` to somewhere else set `warrant`
- * to say so, which is exactly the case this constant is not meant to catch.
- */
-const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
-
-/**
- * How many corrections reach the prompt, when the warrant's `memory:` block
- * never wrote a `recall` of its own.
- *
- * Not an input, deliberately. The number that matters is how many are close
- * enough to be worth showing, and that is what retrieval already decides —
- * anything scoring nothing is dropped before this cap applies. What is left is
- * a ceiling on prompt length, and a consumer tuning it would be tuning a proxy
- * for a cost the summary already shows them directly. `memory: { recall: }`
- * exists for the one consumer who still wants to, without inventing an input
- * for it.
- */
-const RECALLED = 4;
 
 /**
  * One provider per stage, each counting its own requests.
@@ -238,12 +234,7 @@ export interface Outcome {
  * only on success cannot do that — an object mutated as the loop goes can,
  * because the caller already holds the same reference.
  */
-export interface SweepAccumulator {
-  readonly results: SweptThread[];
-  skipped: number;
-  starvedRun: boolean;
-  candidates: number;
-  ungranted: string | null;
+export interface SweepAccumulator extends Accumulator<SweptThread> {
   /**
    * Whether `record` was granted and permitted for this sweep — decided once,
    * before the loop, and read back by `reportSweep` after it. `false` is the
@@ -254,14 +245,7 @@ export interface SweepAccumulator {
 }
 
 function newAccumulator(): SweepAccumulator {
-  return {
-    results: [],
-    skipped: 0,
-    starvedRun: false,
-    candidates: 0,
-    ungranted: null,
-    recording: false,
-  };
+  return { ...newCoreAccumulator<SweptThread>(), recording: false };
 }
 
 /**
@@ -327,7 +311,6 @@ async function runSweep(
   // judgement about an issue, and the listing endpoint returns pull requests
   // too, distinguishable only by this field.
   const candidates = listed.filter((thread) => !thread.isPullRequest);
-  acc.candidates = candidates.length;
 
   // `settings.taxonomy`'s own names, not the warrant's whole one: a sweep
   // scoped to one area's `labels` subset only recognises its own area's
@@ -335,74 +318,44 @@ async function runSweep(
   // is not this sweep's business to skip or to import.
   const names = taxonomyNames(settings);
 
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+  await sweepThreads(acc, candidates, settings, weather, {
+    // The idempotent skip: free, and counted separately from `processed` so a
+    // rerun over a mostly-triaged backlog reports honestly rather than looking
+    // like it did nothing. Bulk migration's own is the mirror image of it — a
+    // thread the taxonomy never touched has no maintainer decision on it to
+    // import, which is the only thing that sweep is for.
+    alreadyDone: (thread) => {
+      const decided = thread.labels.some((name) => names.has(name));
+      return recording ? !decided : decided;
+    },
+    processOne: async (thread) => {
+      const at = { ...context.repo, number: thread.number };
+      const standing = standingFromListing(thread);
 
-    if (recording) {
-      // Bulk migration's own idempotent skip: a thread the taxonomy never
-      // touched has no maintainer decision on it to import — nothing this
-      // sweep is for.
-      const decidable = thread.labels.some((name) => names.has(name));
-      if (!decidable) {
-        acc.skipped += 1;
-        continue;
+      if (recording) {
+        const outcome = await recordCorrection(
+          api,
+          at,
+          standing,
+          authority,
+          settings,
+          stages,
+          weather,
+          "sweep",
+          // A sweep imports whatever labels stand on a thread; there is no
+          // single labelling event to read a before/after delta from, the
+          // same reason `by === "sweep"` skips the S1 enrichment entirely.
+          null,
+        );
+        // The self-training guard's own skip — machine-applied labels, or a
+        // label history too long for this run to attribute — counted the same
+        // way the idempotent skip above is, not added to the results table:
+        // there is nothing this thread contributed to the store to show a row
+        // for.
+        if (outcome.machineOnly || outcome.unattributable) return null;
+        return { number: thread.number, outcome: describeRecordOutcome(outcome) };
       }
-    } else if (thread.labels.some((name) => names.has(name))) {
-      // The idempotent skip: free, and counted separately from `processed` so
-      // a rerun over a mostly-triaged backlog reports honestly rather than
-      // looking like it did nothing.
-      acc.skipped += 1;
-      continue;
-    }
 
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-
-    const at = { ...context.repo, number: thread.number };
-    const standing: Standing = {
-      title: thread.title,
-      body: thread.body,
-      labels: thread.labels,
-      closed: false,
-      // A sweep's listing endpoint does not carry the opener's account type,
-      // and triage has no guard that reads it — this placeholder is never
-      // inspected, only `respond`'s bot-author guard reads `author` at all.
-      author: { login: "", isBot: false },
-      // Nor milestone/assignee state — triage never reads either.
-      milestone: null,
-      assignees: [],
-      createdAt: thread.createdAt,
-      isPullRequest: thread.isPullRequest,
-    };
-
-    if (recording) {
-      const outcome = await recordCorrection(
-        api,
-        at,
-        standing,
-        authority,
-        settings,
-        stages,
-        weather,
-        "sweep",
-        // A sweep imports whatever labels stand on a thread; there is no
-        // single labelling event to read a before/after delta from, the
-        // same reason `by === "sweep"` skips the S1 enrichment entirely.
-        null,
-      );
-      // The self-training guard's own skip — machine-applied labels, or a
-      // label history too long for this run to attribute — counted the same
-      // way the idempotent skip above is, not added to the results table:
-      // there is nothing this thread contributed to the store to show a row
-      // for.
-      if (outcome.machineOnly || outcome.unattributable) {
-        acc.skipped += 1;
-      } else {
-        acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
-      }
-    } else {
       const outcome = await decide(authority, standing, settings, stages, weather);
       const done = settings.dryRun
         ? NOTHING_DONE
@@ -414,9 +367,9 @@ async function runSweep(
             at,
             settings.corrections,
           );
-      acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
-    }
-  }
+      return { number: thread.number, outcome: describeOutcome(outcome, done) };
+    },
+  });
 }
 
 /**
@@ -579,27 +532,15 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
-      ...base.models,
-      ...base.screenModels,
+    const client = assembleClient(base, meter, ["detect", "screen", "triage", "pivot"] as const, [
+      base.screenModels,
     ]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
+    const stages: Stages = client.stages;
 
-    const stages: Stages = {
-      detect: metered(provider, meter, "detect"),
-      screen: metered(provider, meter, "screen"),
-      triage: metered(provider, meter, "triage"),
-      pivot: metered(provider, meter, "pivot"),
-    };
-
-    // The authority first, and before anything is spent. A file that does not
-    // parse is a run with no allowlist, and the fail-safe direction is to stop
-    // — but a file that is simply not there, at the path nobody moved it from,
-    // is not that failure. `resolveAuthority` is what turns that absence into
-    // the implicit warrant rather than an error.
-    const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
-    const authority = await resolveAuthority(read, base.warrant, api, context.repo);
+    // The authority first, and before anything is spent.
+    const { authority, denied } = await openAuthority(base.warrant, api, context.repo, "triage");
 
     // Only now, because whether the warrant or the input answers this is the
     // authority's to decide — and once it does, `languages` is complete and
@@ -608,18 +549,14 @@ export async function run(): Promise<void> {
     // run is promised a green no-op, and red-failing it over a `languages`
     // nobody configured would fail it over configuration it was never going
     // to use.
-    const denied = authority.warrant.unnamed("triage");
-    const resolution = denied
-      ? null
-      : resolveLanguages(authority.warrant, core.getInput("languages"));
-    if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+    const languages = dutyLanguages(authority.warrant, denied, core.getInput("languages"));
 
     // Same warrant-wins, input-falls-back pattern as `languages` above, on the
     // one field the spam screen reads and nothing else does.
     const about = resolveAbout(authority.warrant, base.about);
     if (about.notice !== null) core.notice(about.notice);
 
-    // Guarded the same way `resolution` is: a denied run is promised a green
+    // Guarded the same way `languages` is: a denied run is promised a green
     // no-op, and `labels` is configuration it was never going to use — a typo
     // in it has no business red-failing a run that could never have reached
     // the taxonomy anyway.
@@ -627,7 +564,7 @@ export async function run(): Promise<void> {
 
     settings = {
       ...base,
-      languages: resolution === null ? [] : resolution.languages,
+      languages,
       about: about.about,
       taxonomy,
     };
@@ -795,36 +732,25 @@ export async function run(): Promise<void> {
     // Nothing to report when the settings themselves were the problem: no
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
-      const rosterStarved = starved(settings.models, weather);
-      if (rosterStarved) {
-        core.warning(
-          "Every model in `models` failed on capacity this run. " +
-            (settings.sweep
-              ? "The sweep delivered what it could before the roster ran dry, and " +
-                "stopped early — see `remaining`."
-              : "This run delivered what it could rather than failing red — weather, " +
-                "not a broken configuration."),
-        );
-      }
+      const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) +
-            proposeSection(proposeOutcome) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          sweepPage(settings, bulk, meter.spent()) + proposeSection(proposeOutcome),
+          weather,
         );
       } else if (!settings.sweep && recorded !== null) {
         reportRecordRun(recorded.outcome, rosterStarved);
-        await writeSummary(
-          recordPage(settings, recorded.number, recorded.outcome, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          recordPage(settings, recorded.number, recorded.outcome, meter.spent()),
+          weather,
         );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, settings.dryRun, rosterStarved);
-        await writeSummary(
-          page(settings, single.number, single.outcome, single.done, meter.spent()) +
-            authSection(weather.authFailures),
+        await writeRunSummary(
+          page(settings, single.number, single.outcome, single.done, meter.spent()),
+          weather,
         );
       }
     }
@@ -857,16 +783,12 @@ async function decide(
     );
   }
 
-  const { permitted, withheld } = narrow(
+  const { permitted, withheld } = narrowWarned(
     warrant.granted("triage", DEFAULT_CAPABILITIES),
     settings.apply,
+    "triage",
+    warrant.path,
   );
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to triage. ` +
-        "The narrower of the two wins.",
-    );
-  }
 
   /** A run that stopped early: no verdict, and the guardrails still reported. */
   const stopped = (screened: Outcome["screenedOut"], language: string | null): Outcome => ({
@@ -902,7 +824,6 @@ async function decide(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
-      settings.temperature,
     ),
   );
   const language = detection.language?.label ?? null;
@@ -919,7 +840,6 @@ async function decide(
     body,
     about: settings.about,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -929,92 +849,43 @@ async function decide(
     return stopped(sifted.dropped, language);
   }
 
-  // `recall: 0` (or a negative override) is a promise as much as a setting:
-  // the store is not touched at all, not merely searched-and-returns-nothing.
-  // That distinction matters for a maintainer who points `corrections` at a
-  // path they would rather this run never open.
-  const recallCount = warrant.memory?.recall ?? RECALLED;
   const threadLanguage = detection.language;
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
 
-  let recalled: readonly Correction[] = [];
-  let memorySize = 0;
-  let pivotRecalled = 0;
+  const memory = await recallCorrections({
+    count: warrant.memory?.recall ?? RECALLED,
+    path: settings.corrections,
+    title: standing.title,
+    body,
+    language: threadLanguage,
+    // A bridge is worth having whenever this run has a pivot language at all;
+    // whether it is worth *buying* depends on the store, which `recall.ts`
+    // checks. Triage does not exclude a thread already written in the pivot
+    // language the way respond does — reconciling that is its own change.
+    bridge:
+      pivotLanguage === null
+        ? null
+        : {
+            provider: stages.pivot,
+            rosters: settings,
+            title: standing.title,
+            body,
+            to: pivotLanguage,
+            weather,
+          },
+  });
 
-  if (recallCount > 0) {
-    const store = await readStore(settings.corrections);
-    for (const line of store.unreadable) {
-      // Loud, because this is a committed file that maintainers open by hand:
-      // losing one example is not worth losing the verdict, and losing it
-      // silently is not worth anything.
-      core.warning(`corrections: ${line}`);
-    }
-    const memory = createMemory(store.corrections);
-    memorySize = memory.size;
+  const recalled = memory.corrections;
+  const memorySize = memory.size;
+  const pivotRecalled = memory.crossLanguage;
 
-    const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
-
-    // The pivot bridge is worth a request only when it could change the answer:
-    // the thread's own language has to be known, a pivot language has to be
-    // configured, and the store has to hold at least one correction that is not
-    // already in the thread's own language. A store that shares one language
-    // with the thread has nothing a translated query would reach that the plain
-    // one above does not already reach — so that case, the common one, spends
-    // no provider call here at all.
-    const pivotLanguage =
-      settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-    const worthBridging =
-      threadLanguage !== null &&
-      pivotLanguage !== null &&
-      store.corrections.some((correction) => correction.language !== threadLanguage.code);
-
-    if (worthBridging) {
-      const pivotModels =
-        settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-      const pivotNames =
-        settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-      const pivot = await translateToPivot({
-        provider: stages.pivot,
-        models: pivotModels,
-        title: standing.title,
-        body,
-        to: pivotLanguage,
-        weather,
-        ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-      });
-      for (const failure of pivot.failures) {
-        core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
-      }
-      if (pivot.draft !== null) {
-        queries.push({
-          text: `${pivot.draft.title}\n${pivot.draft.body}`,
-          against: { pivot: pivotLanguage.code },
-        });
-      } else {
-        core.info(
-          "Cross-language recall could not translate this thread into the pivot language this run " +
-            "— recall used the thread's own language only.",
-        );
-      }
-    }
-
-    recalled = memory.recallAcrossQueries(queries, recallCount);
-    pivotRecalled =
-      threadLanguage === null
-        ? 0
-        : recalled.filter(
-            (correction) =>
-              correction.language !== null && correction.language !== threadLanguage.code,
-          ).length;
+  if (memory.read) {
     core.info(
       `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) ` +
         `from \`${settings.corrections}\`` +
         (pivotRecalled > 0
           ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.`
           : "."),
-    );
-  } else {
-    core.info(
-      "Recall is disabled (`memory.recall` is 0 or lower) — the corrections store was not read.",
     );
   }
 
@@ -1027,7 +898,6 @@ async function decide(
     language,
     recalled,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of triaged.failures) {
     core.warning(`triage: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);

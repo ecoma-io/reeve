@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseApiKeys, parseEndpoints } from "./inputs.js";
 import { parseList } from "./list.js";
+import type { Meter } from "./meter.js";
 import {
   AuthenticationFailure,
+  assembleClient,
   createProvider,
   createRoutedProvider,
   createWeather,
   parseModels,
   parseSeats,
   reckon,
+  resolveEndpoints,
   rotateModels,
   settleAuth,
   shown,
@@ -1045,5 +1049,153 @@ describe("settleAuth", () => {
     expect(() => {
       settleAuth(weather);
     }).not.toThrow();
+  });
+});
+
+describe("resolveEndpoints", () => {
+  it("always leads with the default `base-url`/`api-key` pair, aliased null", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: [],
+      apiKeys: [],
+    });
+
+    expect(resolved).toEqual([
+      {
+        alias: null,
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "sk-default",
+        timeoutMs: 120_000,
+      },
+    ]);
+  });
+
+  it("keys every configured endpoint from api-keys by alias", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: parseEndpoints("fast = https://a.example.com/v1"),
+      apiKeys: parseApiKeys("fast = sk-fast"),
+    });
+
+    expect(resolved).toContainEqual({
+      alias: "fast",
+      baseUrl: "https://a.example.com/v1",
+      apiKey: "sk-fast",
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("falls back to an empty key for an endpoint api-keys never named", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: parseEndpoints("open = https://a.example.com/v1"),
+      apiKeys: [],
+    });
+
+    expect(resolved).toContainEqual({
+      alias: "open",
+      baseUrl: "https://a.example.com/v1",
+      apiKey: "",
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("prefers an endpoint's own `timeout=` over `request-timeout`", () => {
+    const resolved = resolveEndpoints({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-default",
+      requestTimeoutMs: 120_000,
+      endpoints: parseEndpoints("fast = https://a.example.com/v1 timeout=5s"),
+      apiKeys: [],
+    });
+
+    expect(resolved.find((endpoint) => endpoint.alias === "fast")?.timeoutMs).toBe(5000);
+  });
+});
+
+describe("assembleClient", () => {
+  const SHARED = {
+    token: "ghs_token",
+    models: ["a", "b@fast"],
+    modelNames: new Map<string, string>(),
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "sk-default",
+    dryRun: false,
+    endpoints: parseEndpoints("fast = https://a.example.com/v1"),
+    apiKeys: parseApiKeys("fast = sk-fast"),
+    requestTimeoutMs: 120_000,
+    temperature: undefined,
+  };
+
+  /** A meter that keeps what it was told, for the cases that are about spend. */
+  function meter(): Meter {
+    return { record: vi.fn(), spent: () => [] };
+  }
+
+  it("wraps one metered provider per purpose asked for, and no others", () => {
+    const { stages } = assembleClient(SHARED, meter(), ["detect", "draft"] as const);
+
+    expect(Object.keys(stages).sort()).toEqual(["detect", "draft"]);
+  });
+
+  it("counts each stage under its own name", async () => {
+    fetchMock.mockResolvedValue(answering("hello"));
+    const spend = meter();
+
+    const { stages } = assembleClient(SHARED, spend, ["detect", "draft"] as const);
+    await stages.draft.complete("a", []);
+
+    expect(vi.mocked(spend.record)).toHaveBeenCalledWith(
+      "draft",
+      expect.objectContaining({ ok: true }),
+    );
+  });
+
+  it("seeds the weather with every endpoint a configured model routes to", () => {
+    // `b@fast` is on the roster, so grounding the `fast` endpoint has to be
+    // something this run's weather can even express.
+    const { weather } = assembleClient(SHARED, meter(), ["detect"] as const);
+    weather.groundEndpoint("fast");
+
+    expect(weather.grounded("b@fast")).toBe(true);
+    expect(weather.grounded("a")).toBe(false);
+  });
+
+  it("seeds the weather with the extra rosters a duty names, not just `models`", () => {
+    // A judge panel left out of the weather is the failure that is silent: its
+    // models are never counted as starved, and the run keeps asking. Only the
+    // extra roster reaches `fast` here, so a weather that ignored it would
+    // have one endpoint in its universe rather than two.
+    const { weather } = assembleClient({ ...SHARED, models: ["a"] }, meter(), ["judge"] as const, [
+      ["c@fast"],
+    ]);
+
+    expect(weather.multiEndpoint).toBe(true);
+  });
+
+  it("applies the run's `temperature` to every request, without a stage carrying it", async () => {
+    fetchMock.mockResolvedValue(answering("hello"));
+
+    const { stages } = assembleClient({ ...SHARED, temperature: 0.2 }, meter(), ["draft"] as const);
+    await stages.draft.complete("a", [{ role: "user", content: "hi" }]);
+
+    expect(lastRequest().body).toMatchObject({ temperature: 0.2 });
+  });
+
+  it("omits `temperature` entirely when the run configured none", async () => {
+    // Not "sends the provider's default": some providers reject the field
+    // outright, so the two cannot share a spelling.
+    fetchMock.mockResolvedValue(answering("hello"));
+
+    const { stages } = assembleClient(SHARED, meter(), ["draft"] as const);
+    await stages.draft.complete("a", []);
+
+    expect(lastRequest().body).not.toHaveProperty("temperature");
   });
 });

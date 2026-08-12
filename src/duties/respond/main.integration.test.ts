@@ -768,26 +768,30 @@ describe("the action contract", () => {
   }
 
   /**
-   * Every input the duty actually reads — its own, and `number`, which it
-   * reaches `core/inputs.ts`'s `threadNumber` for.
+   * Every input the duty actually reads — its own, plus the two functions it
+   * reaches into `core/inputs.ts` for: `readCore`, which reads the inputs
+   * every duty declares, and `threadNumber`.
    *
-   * Only `threadNumber`'s own body is scanned there, not the whole file:
-   * `respond` is deliberately not built on `readShared` (see `readSettings`'s
-   * doc comment in `main.ts`), so `sweep`, `since` and `limit` — which
-   * `readShared` reads and this duty never calls — must not be credited to
-   * it just for living in the same shared file.
+   * Only those two bodies are scanned there, not the whole file: `respond` is
+   * deliberately built on `readCore` and not on `readShared` (see
+   * `readSettings`'s doc comment in `main.ts`), so `sweep`, `since` and
+   * `limit` — which `readShared` reads and this duty never calls — must not
+   * be credited to it just for living in the same shared file.
    */
   async function readInputs(): Promise<string[]> {
     const [own, shared] = await Promise.all([
       readFile(join(ROOT, "src", "duties", "respond", "main.ts"), "utf8"),
       readFile(join(ROOT, "src", "core", "inputs.ts"), "utf8"),
     ]);
+    const readCoreFn = /export function readCore\(\)[^]*?\n}/.exec(shared)?.[0] ?? "";
     const threadNumberFn = /export function threadNumber\(\)[^]*?\n}/.exec(shared)?.[0] ?? "";
     return [
       ...new Set(
-        [...`${own}\n${threadNumberFn}`.matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
-          ([, name]) => name ?? "",
-        ),
+        [
+          ...`${own}\n${readCoreFn}\n${threadNumberFn}`.matchAll(
+            /get(?:Boolean)?Input\("([^"]+)"/g,
+          ),
+        ].map(([, name]) => name ?? ""),
       ),
     ];
   }
