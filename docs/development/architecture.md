@@ -158,7 +158,7 @@ carries.
 
 The one thing it may not do is succeed quietly. A green run that did nothing is
 indistinguishable from a duty that found nothing to do, and
-[D5](../north-star.md#d5--failure-is-loud-it-is-never-plausible) does not allow
+[D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible) does not allow
 the two to look alike.
 
 `src/refusal.ts` and the root entry point go away as duties land — the list of

@@ -358,14 +358,14 @@ describe("createLanguagePicker", () => {
  * request. So the prose is checked against the dataset rather than trusted.
  */
 describe("the documented profile coverage", () => {
-  const PAGE = fileURLToPath(new URL("../../docs/usage/languages.md", import.meta.url));
+  const PAGE = fileURLToPath(new URL("../../docs/guides/languages.md", import.meta.url));
 
   function documented(): string[] {
     const page = readFileSync(PAGE, "utf8");
     const block = /### Which languages the free step knows\n[\s\S]*?```\n([\s\S]*?)```/.exec(page);
     if (!block?.[1]) {
       throw new Error(
-        "docs/usage/languages.md: no fenced language list under the coverage heading.",
+        "docs/guides/languages.md: no fenced language list under the coverage heading.",
       );
     }
     return block[1].split(/\s+/).filter((code) => code.length > 0);

@@ -40,7 +40,7 @@ which is what keeps Reeve out of a premature `1.0`.
 ## What `0.x` and `1.0` mean here
 
 Not a feeling about maturity. The two numbers are read off
-[the roadmap](../north-star.md#7-roadmap), and that is the whole rule:
+[the roadmap](../doctrine/north-star.md#7-roadmap), and that is the whole rule:
 
 - **`0.x` — every release while a stage is still open.** Usable, dogfooded on
   this repository, and free to break its own input surface between minors. An
@@ -90,7 +90,7 @@ one is _consumers already running code whose provenance never arrived_.
 
 **Everything lives in one workflow, and that is forced rather than preferred.**
 release-please tags with `GITHUB_TOKEN`, and GitHub does not start a workflow from
-an event that token caused ([platform limits §1](platform-limits.md#1-a-github_token-write-does-not-trigger-a-workflow)).
+an event that token caused ([platform limits §1](../reference/platform-limits.md#1-a-github_token-write-does-not-trigger-a-workflow)).
 A separate `on: push: tags:` workflow would never run. So everything downstream is
 gated on the action's own `release_created` output instead.
 
@@ -144,7 +144,7 @@ the listing on its own.
 
 **Only the root `action.yml` gets a listing.** Duties live in subdirectories, and
 GitHub's Marketplace reads the repository root
-([platform limits §10](platform-limits.md#10-an-action-can-live-in-a-subdirectory-the-marketplace-only-sees-the-root)).
+([platform limits §10](../reference/platform-limits.md#10-an-action-can-live-in-a-subdirectory-the-marketplace-only-sees-the-root)).
 Consumers get one version line and one core; the cost is that individual duties
 are not separately listed. That trade was made deliberately.
 
@@ -172,7 +172,7 @@ adding both is a step in [the duty checklist](duties.md).
    from commit subjects — a subject nobody could read in a changelog is a subject
    to fix before merging, not after.
 4. If a duty changed, put its evaluation numbers in the release notes
-   ([D11](../north-star.md#d11--every-duty-ships-with-an-evaluation)).
+   ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)).
 5. Merge. The rest runs on its own.
 6. Verify: the release exists, `reeve-action.tar.gz` and
    `reeve-action.intoto.jsonl` are attached, and the floating tag moved.
@@ -189,7 +189,7 @@ Judged from the consumer's workflow file, not from the source:
 - Changing an input's default.
 - Changing what a duty does by default — a capability that becomes on, or a
   guardrail that becomes looser.
-- Breaking one of [the invariants](security.md#invariants), which is a breaking
+- Breaking one of [the invariants](../security/security.md#invariants), which is a breaking
   change regardless of what any `action.yml` says.
 - Raising the Node major in `runs.using`.
 

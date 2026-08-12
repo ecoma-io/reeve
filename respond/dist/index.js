@@ -32593,6 +32593,7 @@ function createProvider(config) {
           model,
           usage: null,
           kind: "capacity",
+          ...isTimeout(error2) ? {} : { transport: true },
           reason: describeRequestError(error2, timeoutMs)
         };
       }
@@ -32609,6 +32610,46 @@ function createProvider(config) {
         };
       }
       return readCompletion(model, response.status, text2);
+    }
+  };
+}
+function splitEndpointAlias(model, aliases) {
+  const at = model.lastIndexOf("@");
+  if (at === -1) return { id: model, alias: null };
+  const alias = model.slice(at + 1);
+  if (!aliases.has(alias)) return { id: model, alias: null };
+  return { id: model.slice(0, at), alias };
+}
+function createRoutedProvider(endpoints) {
+  const aliases = new Set(
+    endpoints.flatMap((endpoint2) => endpoint2.alias === null ? [] : [endpoint2.alias])
+  );
+  const byAlias = new Map(
+    endpoints.map((endpoint2) => [
+      endpoint2.alias,
+      createProvider({
+        baseUrl: endpoint2.baseUrl,
+        apiKey: endpoint2.apiKey,
+        timeoutMs: endpoint2.timeoutMs
+      })
+    ])
+  );
+  return {
+    async complete(model, messages, options) {
+      const { id, alias } = splitEndpointAlias(model, aliases);
+      const provider = byAlias.get(alias);
+      if (provider === void 0) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "protocol",
+          endpoint: alias,
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+        };
+      }
+      const completion = await provider.complete(id, messages, options);
+      return { ...completion, model, endpoint: alias };
     }
   };
 }
@@ -32683,18 +32724,36 @@ var AuthenticationFailure = class extends Error {
     this.failure = failure;
   }
 };
-function createWeather() {
+function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
   const order = [];
   const dead = /* @__PURE__ */ new Set();
+  const deadEndpoints = /* @__PURE__ */ new Set();
+  const universe = models === void 0 || models.length === 0 ? /* @__PURE__ */ new Set([null, ...aliases]) : new Set(models.map((model) => splitEndpointAlias(model, aliases).alias));
+  const authFailed = /* @__PURE__ */ new Map();
   return {
-    grounded: (model) => dead.has(model),
+    grounded: (model) => {
+      const { alias } = splitEndpointAlias(model, aliases);
+      return dead.has(model) || deadEndpoints.has(alias);
+    },
     ground: (model) => {
       if (dead.has(model)) return;
       dead.add(model);
       order.push(model);
     },
+    groundEndpoint: (alias) => deadEndpoints.add(alias),
     get starved() {
       return order;
+    },
+    multiEndpoint: aliases.size > 0,
+    failAuth: (alias, failure) => {
+      deadEndpoints.add(alias);
+      if (!authFailed.has(alias)) authFailed.set(alias, failure);
+    },
+    get authExhausted() {
+      return [...universe].every((alias) => authFailed.has(alias));
+    },
+    get authFailures() {
+      return [...authFailed.values()];
     }
   };
 }
@@ -32711,8 +32770,22 @@ function weatherFailure(model) {
   };
 }
 function reckon(failure, weather) {
-  if (failure.kind === "auth") throw new AuthenticationFailure(failure);
-  if (failure.kind === "capacity") weather?.ground(failure.model);
+  if (failure.kind === "auth") {
+    if (weather?.multiEndpoint === true) {
+      weather.failAuth(failure.endpoint ?? null, failure);
+      return;
+    }
+    throw new AuthenticationFailure(failure);
+  }
+  if (failure.kind === "capacity") {
+    if (failure.transport === true) weather?.groundEndpoint(failure.endpoint ?? null);
+    else weather?.ground(failure.model);
+  }
+}
+function settleAuth(weather) {
+  if (!weather.multiEndpoint || !weather.authExhausted) return;
+  const [first] = weather.authFailures;
+  if (first !== void 0) throw new AuthenticationFailure(first);
 }
 async function rotateModels(models, attempt, weather) {
   const failures = [];
@@ -32728,8 +32801,11 @@ async function rotateModels(models, attempt, weather) {
   }
   return { success: null, failures };
 }
+function isTimeout(error2) {
+  return error2 instanceof Error && error2.name === "TimeoutError";
+}
 function describeRequestError(error2, timeoutMs) {
-  if (error2 instanceof Error && error2.name === "TimeoutError") {
+  if (isTimeout(error2)) {
     return `request timed out after ${String(timeoutMs)}ms`;
   }
   return `request failed \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`;
@@ -32773,11 +32849,15 @@ async function detectLanguage(text2, languages, pick) {
   }
   return { language: null, by: "none", candidates };
 }
-function createLanguagePicker(provider, models, weather) {
+function createLanguagePicker(provider, models, weather, temperature) {
   return async (text2, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) => provider.complete(model, question(text2, candidates)),
+      (model) => provider.complete(
+        model,
+        question(text2, candidates),
+        temperature === void 0 ? void 0 : { temperature }
+      ),
       weather
     );
     if (!rotation.success) return null;
@@ -32931,6 +33011,117 @@ function createEffects(api, at) {
 }
 
 // src/core/inputs.ts
+function parseEndpoints(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return parseList(raw).map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) {
+      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
+    }
+    const alias = entry.slice(0, at).trim();
+    const rest = entry.slice(at + 1).trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
+      throw new Error(
+        `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
+      );
+    }
+    if (alias === "default") {
+      throw new Error(
+        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
+      );
+    }
+    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
+    if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
+    let timeoutMs = null;
+    for (const token of rest2) {
+      const match = /^timeout=(.+)$/.exec(token);
+      if (!match) {
+        throw new Error(
+          `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
+        );
+      }
+      const [, duration = ""] = match;
+      if (timeoutMs !== null) {
+        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
+      }
+      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
+    }
+    return { alias, baseUrl: url, timeoutMs };
+  });
+}
+function parseApiKeys(raw) {
+  const entries = parseList(raw);
+  for (const entry of entries) {
+    const at = entry.indexOf("=");
+    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
+    if (value.length > 0) setSecret(value);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return entries.map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
+    const alias = entry.slice(0, at).trim();
+    const key = entry.slice(at + 1).trim();
+    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
+    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    return { alias, key };
+  });
+}
+function checkApiKeysDeclared(endpoints, apiKeys) {
+  for (const { alias } of apiKeys) {
+    if (!endpoints.some((endpoint2) => endpoint2.alias === alias)) {
+      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
+    }
+  }
+}
+function parseTimeout(name, raw) {
+  const trimmed = raw.trim();
+  const match = /^(\d+)(s|m)$/.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
+    );
+  }
+  const [, digits, unit] = match;
+  const value = Number(digits);
+  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
+  const ms = unit === "m" ? value * 6e4 : value * 1e3;
+  if (ms > 2147483647) {
+    throw new Error(
+      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
+    );
+  }
+  return ms;
+}
+function parseTemperature(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return void 0;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 2) {
+    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
+  }
+  return value;
+}
+function resolveEndpoints(shared) {
+  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
+  return [
+    {
+      alias: null,
+      baseUrl: shared.baseUrl,
+      apiKey: shared.apiKey,
+      timeoutMs: shared.requestTimeoutMs
+    },
+    ...shared.endpoints.map((endpoint2) => ({
+      alias: endpoint2.alias,
+      baseUrl: endpoint2.baseUrl,
+      apiKey: keyed.get(endpoint2.alias) ?? "",
+      timeoutMs: endpoint2.timeoutMs ?? shared.requestTimeoutMs
+    }))
+  ];
+}
 function threadNumber() {
   const configured = getInput("number");
   if (configured.length > 0) return whole("number", configured);
@@ -33164,6 +33355,7 @@ function createMeter() {
       const kept = spends.get(key) ?? {
         purpose,
         model: completion.model,
+        endpoint: completion.endpoint ?? null,
         requests: 0,
         failed: 0,
         unreported: 0,
@@ -33621,11 +33813,11 @@ function defangReferences(prose) {
 
 // src/core/pivot.ts
 async function translateToPivot(request2) {
-  const { provider, models, title, body, to, weather } = request2;
+  const { provider, models, title, body, to, weather, temperature } = request2;
   const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages),
+    (model) => answer(provider, model, messages, temperature),
     weather
   );
   if (!rotation.success) return { draft: null, failures: rotation.failures };
@@ -33636,8 +33828,12 @@ async function translateToPivot(request2) {
     failures: rotation.failures
   };
 }
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
+async function answer(provider, model, messages, temperature) {
+  const completion = await provider.complete(
+    model,
+    messages,
+    temperature === void 0 ? void 0 : { temperature }
+  );
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,
@@ -33732,11 +33928,15 @@ function assemble(official, marker2, publication2) {
 
 // src/core/spam.ts
 async function sift(request2) {
-  const { provider, models, weather } = request2;
+  const { provider, models, weather, temperature } = request2;
   if (models.length === 0) return { dropped: null, failures: [] };
   const rotation = await rotateModels(
     models,
-    (model) => provider.complete(model, prompt2(request2)),
+    (model) => provider.complete(
+      model,
+      prompt2(request2),
+      temperature === void 0 ? void 0 : { temperature }
+    ),
     weather
   );
   if (!rotation.success) return { dropped: null, failures: rotation.failures };
@@ -33780,6 +33980,17 @@ ${body}`);
 }
 
 // src/core/summary.ts
+function authSection(failures) {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
+  ].join("\n");
+}
 async function writeSummary(markdown) {
   if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
     debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
@@ -33816,9 +34027,11 @@ function fence(text2) {
 }
 function cost(spent, name) {
   const sum = total(spent);
+  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
   const rows = spent.map((spend) => [
     STAGE[spend.purpose],
     cell(name(spend)),
+    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
     count(spend.requests),
     spend.failed === 0 ? "\u2014" : count(spend.failed),
     count(spend.prompt),
@@ -33835,6 +34048,7 @@ function cost(spent, name) {
   rows.push([
     "**Total**",
     "",
+    ...multiEndpoint ? [""] : [],
     `**${count(sum.requests)}**`,
     sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
     `**${count(sum.prompt)}**`,
@@ -33844,7 +34058,19 @@ function cost(spent, name) {
   const lines = [
     "### Cost",
     "",
-    table(["Stage", "Model", "Requests", "Failed", "Prompt", "Completion", "Tokens"], rows)
+    table(
+      [
+        "Stage",
+        "Model",
+        ...multiEndpoint ? ["Endpoint"] : [],
+        "Requests",
+        "Failed",
+        "Prompt",
+        "Completion",
+        "Tokens"
+      ],
+      rows
+    )
   ];
   if (sum.unreported > 0) {
     lines.push(
@@ -33863,7 +34089,7 @@ function cost(spent, name) {
 
 // src/duties/respond/draft.ts
 async function draft(request2) {
-  const { provider, models, drafts, weather } = request2;
+  const { provider, models, drafts, weather, temperature } = request2;
   const messages = prompt3(request2);
   const attempts = [];
   const failures = [];
@@ -33874,7 +34100,7 @@ async function draft(request2) {
     if (order.length === 0) break;
     const rotation = await rotateModels(
       order,
-      (model) => answer2(provider, model, messages),
+      (model) => answer2(provider, model, messages, temperature),
       weather
     );
     for (const failure of rotation.failures) exhausted2.add(failure.model);
@@ -33903,8 +34129,12 @@ function remaining(models, at, exhausted2) {
   const start = at % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
 }
-async function answer2(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
+async function answer2(provider, model, messages, temperature) {
+  const completion = await provider.complete(
+    model,
+    messages,
+    temperature === void 0 ? void 0 : { temperature }
+  );
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,
@@ -34023,7 +34253,7 @@ async function readGuidance(path) {
 
 // src/core/judge.ts
 async function judge(request2) {
-  const { provider, judges, candidates, by, ballot: ballot2, weather } = request2;
+  const { provider, judges, candidates, by, ballot: ballot2, weather, temperature } = request2;
   const [leader] = candidates;
   if (leader === void 0 || candidates.length < 2 || judges.length === 0) {
     return { winner: leader ?? null, decidedBy: "score", votes: [], failures: [] };
@@ -34040,7 +34270,7 @@ async function judge(request2) {
       continue;
     }
     const shown2 = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown2, ballot2, weather);
+    const cast = await fill(provider, order, shown2, ballot2, weather, temperature);
     for (const failure of cast.failures) {
       spent.add(failure.model);
       failures.push(failure);
@@ -34056,14 +34286,21 @@ async function judge(request2) {
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
-async function fill(provider, order, shown2, ballot2, weather) {
+async function fill(provider, order, shown2, ballot2, weather, temperature) {
   const failures = [];
   for (const model of order) {
     if (weather?.grounded(model) === true) {
       failures.push(weatherFailure(model));
       continue;
     }
-    const counted = read2(await provider.complete(model, ballot2(shown2)), shown2);
+    const counted = read2(
+      await provider.complete(
+        model,
+        ballot2(shown2),
+        temperature === void 0 ? void 0 : { temperature }
+      ),
+      shown2
+    );
     if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);
@@ -34119,14 +34356,15 @@ function excerpt2(text2) {
 
 // src/duties/respond/judge.ts
 async function judge2(request2) {
-  const { provider, judges, title, body, attempts, weather } = request2;
+  const { provider, judges, title, body, attempts, weather, temperature } = request2;
   const panel = {
     provider,
     judges,
     candidates: attempts,
     by: (attempt) => attempt.model,
     ballot: (shown2) => ballot(title, body, shown2),
-    ...weather === void 0 ? {} : { weather }
+    ...weather === void 0 ? {} : { weather },
+    ...temperature === void 0 ? {} : { temperature }
   };
   return judge(panel);
 }
@@ -34270,7 +34508,7 @@ function verdict(run2) {
     ["Outcome", cell(outcome(run2))]
   ];
   const parts = ["### Verdict", "", table(["Field", "Value"], rows)];
-  if (confidence < run2.floor) parts.push("", ...fence(responded.text));
+  if (!run2.published && responded.text.length > 0) parts.push("", ...fence(responded.text));
   return parts.join("\n");
 }
 function decisionRows(decision) {
@@ -34326,6 +34564,9 @@ function readSettings() {
   }
   const panel = parseSeats(getInput("judge-models"));
   const cheap = parseModels(getInput("screen-models"));
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
   return {
     token: getInput("github-token", { required: true }),
     number: threadNumber(),
@@ -34345,7 +34586,11 @@ function readSettings() {
     corrections: getInput("corrections", { required: true }),
     screenModels: cheap.models,
     screenNames: cheap.names,
-    about: getInput("about")
+    about: getInput("about"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
+    temperature: parseTemperature(getInput("temperature"))
   };
 }
 async function decide(api, at, warrant, settings, stages, weather) {
@@ -34428,7 +34673,8 @@ async function decide(api, at, warrant, settings, stages, weather) {
     title: standing.title,
     body,
     about: settings.about,
-    weather
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
   });
   for (const failure of sifted.failures) {
     warning(`screen: ${shown(settings.screenNames, failure.model)} \u2014 ${failure.reason}`);
@@ -34445,7 +34691,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather)
+    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature)
   );
   const language = detection.language;
   info(
@@ -34468,7 +34714,8 @@ ${body}`, against: "own" }];
       title: standing.title,
       body,
       to: pivotLanguage,
-      weather
+      weather,
+      ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
     });
     for (const failure of pivot.failures) {
       warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
@@ -34501,7 +34748,8 @@ ${pivot.draft.body}`,
     recalled,
     guidance,
     drafts: settings.drafts,
-    weather
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
   });
   const modelName = (id) => shown(settings.modelNames, id);
   for (const failure of drafted.failures)
@@ -34529,7 +34777,8 @@ ${pivot.draft.body}`,
     title: standing.title,
     body,
     attempts: drafted.attempts,
-    weather
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
   });
   const judgeName = (id) => shown(settings.judgeNames, id);
   for (const failure of verdict2.failures)
@@ -34642,15 +34891,20 @@ function notGranted(warrant) {
 }
 async function run() {
   const meter = createMeter();
-  const weather = createWeather();
+  let weather = createWeather();
   let settings = null;
   let authority2 = null;
   let outcome2 = null;
   let ungranted = null;
   try {
     const base = readSettings();
+    weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)), [
+      ...base.models,
+      ...base.screenModels,
+      ...base.judges.flat()
+    ]);
     const api = getOctokit(base.token);
-    const provider = createProvider({ baseUrl: base.baseUrl, apiKey: base.apiKey });
+    const provider = createRoutedProvider(resolveEndpoints(base));
     const stages = {
       screen: metered(provider, meter, "screen"),
       detect: metered(provider, meter, "detect"),
@@ -34673,6 +34927,7 @@ async function run() {
       const at = { ...context2.repo, number: settings.number };
       outcome2 = await decide(api, at, authority2.warrant, settings, stages, weather);
     }
+    settleAuth(weather);
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
@@ -34684,7 +34939,9 @@ async function run() {
         );
       }
       report(outcome2, rosterStarved);
-      await writeSummary(page(settings, authority2, outcome2, ungranted, meter.spent()));
+      await writeSummary(
+        page(settings, authority2, outcome2, ungranted, meter.spent()) + authSection(weather.authFailures)
+      );
     }
   }
 }

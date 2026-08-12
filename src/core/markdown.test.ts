@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { mapProse, segments, type Segment } from "./markdown.js";
+import { chunks, isCodeOnly, mapProse, segments, type Segment } from "./markdown.js";
 
 /** The kinds in order, which is what most cases are actually asserting. */
 function shape(markdown: string): SegmentKindWithText[] {
@@ -194,5 +194,96 @@ describe("mapProse", () => {
     });
 
     expect(seen).toEqual(["one ", " two"]);
+  });
+});
+
+describe("chunks", () => {
+  it("returns the whole text as one chunk when it fits", () => {
+    expect(chunks("short body", 100)).toEqual(["short body"]);
+  });
+
+  it("splits at a segment boundary once the budget is crossed", () => {
+    const text = "a".repeat(10) + "`x`" + "b".repeat(10);
+
+    expect(chunks(text, 12)).toEqual(["a".repeat(10), "`x`", "b".repeat(10)]);
+  });
+
+  it("splits plain prose at line boundaries — a long body with no code still chunks", () => {
+    // `segments()` reads prose with no fences or spans as one segment end to
+    // end, which is the ordinary shape of a long issue body. The budget has
+    // to bite anyway.
+    const text = Array.from(
+      { length: 10 },
+      (_, i) => `line ${String(i)} of an ordinary report`,
+    ).join("\n");
+
+    const result = chunks(text, 70);
+
+    expect(result.length).toBeGreaterThan(1);
+    expect(result.every((chunk) => chunk.length <= 70)).toBe(true);
+    expect(result.join("")).toBe(text);
+    // Boundaries fall between lines, never inside one.
+    expect(result.slice(0, -1).every((chunk) => chunk.endsWith("\n"))).toBe(true);
+  });
+
+  it("hard-cuts a single line longer than the budget — there is no boundary in it to prefer", () => {
+    const text = "a".repeat(25);
+
+    const result = chunks(text, 10);
+
+    expect(result).toEqual(["a".repeat(10), "a".repeat(10), "a".repeat(5)]);
+  });
+
+  it("never splits a fenced block across two chunks", () => {
+    // The fence is 20 characters on its own, over the 10-character budget —
+    // the budget loses, because cutting a fence in two is the one thing this
+    // function may never do.
+    const fence = "```\nvery long code\n```";
+    const text = `before\n${fence}\nafter`;
+
+    const result = chunks(text, 10);
+
+    expect(result.some((chunk) => chunk.includes("```") && !chunk.includes(fence))).toBe(false);
+    expect(result.join("")).toBe(text);
+  });
+
+  it("reassembles to the input exactly, whatever the budget", () => {
+    const text = "one\n\n```\ncode here\n```\n\ntwo\n\nthree `x` four";
+
+    for (const maxChars of [1, 5, 10, 1000]) {
+      expect(chunks(text, maxChars).join("")).toBe(text);
+    }
+  });
+
+  it("returns one empty chunk for empty input, never zero chunks", () => {
+    expect(chunks("", 100)).toEqual([""]);
+  });
+
+  it("refuses a budget the hard-cut loop could never advance past", () => {
+    for (const bad of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => chunks("text", bad)).toThrow("positive integer");
+    }
+  });
+});
+
+describe("isCodeOnly", () => {
+  it("is false for a chunk with any prose in it", () => {
+    expect(isCodeOnly("some words\n```\ncode\n```")).toBe(false);
+  });
+
+  it("is true for a chunk that is nothing but a fenced block", () => {
+    expect(isCodeOnly("```\nconst a = 1;\n```")).toBe(true);
+  });
+
+  it("is true for a chunk that is fences and whitespace, with no prose between them", () => {
+    expect(isCodeOnly("```\na\n```\n\n```\nb\n```\n")).toBe(true);
+  });
+
+  it("is true for an inline code span with no other prose around it", () => {
+    expect(isCodeOnly("`a`")).toBe(true);
+  });
+
+  it("is true for an empty chunk, vacuously", () => {
+    expect(isCodeOnly("")).toBe(true);
   });
 });

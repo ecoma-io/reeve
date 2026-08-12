@@ -57,6 +57,14 @@ export const STAGE: Record<Purpose, string> = {
 export interface Spend {
   readonly purpose: Purpose;
   readonly model: string;
+  /**
+   * Which endpoint carried this spend: the alias an `endpoints` line
+   * declared, or null for the default `base-url`/`api-key` pair. Every
+   * request against one `purpose`/`model` pair routes to the same endpoint by
+   * construction — the id is the routing — so one field on the row is enough,
+   * never a second breakdown underneath it.
+   */
+  readonly endpoint: string | null;
   /** How many requests were made, whatever they answered. */
   readonly requests: number;
   /** How many of them Reeve could not use. Rotation's cost, made visible. */
@@ -91,6 +99,7 @@ export function createMeter(): Meter {
       const kept = spends.get(key) ?? {
         purpose,
         model: completion.model,
+        endpoint: completion.endpoint ?? null,
         requests: 0,
         failed: 0,
         unreported: 0,

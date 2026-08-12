@@ -31,10 +31,12 @@ export interface ReplyJudgeRequest {
   readonly attempts: readonly Attempt[];
   /** This run's memory of capacity failures — see `core/provider.ts`'s `Weather`. */
   readonly weather?: Weather;
+  /** Passed to every ballot. Omitted from the request when not set. */
+  readonly temperature?: number;
 }
 
 export async function judge(request: ReplyJudgeRequest): Promise<Verdict<Attempt>> {
-  const { provider, judges, title, body, attempts, weather } = request;
+  const { provider, judges, title, body, attempts, weather, temperature } = request;
 
   const panel: JudgeRequest<Attempt> = {
     provider,
@@ -43,6 +45,7 @@ export async function judge(request: ReplyJudgeRequest): Promise<Verdict<Attempt
     by: (attempt) => attempt.model,
     ballot: (shown) => ballot(title, body, shown),
     ...(weather === undefined ? {} : { weather }),
+    ...(temperature === undefined ? {} : { temperature }),
   };
 
   return runPanel(panel);

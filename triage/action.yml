@@ -124,7 +124,7 @@ inputs:
       `record` needs naming here as well as in the file: a labelled or
       unlabelled event only records when both halves grant it, and with the
       default of `label` alone a labelled event re-triages instead — see
-      `docs/usage/duties/triage.md`.
+`docs/reference/duties/triage.md`.
 
       `record` composes with `sweep` too, and means something different
       there: a backlog walk that already carries `record` in both halves
@@ -148,7 +148,7 @@ inputs:
       This is the run's own floor, not every label's: a taxonomy entry in the
       warrant may carry its own `confidence:` between 0 and 1, which answers
       for that label alone and leaves this input as the floor for every label
-      that did not — see `docs/usage/warrant.md`.
+      that did not — see `docs/reference/warrant-format.md#label-fields`.
     required: false
     default: "0.75"
 
@@ -228,13 +228,15 @@ inputs:
 
   limit:
     description: >-
-      The most issues one sweep will actually process. A skip — an issue this
-      duty already labelled — costs nothing and does not count against it.
-      Kept modest by default to protect a free tier's own rate limit: a
-      keyless provider caps requests by IP, and a run that tried the whole
-      backlog in one job would spend most of it rotating through 429s instead
-      of finishing a smaller batch for good. Raise it for a paid provider or a
-      deliberate backfill.
+      The most issues one sweep will actually process, or `none` for no cap.
+      A skip — an issue this duty already labelled — costs nothing and does
+      not count against it. Kept modest by default to protect a free tier's
+      own rate limit: a keyless provider caps requests by IP, and a run that
+      tried the whole backlog in one job would spend most of it rotating
+      through 429s instead of finishing a smaller batch for good. Raise it,
+      or set `none`, for a paid provider or a deliberate backfill — paging
+      follows real demand either way, so a large backlog no longer stalls on
+      a hidden ceiling.
     required: false
     default: "50"
 
@@ -252,6 +254,63 @@ inputs:
       store instead of only the backlog still waiting on a verdict.
     required: false
     default: open
+
+  endpoints:
+    description: >-
+      Additional `alias = url` endpoints, comma or newline separated, each
+      with an optional `timeout=<duration>` after the url — for example
+      `fast = https://api.example.com/v1 timeout=30s`. A model id then
+      routes to one of these with `model@alias`, split at the last `@`
+      only when that alias was declared here; a model id with no `@alias`
+      still routes to `base-url` as it always has. The alias and url are
+      both safe to read back in this run's log.
+
+      A capacity failure — a 429, a 5xx, a timeout — demotes only the
+      `model@alias` pair that hit it, so a roster spread across endpoints
+      keeps rotating through whatever is left standing. A transport failure
+      demotes the whole endpoint, on the grounds that one broken connection
+      says nothing about the model asked over it. An auth failure — a 401 or
+      403 — is recorded rather than failing the run red immediately, and
+      only fails red at the end if every endpoint this run's model ids
+      actually route to ended up auth-failed; see
+      `docs/doctrine/north-star.md`.
+    required: false
+    default: ""
+
+  api-keys:
+    description: >-
+      One `alias = key` per line, comma or newline separated, supplying the
+      key for each `endpoints` alias that needs one. Every alias named here
+      must also be declared in `endpoints`. Each entry's key — everything
+      after its first `=` — is registered as a secret before any entry is
+      validated, so a malformed line further down can never land an unmasked
+      key in an error message or this run's log. The alias half is ordinary
+      log-safe text, like a model id.
+    required: false
+    default: ""
+
+  request-timeout:
+    description: >-
+      How long one request is allowed to run before it counts as a timeout —
+      weather, not a failure — expressed as a whole number of seconds or
+      minutes, like `120s` or `2m`. A bare number is refused rather than
+      assumed to be seconds, because a silent unit is exactly the kind of
+      thing that is only noticed once a request has already hung for the
+      wrong amount of time. Applies to `base-url` and to every `endpoints`
+      line that names no `timeout=` of its own.
+    required: false
+    default: 120s
+
+  temperature:
+    description: >-
+      Sampling temperature, between 0 and 2. Empty is the default and omits
+      the field from every request outright, rather than sending some
+      assumed default value — some providers reject the field entirely, and
+      omitting it is the only setting that works everywhere. Refused outside
+      its range rather than clamped, for the same reason `confidence` is:
+      silently sending the wrong number is worse than a red run.
+    required: false
+    default: ""
 
 outputs:
   labels:

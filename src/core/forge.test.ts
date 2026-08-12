@@ -548,12 +548,18 @@ describe("listOpenThreads", () => {
     expect(listForRepo).toHaveBeenCalledTimes(1);
   });
 
-  it("stops at the ceiling rather than walking a repository's whole history", async () => {
+  it("pages past 1,000 open threads rather than silently stopping there", async () => {
+    // The bug this guards against: a repository with more than 1,000 open
+    // issues used to get stuck on the first 1,000 forever, `since` or no
+    // `since`, because a fixed page ceiling stopped the walk regardless of
+    // whether there was more to find. Paging now follows the tracker's own
+    // listing to the end.
     const full = Array.from({ length: 100 }, (_, index) => entry(index, "2026-03-01T00:00:00Z"));
-    const { api, listForRepo } = sweepOf(Array.from({ length: 20 }, () => full));
+    const last = [entry(9999, "2026-03-01T00:00:00Z")];
+    const { api, listForRepo } = sweepOf([...Array.from({ length: 15 }, () => full), last]);
 
-    await expect(listOpenThreads(api, where, null)).resolves.toHaveLength(1000);
-    expect(listForRepo).toHaveBeenCalledTimes(10);
+    await expect(listOpenThreads(api, where, null)).resolves.toHaveLength(1_501);
+    expect(listForRepo).toHaveBeenCalledTimes(16);
   });
 
   it("keeps a thread created on the bound and excludes one created before it", async () => {

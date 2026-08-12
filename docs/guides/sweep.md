@@ -1,5 +1,7 @@
 # The sweep
 
+_Run Reeve against a backlog instead of one thread. Prerequisites: [Installation](../getting-started/installation.md)._
+
 Working a backlog that already exists, on a schedule, instead of one thread at
 a time — and what it looks like when a free provider cannot finish it in one
 run.
@@ -29,9 +31,20 @@ has to end, and ending with an honest partial is the entire point of this
 page. `limit` defaults to `50` when left unset, modest enough to protect a
 free tier's own rate limit; the example above raises it deliberately.
 
+`limit: none` removes the count bound entirely. Paging against the forge
+follows real demand — the listing keeps asking for more until `since` says
+the rest is too old, or the backlog itself runs out — so a backlog past the
+size of one page is not silently cut off partway through: a repository with
+several thousand open issues sees all of them considered, not just however
+many the first page happened to hold. `limit` deliberately does not stop the
+listing early, only how much of it one run processes: the sweep has to see
+the whole candidate set to report `remaining` honestly, so that output
+always says how much was left unprocessed when the run ended — never a
+number that quietly stops moving once a page boundary is behind it.
+
 ## Why a sweep exists at all: weather
 
-[D12](../north-star.md#d12--capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
 is the doctrine; this is what it looks like from the outside. A 429, a 5xx or
 a timeout is **weather** — a provider could not serve this particular request
 right now, and that says nothing about whether Reeve is allowed near your
@@ -175,7 +188,12 @@ per-event `record` path is what keeps it current.
 
 Working through an existing backlog one thread at a time, from a
 `workflow_dispatch` you trigger by hand with the
-[`number`](installation.md#a-backfill-or-one-thread-on-purpose) input, still
+[`number`](../getting-started/installation.md#a-backfill-or-one-thread-on-purpose) input, still
 works exactly as before. `sweep` does not remove that path — a single thread
 on purpose is still exactly that — it adds the scheduled, unattended one next
 to it.
+
+---
+
+**Related:** [Cost](cost.md) · [Dry run](dry-run.md) · [Troubleshooting](troubleshooting.md)
+**Next:** [Cost](cost.md) — what a run like this actually spends, and how to keep it predictable

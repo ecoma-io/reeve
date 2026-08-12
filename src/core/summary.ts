@@ -18,6 +18,38 @@
 import * as core from "@actions/core";
 
 import { STAGE, total, type Spend } from "./meter.js";
+import { type Failure } from "./provider.js";
+
+/**
+ * The endpoints whose keys were refused, named on the page — the half of the
+ * multi-endpoint amendment to
+ * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * that is a reporting duty rather than a control-flow one: a run that kept
+ * going on its other endpoints has to say which ones it kept going *without*,
+ * not just that it finished.
+ *
+ * Empty string when nothing auth-failed, which is every single-endpoint run
+ * that got this far — those fail red on the first refusal and never reach a
+ * summary with a deferred failure to report. Endpoint aliases are safe to
+ * render bare: the input grammar refused anything but letters, digits, `-`
+ * and `_` before a run began. The refusal's own text stays in the log, where
+ * every failure's reason already goes — a provider's response body has no
+ * business being rendered as this page's markdown.
+ */
+export function authSection(failures: readonly Failure[]): string {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} — refused this run's key (an HTTP 401 or 403; the log has each ` +
+      "refusal's own words). Authority is configuration, not weather: nothing " +
+      "asked these endpoints again after the first refusal, and the run " +
+      "carried on with the endpoints that still authenticated.",
+  ].join("\n");
+}
 
 export async function writeSummary(markdown: string): Promise<void> {
   // Set by every current runner and by nothing else — `act` and a local
@@ -114,9 +146,15 @@ export function fence(text: string): readonly string[] {
  */
 export function cost(spent: readonly Spend[], name: (spend: Spend) => string): string {
   const sum = total(spent);
+  // Only shown once a second endpoint actually appears in the spend — a run
+  // against the one endpoint every duty has always had gets the table it has
+  // always gotten, with no column naming an endpoint nobody configured.
+  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
+
   const rows = spent.map((spend) => [
     STAGE[spend.purpose],
     cell(name(spend)),
+    ...(multiEndpoint ? [cell(spend.endpoint ?? "default")] : []),
     count(spend.requests),
     spend.failed === 0 ? "—" : count(spend.failed),
     count(spend.prompt),
@@ -135,6 +173,7 @@ export function cost(spent: readonly Spend[], name: (spend: Spend) => string): s
   rows.push([
     "**Total**",
     "",
+    ...(multiEndpoint ? [""] : []),
     `**${count(sum.requests)}**`,
     sum.failed === 0 ? "—" : `**${count(sum.failed)}**`,
     `**${count(sum.prompt)}**`,
@@ -145,7 +184,19 @@ export function cost(spent: readonly Spend[], name: (spend: Spend) => string): s
   const lines = [
     "### Cost",
     "",
-    table(["Stage", "Model", "Requests", "Failed", "Prompt", "Completion", "Tokens"], rows),
+    table(
+      [
+        "Stage",
+        "Model",
+        ...(multiEndpoint ? ["Endpoint"] : []),
+        "Requests",
+        "Failed",
+        "Prompt",
+        "Completion",
+        "Tokens",
+      ],
+      rows,
+    ),
   ];
 
   // Said plainly, because the alternative is a reader treating a floor as a

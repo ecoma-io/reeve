@@ -49,13 +49,13 @@ describe("refusal", () => {
   it("points a bare `uses:` at the roadmap while a ref carries nothing", () => {
     const message = refusal("", []);
     expect(message).toContain("is not a duty");
-    expect(message).toContain("docs/north-star.md#7-roadmap");
+    expect(message).toContain("docs/doctrine/north-star.md#7-roadmap");
   });
 
   it("points at the roadmap for a duty that is documented and not built", () => {
     const message = refusal("duplicate", []);
     expect(message).toContain("documented contract but no code");
-    expect(message).toContain("docs/north-star.md#7-roadmap");
+    expect(message).toContain("docs/doctrine/north-star.md#7-roadmap");
   });
 
   it("gives the corrected `uses:` line for a duty this ref carries", () => {

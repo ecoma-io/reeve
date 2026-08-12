@@ -1,5 +1,7 @@
 # Installation
 
+_Get a first workflow running in five minutes. Prerequisites: None._
+
 Adding a duty to a repository: the trigger, the permissions, the provider, and
 the version to pin.
 
@@ -36,14 +38,14 @@ jobs:
 ```
 
 No `.github/reeve.yml`, and nothing else written down anywhere. This is level 0
-of [the ladder](../north-star.md#3-the-ladder) — the narrowest authority Reeve
+of [the ladder](../doctrine/north-star.md#3-the-ladder) — the narrowest authority Reeve
 defines in code, built entirely from the labels and the label descriptions your
 repository already has, so a first run costs you nothing typed twice: `triage`
 may only `label`, against the taxonomy sitting in your repository settings
 already.
 
-**This is [Stage 1](../north-star.md#7-roadmap): no warrant needed, and no
-`.github/reeve.yml` either.** See [The warrant](warrant.md) for when a written
+**This is [Stage 1](../doctrine/north-star.md#7-roadmap): no warrant needed, and no
+`.github/reeve.yml` either.** See [The warrant](../guides/warrant.md) for when a written
 one starts earning its keep. Everything from here down is what you configure
 once a rung below stops being enough; read it the day you need it, not
 before.
@@ -69,7 +71,7 @@ with:
 ```
 
 **Leave `api-key` empty for a keyless provider.** That is a supported
-configuration, not a degraded one — [Cost](cost.md) covers how to make it work
+configuration, not a degraded one — [Cost](../guides/cost.md) covers how to make it work
 well.
 
 **`models` takes a list, in order of preference.** One per line or comma
@@ -85,6 +87,83 @@ models: |
 ```
 
 Order is preference, not last-resort. Put the model you actually want first.
+
+**`request-timeout` bounds how long one request may run** before it counts as
+weather rather than a failure — `120s` by default, a whole number of seconds
+or minutes (`30s`, `2m`). A bare number with no unit is refused rather than
+guessed at: the runner's own job timeout and this provider's request timeout
+are not the same number, and treating them as interchangeable hides which one
+actually fired.
+
+**`temperature` sets the sampling temperature Reeve asks for**, between `0`
+and `2`. Left empty — the default — the field is left out of the request
+entirely, because some providers reject it outright rather than fall back to
+a default of their own when one is sent. A value outside `0`–`2` is refused
+rather than clamped to the nearest end.
+
+### More than one endpoint
+
+A single `base-url`/`api-key` pair is the ordinary case, and everything above
+still describes it unchanged. `endpoints` adds more without replacing it —
+a free provider to rotate to when the paid one is out of quota, a second
+gateway that carries models the first does not, a self-hosted `llama.cpp`
+sitting beside a hosted one:
+
+```yaml
+with:
+  base-url: https://api.openai.com/v1
+  api-key: ${{ secrets.OPENAI_API_KEY }}
+  endpoints: |
+    free = https://api.example.com/v1 timeout=30s
+  api-keys: |
+    free = ${{ secrets.FREE_API_KEY }}
+  models: |
+    gpt-5-mini
+    llama-3-70b@free
+```
+
+Each `endpoints` line is `alias = url`, with an optional trailing
+`timeout=<duration>` overriding `request-timeout` for that one endpoint.
+One alias is reserved: `default` names the built-in `base-url` endpoint in
+every log line and summary, so it cannot be declared as an alias of its own.
+`api-keys` is `alias = key`, one line per alias that needs one — every value
+in it is registered as a secret before anything else is even parsed, so a
+malformed later line's error message can never expose an earlier key. An
+alias named in `api-keys` that `endpoints` never declared is refused; a key
+is optional, and an alias with none simply sends no `Authorization` header,
+the same as a keyless `base-url`.
+
+**`model@alias` routes that one model to that one endpoint.** The alias is
+split off the model id at its _last_ `@`, and only when that alias was
+actually declared in `endpoints` — a model id that happens to contain its own
+`@` and names no declared alias is left whole and sent to the default
+`base-url`, exactly as it always was, so an id is never misread as a routing
+suffix by accident. A model with no `@alias` always means the default
+endpoint, whatever else is configured.
+
+**Weather is tracked per model _and_ per endpoint.** A 429, a 5xx or a
+timeout from `llama-3-70b@free` demotes that pair alone — the same model
+reached through a different endpoint, or a different model reached through
+`free`, is still tried. A transport-level failure — the connection itself,
+never an answer from the provider — demotes the whole endpoint instead, on
+the reasoning that a broken connection says nothing about the model that was
+asked over it.
+
+**An auth failure behaves differently once there is more than one endpoint.**
+A single-endpoint run still fails red immediately on the first 401 or 403,
+exactly as
+[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+has always described. Once `endpoints` names more than one, a 401 or 403 is
+recorded instead of thrown, and the run keeps going — one endpoint's wrong
+key says nothing about another endpoint's — failing red only at the end, and
+only once **every** endpoint this run's model ids actually route to has
+ended up auth-failed. An endpoint no model routes to does not keep a doomed
+run green: the question is whether anything that could have been asked still
+authenticated. See the doctrine's own amendment at that same link for the
+full reasoning.
+
+Once more than one endpoint has carried any spend, every duty's job summary
+gains an Endpoint column, naming which one answered each row.
 
 ## 2. Pick a trigger
 
@@ -139,7 +218,7 @@ through the API, as **data**. Nothing from the head is checked out and nothing
 from it is executed. If you add `ref: ${{ github.event.pull_request.head.sha }}`
 to a checkout in that workflow — the obvious fix when something else in the job
 needs the code — you have handed a fork's code your write token. Do not.
-[Security](../development/security.md) has the rest.
+[Security](../security/security.md) has the rest.
 
 ### A backfill, or one thread on purpose
 
@@ -175,14 +254,14 @@ it fails and says which event it was, rather than asking GitHub for issue `NaN`.
 commenting, closing and editing are the same permission as far as the token is
 concerned — which is why duties carry their own capability inputs. **The token
 cannot express "labels only", so the duty has to.** See
-[The warrant](warrant.md).
+[The warrant](../guides/warrant.md).
 
-| You want                     | Grant                                                 |
-| ---------------------------- | ----------------------------------------------------- |
-| Anything on issues           | `issues: write`                                       |
-| Anything on pull requests    | `pull-requests: write`                                |
-| Reading a taxonomy or memory | `contents: read`                                      |
-| Committing corrections back  | `contents: write` — opt in, see [warrant](warrant.md) |
+| You want                     | Grant                                                           |
+| ---------------------------- | --------------------------------------------------------------- |
+| Anything on issues           | `issues: write`                                                 |
+| Anything on pull requests    | `pull-requests: write`                                          |
+| Reading a taxonomy or memory | `contents: read`                                                |
+| Committing corrections back  | `contents: write` — opt in, see [warrant](../guides/warrant.md) |
 
 The ambient `secrets.GITHUB_TOKEN` covers everything a duty does by default, and
 it is the `github-token` default. Pass something else only for the reason in the
@@ -197,7 +276,7 @@ and no input for it to get wrong.
 so silently. If a downstream workflow has to see Reeve's label, pass a GitHub App
 token from `actions/create-github-app-token` instead. This and the other GitHub
 behaviours that shaped the design are in
-[platform limits](../development/platform-limits.md).
+[platform limits](../reference/platform-limits.md).
 
 ## 4. Pin a version
 
@@ -226,53 +305,12 @@ with:
   dry-run: true
 ```
 
-Every duty runs its whole pipeline under `dry-run` — reads the thread, detects
-the language, screens, drafts, scores, verifies — logs what it would have done,
-writes every output, and touches nothing.
+Every duty runs its whole pipeline under `dry-run` and touches nothing. Run it
+against ten real threads before you point a taxonomy or a provider at your
+actual backlog — [Dry run](../guides/dry-run.md) covers what it does and does
+not tell you.
 
-Run it that way against ten real threads first. It costs the model calls and
-nothing else, and it is the only honest way to find out what a taxonomy or a
-provider does on your repository rather than on somebody else's.
+---
 
-## A complete first workflow
-
-```yaml
-name: Reeve
-
-on:
-  issues:
-    types: [opened, reopened, edited]
-
-concurrency:
-  group: reeve-issue-${{ github.event.issue.number }}
-  cancel-in-progress: true
-
-permissions:
-  contents: read
-  issues: write
-
-jobs:
-  triage:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: ecoma-io/reeve/triage@v0.1
-        with:
-          api-key: ${{ secrets.OPENAI_API_KEY }}
-          models: gpt-5-mini
-
-  translate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: ecoma-io/reeve/translate@v0.1
-        with:
-          api-key: ${{ secrets.OPENAI_API_KEY }}
-          models: gpt-5-mini
-          languages: en, vi
-```
-
-Two duties, one version line, one provider — level 0 with an extra duty added,
-nothing more. **Climbing the ladder from here means writing things down, not
-switching anything on:** decide what each duty is allowed to do —
-[The warrant](warrant.md) — and who reads what — [Languages](languages.md).
+**Related:** [The warrant](../guides/warrant.md) · [Languages](../guides/languages.md) · [Cost](../guides/cost.md)
+**Next:** [A complete first workflow](first-workflow.md) — two duties, one version line, walked end to end

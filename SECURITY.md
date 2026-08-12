@@ -1,5 +1,8 @@
 # Security policy
 
+For why the pipeline is shaped the way it is — the threat model and the
+mechanism that enforces it — see [`docs/security/`](docs/security/threat-model.md).
+
 ## Reporting a vulnerability
 
 **Do not open a public issue.** This action runs inside other people's

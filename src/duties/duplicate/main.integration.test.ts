@@ -373,6 +373,10 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     sweep: "false",
     since: "",
     limit: "50",
+    endpoints: "",
+    "api-keys": "",
+    "request-timeout": "120s",
+    temperature: "",
   };
 }
 

@@ -48,6 +48,7 @@ function spend(over: Partial<Spend> = {}): Spend {
   return {
     purpose: "triage",
     model: "big",
+    endpoint: null,
     requests: 1,
     failed: 0,
     prompt: 900,
@@ -481,6 +482,7 @@ describe("summarizeSweep", () => {
           {
             purpose: "screen",
             model: "small",
+            endpoint: null,
             requests: 1,
             failed: 0,
             prompt: 10,
@@ -490,6 +492,7 @@ describe("summarizeSweep", () => {
           {
             purpose: "triage",
             model: "big",
+            endpoint: null,
             requests: 1,
             failed: 0,
             prompt: 900,

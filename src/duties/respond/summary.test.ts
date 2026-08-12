@@ -30,6 +30,7 @@ function spend(over: Partial<Spend> = {}): Spend {
   return {
     purpose: "draft",
     model: "a",
+    endpoint: null,
     requests: 1,
     failed: 0,
     unreported: 0,
@@ -176,6 +177,19 @@ describe("the run summary", () => {
     expect(summary).toContain("refused rather than posted with nothing under the marker");
   });
 
+  it("does not render an empty fenced block for a rendered-empty draft", () => {
+    const summary = subject({
+      language: "English",
+      responded: responded({ text: "" }),
+      confidence: 0.9,
+      floor: 0.75,
+      published: false,
+      permitted: ["comment"],
+    });
+
+    expect(summary).not.toContain("```");
+  });
+
   it("says the draft was withheld when `comment` was not granted", () => {
     const summary = subject({
       language: "English",
@@ -186,6 +200,23 @@ describe("the run summary", () => {
     });
 
     expect(summary).toContain("`comment` was not granted");
+  });
+
+  // This is the report-only dogfood shape: `apply` never names `comment`, so
+  // every confident run is withheld, and the job summary is the only place
+  // anyone ever reads the draft. A confidence above the floor used to be the
+  // one condition that hid it here — the bug this test guards against.
+  it("shows the fenced draft when a confident reply was withheld — report-only dogfooding", () => {
+    const summary = subject({
+      language: "English",
+      responded: responded({ text: "Could you share the version you're running?" }),
+      confidence: 0.94,
+      floor: 0.75,
+      published: false,
+      permitted: [],
+    });
+
+    expect(summary).toContain("```\nCould you share the version you're running?\n```");
   });
 
   it("says a dry run posted nothing", () => {
@@ -199,6 +230,19 @@ describe("the run summary", () => {
     });
 
     expect(summary).toContain("| Outcome | dry run — nothing was written |");
+  });
+
+  it("shows the fenced draft on a dry run too, since nothing reached the thread", () => {
+    const summary = subject({
+      dryRun: true,
+      language: "English",
+      responded: responded({ text: "Could you share the version you're running?" }),
+      confidence: 0.94,
+      published: false,
+      permitted: ["comment"],
+    });
+
+    expect(summary).toContain("```\nCould you share the version you're running?\n```");
   });
 
   it("says a reply that cleared every gate was posted — there is no update-in-place outcome", () => {
