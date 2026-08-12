@@ -2097,9 +2097,9 @@ var require_dispatcher_base = __commonJS({
       }
       close(callback) {
         if (callback === void 0) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve2, reject) => {
             this.close((err, data) => {
-              return err ? reject(err) : resolve(data);
+              return err ? reject(err) : resolve2(data);
             });
           });
         }
@@ -2137,12 +2137,12 @@ var require_dispatcher_base = __commonJS({
           err = null;
         }
         if (callback === void 0) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve2, reject) => {
             this.destroy(err, (err2, data) => {
               return err2 ? (
                 /* istanbul ignore next: should never error */
                 reject(err2)
-              ) : resolve(data);
+              ) : resolve2(data);
             });
           });
         }
@@ -4409,8 +4409,8 @@ var require_util2 = __commonJS({
     function createDeferredPromise() {
       let res;
       let rej;
-      const promise = new Promise((resolve, reject) => {
-        res = resolve;
+      const promise = new Promise((resolve2, reject) => {
+        res = resolve2;
         rej = reject;
       });
       return { promise, resolve: res, reject: rej };
@@ -6657,12 +6657,12 @@ upgrade: ${upgrade}\r
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve, reject) => {
+      const waitForDrain = () => new Promise((resolve2, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve;
+          callback = resolve2;
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
@@ -7299,12 +7299,12 @@ var require_client_h2 = __commonJS({
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve, reject) => {
+      const waitForDrain = () => new Promise((resolve2, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve;
+          callback = resolve2;
         }
       });
       h2stream.on("close", onDrain).on("drain", onDrain);
@@ -7782,16 +7782,16 @@ var require_client = __commonJS({
         return this[kNeedDrain] < 2;
       }
       async [kClose]() {
-        return new Promise((resolve) => {
+        return new Promise((resolve2) => {
           if (this[kSize]) {
-            this[kClosedResolve] = resolve;
+            this[kClosedResolve] = resolve2;
           } else {
-            resolve(null);
+            resolve2(null);
           }
         });
       }
       async [kDestroy](err) {
-        return new Promise((resolve) => {
+        return new Promise((resolve2) => {
           const requests = this[kQueue].splice(this[kPendingIdx]);
           for (let i = 0; i < requests.length; i++) {
             const request2 = requests[i];
@@ -7802,7 +7802,7 @@ var require_client = __commonJS({
               this[kClosedResolve]();
               this[kClosedResolve] = null;
             }
-            resolve(null);
+            resolve2(null);
           };
           if (this[kHTTPContext]) {
             this[kHTTPContext].destroy(err, callback);
@@ -7853,7 +7853,7 @@ var require_client = __commonJS({
         });
       }
       try {
-        const socket = await new Promise((resolve, reject) => {
+        const socket = await new Promise((resolve2, reject) => {
           client[kConnector]({
             host,
             hostname,
@@ -7865,7 +7865,7 @@ var require_client = __commonJS({
             if (err) {
               reject(err);
             } else {
-              resolve(socket2);
+              resolve2(socket2);
             }
           });
         });
@@ -8201,8 +8201,8 @@ var require_pool_base = __commonJS({
         if (this[kQueue].isEmpty()) {
           await Promise.all(this[kClients].map((c) => c.close()));
         } else {
-          await new Promise((resolve) => {
-            this[kClosedResolve] = resolve;
+          await new Promise((resolve2) => {
+            this[kClosedResolve] = resolve2;
           });
         }
       }
@@ -9445,7 +9445,7 @@ var require_readable = __commonJS({
         if (this._readableState.closeEmitted) {
           return null;
         }
-        return await new Promise((resolve, reject) => {
+        return await new Promise((resolve2, reject) => {
           if (this[kContentLength] > limit) {
             this.destroy(new AbortError());
           }
@@ -9458,7 +9458,7 @@ var require_readable = __commonJS({
             if (signal?.aborted) {
               reject(signal.reason ?? new AbortError());
             } else {
-              resolve(null);
+              resolve2(null);
             }
           }).on("error", noop3).on("data", function(chunk) {
             limit -= chunk.length;
@@ -9477,7 +9477,7 @@ var require_readable = __commonJS({
     }
     async function consume(stream, type) {
       assert(!stream[kConsume]);
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve2, reject) => {
         if (isUnusable(stream)) {
           const rState = stream._readableState;
           if (rState.destroyed && rState.closeEmitted === false) {
@@ -9494,7 +9494,7 @@ var require_readable = __commonJS({
             stream[kConsume] = {
               type,
               stream,
-              resolve,
+              resolve: resolve2,
               reject,
               length: 0,
               body: []
@@ -9564,18 +9564,18 @@ var require_readable = __commonJS({
       return buffer;
     }
     function consumeEnd(consume2) {
-      const { type, body, resolve, stream, length } = consume2;
+      const { type, body, resolve: resolve2, stream, length } = consume2;
       try {
         if (type === "text") {
-          resolve(chunksDecode(body, length));
+          resolve2(chunksDecode(body, length));
         } else if (type === "json") {
-          resolve(JSON.parse(chunksDecode(body, length)));
+          resolve2(JSON.parse(chunksDecode(body, length)));
         } else if (type === "arrayBuffer") {
-          resolve(chunksConcat(body, length).buffer);
+          resolve2(chunksConcat(body, length).buffer);
         } else if (type === "blob") {
-          resolve(new Blob(body, { type: stream[kContentType] }));
+          resolve2(new Blob(body, { type: stream[kContentType] }));
         } else if (type === "bytes") {
-          resolve(chunksConcat(body, length));
+          resolve2(chunksConcat(body, length));
         }
         consumeFinish(consume2);
       } catch (err) {
@@ -9832,9 +9832,9 @@ var require_api_request = __commonJS({
     };
     function request2(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           request2.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -10057,9 +10057,9 @@ var require_api_stream = __commonJS({
     };
     function stream(opts, factory, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           stream.call(this, opts, factory, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -10344,9 +10344,9 @@ var require_api_upgrade = __commonJS({
     };
     function upgrade(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           upgrade.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -10438,9 +10438,9 @@ var require_api_connect = __commonJS({
     };
     function connect(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           connect.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -11824,7 +11824,7 @@ var require_headers = __commonJS({
       while (j > i && isHTTPWhiteSpaceCharCode(potentialValue.charCodeAt(i))) ++i;
       return i === 0 && j === potentialValue.length ? potentialValue : potentialValue.substring(i, j);
     }
-    function fill2(headers, object) {
+    function fill3(headers, object) {
       if (Array.isArray(object)) {
         for (let i = 0; i < object.length; ++i) {
           const header = object[i];
@@ -12049,7 +12049,7 @@ var require_headers = __commonJS({
         this.#guard = "none";
         if (init !== void 0) {
           init = webidl.converters.HeadersInit(init, "Headers contructor", "init");
-          fill2(this, init);
+          fill3(this, init);
         }
       }
       // https://fetch.spec.whatwg.org/#dom-headers-append
@@ -12229,7 +12229,7 @@ var require_headers = __commonJS({
       });
     };
     module.exports = {
-      fill: fill2,
+      fill: fill3,
       // for test.
       compareHeaderName,
       Headers: Headers2,
@@ -12246,7 +12246,7 @@ var require_headers = __commonJS({
 var require_response = __commonJS({
   "node_modules/.pnpm/undici@6.28.0/node_modules/undici/lib/web/fetch/response.js"(exports, module) {
     "use strict";
-    var { Headers: Headers2, HeadersList, fill: fill2, getHeadersGuard, setHeadersGuard, setHeadersList } = require_headers();
+    var { Headers: Headers2, HeadersList, fill: fill3, getHeadersGuard, setHeadersGuard, setHeadersList } = require_headers();
     var { extractBody, cloneBody, mixinBody, hasFinalizationRegistry, streamRegistry, bodyUnusable } = require_body();
     var util = require_util();
     var nodeUtil = __require("node:util");
@@ -12550,7 +12550,7 @@ var require_response = __commonJS({
         response[kState].statusText = init.statusText;
       }
       if ("headers" in init && init.headers != null) {
-        fill2(response[kHeaders], init.headers);
+        fill3(response[kHeaders], init.headers);
       }
       if (body) {
         if (nullBodyStatus.includes(response.status)) {
@@ -14302,7 +14302,7 @@ var require_fetch = __commonJS({
       function dispatch({ body }) {
         const url = requestCurrentURL(request2);
         const agent = fetchParams.controller.dispatcher;
-        return new Promise((resolve, reject) => agent.dispatch(
+        return new Promise((resolve2, reject) => agent.dispatch(
           {
             path: url.pathname + url.search,
             origin: url.origin,
@@ -14378,7 +14378,7 @@ var require_fetch = __commonJS({
                 }
               }
               const onError = this.onError.bind(this);
-              resolve({
+              resolve2({
                 status,
                 statusText,
                 headersList,
@@ -14424,7 +14424,7 @@ var require_fetch = __commonJS({
               for (let i = 0; i < rawHeaders.length; i += 2) {
                 headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString("latin1"), true);
               }
-              resolve({
+              resolve2({
                 status,
                 statusText: STATUS_CODES[status],
                 headersList,
@@ -18155,8 +18155,8 @@ var require_util8 = __commonJS({
       return true;
     }
     function delay(ms) {
-      return new Promise((resolve) => {
-        setTimeout(resolve, ms).unref();
+      return new Promise((resolve2) => {
+        setTimeout(resolve2, ms).unref();
       });
     }
     module.exports = {
@@ -18960,11 +18960,11 @@ var require_lib = __commonJS({
     })();
     var __awaiter3 = exports && exports.__awaiter || function(thisArg, _arguments, P, generator) {
       function adopt(value) {
-        return value instanceof P ? value : new P(function(resolve) {
-          resolve(value);
+        return value instanceof P ? value : new P(function(resolve2) {
+          resolve2(value);
         });
       }
-      return new (P || (P = Promise))(function(resolve, reject) {
+      return new (P || (P = Promise))(function(resolve2, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -18980,7 +18980,7 @@ var require_lib = __commonJS({
           }
         }
         function step(result) {
-          result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve2(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -19067,26 +19067,26 @@ var require_lib = __commonJS({
       }
       readBody() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve2) => __awaiter3(this, void 0, void 0, function* () {
             let output = Buffer.alloc(0);
             this.message.on("data", (chunk) => {
               output = Buffer.concat([output, chunk]);
             });
             this.message.on("end", () => {
-              resolve(output.toString());
+              resolve2(output.toString());
             });
           }));
         });
       }
       readBodyBuffer() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve2) => __awaiter3(this, void 0, void 0, function* () {
             const chunks = [];
             this.message.on("data", (chunk) => {
               chunks.push(chunk);
             });
             this.message.on("end", () => {
-              resolve(Buffer.concat(chunks));
+              resolve2(Buffer.concat(chunks));
             });
           }));
         });
@@ -19294,14 +19294,14 @@ var require_lib = __commonJS({
        */
       requestRaw(info3, data) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve2, reject) => {
             function callbackForResult(err, res) {
               if (err) {
                 reject(err);
               } else if (!res) {
                 reject(new Error("Unknown error"));
               } else {
-                resolve(res);
+                resolve2(res);
               }
             }
             this.requestRawWithCallback(info3, data, callbackForResult);
@@ -19545,12 +19545,12 @@ var require_lib = __commonJS({
         return __awaiter3(this, void 0, void 0, function* () {
           retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
           const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-          return new Promise((resolve) => setTimeout(() => resolve(), ms));
+          return new Promise((resolve2) => setTimeout(() => resolve2(), ms));
         });
       }
       _processResponse(res, options) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve, reject) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve2, reject) => __awaiter3(this, void 0, void 0, function* () {
             const statusCode = res.message.statusCode || 0;
             const response = {
               statusCode,
@@ -19558,7 +19558,7 @@ var require_lib = __commonJS({
               headers: {}
             };
             if (statusCode === HttpCodes2.NotFound) {
-              resolve(response);
+              resolve2(response);
             }
             function dateTimeDeserializer(key, value) {
               if (typeof value === "string") {
@@ -19597,7 +19597,7 @@ var require_lib = __commonJS({
               err.result = response.result;
               reject(err);
             } else {
-              resolve(response);
+              resolve2(response);
             }
           }));
         });
@@ -27233,11 +27233,11 @@ import { EOL as EOL3 } from "os";
 import { constants, promises } from "fs";
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
-    return value instanceof P ? value : new P(function(resolve) {
-      resolve(value);
+    return value instanceof P ? value : new P(function(resolve2) {
+      resolve2(value);
     });
   }
-  return new (P || (P = Promise))(function(resolve, reject) {
+  return new (P || (P = Promise))(function(resolve2, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -27253,7 +27253,7 @@ var __awaiter = function(thisArg, _arguments, P, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve2(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -27643,11 +27643,11 @@ var httpClient = __toESM(require_lib(), 1);
 var import_undici2 = __toESM(require_undici(), 1);
 var __awaiter2 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
-    return value instanceof P ? value : new P(function(resolve) {
-      resolve(value);
+    return value instanceof P ? value : new P(function(resolve2) {
+      resolve2(value);
     });
   }
-  return new (P || (P = Promise))(function(resolve, reject) {
+  return new (P || (P = Promise))(function(resolve2, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -27663,7 +27663,7 @@ var __awaiter2 = function(thisArg, _arguments, P, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve2(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -34783,9 +34783,121 @@ ${numbered}`
   ];
 }
 
+// src/core/chrome.ts
+var CHROME_LANGUAGES = ["en", "vi"];
+var CHROME = {
+  // translate/publish.ts — boundary() and footer() wrap every language
+  // section in the thread at once, so both render through `chromeLines`.
+  translateBoundary: {
+    en: "**The text above is the original, and it is the version this project answers for.** Everything below is a machine translation by [Reeve](https://github.com/ecoma-io/reeve). Where the two disagree, the text above is the one that counts.",
+    vi: "**V\u0103n b\u1EA3n ph\xEDa tr\xEAn l\xE0 b\u1EA3n g\u1ED1c, v\xE0 \u0111\xE2y l\xE0 phi\xEAn b\u1EA3n m\xE0 d\u1EF1 \xE1n n\xE0y ch\u1ECBu tr\xE1ch nhi\u1EC7m.** M\u1ECDi n\u1ED9i dung ph\xEDa d\u01B0\u1EDBi l\xE0 b\u1EA3n d\u1ECBch m\xE1y b\u1EDFi [Reeve](https://github.com/ecoma-io/reeve). N\u1EBFu c\xF3 s\u1EF1 kh\xE1c bi\u1EC7t, v\u0103n b\u1EA3n ph\xEDa tr\xEAn m\u1EDBi l\xE0 v\u0103n b\u1EA3n c\xF3 gi\xE1 tr\u1ECB."
+  },
+  translateFooterFrom: {
+    en: "Translated from {label}.",
+    vi: "\u0110\u01B0\u1EE3c d\u1ECBch t\u1EEB {label}."
+  },
+  translateFooterTruncated: {
+    en: "The body was longer than this run's limit, so its tail was not translated.",
+    vi: "N\u1ED9i dung d\xE0i h\u01A1n gi\u1EDBi h\u1EA1n c\u1EE7a l\u1EA7n ch\u1EA1y n\xE0y, n\xEAn ph\u1EA7n cu\u1ED1i ch\u01B0a \u0111\u01B0\u1EE3c d\u1ECBch."
+  },
+  translateFooterSkipped: {
+    en: "Not translated this run: {list}.",
+    vi: "Ch\u01B0a \u0111\u01B0\u1EE3c d\u1ECBch trong l\u1EA7n ch\u1EA1y n\xE0y: {list}."
+  },
+  translateFooterEditable: {
+    en: "Editing the text above republishes this; deleting this block regenerates it.",
+    vi: "Ch\u1EC9nh s\u1EEDa v\u0103n b\u1EA3n ph\xEDa tr\xEAn s\u1EBD \u0111\u0103ng l\u1EA1i b\u1EA3n d\u1ECBch n\xE0y; x\xF3a kh\u1ED1i n\xE0y s\u1EBD t\u1EA1o l\u1EA1i n\xF3."
+  },
+  // lifecycle/message.ts's footer() — every line below already sits under a
+  // comment `renderSay`/`renderClose` already resolved to one language, so
+  // this renders through `chrome`, not `chromeLines`.
+  lifecycleFooterResetsAuthor: {
+    en: "A reply from this thread's author restarts the clock.",
+    vi: "M\u1ED9t ph\u1EA3n h\u1ED3i t\u1EEB t\xE1c gi\u1EA3 c\u1EE7a ch\u1EE7 \u0111\u1EC1 n\xE0y s\u1EBD kh\u1EDFi \u0111\u1ED9ng l\u1EA1i \u0111\u1ED3ng h\u1ED3."
+  },
+  lifecycleFooterResetsAny: {
+    en: "Any activity here restarts the clock.",
+    vi: "B\u1EA5t k\u1EF3 ho\u1EA1t \u0111\u1ED9ng n\xE0o \u1EDF \u0111\xE2y c\u0169ng s\u1EBD kh\u1EDFi \u0111\u1ED9ng l\u1EA1i \u0111\u1ED3ng h\u1ED3."
+  },
+  lifecycleFooterWhenLabel: {
+    en: "Removing the `{label}` label also stops this track.",
+    vi: "G\u1EE1 nh\xE3n `{label}` c\u0169ng s\u1EBD d\u1EEBng track n\xE0y."
+  },
+  lifecycleFooterEscape: {
+    en: "Adding `{label}` stops this permanently.",
+    vi: "Th\xEAm nh\xE3n `{label}` s\u1EBD d\u1EEBng v\u0129nh vi\u1EC5n."
+  },
+  lifecycleFooterAttribution: {
+    en: "lifecycle \u2014 a policy this repository's own warrant configured.",
+    vi: "lifecycle \u2014 m\u1ED9t ch\xEDnh s\xE1ch do warrant c\u1EE7a repository n\xE0y c\u1EA5u h\xECnh."
+  },
+  // respond/publish.ts — one reply, one language throughout, via `chrome`.
+  respondBoundaryDrafted: {
+    en: "This reply was drafted by [Reeve](https://github.com/ecoma-io/reeve), not by a maintainer.",
+    vi: "Ph\u1EA3n h\u1ED3i n\xE0y \u0111\u01B0\u1EE3c so\u1EA1n b\u1EDFi [Reeve](https://github.com/ecoma-io/reeve), kh\xF4ng ph\u1EA3i b\u1EDFi m\u1ED9t maintainer."
+  },
+  respondBoundaryCaveat: {
+    en: "A maintainer has not reviewed it. Treat it as a starting point, not an answer.",
+    vi: "M\u1ED9t maintainer ch\u01B0a xem x\xE9t ph\u1EA3n h\u1ED3i n\xE0y. H\xE3y xem \u0111\xE2y l\xE0 \u0111i\u1EC3m kh\u1EDFi \u0111\u1EA7u, kh\xF4ng ph\u1EA3i c\xE2u tr\u1EA3 l\u1EDDi cu\u1ED1i c\xF9ng."
+  },
+  respondFooterUnknown: {
+    en: "This project could not identify the thread's language, so the reply above is in English.",
+    vi: "D\u1EF1 \xE1n n\xE0y kh\xF4ng th\u1EC3 x\xE1c \u0111\u1ECBnh ng\xF4n ng\u1EEF c\u1EE7a ch\u1EE7 \u0111\u1EC1, v\xEC v\u1EADy ph\u1EA3n h\u1ED3i ph\xEDa tr\xEAn b\u1EB1ng ti\u1EBFng Anh."
+  },
+  respondFooterKnown: {
+    en: "The thread was written in {label}.",
+    vi: "Ch\u1EE7 \u0111\u1EC1 n\xE0y \u0111\u01B0\u1EE3c vi\u1EBFt b\u1EB1ng {label}."
+  },
+  respondFooterRecord: {
+    en: "Reeve answers a thread once. This comment is the record of it.",
+    vi: "Reeve ch\u1EC9 tr\u1EA3 l\u1EDDi m\u1ED9t ch\u1EE7 \u0111\u1EC1 m\u1ED9t l\u1EA7n. B\xECnh lu\u1EADn n\xE0y l\xE0 b\u1EB1ng ch\u1EE9ng cho \u0111i\u1EC1u \u0111\xF3."
+  },
+  // duplicate/publish.ts — one proposal, one language (the thread's own —
+  // see `render`'s doc comment for why that signal is trustworthy here even
+  // though ranking may bridge through a pivot language to find it), via
+  // `chrome`.
+  duplicatePossible: {
+    en: "Possible duplicate of #{number}.",
+    vi: "C\xF3 th\u1EC3 tr\xF9ng l\u1EB7p v\u1EDBi #{number}."
+  },
+  duplicateFooterFloor: {
+    en: "Proposed by a model, not decided by a maintainer \u2014 read it as a lead to check.",
+    vi: "\u0110\u01B0\u1EE3c \u0111\u1EC1 xu\u1EA5t b\u1EDFi m\u1ED9t model, kh\xF4ng ph\u1EA3i quy\u1EBFt \u0111\u1ECBnh c\u1EE7a maintainer \u2014 h\xE3y xem \u0111\xE2y l\xE0 m\u1ED9t manh m\u1ED1i c\u1EA7n ki\u1EC3m tra."
+  },
+  duplicateFooterEditable: {
+    en: "Editing this thread and re-running replaces this comment; it is never posted twice.",
+    vi: "Ch\u1EC9nh s\u1EEDa ch\u1EE7 \u0111\u1EC1 n\xE0y v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n."
+  }
+};
+var LANGUAGE_SET = new Set(CHROME_LANGUAGES);
+function resolve(code) {
+  return code !== null && LANGUAGE_SET.has(code) ? code : "en";
+}
+function chromeSupports(code) {
+  return code !== null && LANGUAGE_SET.has(code);
+}
+function fill2(template, params) {
+  return template.replace(/\{(\w+)\}/g, (whole2, name) => {
+    if (!Object.hasOwn(params, name)) {
+      throw new Error(`chrome: "${whole2}" in a template with no "${name}" in params`);
+    }
+    return params[name] ?? "";
+  });
+}
+function chrome(key, code, params = {}) {
+  return fill2(CHROME[key][resolve(code)], params);
+}
+function chromeFallbackNote(codes) {
+  const missing = new Set(
+    codes.filter((code) => code !== null && !chromeSupports(code))
+  );
+  if (missing.size === 0) return null;
+  const list = [...missing].sort().map((code) => `\`${code}\``).join(", ");
+  return `${list} \u2014 Reeve's own scaffolding text has no translation for ${missing.size === 1 ? "this language" : "these languages"} yet, so it rendered in English instead. Configured: ${CHROME_LANGUAGES.join(", ")}.`;
+}
+
 // src/duties/respond/publish.ts
 var marker = markerFor("respond");
-var HOME = "https://github.com/ecoma-io/reeve";
 function responseFingerprint(title, body, language) {
   return fingerprint(`${title}
 
@@ -34795,14 +34907,20 @@ function publication(responded) {
   if (responded.text.length === 0) return { fingerprint: responded.fingerprint, sections: [] };
   return {
     fingerprint: responded.fingerprint,
-    sections: [boundary(), responded.text, "", provenance(responded), footer(responded)]
+    sections: [
+      boundary(responded.languageCode),
+      responded.text,
+      "",
+      provenance(responded),
+      footer(responded)
+    ]
   };
 }
-function boundary() {
+function boundary(languageCode) {
   return [
     "> [!NOTE]",
-    `> This reply was drafted by [Reeve](${HOME}), not by a maintainer.`,
-    "> A maintainer has not reviewed it. Treat it as a starting point, not an answer."
+    `> ${chrome("respondBoundaryDrafted", languageCode)}`,
+    `> ${chrome("respondBoundaryCaveat", languageCode)}`
   ].join("\n");
 }
 function provenance(responded) {
@@ -34821,8 +34939,8 @@ function provenance(responded) {
 }
 function footer(responded) {
   const notes = [
-    responded.language === null ? "This project could not identify the thread's language, so the reply above is in English." : `The thread was written in ${responded.language}.`,
-    "Reeve answers a thread once. This comment is the record of it."
+    responded.language === null ? chrome("respondFooterUnknown", responded.languageCode) : chrome("respondFooterKnown", responded.languageCode, { label: responded.language }),
+    chrome("respondFooterRecord", responded.languageCode)
   ];
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
 }
@@ -34861,6 +34979,7 @@ function summarize(run2) {
     ...run2.implicit ? [authority(run2), ""] : [],
     verdict(run2),
     ...withheld(run2),
+    ...chromeNote(run2),
     "",
     cost(
       run2.spent,
@@ -34869,6 +34988,11 @@ function summarize(run2) {
   ];
   return `${parts.join("\n").trimEnd()}
 `;
+}
+function chromeNote(run2) {
+  if (run2.responded === null || run2.responded.text.length === 0) return [];
+  const note = chromeFallbackNote([run2.responded.languageCode]);
+  return note === null ? [] : ["", note];
 }
 function verdict(run2) {
   if (run2.note !== null) return ["### Verdict", "", run2.note].join("\n");
@@ -34930,8 +35054,10 @@ function withheld(run2) {
   ];
 }
 
-// src/duties/respond/main.ts
+// src/duties/respond/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
+
+// src/duties/respond/main.ts
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
 function readSettings() {
@@ -35202,6 +35328,7 @@ ${pivot.draft.body}`,
   const confidence = verdict2.winner.confidence;
   const responded = {
     language: language?.label ?? null,
+    languageCode: language?.code ?? null,
     // The real text a model wrote, always — never blanked for a reason not to
     // post it. See `publish.ts`'s doc comment on `Responded.text`.
     text: verdict2.winner.text,

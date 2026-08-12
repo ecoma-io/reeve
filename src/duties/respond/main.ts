@@ -5,10 +5,10 @@
  * maintainer can quietly revert; this one writes a comment that reads, to
  * everyone downstream of it, as though somebody from the project answered.
  * That is the whole reason its defaults are the strictest in this repository
- * — `DEFAULT_CAPABILITIES` below is empty, unlike every other duty's — and the
- * reason two of its guards (a human already spoke; a thread already carries
- * this duty's marker) are not inputs at all. An input can be misconfigured. A
- * guard that is code cannot be.
+ * — `DEFAULT_CAPABILITIES` (see `capabilities.ts`) is empty, unlike every
+ * other duty's — and the reason two of its guards (a human already spoke; a
+ * thread already carries this duty's marker) are not inputs at all. An input
+ * can be misconfigured. A guard that is code cannot be.
  *
  * The order:
  *
@@ -108,22 +108,7 @@ import {
   type Responded,
 } from "./publish.js";
 import { summarize, type Run } from "./summary.js";
-
-/**
- * What this duty may do when the warrant says nothing about it: nothing.
- *
- * Every other duty in this repository has a cheapest reversible default —
- * triage falls back to `label`, translate to `edit-body` — because the file
- * being silent about a duty a maintainer has never heard of is not the same
- * fact as the file having decided against it. A first reply has no such
- * default: there is no cheap, reversible version of "post a comment that
- * reads as this project speaking". So the fallback here is the empty list,
- * and it is what makes both the implicit warrant (no file at all) and a
- * written file that is merely silent about `respond` hand back nothing —
- * see `Warrant.granted`'s doc comment in `core/warrant.ts` for why both
- * shapes resolve through the same `fallback` argument.
- */
-const DEFAULT_CAPABILITIES: readonly Capability[] = [];
+import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
@@ -564,6 +549,7 @@ async function decide(
   const confidence = verdict.winner.confidence;
   const responded: Responded = {
     language: language?.label ?? null,
+    languageCode: language?.code ?? null,
     // The real text a model wrote, always — never blanked for a reason not to
     // post it. See `publish.ts`'s doc comment on `Responded.text`.
     text: verdict.winner.text,

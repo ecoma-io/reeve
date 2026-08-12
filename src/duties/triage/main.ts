@@ -145,15 +145,7 @@ import {
   type ProposeReport,
 } from "./propose.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
-
-/**
- * What this duty may do when the warrant says nothing about it.
- *
- * A label, and nothing else. It is the only effect that is one click to undo,
- * and the default belongs to the duty rather than to the warrant reader because
- * only this duty knows what its cheapest reversible action is.
- */
-const DEFAULT_CAPABILITIES: readonly Capability[] = ["label"];
+import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /**
  * `warrant`'s own default in `action.yml`, repeated here rather than read back

@@ -31,14 +31,13 @@
  * enforces that by refusing to publish an empty section list, so it is enough
  * for this module to render no sections.
  */
+import { chromeLines } from "../../core/chrome.js";
 import type { Language } from "../../core/languages.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 import type { Publication } from "../../core/publish.js";
 
 /** This duty's marker: `<!-- reeve:translate source=… -->`. */
 export const marker: Marker = markerFor("translate");
-
-const HOME = "https://github.com/ecoma-io/reeve";
 
 /**
  * How much of the machinery behind a translation the block names.
@@ -178,8 +177,13 @@ export function publication(translated: Translated): Publication {
 
   return {
     fingerprint: translated.fingerprint,
-    sections: [boundary(), ...sections, footer(translated)],
+    sections: [boundary(translated.posted), ...sections, footer(translated)],
   };
+}
+
+/** Every language a set of postings actually carries, for the shared-boundary chrome case. */
+function codesOf(posted: readonly Posted[]): readonly string[] {
+  return posted.map((entry) => entry.to.code);
 }
 
 /**
@@ -190,15 +194,17 @@ export function publication(translated: Translated): Publication {
  * is answerable for. Stated once at the boundary rather than repeated per
  * section: the rule is about the horizontal rule above it, and a reader who
  * scrolled past it is already inside the machine's half.
+ *
+ * The note itself is chrome that sits above every posted language's section at
+ * once, so it renders once per distinct language actually posted this run —
+ * English first — rather than picking one of them to address the others in.
  */
-function boundary(): string {
+function boundary(posted: readonly Posted[]): string {
   return [
     "---",
     "",
     "> [!NOTE]",
-    "> **The text above is the original, and it is the version this project answers for.**",
-    `> Everything below is a machine translation by [Reeve](${HOME}).`,
-    "> Where the two disagree, the text above is the one that counts.",
+    ...chromeLines("translateBoundary", codesOf(posted)).map((line) => `> ${line}`),
   ].join("\n");
 }
 
@@ -260,22 +266,30 @@ function provenance(entry: Posted): string {
 /**
  * What the run did, for a reader who did not run it.
  *
- * Written in English rather than in any target language: it addresses everyone
- * reading the thread, and picking one of the configured languages for it would
- * be picking one of them as the real audience.
+ * This footer sits below every posted language's section at once, the same as
+ * `boundary()` above them, so each fixed note in it renders once per distinct
+ * language actually posted this run — English first — rather than picking one
+ * of the configured languages as the real audience.
  */
 function footer(translated: Translated): string {
-  const { from, skipped, truncated } = translated;
+  const { from, skipped, truncated, posted } = translated;
+  const codes = codesOf(posted);
 
   const notes: string[] = [];
-  if (from !== null) notes.push(`Translated from ${from.label}.`);
+  if (from !== null) {
+    notes.push(...chromeLines("translateFooterFrom", codes, { label: from.label }));
+  }
   if (truncated) {
-    notes.push("The body was longer than this run's limit, so its tail was not translated.");
+    notes.push(...chromeLines("translateFooterTruncated", codes));
   }
   if (skipped.length > 0) {
-    notes.push(`Not translated this run: ${skipped.map((language) => language.label).join(", ")}.`);
+    notes.push(
+      ...chromeLines("translateFooterSkipped", codes, {
+        list: skipped.map((language) => language.label).join(", "),
+      }),
+    );
   }
-  notes.push("Editing the text above republishes this; deleting this block regenerates it.");
+  notes.push(...chromeLines("translateFooterEditable", codes));
 
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
 }

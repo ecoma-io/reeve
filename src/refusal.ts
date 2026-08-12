@@ -25,16 +25,24 @@
  * built the answer is a corrected `uses:` line. Both are below, and both are
  * exercised by tests.
  */
-export const DUTIES: readonly string[] = ["translate", "triage"];
+export const DUTIES: readonly string[] = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+];
 
 /**
  * Duties with a documented contract and no code at this ref.
  *
  * A name in both lists would be answered by the first branch below, so a duty
  * moves from here to `DUTIES` in the pull request that builds it rather than in
- * a follow-up.
+ * a follow-up. Empty now that every documented duty has landed; the branch
+ * below stays live for whatever gets documented next, and is exercised in
+ * tests by passing a `planned` list of its own rather than by this constant.
  */
-export const PLANNED: readonly string[] = ["duplicate", "respond"];
+export const PLANNED: readonly string[] = [];
 
 const ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
 
@@ -74,12 +82,18 @@ export function normalise(raw: string): string {
  * the first time and has no idea why their job is red. Every branch ends in a
  * line they can paste.
  *
- * `built` is a parameter rather than a direct read of `DUTIES` so the message
- * for a ref that carries duties is testable before any ref does. A default that
- * is only ever overridden by a test would be a smell; this one is the whole
- * reason the function has two branches.
+ * `built` and `planned` are parameters rather than direct reads of `DUTIES` and
+ * `PLANNED` so the message for either kind of ref is testable independently of
+ * what this ref actually carries — `built` before any ref does, and `planned`
+ * after `PLANNED` has emptied out because every documented duty has landed. A
+ * default that is only ever overridden by a test would be a smell; this one is
+ * the whole reason the function has two branches.
  */
-export function refusal(raw: string, built: readonly string[] = DUTIES): string {
+export function refusal(
+  raw: string,
+  built: readonly string[] = DUTIES,
+  planned: readonly string[] = PLANNED,
+): string {
   const duty = normalise(raw);
 
   if (duty.length > 0 && built.includes(duty)) {
@@ -89,7 +103,7 @@ export function refusal(raw: string, built: readonly string[] = DUTIES): string 
     ].join("\n");
   }
 
-  if (duty.length > 0 && PLANNED.includes(duty)) {
+  if (duty.length > 0 && planned.includes(duty)) {
     return [
       `\`${duty}\` has a documented contract but no code at this ref.`,
       `It arrives with the stage that builds it: ${ROADMAP}`,

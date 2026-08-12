@@ -72,6 +72,7 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
     rationale: "Both describe the same login failure on Safari.",
     model: "Quick",
     attribution: "none",
+    language: "en",
     ...overrides,
   };
 }
@@ -400,6 +401,36 @@ describe("postOrReplace", () => {
 
     expect(result).toBe("withheld");
     expect(comments).toHaveLength(100);
+  });
+
+  it("follows the thread's own language for the headline and the footer's fixed lines", async () => {
+    const { api, comments } = stubOf([]);
+
+    await postOrReplace(api, AT, proposal({ language: "vi", rationale: "" }), "fp1");
+
+    expect(comments[0]?.body).toContain("Có thể trùng lặp với #7.");
+    expect(comments[0]?.body).toContain(
+      "Được đề xuất bởi một model, không phải quyết định của maintainer",
+    );
+    expect(comments[0]?.body).toContain("không bao giờ được đăng hai lần");
+    expect(comments[0]?.body).not.toContain("Possible duplicate of");
+  });
+
+  it("falls back to English chrome for a language code with no row, deterministically", async () => {
+    const { api, comments } = stubOf([]);
+
+    await postOrReplace(api, AT, proposal({ language: "fr", rationale: "" }), "fp1");
+
+    expect(comments[0]?.body).toContain("Possible duplicate of #7.");
+    expect(comments[0]?.body).toContain("Proposed by a model, not decided by a maintainer");
+  });
+
+  it("falls back to English chrome when detection reached no answer", async () => {
+    const { api, comments } = stubOf([]);
+
+    await postOrReplace(api, AT, proposal({ language: null, rationale: "" }), "fp1");
+
+    expect(comments[0]?.body).toContain("Possible duplicate of #7.");
   });
 });
 

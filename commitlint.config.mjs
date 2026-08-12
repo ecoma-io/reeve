@@ -28,6 +28,8 @@ export default {
         "publish", // idempotency markers and the write path
         "atlas", // a monorepo's own package layout, read as evidence
         "marker", // the marker grammar and the guards built on it
+        "chrome", // the localized string table for Reeve's own scaffolding text
+        "doctor", // the root action's read-only warrant and label diagnosis
 
         // The duties — one scope each. A new duty adds a scope here in the
         // commit that adds the duty.

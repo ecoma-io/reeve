@@ -49,5 +49,5 @@ outputs let a workflow tell the two apart.
 
 ---
 
-**Related:** [The warrant](warrant.md) · [The sweep](sweep.md) · [Cost](cost.md)
+**Related:** [The warrant](warrant.md) · [The sweep](sweep.md) · [Cost](cost.md) · [Doctor](doctor.md)
 **Next:** [The warrant](warrant.md) — decide what a duty may do once you trust what a dry run showed you

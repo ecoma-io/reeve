@@ -102,6 +102,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`guides/cost.md`](guides/cost.md)                                         | how-to                   | Control and predict what a run costs.                                             |
 | [`guides/troubleshooting.md`](guides/troubleshooting.md)                   | how-to                   | Diagnose a run that didn't do what you expected.                                  |
 | [`guides/dry-run.md`](guides/dry-run.md)                                   | how-to                   | Rehearse a run with nothing written.                                              |
+| [`guides/doctor.md`](guides/doctor.md)                                     | how-to                   | Check a warrant against a repository before anything runs for real.               |
 | [`concepts/authority-model.md`](concepts/authority-model.md)               | concept                  | Explain capabilities, the warrant, and the ladder as one coherent model.          |
 | [`concepts/language-layer.md`](concepts/language-layer.md)                 | concept                  | Explain the three language roles and how detection reasons about them.            |
 | [`concepts/duties-and-the-core.md`](concepts/duties-and-the-core.md)       | concept                  | Explain the boundary between the core and a duty, and why it's drawn there.       |
@@ -112,7 +113,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`reference/duties/lifecycle.md`](reference/duties/lifecycle.md)           | reference                | Full contract for the lifecycle duty.                                             |
 | [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
 | [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
-| [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action.                                            |
+| [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action and its `doctor: true` diagnostic mode.     |
 | [`security/threat-model.md`](security/threat-model.md)                     | security                 | Answer "what can go wrong and what stops it" without reading architecture.        |
 | [`security/security.md`](security/security.md)                             | security                 | Full trust-boundary and sanitising mechanics.                                     |
 | [`security/reporting.md`](security/reporting.md)                           | security                 | How to report a vulnerability.                                                    |

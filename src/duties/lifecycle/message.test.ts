@@ -82,39 +82,58 @@ describe("renderClose", () => {
 
 describe("footer", () => {
   it("names the author-only reset when resets is author", () => {
-    const text = footer(track({ resets: "author" }), EXEMPT_NONE);
+    const text = footer(track({ resets: "author" }), EXEMPT_NONE, "en");
     expect(text).toContain("A reply from this thread's author restarts the clock.");
   });
 
   it("names any-activity reset otherwise", () => {
-    const text = footer(track({ resets: "any" }), EXEMPT_NONE);
+    const text = footer(track({ resets: "any" }), EXEMPT_NONE, "en");
     expect(text).toContain("Any activity here restarts the clock.");
   });
 
   it("mentions the when label as the way to stop the track, for a when: track", () => {
-    const text = footer(track({ when: "needs-info" }), EXEMPT_NONE);
+    const text = footer(track({ when: "needs-info" }), EXEMPT_NONE, "en");
     expect(text).toContain("Removing the `needs-info` label also stops this track.");
   });
 
   it("says nothing about a when label for an inactivity track", () => {
-    const text = footer(track(), EXEMPT_NONE);
+    const text = footer(track(), EXEMPT_NONE, "en");
     expect(text).not.toContain("stops this track");
   });
 
   it("names the first exempt label as the permanent escape hatch", () => {
-    const text = footer(track(), { ...EXEMPT_NONE, labels: ["pinned", "wontfix"] });
+    const text = footer(track(), { ...EXEMPT_NONE, labels: ["pinned", "wontfix"] }, "en");
     expect(text).toContain("Adding `pinned` stops this permanently.");
     expect(text).not.toContain("wontfix");
   });
 
   it("omits the escape hatch line when exempt.labels is empty", () => {
-    const text = footer(track(), EXEMPT_NONE);
+    const text = footer(track(), EXEMPT_NONE, "en");
     expect(text).not.toContain("stops this permanently");
   });
 
   it("always carries the attribution line", () => {
-    expect(footer(track(), EXEMPT_NONE)).toContain(
+    expect(footer(track(), EXEMPT_NONE, "en")).toContain(
       "lifecycle — a policy this repository's own warrant configured.",
     );
+  });
+
+  it("follows the language the rest of the comment already resolved to", () => {
+    const text = footer(
+      track({ resets: "author", when: "needs-info" }),
+      { ...EXEMPT_NONE, labels: ["pinned"] },
+      "vi",
+    );
+    expect(text).toContain("Một phản hồi từ tác giả của chủ đề này sẽ khởi động lại đồng hồ.");
+    expect(text).toContain("Gỡ nhãn `needs-info` cũng sẽ dừng track này.");
+    expect(text).toContain("Thêm nhãn `pinned` sẽ dừng vĩnh viễn.");
+    expect(text).toContain("lifecycle — một chính sách do warrant của repository này cấu hình.");
+    expect(text).not.toContain("restarts the clock");
+  });
+
+  it("falls back to English for an unconfigured or null language, the same shape as renderSay", () => {
+    const configured = footer(track(), EXEMPT_NONE, "en");
+    expect(footer(track(), EXEMPT_NONE, "xx")).toBe(configured);
+    expect(footer(track(), EXEMPT_NONE, null)).toBe(configured);
   });
 });

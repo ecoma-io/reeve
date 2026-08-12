@@ -463,5 +463,5 @@ labels:
 
 ---
 
-**Related:** [The authority model](../concepts/authority-model.md) · [The warrant format reference](../reference/warrant-format.md) · [Dry run](dry-run.md)
+**Related:** [The authority model](../concepts/authority-model.md) · [The warrant format reference](../reference/warrant-format.md) · [Dry run](dry-run.md) · [Doctor](doctor.md)
 **Next:** [Languages](languages.md) — configure who Reeve writes to, on top of what it may do

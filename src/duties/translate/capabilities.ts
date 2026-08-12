@@ -1,0 +1,19 @@
+/**
+ * `translate`'s default, pulled out of `main.ts` so it can be read without
+ * running the duty.
+ *
+ * `main.ts` calls `run()` at import time — see `vitest.config.ts`'s coverage
+ * exclusion for why — so it cannot be the module doctor mode imports this
+ * from without executing translate itself. This file has no such side effect.
+ */
+import type { Capability } from "../../core/warrant.js";
+
+/**
+ * What this duty may do when the warrant says nothing about it.
+ *
+ * `edit-body` and nothing else — it is the only thing this duty has ever
+ * done, and the default belongs here rather than in the warrant reader
+ * because only this duty knows that editing the body is the whole of its
+ * work.
+ */
+export const DEFAULT_CAPABILITIES: readonly Capability[] = ["edit-body"];

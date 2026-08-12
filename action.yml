@@ -25,8 +25,60 @@ inputs:
       you can paste.
 
       A workflow uses a duty directly: `uses: ecoma-io/reeve/triage@v0.1`.
+      Under `doctor: true`, naming one here scopes the report to it instead —
+      see `doctor` below.
     required: false
     default: ""
+
+  doctor:
+    description: >-
+      `true` reads your warrant and checks it against this repository instead
+      of refusing. Nothing is written anywhere — no label, no comment, no
+      commit — this only reports what a duty would do with the configuration
+      it finds: every label the warrant or a `lifecycle:` policy names,
+      checked against this repository's actual labels; the capabilities each
+      duty would effectively have, from the same defaults its own `main.ts`
+      reads; and the defaults in play where the file never wrote an opinion.
+
+      `false`, the default, keeps this action doing what it has always done —
+      refusing, and naming the duty action you meant to write instead.
+    required: false
+    default: "false"
+
+  github-token:
+    description: >-
+      The token `doctor: true` reads labels with. `GITHUB_TOKEN` is enough —
+      this action never writes anything, so nothing wider than `issues: read`
+      is asked for. Unused when `doctor` is `false`.
+    required: false
+    default: ${{ github.token }}
+
+  warrant:
+    description: >-
+      Where the taxonomy and the permissions live. Every label a duty may
+      apply is named in this file, in your own words, with the cases it does
+      not cover — and every effect is checked against the parsed file rather
+      than against the model's account of what it was allowed to do. It may
+      also carry a `languages:` key and a `lifecycle:` policy, both checked by
+      `doctor: true` the same way.
+
+      Missing at this default path, there is no failure: `doctor: true`
+      reports the narrowest authority this build knows — labelling only, from
+      this repository's own label descriptions, leaving out any label GitHub
+      has no description for. Point this at a path of your own instead, and a
+      file missing there is reported red, because naming a file that is not
+      there is a configuration mistake rather than an absence. A file that
+      exists but does not parse is always reported red, wherever it lives.
+      Unused when `doctor` is `false`.
+    required: false
+    default: .github/reeve.yml
+
+outputs:
+  problems:
+    description: >-
+      How many findings `doctor: true` reported that would refuse a duty at
+      runtime — 0 when the configuration is healthy. Unset when `doctor` is
+      `false`.
 
 runs:
   using: node24

@@ -254,6 +254,50 @@ describe("publication", () => {
   });
 });
 
+describe("chrome — follows the languages actually posted", () => {
+  it("renders the boundary and footer in English when only English was posted", () => {
+    const rendered = body({ posted: [posted(english)] });
+    expect(rendered).toContain("The text above is the original");
+    expect(rendered).not.toContain("Văn bản phía trên là bản gốc");
+  });
+
+  it("renders the boundary in Vietnamese, and not English, when only Vietnamese was posted", () => {
+    const rendered = body({ posted: [posted(vietnamese)] });
+    expect(rendered).toContain("Văn bản phía trên là bản gốc");
+    expect(rendered).not.toContain("The text above is the original");
+  });
+
+  it("renders the boundary once per distinct posted language, English first, when several are posted", () => {
+    const rendered = body({ posted: [posted(vietnamese), posted(english)] });
+    const englishAt = rendered.indexOf("The text above is the original");
+    const vietnameseAt = rendered.indexOf("Văn bản phía trên là bản gốc");
+    expect(englishAt).toBeGreaterThan(-1);
+    expect(vietnameseAt).toBeGreaterThan(-1);
+    expect(englishAt).toBeLessThan(vietnameseAt);
+  });
+
+  it("does not repeat a language's boundary line for a second posting in the same language", () => {
+    // Two English postings (e.g. a language posted alongside a fallback) still
+    // share one English boundary line, not two.
+    const rendered = body({ posted: [posted(english), posted(english, "Another.", "model-b")] });
+    expect(rendered.split("The text above is the original")).toHaveLength(2);
+  });
+
+  it("renders the footer's fixed notes in Vietnamese when only Vietnamese was posted", () => {
+    const rendered = body({ posted: [posted(vietnamese)] });
+    expect(rendered).toContain("Được dịch từ Tiếng Việt.");
+    expect(rendered).toContain("Chỉnh sửa văn bản phía trên sẽ đăng lại bản dịch này");
+  });
+
+  it("falls back to English boundary/footer chrome for a posted language chrome has no row for", () => {
+    // Chinese has no row in chrome.ts's committed table — the whole point of the
+    // deterministic English fallback rather than a runtime guess at a translation.
+    const rendered = body({ posted: [posted(chinese)] });
+    expect(rendered).toContain("The text above is the original");
+    expect(rendered.split("The text above is the original")).toHaveLength(2);
+  });
+});
+
 describe("translationFingerprint", () => {
   it("is stable for the same text and the same languages", () => {
     expect(translationFingerprint(OFFICIAL, [english, chinese])).toBe(

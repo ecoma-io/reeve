@@ -1,3 +1,7 @@
+import { existsSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DUTIES, PLANNED, normalise, refusal } from "./refusal.js";
@@ -53,7 +57,11 @@ describe("refusal", () => {
   });
 
   it("points at the roadmap for a duty that is documented and not built", () => {
-    const message = refusal("duplicate", []);
+    // `PLANNED` is empty at this ref — every documented duty has landed — so
+    // the planned-branch is exercised with an injected list rather than the
+    // real one, the same way `built` is exercised above with an injected list
+    // before any ref carries anything.
+    const message = refusal("someday", [], ["someday"]);
     expect(message).toContain("documented contract but no code");
     expect(message).toContain("docs/doctrine/north-star.md#7-roadmap");
   });
@@ -86,13 +94,16 @@ describe("refusal", () => {
 describe("the duty lists", () => {
   it("covers every duty the documentation gives a contract to", () => {
     expect([...DUTIES, ...PLANNED].sort()).toEqual(
-      ["triage", "translate", "duplicate", "respond"].sort(),
+      ["triage", "translate", "duplicate", "respond", "lifecycle"].sort(),
     );
   });
 
-  it("carries both duties this ref builds", () => {
+  it("carries every duty this ref builds", () => {
     expect(DUTIES).toContain("translate");
     expect(DUTIES).toContain("triage");
+    expect(DUTIES).toContain("duplicate");
+    expect(DUTIES).toContain("respond");
+    expect(DUTIES).toContain("lifecycle");
   });
 
   it("never lists the same duty as both built and planned", () => {
@@ -101,5 +112,21 @@ describe("the duty lists", () => {
     // answered correctly — built is checked first — but the roadmap branch
     // would then be unreachable for it, which is a claim nothing tests.
     expect(DUTIES.filter((duty) => PLANNED.includes(duty))).toEqual([]);
+  });
+
+  it("names exactly the directories that ship their own action.yml", () => {
+    // The drift this guards against: a duty lands (a new directory with its
+    // own `action.yml` beside `dist/index.js`) and `DUTIES` is never told, so
+    // the root action's refusal keeps recommending only the old set. Reading
+    // the filesystem rather than a second hand-maintained list is the point —
+    // this is the one place that would catch the omission.
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const dutyDirs = readdirSync(repoRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => name !== "node_modules" && name !== ".git")
+      .filter((name) => existsSync(join(repoRoot, name, "action.yml")));
+
+    expect(dutyDirs.sort()).toEqual([...DUTIES].sort());
   });
 });

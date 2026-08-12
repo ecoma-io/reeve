@@ -33,6 +33,7 @@
  * translated, reworded by `show-attribution`, or simply absent. See
  * `payloadFor`.
  */
+import { chrome } from "../../core/chrome.js";
 import { isBotAuthor, type Author, type Location } from "../../core/forge.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 
@@ -71,6 +72,14 @@ export interface Proposal {
   /** The model's display name, already resolved by the caller. */
   readonly model: string;
   readonly attribution: Attribution;
+  /**
+   * The thread's own detected language code, or null when detection reached
+   * no answer. The judge is instructed to write `rationale` in this same
+   * language — see `verdict.ts`'s `prompt` — so this comment's own fixed
+   * lines follow it too, the same "chrome follows the language of the block
+   * it wraps" rule every other duty's publisher applies.
+   */
+  readonly language: string | null;
 }
 
 /**
@@ -343,7 +352,7 @@ export async function rehearse(
  */
 function render(proposal: Proposal): string {
   const lines = [
-    `Possible duplicate of #${String(proposal.duplicateOf)}.`,
+    chrome("duplicatePossible", proposal.language, { number: String(proposal.duplicateOf) }),
     ...(proposal.rationale.length > 0
       ? ["", defang(proposal.rationale, proposal.duplicateOf)]
       : []),
@@ -381,7 +390,7 @@ function defang(text: string, allowed: number): string {
  * exactly why it is not on the axis.
  */
 function footer(proposal: Proposal): string {
-  const parts = ["Proposed by a model, not decided by a maintainer — read it as a lead to check."];
+  const parts = [chrome("duplicateFooterFloor", proposal.language)];
 
   if (proposal.attribution !== "none") {
     parts.push(`Suggested by \`${proposal.model}\`.`);
@@ -392,7 +401,7 @@ function footer(proposal: Proposal): string {
         `lexical match ${proposal.lexicalScore.toFixed(2)}.`,
     );
   }
-  parts.push("Editing this thread and re-running replaces this comment; it is never posted twice.");
+  parts.push(chrome("duplicateFooterEditable", proposal.language));
 
   return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
 }

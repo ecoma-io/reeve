@@ -116,6 +116,30 @@ describe("renderSweepPage", () => {
     );
     expect(page.match(/does not grant to lifecycle/g)).toHaveLength(1);
   });
+
+  it("reports a chrome fallback at most once even when several threads share it", () => {
+    const done: DoneSummary = { ...NOTHING_DONE, commented: true };
+    const page = renderSweepPage(
+      ".github/reeve.yml",
+      false,
+      [
+        { number: 1, outcome: outcome({ language: "fr" }), done },
+        { number: 2, outcome: outcome({ language: "fr" }), done },
+      ],
+      null,
+    );
+    expect(page.match(/`fr`/g)).toHaveLength(1);
+  });
+
+  it("says nothing about a chrome fallback when no thread in the sweep actually commented", () => {
+    const page = renderSweepPage(
+      ".github/reeve.yml",
+      false,
+      [{ number: 1, outcome: outcome({ language: "fr" }), done: NOTHING_DONE }],
+      null,
+    );
+    expect(page).not.toContain("no translation for");
+  });
 });
 
 describe("renderThreadPage", () => {
@@ -157,5 +181,47 @@ describe("renderThreadPage", () => {
       NOTHING_DONE,
     );
     expect(page).not.toContain("Author language");
+  });
+
+  const COMMENTED: DoneSummary = { ...NOTHING_DONE, commented: true };
+
+  it("says nothing about a chrome fallback for a comment in a language chrome covers", () => {
+    const page = renderThreadPage(".github/reeve.yml", false, 42, outcome(), COMMENTED);
+    expect(page).not.toContain("no translation for");
+  });
+
+  it("notes a chrome fallback once for a comment in a language chrome has no row for", () => {
+    const page = renderThreadPage(
+      ".github/reeve.yml",
+      false,
+      42,
+      outcome({ language: "fr" }),
+      COMMENTED,
+    );
+    expect(page).toContain("`fr`");
+    expect(page).toContain("no translation for");
+    expect(page.match(/`fr`/g)).toHaveLength(1);
+  });
+
+  it("says nothing about a chrome fallback when nothing was actually commented", () => {
+    const page = renderThreadPage(
+      ".github/reeve.yml",
+      false,
+      42,
+      outcome({ language: "fr" }),
+      NOTHING_DONE,
+    );
+    expect(page).not.toContain("no translation for");
+  });
+
+  it("says nothing about a chrome fallback on a dry run, since nothing was actually posted", () => {
+    const page = renderThreadPage(
+      ".github/reeve.yml",
+      true,
+      42,
+      outcome({ language: "fr" }),
+      COMMENTED,
+    );
+    expect(page).not.toContain("no translation for");
   });
 });

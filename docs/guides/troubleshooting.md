@@ -228,5 +228,5 @@ the private channel.
 
 ---
 
-**Related:** [The sweep](sweep.md) · [Cost](cost.md) · [Languages](languages.md)
+**Related:** [The sweep](sweep.md) · [Cost](cost.md) · [Languages](languages.md) · [Doctor](doctor.md)
 **Next:** [The authority model](../concepts/authority-model.md) — the model behind every guardrail this page tells you how to read

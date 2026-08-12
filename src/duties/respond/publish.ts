@@ -30,13 +30,12 @@
  * it, and `main.ts` checks that list itself before it will call
  * `effects.comment`, rather than posting a marker with nothing under it.
  */
+import { chrome } from "../../core/chrome.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 import type { Publication } from "../../core/publish.js";
 
 /** This duty's marker: `<!-- reeve:respond source=… -->`. */
 export const marker: Marker = markerFor("respond");
-
-const HOME = "https://github.com/ecoma-io/reeve";
 
 /** What a run can say about why this draft was the one posted. */
 export interface Decision {
@@ -54,6 +53,13 @@ export interface Decision {
 export interface Responded {
   /** The language the thread was written in, or null when detection reached no answer. */
   readonly language: string | null;
+  /**
+   * The same language, as the code {@link chrome} keys its table by, rather
+   * than the display label {@link language} carries. Null under the same
+   * condition {@link language} is null — detection reached no answer, so
+   * there is nothing here for this reply's own chrome to follow either.
+   */
+  readonly languageCode: string | null;
   /**
    * The winning draft, already sanitised. Always the real text a model
    * wrote — never blanked for a reason to withhold posting. Whether a
@@ -109,7 +115,13 @@ export function publication(responded: Responded): Publication {
 
   return {
     fingerprint: responded.fingerprint,
-    sections: [boundary(), responded.text, "", provenance(responded), footer(responded)],
+    sections: [
+      boundary(responded.languageCode),
+      responded.text,
+      "",
+      provenance(responded),
+      footer(responded),
+    ],
   };
 }
 
@@ -123,12 +135,16 @@ export function publication(responded: Responded): Publication {
  * `main.ts` can produce a `Responded` whose `text` skips this: `publication`
  * is the only path from a decision to a posted body, and it always prepends
  * this line.
+ *
+ * The reply below it already belongs to one language — the thread's own, or
+ * English when detection reached no answer — so this note follows the same
+ * language, English fallback and all.
  */
-function boundary(): string {
+function boundary(languageCode: string | null): string {
   return [
     "> [!NOTE]",
-    `> This reply was drafted by [Reeve](${HOME}), not by a maintainer.`,
-    "> A maintainer has not reviewed it. Treat it as a starting point, not an answer.",
+    `> ${chrome("respondBoundaryDrafted", languageCode)}`,
+    `> ${chrome("respondBoundaryCaveat", languageCode)}`,
   ].join("\n");
 }
 
@@ -167,16 +183,17 @@ function provenance(responded: Responded): string {
 /**
  * What a reader who did not run this should know.
  *
- * Written in English rather than in the reply's own language: it addresses
- * whoever is deciding whether to trust the comment above, and that is not
- * always the thread's author.
+ * Follows the reply's own language, the same as `boundary()` above it, rather
+ * than always addressing the reader in English: whoever is deciding whether
+ * to trust the comment above is reading the reply itself in that language
+ * already.
  */
 function footer(responded: Responded): string {
   const notes = [
     responded.language === null
-      ? "This project could not identify the thread's language, so the reply above is in English."
-      : `The thread was written in ${responded.language}.`,
-    "Reeve answers a thread once. This comment is the record of it.",
+      ? chrome("respondFooterUnknown", responded.languageCode)
+      : chrome("respondFooterKnown", responded.languageCode, { label: responded.language }),
+    chrome("respondFooterRecord", responded.languageCode),
   ];
 
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;

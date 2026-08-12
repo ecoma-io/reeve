@@ -119,17 +119,7 @@ import {
   type SweptThread,
 } from "./summary.js";
 import { judge } from "./verdict.js";
-
-/**
- * What this duty may do when the warrant says nothing about it: nothing.
- *
- * Unlike triage's cheapest-reversible-action default, there is no capability
- * here worth granting for free. A label a run got wrong costs one click to
- * remove; a comment naming the wrong thread as a duplicate is a claim posted
- * in public about somebody else's report, and that is not a default a duty
- * should reach for on a repository that never wrote an opinion about it.
- */
-const DEFAULT_CAPABILITIES: readonly Capability[] = [];
+import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
@@ -754,6 +744,11 @@ async function decide(
         rationale,
         model: judged.model !== null ? shown(settings.modelNames, judged.model) : "unknown",
         attribution: settings.attribution,
+        // The judge writes `rationale` in the thread's own language (see
+        // `verdict.ts`'s `prompt`), so this comment's fixed lines follow the
+        // same code — not the pivot language `pivotLanguage`/`threadLanguage`
+        // below only use for cross-language corpus matching.
+        language: detection.language?.code ?? null,
       }
     : null;
 
@@ -977,6 +972,10 @@ function page(
     dryRun: settings.dryRun,
     warrant: settings.warrant,
     language: outcome.language,
+    // The code the proposal's own chrome is keyed by, not the label
+    // `language` above carries — only present alongside a real `proposal`,
+    // which is exactly when this duty's chrome renders anything at all.
+    languageCode: outcome.proposal?.language ?? null,
     ungranted: outcome.ungranted,
     duplicateOf: outcome.duplicateOf,
     confidence: outcome.confidence,
