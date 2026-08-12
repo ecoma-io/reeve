@@ -6,6 +6,7 @@ import {
   createThread,
   isMissing,
   listCorrectionFiles,
+  listLabelEvents,
   listOpenThreads,
   listReplies,
   listRepositoryLabels,
@@ -243,6 +244,35 @@ describe("listReplies", () => {
     expect(api.rest.issues.listComments).toHaveBeenCalledTimes(11);
   });
 
+  it("reaches back into the page before a partial last page, rather than assume every fetched page is full", async () => {
+    // The bug this replaces: `pagesNeeded = ceil(max / REPLY_PAGE)` assumed
+    // every fetched page holds `REPLY_PAGE` replies, so a 150-reply thread
+    // asked for its newest 100 would compute `ceil(100 / 100) = 1` page,
+    // walk back exactly one page — the 50-reply last page — and hand back
+    // only those 50, missing the 50 replies on the page before it.
+    const firstHundred = Array.from({ length: 100 }, (_, index) => ({
+      id: index,
+      body: `c-${String(index)}`,
+    }));
+    const lastFifty = Array.from({ length: 50 }, (_, index) => ({
+      id: 100 + index,
+      body: `c-${String(100 + index)}`,
+    }));
+    const api = paged([firstHundred, lastFifty]);
+
+    const { replies, more } = await listReplies(api, AT, { max: 100, order: "newest" });
+
+    // Exactly the 100 truly newest replies — ids 50 through 149 — not the 50
+    // the last page alone could offer.
+    expect(replies).toHaveLength(100);
+    expect(replies[0]?.id).toBe(50);
+    expect(replies.at(-1)?.id).toBe(149);
+    expect(more).toBe(true);
+    // Both pages read: the discovery request (page 1, reused for the walk)
+    // and the true last page (page 2).
+    expect(api.rest.issues.listComments).toHaveBeenCalledTimes(2);
+  });
+
   it("reuses the discovery page instead of re-fetching it, when the backward walk reaches all the way to page 1", async () => {
     const pages = Array.from({ length: 3 }, (_, pageIndex) =>
       Array.from({ length: 100 }, (_, index) => ({
@@ -448,6 +478,80 @@ describe("readStanding", () => {
     const { api } = trackerOf({ state: "closed" });
 
     await expect(readStanding(api, AT)).resolves.toMatchObject({ closed: true });
+  });
+});
+
+describe("listLabelEvents", () => {
+  /**
+   * A `TrackerApi` whose `listEvents` answers a different page every call —
+   * enough to drive the completeness flag past its ceiling, the way a
+   * thread with a very long label history would.
+   */
+  function eventsOf(pages: { event: string; label?: { name?: string } }[][]): TrackerApi {
+    const listEvents = vi.fn((params: { page?: number }) =>
+      Promise.resolve({ data: pages[(params.page ?? 1) - 1] ?? [] }),
+    );
+    return {
+      rest: {
+        issues: {
+          get: vi.fn(() => Promise.resolve({ data: {} })),
+          update: vi.fn(() => Promise.resolve({})),
+          addLabels: vi.fn(() => Promise.resolve({})),
+          createComment: vi.fn(() => Promise.resolve({})),
+          addAssignees: vi.fn(() => Promise.resolve({})),
+          listLabelsForRepo: vi.fn(() => Promise.resolve({ data: [] })),
+          listEvents,
+        },
+      },
+    } as unknown as TrackerApi;
+  }
+
+  it("reads a short label history as complete", async () => {
+    const api = eventsOf([
+      [
+        { event: "labeled", label: { name: "bug" } },
+        { event: "unlabeled", label: { name: "bug" } },
+      ],
+    ]);
+
+    await expect(listLabelEvents(api, AT)).resolves.toEqual({
+      events: [
+        { label: "bug", action: "labeled", isBot: false },
+        { label: "bug", action: "unlabeled", isBot: false },
+      ],
+      complete: true,
+    });
+  });
+
+  it("reports incomplete when the walk hits its page ceiling while the last page read is still full", async () => {
+    // Ten full pages of a hundred filler events each — the walk stops at the
+    // ceiling never having seen a short page, so it cannot tell whether the
+    // real history ends there or keeps going past what it read.
+    const full = Array.from({ length: 10 }, () =>
+      Array.from({ length: 100 }, () => ({ event: "labeled", label: { name: "filler" } })),
+    );
+    const api = eventsOf(full);
+
+    const { complete } = await listLabelEvents(api, AT);
+
+    expect(complete).toBe(false);
+    expect(api.rest.issues.listEvents).toHaveBeenCalledTimes(10);
+  });
+
+  it("reports complete when the history ends exactly on a full page", async () => {
+    // A history that happens to be precisely `EVENT_PAGE * EVENT_PAGES` long
+    // must not be confused with one that was cut off: the next page, asked
+    // for, comes back empty rather than short, and that is what tells the
+    // walk it has genuinely reached the end.
+    const nine = Array.from({ length: 9 }, () =>
+      Array.from({ length: 100 }, () => ({ event: "labeled", label: { name: "filler" } })),
+    );
+    const api = eventsOf([...nine, []]);
+
+    const { complete } = await listLabelEvents(api, AT);
+
+    expect(complete).toBe(true);
+    expect(api.rest.issues.listEvents).toHaveBeenCalledTimes(10);
   });
 });
 

@@ -252,24 +252,29 @@ export async function listReplies(
     return { replies: all.slice(-max), more: all.length > max };
   }
 
-  // Walk backward from the true end, only as many pages as `max` can ever
-  // need, capped at `REPLY_PAGES` the same way the oldest-first walk is —
-  // the ceiling this run will pay for, not the ceiling on how large a thread
-  // may be.
-  const pagesNeeded = Math.min(
-    REPLY_PAGES,
-    Math.ceil(Math.min(max, REPLY_PAGE * REPLY_PAGES) / REPLY_PAGE),
-    lastPage,
-  );
-  const firstPageWalked = lastPage - pagesNeeded + 1;
-
+  // Walk backward from the true end, one page at a time, stopping once enough
+  // replies are in hand, the start of the thread is reached, or `REPLY_PAGES`
+  // pages have been spent — the same ceiling the forward walk pays for.
+  //
+  // Pages fetched are counted as they happen rather than precomputed from
+  // `max / REPLY_PAGE`: only `lastPage` — the true last page, fetched first
+  // here — can ever hold fewer than `REPLY_PAGE` replies, and a precomputed
+  // page count that assumes every page is full falls short by exactly that
+  // shortfall whenever it isn't. A 150-reply thread asked for its newest 100,
+  // with a 50-reply last page, needs both of its pages read to reach 100 —
+  // not the one page a full-page assumption would have stopped at.
   const collected: Reply[] = [];
-  for (let n = lastPage; n >= firstPageWalked; n -= 1) {
+  let firstPageWalked: number;
+  let pagesFetched = 0;
+  for (let n = lastPage; ; n -= 1) {
     // Page 1 was already fetched above, to learn where the thread ends —
     // reusing it here means a thread short enough to walk back to the start
     // never pays for it twice.
     const { data } = n === 1 ? first : await page(n);
     collected.unshift(...data.map(toReply));
+    firstPageWalked = n;
+    pagesFetched += 1;
+    if (collected.length >= max || n === 1 || pagesFetched >= REPLY_PAGES) break;
   }
 
   return {
@@ -629,6 +634,21 @@ const EVENT_PAGE = 100;
 const EVENT_PAGES = 10;
 
 /**
+ * The result of walking a thread's timeline for `listLabelEvents`.
+ *
+ * `complete` is what makes the ceiling honest to a caller instead of a silent
+ * truncation: `false` means the walk stopped at `EVENT_PAGES` while the last
+ * page read was still full, so there may be earlier `labeled`/`unlabeled`
+ * events this call never saw. A caller using `events` to decide who most
+ * recently touched a label cannot tell "no event" apart from "an event past
+ * where this stopped reading" once that happens, and must not guess.
+ */
+export interface LabelHistory {
+  readonly events: readonly LabelEvent[];
+  readonly complete: boolean;
+}
+
+/**
  * Every `labeled`/`unlabeled` event on a thread's timeline, oldest first —
  * the same order the timeline API returns it in, which is what lets a caller
  * fold this into "the most recent event for a given label" with a single
@@ -638,11 +658,9 @@ const EVENT_PAGES = 10;
  * extra request per thread, worth spending only where the alternative is
  * importing a machine's own old verdict as a maintainer's.
  */
-export async function listLabelEvents(
-  api: TrackerApi,
-  at: Location,
-): Promise<readonly LabelEvent[]> {
+export async function listLabelEvents(api: TrackerApi, at: Location): Promise<LabelHistory> {
   const events: LabelEvent[] = [];
+  let complete = true;
 
   for (let page = 1; page <= EVENT_PAGES; page += 1) {
     const { data } = await api.rest.issues.listEvents({
@@ -661,9 +679,10 @@ export async function listLabelEvents(
     }
 
     if (data.length < EVENT_PAGE) break;
+    if (page === EVENT_PAGES) complete = false;
   }
 
-  return events;
+  return { events, complete };
 }
 
 /**
