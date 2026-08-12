@@ -35314,6 +35314,242 @@ function commitMessage(correction) {
   return `memory: record #${String(correction.thread)} as ${decided}`;
 }
 
+// src/duties/triage/record.ts
+function recordTrigger() {
+  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
+  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
+  const payload = context2.payload;
+  if (payload.action === "reopened") {
+    if (isBotAuthor(payload.sender)) {
+      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
+    }
+    return { eligible: true, kind: "reopen", reason: "" };
+  }
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
+    return { eligible: false, kind: "label", reason: "" };
+  }
+  if (isBotAuthor(payload.sender)) {
+    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
+  }
+  return { eligible: true, kind: "label", reason: "" };
+}
+function senderLogin() {
+  const payload = context2.payload;
+  return payload.sender?.login ?? "";
+}
+function labelChange() {
+  const payload = context2.payload;
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
+  const label = payload.label?.name;
+  if (label === void 0 || label.length === 0) return null;
+  return { label, action: payload.action };
+}
+function recordGrantedByFile(grantedCapabilities) {
+  return grantedCapabilities.includes("record");
+}
+function recordGrantedByRun(permitted) {
+  return permitted.includes("record");
+}
+async function computePivot(warrant, standing, body, code, settings, stages, weather) {
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
+    return { pivot: null, pivotNote: null };
+  }
+  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+  const rendered = await translateToPivot({
+    provider: stages.pivot,
+    models: pivotModels,
+    title: standing.title,
+    body,
+    to: pivotLanguage,
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+  });
+  for (const failure of rendered.failures) {
+    warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (rendered.draft !== null) {
+    return {
+      pivot: {
+        language: pivotLanguage.code,
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT)
+      },
+      pivotNote: null
+    };
+  }
+  const pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
+  info(pivotNote);
+  return { pivot: null, pivotNote };
+}
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed) {
+  const warrant = authority2.warrant;
+  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  if (by === "sweep" && decidedLabels.length > 0) {
+    const history = await listLabelEvents(api, at);
+    if (!history.complete) {
+      info(
+        `#${String(at.number)}: label history is longer than one run reads \u2014 cannot attribute, nothing imported.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: false,
+        unattributable: true
+      };
+    }
+    const lastLabeledByBot = /* @__PURE__ */ new Map();
+    for (const event of history.events) {
+      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
+    }
+    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
+    if (decidedLabels.length === 0) {
+      info(
+        `#${String(at.number)}: every taxonomy label here was machine-applied \u2014 nothing to import.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: true,
+        unattributable: false
+      };
+    }
+  }
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+      settings.temperature
+    )
+  );
+  const code = detection.language?.code ?? null;
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather
+  );
+  let proposed = [];
+  let outcomeField = null;
+  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
+    const before = new Set(decidedLabels);
+    if (changed.action === "unlabeled") before.add(changed.label);
+    else before.delete(changed.label);
+    proposed = [...before];
+    if (changed.action === "unlabeled") {
+      outcomeField = await removedByAutomation(api, at, changed.label) ? "overruled" : null;
+    }
+  }
+  const correction = {
+    repo: `${at.owner}/${at.repo}`,
+    thread: at.number,
+    duty: "triage",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed,
+    decided: decidedLabels,
+    by,
+    note: null,
+    outcome: outcomeField,
+    duplicateOf: null,
+    pivot
+  };
+  if (settings.dryRun) {
+    info(
+      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
+    );
+  } else {
+    await writeCorrection(api, at, settings.corrections, correction);
+  }
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+    machineOnly: false,
+    unattributable: false
+  };
+}
+async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf) {
+  const warrant = authority2.warrant;
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+      settings.temperature
+    )
+  );
+  const code = detection.language?.code ?? null;
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather
+  );
+  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  const correction = {
+    repo: `${at.owner}/${at.repo}`,
+    thread: at.number,
+    duty: "duplicate",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed: [],
+    decided: decidedLabels,
+    by,
+    note: null,
+    outcome: "overruled",
+    duplicateOf,
+    pivot
+  };
+  if (settings.dryRun) {
+    info(
+      `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
+    );
+  } else {
+    await writeCorrection(api, at, settings.corrections, correction);
+  }
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+    machineOnly: false,
+    unattributable: false
+  };
+}
+function describeRecordOutcome(outcome) {
+  return outcome.decided.length > 0 ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}` : "recorded with no taxonomy labels";
+}
+
 // src/duties/triage/summary.ts
 function summarize(run2) {
   const parts = [
@@ -36296,7 +36532,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   }
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
   const { permitted } = narrow(grantedCapabilities, settings.apply);
-  const recording = permitted.includes("record");
+  const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
   if (!authority2.implicit) {
     await resolveMissingLabels(
@@ -36433,9 +36669,6 @@ function noticeProposeSweepOnly(authority2) {
     );
   }
 }
-function describeRecordOutcome(outcome) {
-  return outcome.decided.length > 0 ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}` : "recorded with no taxonomy labels";
-}
 function remainingOf(acc) {
   return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
@@ -36534,16 +36767,16 @@ async function run() {
               settings.dryRun
             );
           }
-          if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
+          if (trigger.eligible && recordGrantedByFile(grantedCapabilities) && !recordGrantedByRun(permitted)) {
             notice(
               `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
             );
           }
-          if (trigger.reason !== "" && permitted.includes("record")) {
+          if (trigger.reason !== "" && recordGrantedByRun(permitted)) {
             info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
           }
           noticeProposeSweepOnly(authority2);
-          if (trigger.eligible && permitted.includes("record") && trigger.kind === "reopen") {
+          if (trigger.eligible && recordGrantedByRun(permitted) && trigger.kind === "reopen") {
             const check = await checkReversal(api, at, standing, senderLogin());
             if (check.authorReopen) {
               notice(
@@ -36565,7 +36798,7 @@ async function run() {
             } else {
               outcome = await decide(authority2, standing, settings, stages, weather);
             }
-          } else if (trigger.eligible && permitted.includes("record")) {
+          } else if (trigger.eligible && recordGrantedByRun(permitted)) {
             recordOutcome = await recordCorrection(
               api,
               at,
@@ -36803,231 +37036,6 @@ ${pivot.draft.body}`,
     // may do and a rehearsal rehearses the same narrowing a real run has.
     applied: permitted.includes("label") ? decision.applied : [],
     refused: decision.refused
-  };
-}
-function recordTrigger() {
-  const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
-  const payload = context2.payload;
-  if (payload.action === "reopened") {
-    if (isBotAuthor(payload.sender)) {
-      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
-    }
-    return { eligible: true, kind: "reopen", reason: "" };
-  }
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return { eligible: false, kind: "label", reason: "" };
-  }
-  if (isBotAuthor(payload.sender)) {
-    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
-  }
-  return { eligible: true, kind: "label", reason: "" };
-}
-function senderLogin() {
-  const payload = context2.payload;
-  return payload.sender?.login ?? "";
-}
-function labelChange() {
-  const payload = context2.payload;
-  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
-  const label = payload.label?.name;
-  if (label === void 0 || label.length === 0) return null;
-  return { label, action: payload.action };
-}
-async function computePivot(warrant, standing, body, code, settings, stages, weather) {
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
-    return { pivot: null, pivotNote: null };
-  }
-  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-  const rendered = await translateToPivot({
-    provider: stages.pivot,
-    models: pivotModels,
-    title: standing.title,
-    body,
-    to: pivotLanguage,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-  });
-  for (const failure of rendered.failures) {
-    warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
-  }
-  if (rendered.draft !== null) {
-    return {
-      pivot: {
-        language: pivotLanguage.code,
-        title: rendered.draft.title,
-        excerpt: rendered.draft.body.slice(0, EXCERPT)
-      },
-      pivotNote: null
-    };
-  }
-  const pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
-  info(pivotNote);
-  return { pivot: null, pivotNote };
-}
-async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed) {
-  const warrant = authority2.warrant;
-  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
-  if (by === "sweep" && decidedLabels.length > 0) {
-    const history = await listLabelEvents(api, at);
-    if (!history.complete) {
-      info(
-        `#${String(at.number)}: label history is longer than one run reads \u2014 cannot attribute, nothing imported.`
-      );
-      return {
-        recorded: false,
-        language: null,
-        decided: [],
-        pivot: false,
-        pivotNote: null,
-        machineOnly: false,
-        unattributable: true
-      };
-    }
-    const lastLabeledByBot = /* @__PURE__ */ new Map();
-    for (const event of history.events) {
-      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
-    }
-    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
-    if (decidedLabels.length === 0) {
-      info(
-        `#${String(at.number)}: every taxonomy label here was machine-applied \u2014 nothing to import.`
-      );
-      return {
-        recorded: false,
-        language: null,
-        decided: [],
-        pivot: false,
-        pivotNote: null,
-        machineOnly: true,
-        unattributable: false
-      };
-    }
-  }
-  const limit = settings.maxBodyChars;
-  const body = limit === null ? standing.body : standing.body.slice(0, limit);
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather,
-      settings.temperature
-    )
-  );
-  const code = detection.language?.code ?? null;
-  const { pivot, pivotNote } = await computePivot(
-    warrant,
-    standing,
-    body,
-    code,
-    settings,
-    stages,
-    weather
-  );
-  let proposed = [];
-  let outcomeField = null;
-  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
-    const before = new Set(decidedLabels);
-    if (changed.action === "unlabeled") before.add(changed.label);
-    else before.delete(changed.label);
-    proposed = [...before];
-    if (changed.action === "unlabeled") {
-      outcomeField = await removedByAutomation(api, at, changed.label) ? "overruled" : null;
-    }
-  }
-  const correction = {
-    repo: `${at.owner}/${at.repo}`,
-    thread: at.number,
-    duty: "triage",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed,
-    decided: decidedLabels,
-    by,
-    note: null,
-    outcome: outcomeField,
-    duplicateOf: null,
-    pivot
-  };
-  if (settings.dryRun) {
-    info(
-      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
-    );
-  } else {
-    await writeCorrection(api, at, settings.corrections, correction);
-  }
-  return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote,
-    machineOnly: false,
-    unattributable: false
-  };
-}
-async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf) {
-  const warrant = authority2.warrant;
-  const limit = settings.maxBodyChars;
-  const body = limit === null ? standing.body : standing.body.slice(0, limit);
-  const detection = await detectLanguage(
-    body.length === 0 ? standing.title : body,
-    settings.languages,
-    createLanguagePicker(
-      stages.detect,
-      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
-      weather,
-      settings.temperature
-    )
-  );
-  const code = detection.language?.code ?? null;
-  const { pivot, pivotNote } = await computePivot(
-    warrant,
-    standing,
-    body,
-    code,
-    settings,
-    stages,
-    weather
-  );
-  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
-  const correction = {
-    repo: `${at.owner}/${at.repo}`,
-    thread: at.number,
-    duty: "duplicate",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    title: standing.title,
-    excerpt: body.slice(0, EXCERPT),
-    language: code,
-    proposed: [],
-    decided: decidedLabels,
-    by,
-    note: null,
-    outcome: "overruled",
-    duplicateOf,
-    pivot
-  };
-  if (settings.dryRun) {
-    info(
-      `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
-    );
-  } else {
-    await writeCorrection(api, at, settings.corrections, correction);
-  }
-  return {
-    recorded: true,
-    language: detection.language?.label ?? null,
-    decided: decidedLabels,
-    pivot: pivot !== null,
-    pivotNote,
-    machineOnly: false,
-    unattributable: false
   };
 }
 async function createMissingLabels(api, at, toCreate) {
