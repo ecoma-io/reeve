@@ -134,10 +134,22 @@ inputs:
     description: >-
       Also translate the thread's replies, each detected and fingerprinted on
       its own. Off by default because the ceiling is real: every reply, times
-      every language it is missing. One run reads the most recent hundred and
-      warns when there were more.
+      every language it is missing. One run reads the most recent replies
+      (`max-replies`) and warns when there were more.
     required: false
     default: "false"
+
+  max-replies:
+    description: >-
+      How many of a thread's most recent replies one run reads, when
+      `translate-replies` is on, or `none` for no bound. GitHub's own comment
+      listing has no reverse-chronological order, so finding the most recent
+      ones means walking forward from the start of the thread — this duty
+      still does that within one run, but a thread of thousands of replies is
+      the case even `none` will not fully read, and the run says so rather
+      than pretending otherwise.
+    required: false
+    default: "100"
 
   show-attribution:
     description: >-

@@ -44,12 +44,20 @@ function apiOf(
   const update = vi.fn(() => Promise.resolve({}));
   const listComments = vi.fn(() => Promise.resolve({ data: comments }));
   const updateComment = vi.fn((_params: { body: string }) => Promise.resolve({}));
+  const getComment = vi.fn((params: { comment_id: number }) =>
+    Promise.resolve({
+      data: { body: comments.find((comment) => comment.id === params.comment_id)?.body ?? "" },
+    }),
+  );
   return {
-    api: { rest: { issues: { get, update, listComments, updateComment } } } as GitHubApi,
+    api: {
+      rest: { issues: { get, update, listComments, updateComment, getComment } },
+    } as GitHubApi,
     get,
     update,
     listComments,
     updateComment,
+    getComment,
   };
 }
 
@@ -97,6 +105,7 @@ describe("listReplies", () => {
       repo: "reeve",
       issue_number: 42,
       per_page: 100,
+      page: 1,
     });
   });
 
@@ -138,6 +147,61 @@ describe("listReplies", () => {
       { id: 991, body: "Ran the checks.", login: "github-actions[bot]", isBot: true },
     ]);
   });
+
+  /** A client whose `listComments` answers a different page every call. */
+  function paged(pages: { id: number; body: string }[][]): GitHubApi {
+    const listComments = vi.fn((params: { page?: number }) =>
+      Promise.resolve({ data: pages[(params.page ?? 1) - 1] ?? [] }),
+    );
+    return {
+      rest: {
+        issues: {
+          get: vi.fn(() => Promise.resolve({ data: { body: "" } })),
+          update: vi.fn(() => Promise.resolve({})),
+          listComments,
+          updateComment: vi.fn(() => Promise.resolve({})),
+          getComment: vi.fn(() => Promise.resolve({ data: { body: "" } })),
+        },
+      },
+    };
+  }
+
+  it("walks forward through every page to find the newest replies", async () => {
+    // GitHub's comment listing has no reverse-chronological order — the only
+    // way to the newest ones is walking forward to the true end.
+    const oldest = Array.from({ length: 100 }, (_, index) => ({
+      id: index,
+      body: `old-${String(index)}`,
+    }));
+    const newest = [
+      { id: 200, body: "Vẫn còn lỗi." },
+      { id: 201, body: "Tôi cũng vậy." },
+    ];
+    const api = paged([oldest, newest]);
+
+    const { replies, more } = await listReplies(api, AT, { max: 2, order: "newest" });
+
+    expect(replies).toEqual([
+      { id: 200, body: "Vẫn còn lỗi.", login: "", isBot: false },
+      { id: 201, body: "Tôi cũng vậy.", login: "", isBot: false },
+    ]);
+    expect(more).toBe(true);
+  });
+
+  it("stops at the first page reading oldest-first, never walking further than `max` needs", async () => {
+    const oldest = Array.from({ length: 100 }, (_, index) => ({
+      id: index,
+      body: `c-${String(index)}`,
+    }));
+    const api = paged([oldest, oldest]);
+
+    const { replies } = await listReplies(api, AT, { max: 5, order: "oldest" });
+
+    expect(replies).toHaveLength(5);
+    expect(replies[0]?.id).toBe(0);
+    expect(replies[4]?.id).toBe(4);
+    expect(api.rest.issues.listComments).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("createReply", () => {
@@ -150,6 +214,23 @@ describe("createReply", () => {
     await expect(createReply(api, AT, reply).read()).resolves.toBe(OFFICIAL);
     expect(get).not.toHaveBeenCalled();
     expect(listComments).not.toHaveBeenCalled();
+  });
+
+  it("asks GitHub for a second read, so a re-read after writing sees what actually landed", async () => {
+    // The one case the cached first read cannot answer: `publish`'s
+    // re-read-after-write, which exists to notice another write racing this
+    // one. A second read that just replayed `reply.body` would call every
+    // publish "mismatched" — see `core/forge.ts`.
+    const { api, getComment } = apiOf("something else", [{ id: 991, body: "edited elsewhere" }]);
+    const thread = createReply(api, AT, reply);
+
+    await expect(thread.read()).resolves.toBe(OFFICIAL);
+    await expect(thread.read()).resolves.toBe("edited elsewhere");
+    expect(getComment).toHaveBeenCalledWith({
+      owner: "ecoma-io",
+      repo: "reeve",
+      comment_id: 991,
+    });
   });
 
   it("writes the body back to the comment by its id, not to the thread", async () => {
@@ -388,6 +469,16 @@ describe("listOpenThreads", () => {
       per_page: 100,
       page: 1,
     });
+  });
+
+  it("asks for closed or all threads when told to, instead of the open default", async () => {
+    const { api, listForRepo } = sweepOf([[entry(3, "2026-03-01T00:00:00Z")]]);
+
+    await listOpenThreads(api, where, null, "closed");
+
+    expect(listForRepo).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "closed" }),
+    );
   });
 
   it("reads a thread's number, text and labels off the listing", async () => {

@@ -116,6 +116,16 @@ const DEFAULT_CAPABILITIES: readonly Capability[] = ["edit-body"];
  */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
+/**
+ * `languages`'s own default in `action.yml`, repeated here for the same
+ * reason `DEFAULT_WARRANT_PATH` is. Used only to tell "this is the input
+ * nobody touched" from "this is what somebody typed, and it happens to match"
+ * — the two are not otherwise distinguishable once the input has already
+ * been filled in, and the run treats the coincidence as harmless rather than
+ * try to detect it.
+ */
+const DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
+
 interface Settings {
   readonly token: string;
   /** The thread to work on, or null in `sweep`. */
@@ -134,6 +144,8 @@ interface Settings {
   /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
   readonly maxBodyChars: number | null;
   readonly replies: boolean;
+  /** How many of a thread's newest replies one run reads. `null` is no bound. */
+  readonly maxReplies: number | null;
   readonly attribution: Attribution;
   readonly dryRun: boolean;
   readonly baseUrl: string;
@@ -168,6 +180,7 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
     drafts: whole("drafts", core.getInput("drafts")),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
     replies: core.getBooleanInput("translate-replies"),
+    maxReplies: bounded("max-replies", core.getInput("max-replies")),
     attribution: readAttribution(),
   };
 }
@@ -487,6 +500,17 @@ async function translateText(
       ? `${what}: nothing written — ${outcome.reason}.`
       : `${what}: ${outcome.action}.`,
   );
+  // Not red: the write already landed, and whatever raced it is a fact about
+  // this run's timing, not about whether it was allowed to happen. `docs/usage/
+  // installation.md`'s `concurrency:` group is the fix; this is the run saying
+  // it hit exactly the gap that guidance closes.
+  if (outcome.action === "published" && outcome.mismatched) {
+    core.warning(
+      `${what}: another write landed on this thread between this run's write and its check — ` +
+        "the body may not be exactly what this run published. Add a `concurrency:` group keyed " +
+        "on the thread (see the installation guide) to stop two runs from racing the same body.",
+    );
+  }
 
   return {
     what,
@@ -517,7 +541,10 @@ async function translateReplies(
   looked: Looked[],
   weather: Weather,
 ): Promise<number> {
-  const { replies, more } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at, {
+    max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
+    order: "newest",
+  });
   if (more) {
     core.warning(
       `#${String(at.number)} has more replies than one run reads, so the oldest were not ` +
@@ -740,10 +767,26 @@ export async function run(): Promise<void> {
     // run is promised a green no-op, and a duty that will never translate has
     // no business failing red over a `languages` nobody configured for it.
     const denied = authority.warrant.unnamed("translate");
-    const resolution = denied
-      ? null
-      : resolveLanguages(authority.warrant, core.getInput("languages"));
+    const rawLanguages = core.getInput("languages");
+    const resolution = denied ? null : resolveLanguages(authority.warrant, rawLanguages);
     if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
+
+    // Once, and only for the run nobody has configured at all: the warrant
+    // never wrote `languages:`, and the input is exactly the default
+    // `action.yml` fills in when a workflow leaves it out. A repository that
+    // typed this on purpose gets the same notice — indistinguishable from
+    // here, and saying so once is cheap next to staying silent forever about
+    // a choice nobody actually made.
+    if (
+      resolution !== null &&
+      authority.warrant.languages === null &&
+      rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
+    ) {
+      core.notice(
+        "languages: running on the default (`en, vi, zh`) — nobody has set this yet. " +
+          "Write the `languages` input, or `languages:` in the warrant, to choose on purpose.",
+      );
+    }
 
     settings = {
       ...base,

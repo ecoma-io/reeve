@@ -454,6 +454,7 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     sweep: "false",
     since: "",
     limit: "50",
+    "sweep-state": "open",
   };
 }
 
@@ -1122,6 +1123,7 @@ describe("record", () => {
   it("replaces the prior entry for this thread rather than duplicating it", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({
+      repo: "ecoma-io/reeve",
       thread: 42,
       at: "2026-07-01T00:00:00Z",
       title: "Old title",
@@ -1134,6 +1136,7 @@ describe("record", () => {
       pivot: null,
     });
     const other = JSON.stringify({
+      repo: "ecoma-io/reeve",
       thread: 99,
       at: "2026-07-01T00:00:00Z",
       title: "Someone else's thread",
@@ -1171,6 +1174,7 @@ describe("record", () => {
   it("replaces the prior entry in a healthy shard past an oversized sibling, warning rather than failing", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({
+      repo: "ecoma-io/reeve",
       thread: 42,
       at: "2026-07-01T00:00:00Z",
       title: "Old title",
@@ -1872,4 +1876,102 @@ describe("the sweep", () => {
       expect(run.summary).toContain("**Dry run** — nothing was applied.");
     },
   );
+
+  describe("bulk migration", () => {
+    // Same grant `describe("record", ...)` above uses — `record` never fires
+    // from `triage: [label]` alone, sweep or not.
+    const RECORDING_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record]");
+    const CORRECTIONS = ".reeve/corrections";
+
+    function shardPath(): string {
+      return `${CORRECTIONS}/${currentShard()}.ndjson`;
+    }
+
+    it(
+      "records every candidate's standing labels instead of triaging them, attributed to " +
+        "`sweep`, when `record` composes with `sweep`",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [
+          candidate(701, "2026-01-02T00:00:00Z", { labels: ["bug"] }),
+          candidate(702, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
+        ];
+
+        const run = await runAction(
+          stub,
+          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        );
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.recorded).toBe("true");
+        expect(run.outputs.processed).toBe("2");
+        // Never a fresh verdict — a sweep composing `record` reads what already
+        // stands, same as a single labelled event does.
+        expect(stub.asked).toHaveLength(0);
+        expect(stub.effects.applied).toEqual([]);
+
+        const shard = stub.contentsFiles.get(shardPath());
+        expect(shard).toBeDefined();
+        const written = (shard?.content.trim().split("\n") ?? []).map(
+          (line) => JSON.parse(line) as { repo: string; thread: number; decided: string[]; by: string },
+        );
+        expect(written).toHaveLength(2);
+        expect(written.find((line) => line.thread === 701)).toMatchObject({
+          repo: "ecoma-io/reeve",
+          decided: ["bug"],
+          by: "sweep",
+        });
+        expect(written.find((line) => line.thread === 702)).toMatchObject({
+          repo: "ecoma-io/reeve",
+          decided: ["docs"],
+          by: "sweep",
+        });
+        expect(run.summary).toContain("recorded as `bug`");
+        expect(run.summary).toContain("recorded as `docs`");
+      },
+    );
+
+    it("skips a candidate carrying no taxonomy label — nothing on it to import", async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      stub.issues = [
+        candidate(801, "2026-01-02T00:00:00Z", { labels: ["triage-needed"] }),
+        candidate(802, "2026-01-01T00:00:00Z", { labels: ["bug"] }),
+      ];
+
+      const run = await runAction(
+        stub,
+        sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+      );
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.skipped).toBe("1");
+      const shard = stub.contentsFiles.get(shardPath());
+      const written = (shard?.content.trim().split("\n") ?? []).map(
+        (line) => JSON.parse(line) as { thread: number },
+      );
+      expect(written).toHaveLength(1);
+      expect(written[0]?.thread).toBe(802);
+      expect(run.summary).toContain("| #802 |");
+      expect(run.summary).not.toContain("| #801 |");
+    });
+
+    it(
+      "leaves an ordinary sweep triaging, and `recorded` false, when `apply` does not " +
+        "grant `record`",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [candidate(901, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
+
+        const run = await runAction(stub, sweepInputs({ corrections: CORRECTIONS }));
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.recorded).toBe("false");
+        // Already labelled with a taxonomy entry, so the ordinary triaging
+        // sweep's own idempotent skip takes it, not a model call.
+        expect(run.outputs.skipped).toBe("1");
+        expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+      },
+    );
+  });
 });

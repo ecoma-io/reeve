@@ -327,6 +327,14 @@ async function route(
     send(response, 200, { id, body: stub.replies.get(id) });
     return;
   }
+  // `publish`'s re-read-after-write, for a reply: `createReply`'s second
+  // `read()` goes back here rather than answering from the listing it started
+  // from — see `core/forge.ts`.
+  if (method === "GET" && comment) {
+    const id = Number(comment[1]);
+    send(response, 200, { id, body: stub.replies.get(id) ?? "" });
+    return;
+  }
 
   if (method === "POST" && path === "/v1/chat/completions") {
     const ask = askOf(raw, request.headers.authorization ?? null);
@@ -404,6 +412,7 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "judge-models": "",
     "max-body-chars": "6000",
     "translate-replies": "false",
+    "max-replies": "100",
     "show-attribution": "none",
     "dry-run": "false",
     sweep: "false",

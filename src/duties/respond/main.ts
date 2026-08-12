@@ -72,8 +72,10 @@ import { sift } from "../../core/spam.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
+  resolveAbout,
   resolveAuthority,
   resolveLanguages,
+  resolvePivot,
   type Authority,
   type Capability,
   type Label,
@@ -377,7 +379,8 @@ async function decide(
   // bridging into it before recalling — see `core/pivot.ts`. A thread already
   // written in the pivot language has nothing to gain from being translated
   // into itself, so that case spends no provider call here either.
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage =
+    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   const worthBridging =
     language !== null &&
     pivotLanguage !== null &&
@@ -642,7 +645,12 @@ export async function run(): Promise<void> {
     } else {
       const resolution = resolveLanguages(authority.warrant, core.getInput("languages"));
       if (resolution.notice !== null) core.notice(resolution.notice);
-      settings = { ...base, languages: resolution.languages };
+
+      // Same warrant-wins, input-falls-back pattern as `languages` above.
+      const about = resolveAbout(authority.warrant, base.about);
+      if (about.notice !== null) core.notice(about.notice);
+
+      settings = { ...base, languages: resolution.languages, about: about.about };
 
       const at: Location = { ...context.repo, number: settings.number };
       outcome = await decide(api, at, authority.warrant, settings, stages, weather);

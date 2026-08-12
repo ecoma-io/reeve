@@ -101,6 +101,8 @@ function threadWith(
           replies.set(id, next);
           return Promise.resolve(undefined);
         },
+        getComment: ({ comment_id: id }) =>
+          Promise.resolve({ data: { body: replies.get(id) ?? "" } }),
       },
     },
   };
@@ -196,7 +198,7 @@ describe("publishing what a real run produced", () => {
       await run([[english, { a: ENGLISH.replace("no longer resolves", "stops resolving") }]]),
     );
 
-    expect(again).toEqual({ action: "published" });
+    expect(again).toEqual({ action: "published", mismatched: false });
     expect(thread.body().split("reeve:translate")).toHaveLength(2);
     expect(marker.split(thread.body()).official).toBe(SOURCE);
   });
@@ -208,7 +210,7 @@ describe("publishing what a real run produced", () => {
     const written = thread.body();
     const second = await publishing(thread, await run([[english, { a: ENGLISH }]]));
 
-    expect(first).toEqual({ action: "published" });
+    expect(first).toEqual({ action: "published", mismatched: false });
     expect(second).toEqual({ action: "unchanged" });
     expect(thread.body()).toBe(written);
   });
@@ -265,6 +267,7 @@ describe("publishing what a real run produced", () => {
     expect(real.rest.issues.update).toBeTypeOf("function");
     expect(real.rest.issues.updateComment).toBeTypeOf("function");
     expect(real.rest.issues.listComments).toBeTypeOf("function");
+    expect(real.rest.issues.getComment).toBeTypeOf("function");
   });
 });
 

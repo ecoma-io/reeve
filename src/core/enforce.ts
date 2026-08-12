@@ -114,11 +114,20 @@ export interface LabelDecision {
  * wins. That is a real decision and not a tie-break dressed up — asking the
  * model to resolve its own conflict is asking the least reliable participant
  * the hardest question.
+ *
+ * `confidence` is the verdict's own account of how sure it is, checked against
+ * `floor` — the run's own floor, the `confidence` input every label has always
+ * shared — unless the label names a floor of its own in the warrant, which
+ * then answers for that label alone. A label costly to get wrong can ask for
+ * more certainty than the run otherwise requires, without moving the run's
+ * floor for every other label to get it.
  */
 export function enforceLabels(
   warrant: Warrant,
   proposed: readonly string[],
   onThread: readonly string[],
+  confidence: number,
+  floor: number,
 ): LabelDecision {
   const applied: string[] = [];
   const refused: Refusal[] = [];
@@ -134,6 +143,18 @@ export function enforceLabels(
       // The single check that makes injected text unable to invent an outcome.
       // Text can persuade a model; it cannot add a name to a file it is not in.
       refused.push({ what: name, why: `\`${warrant.path}\` does not name it` });
+      continue;
+    }
+
+    const labelFloor = entry.confidence ?? floor;
+    if (confidence < labelFloor) {
+      refused.push({
+        what: name,
+        why:
+          entry.confidence === null
+            ? `confidence ${confidence.toFixed(2)} is under the floor of ${labelFloor.toFixed(2)}`
+            : `confidence ${confidence.toFixed(2)} is under \`${name}\`'s own floor of ${labelFloor.toFixed(2)}`,
+      });
       continue;
     }
 

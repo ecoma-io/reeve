@@ -125,6 +125,12 @@ inputs:
       unlabelled event only records when both halves grant it, and with the
       default of `label` alone a labelled event re-triages instead — see
       `docs/usage/duties/triage.md`.
+
+      `record` composes with `sweep` too, and means something different
+      there: a backlog walk that already carries `record` in both halves
+      imports every candidate's standing labels as history instead of
+      triaging it — bulk migration, in one run, of decisions this project
+      already made before this action existed. See `sweep-state` below.
     required: false
     default: label
 
@@ -138,6 +144,11 @@ inputs:
       Refused rather than clamped: `75` is a typo that would otherwise mean
       `1`, and a duty that silently stopped labelling anything is worse than a
       red run.
+
+      This is the run's own floor, not every label's: a taxonomy entry in the
+      warrant may carry its own `confidence:` between 0 and 1, which answers
+      for that label alone and leaves this input as the floor for every label
+      that did not — see `docs/usage/warrant.md`.
     required: false
     default: "0.75"
 
@@ -227,6 +238,21 @@ inputs:
     required: false
     default: "50"
 
+  sweep-state:
+    description: >-
+      Which issues a sweep considers, by their state on the tracker: `open`,
+      `closed`, or `all`. A resource filter, not a mode — it changes what a
+      sweep fetches, nothing about what it is allowed to do with what it
+      finds.
+
+      `open` is the default and the ordinary case. `closed` and `all` exist
+      for bulk migration — `record` granted in both the warrant and `apply`,
+      composed with `sweep` — so a one-time backfill can import a project's
+      already-decided history, closed issues included, into the corrections
+      store instead of only the backlog still waiting on a verdict.
+    required: false
+    default: open
+
 outputs:
   labels:
     description: >-
@@ -278,13 +304,15 @@ outputs:
 
   processed:
     description: >-
-      How many issues a sweep actually processed this run — decided about,
-      whether or not anything was applied. `0` outside `sweep`.
+      How many issues a sweep actually processed this run — decided about, or
+      under bulk migration recorded, whether or not anything was applied. `0`
+      outside `sweep`.
 
   skipped:
     description: >-
-      How many issues a sweep found already labelled and left alone, at no
-      cost beyond the listing itself. `0` outside `sweep`.
+      How many issues a sweep left alone at no cost beyond the listing
+      itself: already labelled, under ordinary triage, or carrying no
+      taxonomy label to import, under bulk migration. `0` outside `sweep`.
 
   remaining:
     description: >-
@@ -296,9 +324,12 @@ outputs:
     description: >-
       `true` when a labelled or unlabelled event from a human, with `record`
       granted, wrote (or under `dry-run`, would have written) this thread's
-      current labels to the corrections store. `false` on every other run —
-      including an ordinary verdict, a sweep, and a labelled event where
-      `record` is not granted — never unset.
+      current labels to the corrections store. Also `true` for a whole `sweep`
+      run composing `record` with it — bulk migration — regardless of how many
+      individual candidates were skipped for carrying nothing to import.
+      `false` on every other run — including an ordinary verdict, an ordinary
+      triaging sweep, and a labelled event where `record` is not granted —
+      never unset.
 
 runs:
   using: node24

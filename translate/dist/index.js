@@ -32855,27 +32855,55 @@ function isBotAuthor(author) {
   return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
 }
 var REPLY_PAGE = 100;
-async function listReplies(api, at) {
-  const { data } = await api.rest.issues.listComments({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number,
-    per_page: REPLY_PAGE
-  });
-  const replies = data.map((comment) => {
-    const login = comment.user?.login ?? "";
-    return {
-      id: comment.id,
-      body: comment.body ?? "",
-      login,
-      isBot: isBotAuthor(comment.user)
-    };
-  });
-  return { replies, more: data.length === REPLY_PAGE };
+var REPLY_PAGES = 10;
+async function listReplies(api, at, options) {
+  const max = options?.max ?? REPLY_PAGE;
+  const order = options?.order ?? "oldest";
+  const pageCap = order === "oldest" ? Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE)) : REPLY_PAGES;
+  const all = [];
+  let lastPageFull = false;
+  for (let page2 = 1; page2 <= pageCap; page2 += 1) {
+    const { data } = await api.rest.issues.listComments({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: REPLY_PAGE,
+      page: page2
+    });
+    all.push(
+      ...data.map((comment) => ({
+        id: comment.id,
+        body: comment.body ?? "",
+        login: comment.user?.login ?? "",
+        isBot: isBotAuthor(comment.user)
+      }))
+    );
+    lastPageFull = data.length === REPLY_PAGE;
+    if (!lastPageFull) break;
+    if (order === "oldest" && all.length >= max) break;
+  }
+  const replies = order === "oldest" ? all.slice(0, max) : all.slice(-max);
+  return { replies, more: all.length > max || lastPageFull };
 }
 function createReply(api, at, reply) {
+  let read2 = false;
   return {
-    read: () => Promise.resolve(reply.body),
+    // The first read answers from what `listReplies` already fetched — one
+    // request for the page rather than one per comment, still, which is why a
+    // forty-reply thread costs forty reads and not eighty. Only a second read
+    // goes back to GitHub, and `publish` only ever asks for one after it has
+    // written: that is its re-read-after-write (see `core/publish.ts`),
+    // there to notice another write landing on this comment in between. The
+    // closure's original `reply.body` cannot answer that question — it never
+    // moves, so it would call every publish "mismatched" whether or not
+    // anything raced it.
+    read() {
+      if (read2) {
+        return api.rest.issues.getComment({ owner: at.owner, repo: at.repo, comment_id: reply.id }).then(({ data }) => data.body ?? "");
+      }
+      read2 = true;
+      return Promise.resolve(reply.body);
+    },
     async write(body) {
       await api.rest.issues.updateComment({
         owner: at.owner,
@@ -32906,13 +32934,13 @@ async function listRepositoryLabels(api, at) {
 }
 var SWEEP_PAGE = 100;
 var SWEEP_PAGES = 10;
-async function listOpenThreads(api, at, since) {
+async function listOpenThreads(api, at, since, state = "open") {
   const listed = [];
   for (let page2 = 1; page2 <= SWEEP_PAGES; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
-      state: "open",
+      state,
       sort: "created",
       direction: "desc",
       per_page: SWEEP_PAGE,
@@ -33071,7 +33099,8 @@ async function publish(thread, marker2, publication2) {
   const body = assemble(official, marker2, publication2);
   if (current === body) return { action: "unchanged" };
   await thread.write(body);
-  return { action: "published" };
+  const after = await thread.read();
+  return { action: "published", mismatched: after !== body };
 }
 
 // src/core/meter.ts
@@ -33247,6 +33276,9 @@ function parseWarrant(path, source) {
   }
   const labels = readLabels(path, document2.labels);
   const languages = readLanguages(path, document2.languages);
+  const pivot = readPivot(path, document2.pivot);
+  const memory = readMemory(path, document2.memory);
+  const about = readAbout(path, document2.about);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -33263,6 +33295,9 @@ function parseWarrant(path, source) {
     path,
     labels,
     languages,
+    pivot,
+    memory,
+    about,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -33283,7 +33318,8 @@ function implicitWarrant(path, repositoryLabels) {
       not: null,
       examples: [],
       owner: null,
-      exclusiveWith: []
+      exclusiveWith: [],
+      confidence: null
     });
   }
   const byName = new Map(labels.map((label) => [label.name, label]));
@@ -33292,6 +33328,9 @@ function implicitWarrant(path, repositoryLabels) {
       path,
       labels,
       languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
@@ -33366,7 +33405,8 @@ function readLabels(path, raw) {
       not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
-      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with)
+      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
     });
   }
   return labels;
@@ -33395,6 +33435,38 @@ function readLanguages(path, raw) {
     return entry.trim();
   });
   return parseLanguages(entries);
+}
+function readPivot(path, raw) {
+  if (raw === void 0) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(`warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`);
+  }
+  return raw.trim();
+}
+function readMemory(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const recall = fields.recall;
+  if (recall === void 0 || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
+    );
+  }
+  return { recall };
+}
+function readAbout(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33462,6 +33534,13 @@ function strings(at, key, raw) {
 }
 function nullable(value) {
   return value.length === 0 ? null : value;
+}
+function confidenceField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`);
+  }
+  return raw;
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -34147,6 +34226,7 @@ function readSettings() {
     drafts: whole("drafts", getInput("drafts")),
     maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
     replies: getBooleanInput("translate-replies"),
+    maxReplies: bounded("max-replies", getInput("max-replies")),
     attribution: readAttribution()
   };
 }
@@ -34311,6 +34391,11 @@ ${assemble(official, marker, would)}`
   info(
     outcome.action === "none" ? `${what}: nothing written \u2014 ${outcome.reason}.` : `${what}: ${outcome.action}.`
   );
+  if (outcome.action === "published" && outcome.mismatched) {
+    warning(
+      `${what}: another write landed on this thread between this run's write and its check \u2014 the body may not be exactly what this run published. Add a \`concurrency:\` group keyed on the thread (see the installation guide) to stop two runs from racing the same body.`
+    );
+  }
   return {
     what,
     from: detection.language,
@@ -34321,7 +34406,10 @@ ${assemble(official, marker, would)}`
   };
 }
 async function translateReplies(api, at, settings, stages, looked, weather) {
-  const { replies, more } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at, {
+    max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
+    order: "newest"
+  });
   if (more) {
     warning(
       `#${String(at.number)} has more replies than one run reads, so the oldest were not translated. They are picked up by editing them, or by a run against a smaller thread.`

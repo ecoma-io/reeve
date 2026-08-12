@@ -111,8 +111,10 @@ import { writeSummary } from "../../core/summary.js";
 import {
   checkLabelsExist,
   readWarrant,
+  resolveAbout,
   resolveAuthority,
   resolveLanguages,
+  resolvePivot,
   type Authority,
   type Capability,
   type Warrant,
@@ -150,13 +152,16 @@ const DEFAULT_CAPABILITIES: readonly Capability[] = ["label"];
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
 /**
- * How many corrections reach the prompt.
+ * How many corrections reach the prompt, when the warrant's `memory:` block
+ * never wrote a `recall` of its own.
  *
  * Not an input, deliberately. The number that matters is how many are close
  * enough to be worth showing, and that is what retrieval already decides —
  * anything scoring nothing is dropped before this cap applies. What is left is
  * a ceiling on prompt length, and a consumer tuning it would be tuning a proxy
- * for a cost the summary already shows them directly.
+ * for a cost the summary already shows them directly. `memory: { recall: }`
+ * exists for the one consumer who still wants to, without inventing an input
+ * for it.
  */
 const RECALLED = 4;
 
@@ -184,6 +189,36 @@ interface Settings {
   readonly sweep: boolean;
   readonly since: Date | null;
   readonly limit: number;
+  /**
+   * Which resource state a sweep considers — a filter on what it fetches, not
+   * a different mode of the duty. See `parseSweepState`.
+   */
+  readonly sweepState: SweepState;
+}
+
+/** `sweep-state`'s three spellings, as `parseSweepState` reads them. */
+type SweepState = "open" | "closed" | "all";
+const SWEEP_STATES: readonly SweepState[] = ["open", "closed", "all"];
+
+/**
+ * Which resource state a sweep considers.
+ *
+ * A resource filter, not a mode: it changes what `listOpenThreads` fetches,
+ * nothing about how a fetched thread is decided. `open` is the default and
+ * the ordinary case — a sweep keeping a fresh backlog triaged. `closed` and
+ * `all` exist for the case this duty's `record` capability makes possible
+ * when it composes with `sweep`: a one-time bulk migration that imports a
+ * project's already-decided history — including threads a maintainer closed
+ * long before this action existed — into the corrections store in one run,
+ * rather than one label event at a time from here on.
+ */
+function parseSweepState(raw: string): SweepState {
+  const value = raw.trim().toLowerCase();
+  const match = SWEEP_STATES.find((state) => state === value);
+  if (match === undefined) {
+    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
+  }
+  return match;
 }
 
 /**
@@ -207,6 +242,7 @@ function readSettings(): Omit<Settings, "languages"> {
     about: core.getInput("about"),
     minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
+    sweepState: parseSweepState(core.getInput("sweep-state")),
   };
 }
 
@@ -280,24 +316,49 @@ interface SweepAccumulator {
   starvedRun: boolean;
   candidates: number;
   ungranted: string | null;
+  /**
+   * Whether `record` was granted and permitted for this sweep — decided once,
+   * before the loop, and read back by `reportSweep` after it. `false` is the
+   * ordinary sweep every existing workflow already runs; `true` is bulk
+   * migration, `record` composed with `sweep`.
+   */
+  recording: boolean;
 }
 
 function newAccumulator(): SweepAccumulator {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+  return {
+    results: [],
+    skipped: 0,
+    starvedRun: false,
+    candidates: 0,
+    ungranted: null,
+    recording: false,
+  };
 }
 
 /**
  * The whole backlog, one thread at a time, through the identical pipeline a
- * single-thread run uses.
+ * single-thread run uses — or through `record`'s, when this is bulk
+ * migration.
  *
  * Ungranted, capped labels-exist checking and per-thread deciding all happen
  * exactly once each — the first two before the loop, because they are facts
  * about the run rather than about any one thread, and the last one inside it,
- * because that is `decide`'s whole job.
+ * because that is `decide`'s (or `recordCorrection`'s) whole job.
+ *
+ * **`record` composes with `sweep` by replacing the loop's whole body, not by
+ * running alongside it.** A single-thread run tells the two apart by the
+ * triggering event — a label change is a correction, anything else is a
+ * verdict — but a sweep has no such event per thread, only a warrant and an
+ * `apply` that either grant `record` or do not. So the same test single-thread
+ * mode uses at its own branch point (`permitted.includes("record")`) is made
+ * once here, for the whole run: granted, every candidate is recorded as
+ * bulk-migrated history; not granted, every candidate is triaged, exactly as
+ * before this capability existed.
  */
 async function runSweep(
   acc: SweepAccumulator,
-  api: TrackerApi,
+  api: TrackerApi & ContentsApi,
   authority: Authority,
   settings: Settings,
   stages: Stages,
@@ -315,7 +376,12 @@ async function runSweep(
     );
   }
 
-  const listed = await listOpenThreads(api, context.repo, settings.since);
+  const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  const recording = permitted.includes("record");
+  acc.recording = recording;
+
+  const listed = await listOpenThreads(api, context.repo, settings.since, settings.sweepState);
   // Triage sweeps issues only — a taxonomy of bug/docs/feature labels is a
   // judgement about an issue, and the listing endpoint returns pull requests
   // too, distinguishable only by this field.
@@ -325,10 +391,21 @@ async function runSweep(
   for (const thread of candidates) {
     if (acc.results.length >= settings.limit) break;
 
-    // The idempotent skip: free, and counted separately from `processed` so a
-    // rerun over a mostly-triaged backlog reports honestly rather than looking
-    // like it did nothing.
-    if (alreadyTaxonomized(authority.warrant, thread.labels)) {
+    if (recording) {
+      // Bulk migration's own idempotent skip: a thread the taxonomy never
+      // touched has no maintainer decision on it to import — nothing this
+      // sweep is for.
+      const decidable = thread.labels.some(
+        (name) => authority.warrant.labelNamed(name) !== undefined,
+      );
+      if (!decidable) {
+        acc.skipped += 1;
+        continue;
+      }
+    } else if (alreadyTaxonomized(authority.warrant, thread.labels)) {
+      // The idempotent skip: free, and counted separately from `processed` so
+      // a rerun over a mostly-triaged backlog reports honestly rather than
+      // looking like it did nothing.
       acc.skipped += 1;
       continue;
     }
@@ -349,12 +426,34 @@ async function runSweep(
       // inspected, only `respond`'s bot-author guard reads `author` at all.
       author: { login: "", isBot: false },
     };
-    const outcome = await decide(authority, standing, settings, stages, weather);
-    const done = settings.dryRun
-      ? NOTHING_DONE
-      : await act(createEffects(api, at), authority.warrant, outcome);
-    acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+
+    if (recording) {
+      const outcome = await recordCorrection(
+        api,
+        at,
+        standing,
+        authority,
+        settings,
+        stages,
+        weather,
+        "sweep",
+      );
+      acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+    } else {
+      const outcome = await decide(authority, standing, settings, stages, weather);
+      const done = settings.dryRun
+        ? NOTHING_DONE
+        : await act(createEffects(api, at), authority.warrant, outcome);
+      acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
+    }
   }
+}
+
+/** One sweep row's outcome under bulk migration, in the fewest words that are true. */
+function describeRecordOutcome(outcome: RecordOutcome): string {
+  return outcome.decided.length > 0
+    ? `recorded as ${outcome.decided.map((name) => `\`${name}\``).join(", ")}`
+    : "recorded with no taxonomy labels";
 }
 
 /** Candidates neither processed nor skipped — what a next sweep still has to look at. */
@@ -418,7 +517,17 @@ export async function run(): Promise<void> {
       ? null
       : resolveLanguages(authority.warrant, core.getInput("languages"));
     if (resolution !== null && resolution.notice !== null) core.notice(resolution.notice);
-    settings = { ...base, languages: resolution === null ? [] : resolution.languages };
+
+    // Same warrant-wins, input-falls-back pattern as `languages` above, on the
+    // one field the spam screen reads and nothing else does.
+    const about = resolveAbout(authority.warrant, base.about);
+    if (about.notice !== null) core.notice(about.notice);
+
+    settings = {
+      ...base,
+      languages: resolution === null ? [] : resolution.languages,
+      about: about.about,
+    };
 
     if (settings.sweep) {
       bulk = newAccumulator();
@@ -504,6 +613,7 @@ export async function run(): Promise<void> {
             settings,
             stages,
             weather,
+            senderLogin(),
           );
         } else {
           outcome = await decide(authority, standing, settings, stages, weather);
@@ -667,7 +777,8 @@ async function decide(
   // with the thread has nothing a translated query would reach that the plain
   // one above does not already reach — so that case, the common one, spends
   // no provider call here at all.
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage =
+    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   const threadLanguage = detection.language;
   const worthBridging =
     threadLanguage !== null &&
@@ -702,7 +813,7 @@ async function decide(
     }
   }
 
-  const recalled = memory.recallAcrossQueries(queries, RECALLED);
+  const recalled = memory.recallAcrossQueries(queries, warrant.memory?.recall ?? RECALLED);
   const pivotRecalled =
     threadLanguage === null
       ? 0
@@ -762,20 +873,18 @@ async function decide(
     ungranted: null,
   } as const;
 
-  // The floor before the taxonomy, so a verdict nobody trusts is not also
-  // reported as four labels the warrant refused. It proposed them; it was
-  // simply not confident enough for that to be the interesting part.
-  if (verdict.confidence < settings.confidence) {
-    if (verdict.labels.length > 0) {
-      core.info(
-        `Confidence ${verdict.confidence.toFixed(2)} is under the floor of ` +
-          `${settings.confidence.toFixed(2)} — reported, not applied.`,
-      );
-    }
-    return { ...decided, applied: [], refused: [] };
-  }
-
-  const decision = enforceLabels(warrant, verdict.labels, standing.labels);
+  // The run's own floor is `enforceLabels`'s default, but a label carrying
+  // its own `confidence:` in the warrant answers for itself instead — so this
+  // no longer short-circuits before the taxonomy is even consulted. A verdict
+  // under the run's floor can still clear one label's own lower bar, and a
+  // verdict over it can still be turned away by one label's own higher one.
+  const decision = enforceLabels(
+    warrant,
+    verdict.labels,
+    standing.labels,
+    verdict.confidence,
+    settings.confidence,
+  );
   for (const refusal of decision.refused) {
     core.info(`\`${refusal.what}\` was not applied — ${refusal.why}.`);
   }
@@ -858,6 +967,12 @@ interface RecordOutcome {
  *
  * `dry-run` runs every step below except the commit itself, so the log and
  * the `recorded` output both say what a real run would have done.
+ *
+ * `by` is who this correction is attributed to — the human who changed the
+ * label on a single-thread run, or the literal `"sweep"` when this is bulk
+ * migration composing `record` with `sweep`: there is no one sender to name
+ * for a thread nobody just relabelled, only a run that decided to import what
+ * was already decided.
  */
 async function recordCorrection(
   contentsApi: ContentsApi,
@@ -867,6 +982,7 @@ async function recordCorrection(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  by: string,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
   const limit = settings.maxBodyChars;
@@ -894,7 +1010,8 @@ async function recordCorrection(
   // recall a category triage was never asked to propose.
   const decidedLabels = standing.labels.filter((name) => warrant.labelNamed(name) !== undefined);
 
-  const pivotLanguage = settings.languages[0] ?? null;
+  const pivotLanguage =
+    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
   let pivot: Correction["pivot"] = null;
   let pivotNote: string | null = null;
   if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
@@ -931,6 +1048,7 @@ async function recordCorrection(
   }
 
   const correction: Correction = {
+    repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     at: new Date().toISOString(),
     title: standing.title,
@@ -938,7 +1056,7 @@ async function recordCorrection(
     language: code,
     proposed: [],
     decided: decidedLabels,
-    by: senderLogin(),
+    by,
     note: null,
     pivot,
   };
@@ -1049,10 +1167,20 @@ async function attemptWrite(
     if (read === null) continue;
 
     const lines = read.text.split("\n");
+    // `repo` as well as `thread`, so a line written before this field existed
+    // — `repo: ""` once parsed — never matches a fresh write and is never
+    // replaced by one. It stays in the store exactly as it was, still read
+    // for recall, just no longer this thread number's authoritative entry to
+    // overwrite blind. `correction.repo` is always the current run's own
+    // repository, never empty, so this only ever widens what is left alone.
     const index = lines.findIndex((line) => {
       if (line.trim().length === 0) return false;
       const existing = parseCorrection(line);
-      return existing !== null && existing.thread === correction.thread;
+      return (
+        existing !== null &&
+        existing.thread === correction.thread &&
+        existing.repo === correction.repo
+      );
     });
 
     if (index !== -1) {
@@ -1313,9 +1441,10 @@ function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
   core.setOutput("starved", String(rosterStarved));
-  // A sweep never records either — `record` fires on a single labelled event,
-  // never on a backlog walk — so this is `false` on every sweep run too.
-  core.setOutput("recorded", "false");
+  // `true` only for bulk migration — `record` composed with `sweep`, decided
+  // once for the whole run and carried on the accumulator. An ordinary
+  // triaging sweep never records, the same as it always did.
+  core.setOutput("recorded", String(bulk.recording));
 }
 
 /**
@@ -1402,6 +1531,7 @@ function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
     ungranted: bulk.ungranted,
+    recording: bulk.recording,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames,

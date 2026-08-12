@@ -77,6 +77,7 @@ description.
 | `judge-models`      | _empty_             | Seats, not a fallback list — every seat is asked. `\|` inside a seat is that seat's fallback. See below.                                                                  |
 | `max-body-chars`    | `6000`              | Bounds what is **read from the thread**, not what the model answers, or `none` for no bound at all. Measured against the author's half only.                              |
 | `translate-replies` | `false`             | Off because the ceiling is real. See below.                                                                                                                               |
+| `max-replies`       | `100`                | How many of a thread's newest replies one run reads, or `none`. See below.                                                                                                 |
 | `show-attribution`  | `none`              | How much of the machinery the published block names. See below.                                                                                                           |
 | `dry-run`           | `false`             | Whole pipeline, every output, nothing written.                                                                                                                            |
 
@@ -277,11 +278,16 @@ It is off by default because the ceiling is real: every reply, times every
 language it is missing. Turn it on where the discussion is where the answers
 live; leave it off where the issue body is the thing worth reading.
 
-Two limits to know first. One run reads the most recent hundred replies and warns
-when there were more, so a very long thread is translated from its newest end
-rather than silently in part. And **review comments on a pull request's diff are
-deliberately not included** — a translation appended to a line comment moves the
-review conversation away from the line it is about.
+Two limits to know first. One run reads the most recent replies — a hundred by
+default, `max-replies` — and warns when there were more, so a very long thread
+is translated from its newest end rather than silently in part. GitHub's own
+comment listing has no reverse-chronological order, so finding "most recent"
+means walking forward from the start of the thread within the run; `none`
+lifts the count but not the walk, and a thread of thousands of replies is the
+case even that will not fully read in one run. And **review comments on a
+pull request's diff are deliberately not included** — a translation appended
+to a line comment moves the review conversation away from the line it is
+about.
 
 ## What the published block looks like
 

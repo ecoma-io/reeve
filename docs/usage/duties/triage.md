@@ -100,7 +100,7 @@ what tells it.
 | `duplicate-of` | Issue number this one appears to duplicate, empty when none was found. Reported, never acted on unless `apply` names `close`.                                                        |
 | `screened-out` | Why the cheap pass stopped the run before an expensive model saw it. Empty when the issue went through in full.                                                                      |
 | `applied`      | JSON object recording what was actually done. Empty of actions under `dry-run`, which is how a workflow tells a rehearsal from a run.                                                |
-| `recorded`     | `true` when this run wrote (or under `dry-run`, would have written) the thread's current labels to the corrections store. `false` on every other run, including an ordinary verdict. |
+| `recorded`     | `true` when this run wrote (or under `dry-run`, would have written) the thread's current labels to the corrections store — also `true` for a whole bulk-migration sweep. `false` on every other run, including an ordinary verdict and an ordinary triaging sweep. |
 
 **The difference between `proposed` and `labels` is what the guardrails
 stopped.** That is the output to watch while you are tuning `confidence` or a
@@ -241,6 +241,12 @@ and the file's own half, alongside whatever else `triage` is granted:
 capabilities:
   triage: [label, record]
 ```
+
+**`record` also composes with `sweep`, for a one-time bulk migration** — the
+same double grant above, but on a backlog walk instead of a single labelled
+event, importing a project's already-decided history (closed issues
+included, via `sweep-state`) into the store in one run rather than one label
+change at a time from here on. See [the sweep page](../sweep.md#bulk-migration-record-composed-with-sweep).
 
 **Triage.** Ask for a verdict: labels from the taxonomy, a confidence, an optional
 duplicate reference, a rationale. Three properties are non-negotiable:

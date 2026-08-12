@@ -16,14 +16,21 @@ function publication(over: Partial<Publication> = {}): Publication {
   return { fingerprint: "abc123", sections: ["A section."], ...over };
 }
 
-/** A thread whose body is whatever the case put on it, recording every write. */
+/**
+ * A thread whose body is whatever the case put on it, recording every write
+ * and answering `read` from whatever it last wrote — a genuine mutable stub,
+ * because `publish`'s re-read-after-write only means anything against a
+ * thread whose reads reflect its writes, the way a real one does.
+ */
 function threadOf(body: string): Thread & { written: string[] } {
   const written: string[] = [];
+  let current = body;
   return {
     written,
-    read: vi.fn(() => Promise.resolve(body)),
+    read: vi.fn(() => Promise.resolve(current)),
     write: vi.fn((next: string) => {
       written.push(next);
+      current = next;
       return Promise.resolve();
     }),
   };
@@ -86,6 +93,7 @@ describe("publish", () => {
 
     await expect(publish(thread, translate, publication())).resolves.toEqual({
       action: "published",
+      mismatched: false,
     });
     expect(thread.written[0]).toBe(assemble(OFFICIAL, translate, publication()));
   });
@@ -96,7 +104,7 @@ describe("publish", () => {
 
     await expect(
       publish(thread, translate, publication({ fingerprint: "fresh" })),
-    ).resolves.toEqual({ action: "published" });
+    ).resolves.toEqual({ action: "published", mismatched: false });
     expect(thread.written[0]).toBe(
       assemble(OFFICIAL, translate, publication({ fingerprint: "fresh" })),
     );
@@ -145,7 +153,11 @@ describe("publish", () => {
   it("writes a reply through the same port as a thread", async () => {
     // The point of the port: this stage never learns whether it is editing a
     // body or a comment.
-    const updateComment = vi.fn((_params: { body: string }) => Promise.resolve({}));
+    let commentBody = OFFICIAL;
+    const updateComment = vi.fn((params: { body: string }) => {
+      commentBody = params.body;
+      return Promise.resolve({});
+    });
     const api = {
       rest: {
         issues: {
@@ -153,6 +165,7 @@ describe("publish", () => {
           update: vi.fn(() => Promise.resolve({})),
           listComments: vi.fn(() => Promise.resolve({ data: [] })),
           updateComment,
+          getComment: vi.fn(() => Promise.resolve({ data: { body: commentBody } })),
         },
       },
     } as GitHubApi;
@@ -164,7 +177,7 @@ describe("publish", () => {
       publication(),
     );
 
-    expect(outcome).toEqual({ action: "published" });
+    expect(outcome).toEqual({ action: "published", mismatched: false });
     expect(updateComment.mock.calls[0]?.[0].body).toContain(OFFICIAL);
     expect(updateComment.mock.calls[0]?.[0].body).toContain(translate.render("abc123"));
   });

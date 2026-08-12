@@ -9,7 +9,9 @@ import {
   implicitWarrant,
   parseWarrant,
   readWarrant,
+  resolveAbout,
   resolveLanguages,
+  resolvePivot,
   type Warrant,
 } from "./warrant.js";
 
@@ -63,6 +65,7 @@ describe("parseWarrant", () => {
       examples: ["Export produces an empty file when the table has exactly one row"],
       owner: "@ecoma-io/runtime",
       exclusiveWith: [],
+      confidence: null,
     });
   });
 
@@ -204,6 +207,37 @@ describe("owner", () => {
       expect(() => warrant(`${MINIMAL}    owner: "${owner}"\n`)).toThrow(/is not a handle/);
     },
   );
+});
+
+describe("confidence", () => {
+  it("is null when a label writes no floor of its own", () => {
+    expect(warrant(MINIMAL).labelNamed("bug")?.confidence).toBeNull();
+  });
+
+  it("reads a label's own floor", () => {
+    const source = `${MINIMAL}    confidence: 0.9\n`;
+    expect(warrant(source).labelNamed("bug")?.confidence).toBe(0.9);
+  });
+
+  it("accepts the boundaries, 0 and 1", () => {
+    expect(warrant(`${MINIMAL}    confidence: 0\n`).labelNamed("bug")?.confidence).toBe(0);
+    expect(warrant(`${MINIMAL}    confidence: 1\n`).labelNamed("bug")?.confidence).toBe(1);
+  });
+
+  it("refuses a value outside 0 through 1", () => {
+    expect(() => warrant(`${MINIMAL}    confidence: 1.5\n`)).toThrow(
+      /`confidence` as .+, expected a number between 0 and 1/,
+    );
+    expect(() => warrant(`${MINIMAL}    confidence: -0.1\n`)).toThrow(
+      /expected a number between 0 and 1/,
+    );
+  });
+
+  it("refuses a confidence that is not a number", () => {
+    expect(() => warrant(`${MINIMAL}    confidence: "high"\n`)).toThrow(
+      /`confidence` as the text `high`, expected a number between 0 and 1/,
+    );
+  });
 });
 
 describe("capabilities", () => {
@@ -385,6 +419,121 @@ describe("resolveLanguages", () => {
   });
 });
 
+describe("pivot", () => {
+  it("is null when the key was never written", () => {
+    expect(warrant(MINIMAL).pivot).toBeNull();
+  });
+
+  it("reads a language code", () => {
+    expect(warrant(`${MINIMAL}pivot: en\n`).pivot).toBe("en");
+  });
+
+  it("refuses the key written with nothing under it", () => {
+    expect(() => warrant(`${MINIMAL}pivot:\n`)).toThrow(/`pivot` as empty, expected a language code/);
+  });
+
+  it("refuses a pivot that is not text", () => {
+    expect(() => warrant(`${MINIMAL}pivot: 3\n`)).toThrow(/`pivot` as .+3.+, expected a language code/);
+  });
+});
+
+describe("memory", () => {
+  it("is null when the key was never written", () => {
+    expect(warrant(MINIMAL).memory).toBeNull();
+  });
+
+  it("reads a recall count", () => {
+    expect(warrant(`${MINIMAL}memory:\n  recall: 6\n`).memory).toEqual({ recall: 6 });
+  });
+
+  it("accepts 0, which turns recall off", () => {
+    expect(warrant(`${MINIMAL}memory:\n  recall: 0\n`).memory).toEqual({ recall: 0 });
+  });
+
+  it("refuses a `memory` block with no `recall`", () => {
+    expect(() => warrant(`${MINIMAL}memory: {}\n`)).toThrow(/`memory` has no `recall`/);
+  });
+
+  it("refuses a `memory` key that is not a mapping", () => {
+    expect(() => warrant(`${MINIMAL}memory: 4\n`)).toThrow(/`memory` as .+4.+, expected a mapping/);
+  });
+
+  it("refuses a `recall` that is not a whole number of 0 or more", () => {
+    expect(() => warrant(`${MINIMAL}memory:\n  recall: -1\n`)).toThrow(
+      /`memory\.recall` is .+, expected a whole number of 0 or more/,
+    );
+    expect(() => warrant(`${MINIMAL}memory:\n  recall: 1.5\n`)).toThrow(
+      /expected a whole number of 0 or more/,
+    );
+  });
+});
+
+describe("about", () => {
+  it("is null when the key was never written", () => {
+    expect(warrant(MINIMAL).about).toBeNull();
+  });
+
+  it("reads the sentence", () => {
+    expect(warrant(`${MINIMAL}about: A database export tool.\n`).about).toBe(
+      "A database export tool.",
+    );
+  });
+
+  it("treats a key written empty as null, the same as never writing it", () => {
+    expect(warrant(`${MINIMAL}about: "   "\n`).about).toBeNull();
+  });
+
+  it("refuses an `about` that is not text", () => {
+    expect(() => warrant(`${MINIMAL}about: 3\n`)).toThrow(/`about` as .+3.+, expected text/);
+  });
+});
+
+describe("resolvePivot", () => {
+  const EN = { code: "en", label: "English", scripts: ["Latn"] };
+  const VI = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
+
+  it("is the first configured language when the warrant never wrote `pivot:`", () => {
+    expect(resolvePivot(warrant(MINIMAL), [EN, VI])).toBe(EN);
+  });
+
+  it("lets the warrant's own `pivot:` win, case-insensitively", () => {
+    expect(resolvePivot(warrant(`${MINIMAL}pivot: VI\n`), [EN, VI])).toBe(VI);
+  });
+
+  it("refuses a pivot that names a language outside the configured list", () => {
+    expect(() => resolvePivot(warrant(`${MINIMAL}pivot: zh\n`), [EN, VI])).toThrow(
+      /`pivot: zh` is not one of the configured languages \(en, vi\)/,
+    );
+  });
+
+  it("refuses when there are no languages to pivot among, even absent", () => {
+    expect(() => resolvePivot(warrant(MINIMAL), [])).toThrow(/no languages are configured/);
+  });
+});
+
+describe("resolveAbout", () => {
+  it("lets the warrant's own key win outright, with a notice naming both sources", () => {
+    const resolution = resolveAbout(warrant(`${MINIMAL}about: A database export tool.\n`), "ignored");
+
+    expect(resolution.about).toBe("A database export tool.");
+    expect(resolution.notice).toContain(`\`${PATH}\`'s \`about:\` key`);
+    expect(resolution.notice).toContain("not the `about` input");
+  });
+
+  it("falls back to the input, trimmed, when the warrant never mentions the key", () => {
+    const resolution = resolveAbout(warrant(MINIMAL), "  A database export tool.  ");
+
+    expect(resolution.about).toBe("A database export tool.");
+    expect(resolution.notice).toBeNull();
+  });
+
+  it("falls back to an empty string when neither source answers", () => {
+    const resolution = resolveAbout(warrant(MINIMAL), "");
+    expect(resolution.about).toBe("");
+    expect(resolution.notice).toBeNull();
+  });
+});
+
 describe("checkLabelsExist", () => {
   /** The check as a thunk, which is the shape `toThrow` reads. */
   function checking(source: string, existing: readonly string[]): () => void {
@@ -486,6 +635,7 @@ describe("implicitWarrant", () => {
         examples: [],
         owner: null,
         exclusiveWith: [],
+        confidence: null,
       },
       {
         name: "docs",
@@ -494,6 +644,7 @@ describe("implicitWarrant", () => {
         examples: [],
         owner: null,
         exclusiveWith: [],
+        confidence: null,
       },
     ]);
     expect(excluded).toEqual([]);

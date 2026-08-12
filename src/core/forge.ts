@@ -79,6 +79,11 @@ export interface GitHubApi {
         comment_id: number;
         body: string;
       }): Promise<unknown>;
+      getComment(params: {
+        owner: string;
+        repo: string;
+        comment_id: number;
+      }): Promise<{ data: { body?: string | null } }>;
     };
   };
 }
@@ -127,46 +132,86 @@ export interface Reply {
 }
 
 /**
- * How many replies one run will look at, and why there is a number at all.
+ * How many replies one page carries, and how many pages one run will turn
+ * looking for the newest ones.
  *
  * A thread's replies are unbounded — a year-old issue can carry four hundred —
  * and every one of them is a body a duty would read, fingerprint, and possibly
- * spend a request on. The page is the newest ones because that is where a
- * reader is: a discussion nobody has touched in eight months does not need its
- * middle worked over on the run that a new comment triggered.
+ * spend a request on. GitHub's comment listing has no reverse-chronological
+ * order, so "the newest ones" can only be found by walking forward from the
+ * start; `REPLY_PAGES` is the ceiling on how far one run will walk to find
+ * them; a thread past `REPLY_PAGE * REPLY_PAGES` comments (mirrors
+ * `SWEEP_PAGES`'s reasoning) is the pathological case this reports honestly
+ * (`more: true`) rather than serves completely.
  *
- * A run that hits this ceiling says so rather than trimming quietly, so the
+ * A run that hits either ceiling says so rather than trimming quietly, so the
  * consumer sees a number to raise instead of a silence to misread.
  */
 const REPLY_PAGE = 100;
+const REPLY_PAGES = 10;
+
+/** What one call to {@link listReplies} wants back. */
+export interface ListRepliesOptions {
+  /** How many replies to keep. Defaults to one page (100). */
+  readonly max?: number;
+  /**
+   * `"oldest"` (the default) reads from the start of the thread and keeps the
+   * first `max` — the order `respond` wants, since it answers a thread the
+   * way a reader arrives at it, from the top. `"newest"` walks every page up
+   * to `REPLY_PAGES` and keeps the last `max` — the order a translator wants,
+   * since a discussion nobody has touched in eight months does not need its
+   * middle worked over on the run a new comment triggered.
+   */
+  readonly order?: "oldest" | "newest";
+}
 
 /**
- * The replies on a thread, newest last, capped at one page.
- *
- * Ascending order is GitHub's own and is kept: it is the order a reader sees,
- * so a run's log reads down the thread the way the thread does.
+ * The replies on a thread, oldest first — GitHub's own order, and the order a
+ * reader sees, kept regardless of which end {@link ListRepliesOptions.order}
+ * asked for: `"newest"` changes which replies are kept, never how the kept
+ * ones are handed back.
  */
 export async function listReplies(
   api: GitHubApi,
   at: Location,
+  options?: ListRepliesOptions,
 ): Promise<{ replies: readonly Reply[]; more: boolean }> {
-  const { data } = await api.rest.issues.listComments({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number,
-    per_page: REPLY_PAGE,
-  });
+  const max = options?.max ?? REPLY_PAGE;
+  const order = options?.order ?? "oldest";
+  // Oldest-first never needs more pages than it takes to cover `max` — the
+  // replies past that point are never kept, so there is nothing to walk
+  // forward for. Newest-first has no such shortcut: finding the true end of
+  // the thread means walking every page up to the ceiling.
+  const pageCap =
+    order === "oldest" ? Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE)) : REPLY_PAGES;
 
-  const replies = data.map((comment) => {
-    const login = comment.user?.login ?? "";
-    return {
-      id: comment.id,
-      body: comment.body ?? "",
-      login,
-      isBot: isBotAuthor(comment.user),
-    };
-  });
-  return { replies, more: data.length === REPLY_PAGE };
+  const all: Reply[] = [];
+  let lastPageFull = false;
+  for (let page = 1; page <= pageCap; page += 1) {
+    const { data } = await api.rest.issues.listComments({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: REPLY_PAGE,
+      page,
+    });
+
+    all.push(
+      ...data.map((comment) => ({
+        id: comment.id,
+        body: comment.body ?? "",
+        login: comment.user?.login ?? "",
+        isBot: isBotAuthor(comment.user),
+      })),
+    );
+
+    lastPageFull = data.length === REPLY_PAGE;
+    if (!lastPageFull) break;
+    if (order === "oldest" && all.length >= max) break;
+  }
+
+  const replies = order === "oldest" ? all.slice(0, max) : all.slice(-max);
+  return { replies, more: all.length > max || lastPageFull };
 }
 
 /**
@@ -179,8 +224,27 @@ export async function listReplies(
  * not have in the measure a thread body does.
  */
 export function createReply(api: GitHubApi, at: Location, reply: Reply): Thread {
+  let read = false;
+
   return {
-    read: () => Promise.resolve(reply.body),
+    // The first read answers from what `listReplies` already fetched — one
+    // request for the page rather than one per comment, still, which is why a
+    // forty-reply thread costs forty reads and not eighty. Only a second read
+    // goes back to GitHub, and `publish` only ever asks for one after it has
+    // written: that is its re-read-after-write (see `core/publish.ts`),
+    // there to notice another write landing on this comment in between. The
+    // closure's original `reply.body` cannot answer that question — it never
+    // moves, so it would call every publish "mismatched" whether or not
+    // anything raced it.
+    read() {
+      if (read) {
+        return api.rest.issues
+          .getComment({ owner: at.owner, repo: at.repo, comment_id: reply.id })
+          .then(({ data }) => data.body ?? "");
+      }
+      read = true;
+      return Promise.resolve(reply.body);
+    },
 
     async write(body) {
       await api.rest.issues.updateComment({
@@ -415,11 +479,18 @@ export interface Listed {
  * sweep exists to keep working. Creation date never moves, which is what makes
  * it the honest boundary for "no archaeology on threads before Reeve
  * adoption".
+ *
+ * **`state` defaults to `open`** — the ordinary backlog every caller but one
+ * wants — **and is a resource filter, not a different kind of listing.**
+ * `closed` and `all` exist for triage's own `sweep-state` input, which lets a
+ * one-time bulk migration walk a project's already-decided history (open
+ * *and* closed alike) instead of only the threads still waiting on a verdict.
  */
 export async function listOpenThreads(
   api: TrackerApi,
   at: Pick<Location, "owner" | "repo">,
   since: Date | null,
+  state: "open" | "closed" | "all" = "open",
 ): Promise<readonly Listed[]> {
   const listed: Listed[] = [];
 
@@ -427,7 +498,7 @@ export async function listOpenThreads(
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
-      state: "open",
+      state,
       sort: "created",
       direction: "desc",
       per_page: SWEEP_PAGE,

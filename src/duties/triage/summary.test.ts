@@ -416,6 +416,7 @@ function sweep(over: Partial<SweepRun> = {}): SweepRun {
     remaining: 0,
     starvedRun: false,
     ungranted: null,
+    recording: false,
     spent: [],
     modelNames: new Map(),
     screenNames: new Map(),
@@ -429,6 +430,15 @@ describe("summarizeSweep", () => {
 
     expect(page).toContain("## Reeve · triage — sweep");
     expect(page).toContain("Processed 0, skipped 5 (already labelled), 3 remaining.");
+  });
+
+  it("names bulk migration in the heading and explains the skip differently", () => {
+    const page = summarizeSweep(
+      sweep({ results: [], skipped: 5, remaining: 3, recording: true }),
+    );
+
+    expect(page).toContain("## Reeve · triage — sweep (bulk migration)");
+    expect(page).toContain("Processed 0, skipped 5 (no taxonomy label to import), 3 remaining.");
   });
 
   it("says a dry run rehearsed rather than applied", () => {

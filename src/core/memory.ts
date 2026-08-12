@@ -51,6 +51,15 @@ import { join } from "node:path";
  * needs is enough text to match on.
  */
 export interface Correction {
+  /**
+   * `owner/repo`, or `""` for a line written before this field existed. Never
+   * used to filter what recall reads — one project's store is one project's
+   * memory regardless of which repository a thread happened to live in when a
+   * warrant moved — only to tell entries about the same thread number in two
+   * different repositories apart when a store is ever consolidated, and to
+   * decide which existing line a fresh write may replace: see `thread` below.
+   */
+  readonly repo: string;
   /** The thread this was decided on. */
   readonly thread: number;
   /** When, as an ISO-8601 instant. */
@@ -476,6 +485,7 @@ export function parseCorrection(line: string): Correction | null {
   if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
 
   return {
+    repo: typeof record.repo === "string" ? record.repo : "",
     thread,
     at: typeof record.at === "string" ? record.at : "",
     title: typeof record.title === "string" ? record.title : "",
@@ -528,6 +538,7 @@ function readPivot(raw: unknown): Correction["pivot"] {
  */
 export function formatCorrection(correction: Correction): string {
   return JSON.stringify({
+    repo: correction.repo,
     thread: correction.thread,
     at: correction.at,
     title: correction.title,
