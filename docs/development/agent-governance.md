@@ -158,9 +158,12 @@ adjectives:
   `capabilities:` maps to `authority.capabilities` with per-duty grants
   preserved; `labels:` — the taxonomy is an allowlist checked in code, so it
   is authority and it moves into `authority.yaml`, entries unchanged;
-  `languages:` likewise. Prose that today has nowhere to live (`not:` grew
-  out of its string field) may _additionally_ expand into `duties/`, but the
-  lift itself never requires it.
+  `languages:` likewise — including its precedence:
+  [written in the warrant, it is the whole answer](../guides/warrant.md#languages)
+  and the `languages` workflow input is ignored, and the lifted file keeps
+  exactly that relationship to the input. Prose that today has nowhere to
+  live (`not:` grew out of its string field) may _additionally_ expand into
+  `duties/`, but the lift itself never requires it.
 - **Lossless:** nothing expressible in a 1.x warrant is inexpressible in
   `authority.yaml`. A lift that loses a `not:` field or an
   `exclusive_with:` is a defective lift, and the migration tooling's tests
