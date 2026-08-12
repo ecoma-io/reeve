@@ -34946,6 +34946,120 @@ function chromeFallbackNote(codes) {
   return `${list} \u2014 Reeve's own scaffolding text has no translation for ${missing.size === 1 ? "this language" : "these languages"} yet, so it rendered in English instead. Chrome covers: ${CHROME_LANGUAGES.join(", ")}.`;
 }
 
+// src/duties/translate/publish.ts
+var marker = markerFor("translate");
+function translationFingerprint(translated, languages) {
+  return fingerprint(
+    translated,
+    languages.map((language) => language.code)
+  );
+}
+function publication(translated) {
+  if (translated.posted.length === 0) return { fingerprint: translated.fingerprint, sections: [] };
+  const sections = translated.posted.map(
+    (entry) => section(entry, translated.posted.length === 1, translated.attribution)
+  );
+  return {
+    fingerprint: translated.fingerprint,
+    sections: [boundary(translated.posted), ...sections, footer(translated)]
+  };
+}
+function codesOf(posted) {
+  return posted.map((entry) => entry.to.code);
+}
+function boundary(posted) {
+  return [
+    "---",
+    "",
+    "> [!NOTE]",
+    ...chromeLines("translateBoundary", codesOf(posted)).map((line) => `> ${line}`)
+  ].join("\n");
+}
+function section(entry, alone, attribution) {
+  return [
+    `<details${alone ? " open" : ""}>`,
+    `<summary>${summary2(entry, attribution)}</summary>`,
+    // GitHub only renders Markdown inside a block-level HTML element when a
+    // blank line separates them, so these are load-bearing rather than tidy:
+    // without them a fenced code block in the translation posts as one line of
+    // backticks.
+    "",
+    entry.text,
+    "",
+    ...attribution === "detail" ? [provenance(entry), ""] : [],
+    "</details>"
+  ].join("\n");
+}
+function summary2(entry, attribution) {
+  const language = `<b>${escapeHtml(entry.to.label)}</b>`;
+  if (attribution === "none") return language;
+  return `${language} \xB7 <code>${escapeHtml(entry.model)}</code>`;
+}
+function provenance(entry) {
+  const { decision } = entry;
+  const parts = [`Translated by \`${entry.model}\`.`];
+  if (decision !== void 0) {
+    parts.push(
+      `Scored ${decision.score.toFixed(2)} of 1.00` + (decision.drafts > 1 ? `, best of ${String(decision.drafts)} drafts` : "") + `, decided by ${decision.decidedBy}.`
+    );
+    if (decision.votes.length > 0) {
+      const votes = decision.votes.map((vote) => `\`${vote.model}\`\u2192\`${vote.pick}\``).join(", ");
+      parts.push(`Votes: ${votes}.`);
+    }
+  }
+  return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
+}
+function footer(translated) {
+  const { from, skipped, truncated, posted } = translated;
+  const codes = codesOf(posted);
+  const notes = [];
+  if (from !== null) {
+    notes.push(...chromeLines("translateFooterFrom", codes, { label: from.label }));
+  }
+  if (truncated) {
+    notes.push(...chromeLines("translateFooterTruncated", codes));
+  }
+  if (skipped.length > 0) {
+    notes.push(
+      ...chromeLines("translateFooterSkipped", codes, {
+        list: skipped.map((language) => language.label).join(", ")
+      })
+    );
+  }
+  notes.push(...chromeLines("translateFooterEditable", codes));
+  return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
+}
+function escapeHtml(text2) {
+  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// src/duties/translate/inputs.ts
+function readBody(body, limit) {
+  const { official, fingerprint: published } = marker.split(body);
+  return {
+    official,
+    source: limit === null ? official : official.slice(0, limit),
+    truncated: limit !== null && official.length > limit,
+    published
+  };
+}
+function targets(languages, from) {
+  if (from === null) return languages;
+  const source = from.code.toLowerCase();
+  return languages.filter((language) => language.code.toLowerCase() !== source);
+}
+var MIN_CHUNK_CHARS = 500;
+function parseChunkChars(raw) {
+  const trimmed = raw.trim();
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < MIN_CHUNK_CHARS) {
+    throw new Error(
+      `chunk-chars: expected a whole number of ${String(MIN_CHUNK_CHARS)} or more, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
+
 // src/duties/translate/summary.ts
 function authority(run2) {
   return `No \`${run2.warrant}\` \u2014 this duty found no warrant file, and ran on its own defaults (\`edit-body\`, and whatever \`languages\` was configured).`;
@@ -35082,93 +35196,6 @@ function summarizeSweep(run2) {
 `;
 }
 
-// src/duties/translate/publish.ts
-var marker = markerFor("translate");
-function translationFingerprint(translated, languages) {
-  return fingerprint(
-    translated,
-    languages.map((language) => language.code)
-  );
-}
-function publication(translated) {
-  if (translated.posted.length === 0) return { fingerprint: translated.fingerprint, sections: [] };
-  const sections = translated.posted.map(
-    (entry) => section(entry, translated.posted.length === 1, translated.attribution)
-  );
-  return {
-    fingerprint: translated.fingerprint,
-    sections: [boundary(translated.posted), ...sections, footer(translated)]
-  };
-}
-function codesOf(posted) {
-  return posted.map((entry) => entry.to.code);
-}
-function boundary(posted) {
-  return [
-    "---",
-    "",
-    "> [!NOTE]",
-    ...chromeLines("translateBoundary", codesOf(posted)).map((line) => `> ${line}`)
-  ].join("\n");
-}
-function section(entry, alone, attribution) {
-  return [
-    `<details${alone ? " open" : ""}>`,
-    `<summary>${summary2(entry, attribution)}</summary>`,
-    // GitHub only renders Markdown inside a block-level HTML element when a
-    // blank line separates them, so these are load-bearing rather than tidy:
-    // without them a fenced code block in the translation posts as one line of
-    // backticks.
-    "",
-    entry.text,
-    "",
-    ...attribution === "detail" ? [provenance(entry), ""] : [],
-    "</details>"
-  ].join("\n");
-}
-function summary2(entry, attribution) {
-  const language = `<b>${escapeHtml(entry.to.label)}</b>`;
-  if (attribution === "none") return language;
-  return `${language} \xB7 <code>${escapeHtml(entry.model)}</code>`;
-}
-function provenance(entry) {
-  const { decision } = entry;
-  const parts = [`Translated by \`${entry.model}\`.`];
-  if (decision !== void 0) {
-    parts.push(
-      `Scored ${decision.score.toFixed(2)} of 1.00` + (decision.drafts > 1 ? `, best of ${String(decision.drafts)} drafts` : "") + `, decided by ${decision.decidedBy}.`
-    );
-    if (decision.votes.length > 0) {
-      const votes = decision.votes.map((vote) => `\`${vote.model}\`\u2192\`${vote.pick}\``).join(", ");
-      parts.push(`Votes: ${votes}.`);
-    }
-  }
-  return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
-}
-function footer(translated) {
-  const { from, skipped, truncated, posted } = translated;
-  const codes = codesOf(posted);
-  const notes = [];
-  if (from !== null) {
-    notes.push(...chromeLines("translateFooterFrom", codes, { label: from.label }));
-  }
-  if (truncated) {
-    notes.push(...chromeLines("translateFooterTruncated", codes));
-  }
-  if (skipped.length > 0) {
-    notes.push(
-      ...chromeLines("translateFooterSkipped", codes, {
-        list: skipped.map((language) => language.label).join(", ")
-      })
-    );
-  }
-  notes.push(...chromeLines("translateFooterEditable", codes));
-  return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
-}
-function escapeHtml(text2) {
-  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 // src/duties/translate/capabilities.ts
 var DEFAULT_CAPABILITIES = ["edit-body"];
 
@@ -35197,31 +35224,6 @@ function readAttribution() {
   const raw = getInput("show-attribution").trim().toLowerCase();
   if (raw === "none" || raw === "model" || raw === "detail") return raw;
   throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
-}
-function readBody(body, limit) {
-  const { official, fingerprint: published } = marker.split(body);
-  return {
-    official,
-    source: limit === null ? official : official.slice(0, limit),
-    truncated: limit !== null && official.length > limit,
-    published
-  };
-}
-function targets(languages, from) {
-  if (from === null) return languages;
-  const source = from.code.toLowerCase();
-  return languages.filter((language) => language.code.toLowerCase() !== source);
-}
-var MIN_CHUNK_CHARS = 500;
-function parseChunkChars(raw) {
-  const trimmed = raw.trim();
-  const value = Number(trimmed);
-  if (trimmed.length === 0 || !Number.isInteger(value) || value < MIN_CHUNK_CHARS) {
-    throw new Error(
-      `chunk-chars: expected a whole number of ${String(MIN_CHUNK_CHARS)} or more, got \`${raw}\`.`
-    );
-  }
-  return value;
 }
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
