@@ -23,6 +23,7 @@ function correction(over: Partial<Correction> = {}): Correction {
   return {
     repo: "ecoma-io/reeve",
     thread: 1,
+    duty: "triage",
     at: "2026-08-01T00:00:00Z",
     title: "Export produces an empty file",
     excerpt: "The export writes zero bytes when the table has exactly one row.",
@@ -31,6 +32,8 @@ function correction(over: Partial<Correction> = {}): Correction {
     decided: ["bug", "needs reproduction"],
     by: "maintainer",
     note: null,
+    outcome: null,
+    duplicateOf: null,
     pivot: null,
     ...over,
   };
@@ -457,6 +460,7 @@ describe("parseCorrection", () => {
     expect(parsed).toEqual({
       repo: "",
       thread: 7,
+      duty: "triage",
       at: "",
       title: "",
       excerpt: "",
@@ -465,6 +469,8 @@ describe("parseCorrection", () => {
       decided: ["bug"],
       by: "",
       note: null,
+      outcome: null,
+      duplicateOf: null,
       pivot: null,
     });
   });

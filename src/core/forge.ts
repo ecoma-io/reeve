@@ -439,6 +439,25 @@ export interface TrackerApi {
         }[];
       }>;
     };
+    readonly repos: {
+      /**
+       * Whether a given account can push to this repository — `"admin"`,
+       * `"write"`, `"read"` or `"none"`, GitHub's own four-way answer and
+       * nothing finer.
+       *
+       * The stand-in for `author_association`, which a webhook's `sender` —
+       * the account that performed an action, as opposed to `issue.user`, the
+       * thread's own author — does not carry: only an issue's author and a
+       * comment or review's author get that field. A duty that needs to know
+       * whether whoever just *acted* is a trusted account has no field to
+       * read and has to ask the platform directly, which is what this is for.
+       */
+      getCollaboratorPermissionLevel(params: {
+        owner: string;
+        repo: string;
+        username: string;
+      }): Promise<{ data: { permission: string } }>;
+    };
   };
 }
 

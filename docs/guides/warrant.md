@@ -291,6 +291,11 @@ These are not defaults. There is no input, no file key and no flag:
   marker. Everything above it is kept byte-for-byte on every run.
 - **Applying a label the taxonomy does not name**, whatever a model returned and
   whatever it asserted about its instructions.
+- **Re-closing as a duplicate a thread a human reopened after Reeve's own
+  duplicate-close.** The moment that reopen is on record as a reversal, the
+  enforce stage refuses the close in code — whatever the model's verdict says
+  this time. See [Memory](#memory) below for how that reversal gets recorded
+  and what the refusal checks against.
 - **Writing code, opening a pull request, or running your tests.**
 
 The last one is a product boundary rather than a safety one, and it is argued in
@@ -317,23 +322,44 @@ No checkout happens for this — the commit goes through the Contents API — an
 a token without the scope fails the run the way any other authentication
 problem does, plainly.
 
+**`record` also commits a human _reversal_ of Reeve's own action** — not only a
+human's forward decision. Two shapes:
+
+- A taxonomy label Reeve applied, that a human then removed. The ordinary
+  labelled/unlabelled write already covers this; it is enriched with a flag
+  marking it as a correction of automation rather than of another human,
+  which is what lets a later prompt render it under a separate "a human
+  undid one of Reeve's own actions" heading, structurally apart from an
+  ordinary decision.
+- A thread Reeve closed as a duplicate, that a human then reopened. This needs
+  `apply` to also grant `close` — nothing records a reversal of a close this
+  installation never makes — and the workflow's trigger to include
+  `reopened`. A reopen from the thread's own author is deliberately never
+  recorded this way, even though an author has obvious standing over their own
+  thread: an author's disagreement is not a maintainer's agreement. It is
+  surfaced in the run's own notice instead, so a maintainer who agrees can
+  still record it by relabelling.
+
+Either shape is checked, in code, on every close a duplicate verdict would
+otherwise make: see [What no capability can ever turn on](#what-no-capability-can-ever-turn-on).
+
 **`record` needs naming in both halves — this file and the workflow's
 `apply`.** [The narrower of the two wins](#capabilities) for `record` exactly
 as it does for `label` or `comment`, and granting it here alone is not
-enough: `apply` defaults to `label`, so a labelled event on a run whose file
+enough: `apply` defaults to `label`, so an eligible event on a run whose file
 grants `record` but whose workflow does not name it re-triages the thread
 instead of recording it, and a `core.notice` on that run says so. Both halves
 need to agree:
 
 ```yaml
 capabilities:
-  triage: [label, record]
+  triage: [label, close, record]
 ```
 
 ```yaml
 on:
   issues:
-    types: [labeled, unlabeled]
+    types: [labeled, unlabeled, reopened]
 
 concurrency:
   group: reeve-${{ github.event.issue.number }}
@@ -350,7 +376,7 @@ jobs:
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           number: ${{ github.event.issue.number }}
-          apply: label, record
+          apply: label, close, record
 ```
 
 The `concurrency` group is what keeps two of this thread's events from racing

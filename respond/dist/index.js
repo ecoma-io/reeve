@@ -33378,9 +33378,15 @@ function parseCorrection(line) {
   const thread = record.thread;
   const decided = strings(record.decided);
   if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
+  const rawOutcome = record.outcome;
+  if (rawOutcome !== void 0 && rawOutcome !== null && rawOutcome !== "overruled") return null;
+  const outcome2 = rawOutcome === "overruled" ? "overruled" : null;
+  const rawDuplicateOf = record.duplicateOf;
+  const duplicateOf = typeof rawDuplicateOf === "number" && Number.isInteger(rawDuplicateOf) && rawDuplicateOf >= 1 ? rawDuplicateOf : null;
   return {
     repo: typeof record.repo === "string" ? record.repo : "",
     thread,
+    duty: typeof record.duty === "string" && record.duty.length > 0 ? record.duty : "triage",
     at: typeof record.at === "string" ? record.at : "",
     title: typeof record.title === "string" ? record.title : "",
     excerpt: typeof record.excerpt === "string" ? record.excerpt : "",
@@ -33389,6 +33395,8 @@ function parseCorrection(line) {
     decided,
     by: typeof record.by === "string" ? record.by : "",
     note: typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
+    outcome: outcome2,
+    duplicateOf,
     pivot: readPivot(record.pivot)
   };
 }

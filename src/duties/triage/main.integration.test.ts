@@ -843,7 +843,15 @@ describe("the action", () => {
 
     await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, close]"));
     stub.labels = [];
-    const closed = await runAction(stub, { apply: "label, close" });
+    // The hard gate reads the corrections store through the Contents API
+    // before any close — even on a run that never grants `record` — so this
+    // needs a repo-relative path the stub server actually serves, not the
+    // scratch directory `readStore` reads straight off disk elsewhere in this
+    // suite.
+    const closed = await runAction(stub, {
+      apply: "label, close",
+      corrections: ".reeve/corrections",
+    });
 
     expect(closed.code).toBe(0);
     expect(stub.effects.closed).toBe(true);
@@ -1804,7 +1812,7 @@ describe("record", () => {
     expect(stub.contentsWrites).toEqual([]);
     expect(run.log).toContain(
       `\`${warrantPath}\` grants \`record\`, but \`apply\` does not name it, ` +
-        "so this labelled/unlabelled event was triaged instead of recorded.",
+        "so this event was triaged instead of recorded.",
     );
     // Fell through to the ordinary pipeline, which did triage the thread.
     expect(stub.effects.applied).toEqual(["bug"]);

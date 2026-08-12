@@ -50,6 +50,7 @@ function correction(over: Partial<Correction> = {}): Correction {
   return {
     repo: "ecoma-io/reeve",
     thread: 42,
+    duty: "triage",
     at: "2026-01-01T00:00:00Z",
     title: "The button does nothing on mobile",
     excerpt: "Tapping it opens nothing.",
@@ -58,6 +59,8 @@ function correction(over: Partial<Correction> = {}): Correction {
     decided: ["bug", "mobile"],
     by: "maintainer",
     note: null,
+    outcome: null,
+    duplicateOf: null,
     pivot: null,
     ...over,
   };

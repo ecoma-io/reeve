@@ -128,6 +128,7 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
+import { checkReversal, closeMarker, gateClose, removedByAutomation } from "./outcome.js";
 import {
   summarize,
   summarizeRecord,
@@ -522,6 +523,10 @@ async function runSweep(
         stages,
         weather,
         "sweep",
+        // A sweep imports whatever labels stand on a thread; there is no
+        // single labelling event to read a before/after delta from, the
+        // same reason `by === "sweep"` skips the S1 enrichment entirely.
+        null,
       );
       // The self-training guard's own skip — machine-applied labels, or a
       // label history too long for this run to attribute — counted the same
@@ -537,7 +542,14 @@ async function runSweep(
       const outcome = await decide(authority, standing, settings, stages, weather);
       const done = settings.dryRun
         ? NOTHING_DONE
-        : await act(createEffects(api, at), authority.warrant, outcome);
+        : await act(
+            createEffects(api, at),
+            authority.warrant,
+            outcome,
+            api,
+            at,
+            settings.corrections,
+          );
       acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
     }
   }
@@ -768,11 +780,11 @@ export async function run(): Promise<void> {
           // again here.
           outcome = recursionGuardOutcome();
         } else {
-          // `record` takes a labelled/unlabelled event, from a human, and only
-          // when both the file and the workflow's `apply` grant it — the same
-          // narrowing every other capability goes through. Every other event,
-          // or the capability simply not granted, is today's behaviour: a
-          // verdict, not a recording.
+          // `record` takes a labelled/unlabelled event or a reopen, from a
+          // human, and only when both the file and the workflow's `apply`
+          // grant it — the same narrowing every other capability goes through.
+          // Every other event, or the capability simply not granted, is
+          // today's behaviour: a verdict, not a recording.
           const trigger = recordTrigger();
           const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
           const { permitted } = narrow(grantedCapabilities, settings.apply);
@@ -807,9 +819,9 @@ export async function run(): Promise<void> {
           // otherwise. This is the other direction — the file grants `record`,
           // `apply` simply never names it, `apply` defaults to `label` alone — and
           // without this notice a maintainer who granted `record` in the file and
-          // stopped there gets a silent full re-triage on every label change
-          // instead of the recording they configured, with nothing in the log
-          // explaining why.
+          // stopped there gets a silent full re-triage on every label change or
+          // reopen instead of the recording they configured, with nothing in the
+          // log explaining why.
           if (
             trigger.eligible &&
             grantedCapabilities.includes("record") &&
@@ -817,18 +829,18 @@ export async function run(): Promise<void> {
           ) {
             core.notice(
               `\`${authority.warrant.path}\` grants \`record\`, but \`apply\` does not name it, ` +
-                "so this labelled/unlabelled event was triaged instead of recorded. The narrower " +
-                "of the two wins — add `record` to `apply` as well to record it instead.",
+                "so this event was triaged instead of recorded. The narrower of the two wins — " +
+                "add `record` to `apply` as well to record it instead.",
             );
           }
 
           // The other silent branch of the same gate — but only for the one
           // ineligible case worth a maintainer's attention: `record` is fully
-          // granted, the event was the labelled/unlabelled kind it fires on,
-          // and it still did not run because the sender was refused (a bot).
-          // A workflow that also runs on `opened` or a `push` is not
-          // misconfigured on those legs — `trigger.reason` is empty for both,
-          // deliberately, so this stays silent there.
+          // granted, the event was a kind it fires on, and it still did not run
+          // because the sender was refused (a bot). A workflow that also runs
+          // on `opened` or a `push` is not misconfigured on those legs —
+          // `trigger.reason` is empty for both, deliberately, so this stays
+          // silent there.
           if (trigger.reason !== "" && permitted.includes("record")) {
             core.info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
           }
@@ -838,7 +850,31 @@ export async function run(): Promise<void> {
           // shape as the two notices above.
           noticeProposeSweepOnly(authority);
 
-          if (trigger.eligible && permitted.includes("record")) {
+          if (trigger.eligible && permitted.includes("record") && trigger.kind === "reopen") {
+            const check = await checkReversal(api, at, standing, senderLogin());
+            if (check.authorReopen) {
+              core.notice(
+                `#${String(number)} was reopened by the thread's own author — not recorded as a ` +
+                  "reversal. A maintainer who agrees the close was wrong can still record it, by " +
+                  "toggling a label.",
+              );
+            }
+            if (check.reversal !== null) {
+              recordOutcome = await recordReversal(
+                api,
+                at,
+                standing,
+                authority,
+                settings,
+                stages,
+                weather,
+                senderLogin(),
+                check.reversal.duplicateOf,
+              );
+            } else {
+              outcome = await decide(authority, standing, settings, stages, weather);
+            }
+          } else if (trigger.eligible && permitted.includes("record")) {
             recordOutcome = await recordCorrection(
               api,
               at,
@@ -848,6 +884,7 @@ export async function run(): Promise<void> {
               stages,
               weather,
               senderLogin(),
+              labelChange(),
             );
           } else {
             outcome = await decide(authority, standing, settings, stages, weather);
@@ -860,7 +897,14 @@ export async function run(): Promise<void> {
       } else if (outcome !== null) {
         const done = settings.dryRun
           ? NOTHING_DONE
-          : await act(createEffects(api, at), authority.warrant, outcome);
+          : await act(
+              createEffects(api, at),
+              authority.warrant,
+              outcome,
+              api,
+              at,
+              settings.corrections,
+            );
         single = { number, outcome, done };
       }
     }
@@ -1174,50 +1218,83 @@ async function decide(
  * Whether the event that triggered this run is one `record` fires on, and —
  * for the one case worth saying anything about — why not.
  *
- * `labeled`/`unlabeled` on `issues`, from a human. Not `opened`, not
- * `edited`, not a re-triage — `record` never re-triages, it takes a label
- * change as a maintainer's word for what a thread is and writes that down.
- * And not a bot: a label another automation applied is not a correction, and
- * recording it would teach recall a category no maintainer ever chose.
+ * Two kinds of event, and `kind` tells them apart because the two write
+ * completely different shapes: `labeled`/`unlabeled` on `issues`, from a
+ * human, is a standing-label correction (`recordCorrection`); `reopened` on
+ * `issues`, from a human, is a candidate reversal of one of Reeve's own
+ * closes (`checkReversal`, `recordReversal`) and needs the API evidence
+ * `checkReversal` gathers before it is known whether there is anything to
+ * record at all. Not `opened`, not `edited`, not a re-triage on either kind
+ * — `record` never re-triages, it takes an event as a maintainer's word for
+ * something and writes that down. And not a bot on either kind: a label
+ * another automation applied, or a reopen a second bot performed, is not a
+ * maintainer's word for anything.
  */
 interface RecordTrigger {
   readonly eligible: boolean;
+  readonly kind: "label" | "reopen";
   /**
    * Why the sender disqualified an otherwise-eligible event — empty on every
-   * other path, including the one that fires and the two that were never
-   * going to: the wrong event entirely, or an `issues` action besides
-   * `labeled`/`unlabeled`. Those two are not worth a maintainer's attention
-   * — a workflow granting `record` that also runs on `opened` or a `push` is
-   * not misconfigured, that leg was simply never going to record — so only
-   * this one case, a human-shaped label event that turned out to come from a
-   * bot, is the reason anything gets logged over.
+   * other path, including the one that fires and the ones that were never
+   * going to: the wrong event entirely, or an `issues` action besides the
+   * three this fires on. Those are not worth a maintainer's attention — a
+   * workflow granting `record` that also runs on `opened` or a `push` is not
+   * misconfigured, that leg was simply never going to record — so only a
+   * human-shaped event that turned out to come from a bot is the reason
+   * anything gets logged over.
    */
   readonly reason: string;
 }
 
 function recordTrigger(): RecordTrigger {
   const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") return { eligible: false, reason: "" };
+  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
 
   const payload = context.payload as {
     action?: string;
     sender?: { login?: string; type?: string };
   };
+
+  if (payload.action === "reopened") {
+    if (isBotAuthor(payload.sender)) {
+      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
+    }
+    return { eligible: true, kind: "reopen", reason: "" };
+  }
+
   if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return { eligible: false, reason: "" };
+    return { eligible: false, kind: "label", reason: "" };
   }
 
   if (isBotAuthor(payload.sender)) {
-    return { eligible: false, reason: "the label change came from a bot" };
+    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
   }
 
-  return { eligible: true, reason: "" };
+  return { eligible: true, kind: "label", reason: "" };
 }
 
-/** The human who made the label change this run is recording — a handle, without the `@`. */
+/** The human behind this run's triggering event — a handle, without the `@`. */
 function senderLogin(): string {
   const payload = context.payload as { sender?: { login?: string } };
   return payload.sender?.login ?? "";
+}
+
+/**
+ * The taxonomy label a `labeled`/`unlabeled` event named, for the one call
+ * site that turns it into `proposed`'s honest before/after delta —
+ * `recordCorrection`. `null` for every event this is not, including a sweep,
+ * which has no single event to read at all, and including a `reopened`
+ * event, which names no label.
+ */
+function labelChange(): {
+  readonly label: string;
+  readonly action: "labeled" | "unlabeled";
+} | null {
+  const payload = context.payload as { action?: string; label?: { name?: string } };
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
+  const label = payload.label?.name;
+  if (label === undefined || label.length === 0) return null;
+  return { label, action: payload.action };
 }
 
 /** What a `record` run concluded — a mirror of `Outcome`, sized for the much smaller pipeline it took. */
@@ -1246,6 +1323,63 @@ interface RecordOutcome {
    * Never set outside a migration sweep.
    */
   readonly unattributable: boolean;
+}
+
+/**
+ * The pivot-language rendering for a correction about to be written, shared
+ * by `recordCorrection` and `recordReversal` so a store's two record paths
+ * stay identical about what "no pivot" means and why — see `Correction.pivot`'s
+ * own doc comment for what a `null` here means to a reader downstream.
+ */
+async function computePivot(
+  warrant: Warrant,
+  standing: Standing,
+  body: string,
+  code: string | null,
+  settings: Settings,
+  stages: Stages,
+  weather: Weather,
+): Promise<{ readonly pivot: Correction["pivot"]; readonly pivotNote: string | null }> {
+  const pivotLanguage =
+    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
+    return { pivot: null, pivotNote: null };
+  }
+
+  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+  const rendered = await translateToPivot({
+    provider: stages.pivot,
+    models: pivotModels,
+    title: standing.title,
+    body,
+    to: pivotLanguage,
+    weather,
+    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
+  });
+  for (const failure of rendered.failures) {
+    core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+  }
+  if (rendered.draft !== null) {
+    return {
+      pivot: {
+        language: pivotLanguage.code,
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT),
+      },
+      pivotNote: null,
+    };
+  }
+
+  // Weather, not a broken configuration — the write below still happens. A
+  // correction without a pivot rendering is still a correction; a run that
+  // refused to record over a starved translation would be trading a sure
+  // thing for a nice-to-have.
+  const pivotNote =
+    "A pivot-language rendering could not be produced this run, so the correction was " +
+    "recorded without one.";
+  core.info(pivotNote);
+  return { pivot: null, pivotNote };
 }
 
 /**
@@ -1292,6 +1426,7 @@ async function recordCorrection(
   stages: Stages,
   weather: Weather,
   by: string,
+  changed: { readonly label: string; readonly action: "labeled" | "unlabeled" } | null,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
 
@@ -1367,55 +1502,56 @@ async function recordCorrection(
   // `language` output sees the same shape whichever path produced it.
   const code = detection.language?.code ?? null;
 
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  let pivot: Correction["pivot"] = null;
-  let pivotNote: string | null = null;
-  if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames =
-      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const rendered = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-    });
-    for (const failure of rendered.failures) {
-      core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
-    }
-    if (rendered.draft !== null) {
-      pivot = {
-        language: pivotLanguage.code,
-        title: rendered.draft.title,
-        excerpt: rendered.draft.body.slice(0, EXCERPT),
-      };
-    } else {
-      // Weather, not a broken configuration — the write below still happens.
-      // A correction without a pivot rendering is still a correction; a run
-      // that refused to record over a starved translation would be trading a
-      // sure thing for a nice-to-have.
-      pivotNote =
-        "A pivot-language rendering could not be produced this run, so the correction was " +
-        "recorded without one.";
-      core.info(pivotNote);
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather,
+  );
+
+  // A genuine single-thread record — never a sweep — carries the label event
+  // that triggered it, which is what turns `proposed` from an empty list
+  // into an honest before/after delta: the taxonomy-filtered labels standing
+  // on the thread a moment before this event landed. Only a change to a
+  // taxonomy label is worth computing this for — a `labeled`/`unlabeled`
+  // event on a label outside the taxonomy already left `decidedLabels`
+  // untouched, and a delta around a label this duty never proposes would say
+  // nothing a maintainer corrected.
+  let proposed: readonly string[] = [];
+  let outcomeField: Correction["outcome"] = null;
+  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
+    const before = new Set(decidedLabels);
+    if (changed.action === "unlabeled") before.add(changed.label);
+    else before.delete(changed.label);
+    proposed = [...before];
+
+    // S1: a taxonomy label a human just removed, when it was Reeve's own
+    // prior run that applied it — the enrichment on top of the ordinary
+    // (S2) correction this function already writes for every human relabel.
+    // See `removedByAutomation`'s own doc comment for why an incomplete
+    // history answers "not automation" rather than "unknown".
+    if (changed.action === "unlabeled") {
+      outcomeField = (await removedByAutomation(api, at, changed.label)) ? "overruled" : null;
     }
   }
 
   const correction: Correction = {
     repo: `${at.owner}/${at.repo}`,
     thread: at.number,
+    duty: "triage",
     at: new Date().toISOString(),
     title: standing.title,
     excerpt: body.slice(0, EXCERPT),
     language: code,
-    proposed: [],
+    proposed,
     decided: decidedLabels,
     by,
     note: null,
+    outcome: outcomeField,
+    duplicateOf: null,
     pivot,
   };
 
@@ -1424,6 +1560,107 @@ async function recordCorrection(
       `Would record #${String(at.number)} as ` +
         (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") +
         `${pivot !== null ? ", with a pivot rendering" : ""} — dry run, nothing committed.`,
+    );
+  } else {
+    await writeCorrection(api, at, settings.corrections, correction);
+  }
+
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+    machineOnly: false,
+    unattributable: false,
+  };
+}
+
+/**
+ * Records a human's reopen of a thread Reeve closed as a duplicate — S3 in
+ * the outcome taxonomy `recall.ts` renders. Written under `duty: "duplicate"`
+ * rather than `"triage"`, deliberately: the replacement key is (repo,
+ * thread, duty), so this reversal lives in its own slot and can never
+ * silently overwrite — or be overwritten by — whatever `recordCorrection`
+ * last wrote for this thread's standing labels. See `Correction.duty`'s doc
+ * comment.
+ *
+ * The caller (`run()`) only reaches this function after `checkReversal` has
+ * already established both halves of the evidence — the close really was
+ * Reeve's own, and the reopener has the standing to reverse it — so nothing
+ * here re-checks either; this function's only job is turning that finding
+ * into the record.
+ *
+ * Title, excerpt, language and pivot are gathered the same way
+ * `recordCorrection` gathers them for an ordinary correction — S3 gets the
+ * same cross-language reach as every other record, not a second-class one.
+ */
+async function recordReversal(
+  api: TrackerApi & ContentsApi,
+  at: Location,
+  standing: Standing,
+  authority: Authority,
+  settings: Settings,
+  stages: Stages,
+  weather: Weather,
+  by: string,
+  duplicateOf: number,
+): Promise<RecordOutcome> {
+  const warrant = authority.warrant;
+
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+      settings.temperature,
+    ),
+  );
+  const code = detection.language?.code ?? null;
+
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather,
+  );
+
+  // `decided` is incidental standing on a reversal line, not the correction
+  // itself — see `Correction.decided`'s own doc comment on that distinction.
+  // Kept anyway, filtered the same way an ordinary correction's `decided` is,
+  // so a reader never has to special-case a reversal line to know what the
+  // thread carries.
+  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+
+  const correction: Correction = {
+    repo: `${at.owner}/${at.repo}`,
+    thread: at.number,
+    duty: "duplicate",
+    at: new Date().toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed: [],
+    decided: decidedLabels,
+    by,
+    note: null,
+    outcome: "overruled",
+    duplicateOf,
+    pivot,
+  };
+
+  if (settings.dryRun) {
+    core.info(
+      `Would record #${String(at.number)}'s reopen as reversing a close that named it a ` +
+        `duplicate of #${String(duplicateOf)} — dry run, nothing committed.`,
     );
   } else {
     await writeCorrection(api, at, settings.corrections, correction);
@@ -1510,27 +1747,34 @@ async function attemptWrite(
   const files = await listCorrectionFiles(contentsApi, at, path);
   const unreadable: string[] = [];
 
-  // The walk stops the moment a line carrying this exact (repo, thread) pair
-  // turns up: nothing later in the store can change what an explicit match
-  // means, so the shards past it are never read at all — the common case, a
-  // repeat correction on a thread already recorded, costs the reads it takes
-  // to find the line and not one more. Only a write that finds no explicit
-  // match anywhere has, by then, necessarily read the whole store — which is
-  // exactly the knowledge the loose rule below needs, gathered as a
+  // The walk stops the moment a line carrying this exact (repo, thread, duty)
+  // triple turns up: nothing later in the store can change what an explicit
+  // match means, so the shards past it are never read at all — the common
+  // case, a repeat correction on a thread already recorded, costs the reads
+  // it takes to find the line and not one more. Only a write that finds no
+  // explicit match anywhere has, by then, necessarily read the whole store —
+  // which is exactly the knowledge the loose rule below needs, gathered as a
   // side-effect of the search rather than as an extra pass. And no shard is
   // retained past its own visit except the single candidate line the loose
   // rule might still rewrite, so a store of many large shards is never held
   // in memory whole.
   //
-  // The loose rule: `repo` as well as `thread` — the dedup key widened to
-  // the pair once a store could hold more than one repository's history. A
-  // line written before that field existed parses as `repo: ""`, and in a
-  // store that has only ever recorded for today's repo, a stored empty repo
-  // can only mean "written before this field existed" — read as this thread
-  // number's own legacy entry, and rewritten in place with today's repo on
-  // it. That is what lets a single-repo store self-migrate: the first write
-  // a thread sees after the field shipped leaves nothing legacy to match
-  // loosely the next time.
+  // The loose rule: `repo` as well as `thread`, and now `duty` alongside both
+  // — the dedup key widened twice, once when a store could hold more than one
+  // repository's history and again when a single thread could carry more
+  // than one kind of correction (`Correction.duty`'s own doc comment). A line
+  // written before `repo` existed parses as `repo: ""`, and in a store that
+  // has only ever recorded for today's repo, a stored empty repo can only
+  // mean "written before this field existed" — read as this thread number's
+  // own legacy entry, and rewritten in place with today's repo on it. That is
+  // what lets a single-repo store self-migrate: the first write a thread sees
+  // after the field shipped leaves nothing legacy to match loosely the next
+  // time. `duty` is checked here too, deliberately: a legacy `repo: ""` line
+  // predates `duty` as well and reads as `"triage"` by default, so a reversal
+  // write (`duty: "duplicate"`) never loosely claims a thread's pre-`repo`
+  // standing-label line as though it were the same correction — the two are
+  // not, and only the exact-match branch above, which already compares
+  // `duty`, is allowed to treat two lines as one entry.
   //
   // A store that also carries a *different* explicit repo — the whole reason
   // `repo` exists — cannot make that same assumption: an empty-repo line for
@@ -1578,7 +1822,11 @@ async function attemptWrite(
         provenShared = true;
         continue;
       }
-      if (existing.thread === correction.thread && existing.repo === correction.repo) {
+      if (
+        existing.thread === correction.thread &&
+        existing.repo === correction.repo &&
+        existing.duty === correction.duty
+      ) {
         const updated = [...lines];
         updated[index] = formatCorrection(correction);
         await writeContentsFile(
@@ -1595,6 +1843,7 @@ async function attemptWrite(
       if (
         existing.repo === "" &&
         existing.thread === correction.thread &&
+        existing.duty === correction.duty &&
         legacyCandidate === null
       ) {
         legacyCandidate = { path: file.path, lines, sha: read.sha, index };
@@ -1895,8 +2144,24 @@ function notGranted(warrant: Warrant): Outcome {
  * Each effect is guarded by the intersection rather than by the verdict, and
  * they are meant to be read top to bottom by somebody asking what this duty can
  * do to their repository. Not reached at all under `dry-run`.
+ *
+ * **The hard gate.** A `close`-permitted verdict naming a `duplicateOf` is
+ * not enough on its own to close a thread — `gateClose` gets the last word,
+ * checked here in code, after everything upstream (the model, `enforce`,
+ * `narrow`) has already agreed a close would otherwise be allowed. A model's
+ * own answer cannot talk this refusal down, which is the entire property
+ * `recall`'s prompt-side examples cannot provide by themselves: recall is
+ * advice, this is enforcement. See `gateClose`'s own doc comment for what it
+ * checks and why an unreadable shard refuses the same as a found record.
  */
-async function act(effects: Effects, warrant: Warrant, outcome: Outcome): Promise<Done> {
+async function act(
+  effects: Effects,
+  warrant: Warrant,
+  outcome: Outcome,
+  contentsApi: ContentsApi,
+  at: Location,
+  correctionsPath: string,
+): Promise<Done> {
   let labels: readonly string[] = [];
   let assigned: readonly string[] = [];
   let closed = false;
@@ -1926,8 +2191,33 @@ async function act(effects: Effects, warrant: Warrant, outcome: Outcome): Promis
   }
 
   if (outcome.permitted.includes("close") && outcome.verdict.duplicateOf !== null) {
-    await effects.closeAsNotPlanned();
-    closed = true;
+    const gate = await gateClose(
+      contentsApi,
+      at,
+      repoRelativePath(correctionsPath),
+      `${at.owner}/${at.repo}`,
+      at.number,
+    );
+    if (gate.refuse) {
+      if (gate.unreadable.length > 0) {
+        core.warning(
+          `#${String(at.number)}: the hard gate could not fully check whether this close was ` +
+            `already reversed — ${gate.unreadable.map((shard) => `\`${shard}\``).join(", ")} ` +
+            "could not be read, and an unreadable shard refuses the same as a found record " +
+            "would. The close was refused rather than risk re-closing a thread a human already " +
+            "reopened.",
+        );
+      } else {
+        core.notice(
+          `#${String(at.number)}: a human already reopened this thread after Reeve closed it as ` +
+            "a duplicate — that close was recorded as reversed, and the gate refuses to repeat " +
+            "it. The model's verdict is not what decides this; D3 is.",
+        );
+      }
+    } else {
+      await effects.closeAsNotPlanned();
+      closed = true;
+    }
   }
 
   // Last, so it describes what happened rather than what was about to. A run
@@ -1956,6 +2246,14 @@ function comment(outcome: Outcome, done: Done): string {
     parts.push(
       done.closed ? `Closed as a duplicate of ${number}.` : `This may duplicate ${number}.`,
     );
+    // The attribution marker rides in the same comment as the close it
+    // describes — never a second comment, which is what lets `attributedClose`
+    // find "the most recent close" as "the most recent bot comment carrying
+    // this marker" without also having to reconcile it against a separate
+    // labelling comment posted the same run. See `closeMarker`'s own doc
+    // comment for why the marker has to exist at all before a reversal of
+    // this close can ever be attributed back to Reeve.
+    if (done.closed) parts.push(closeMarker.render(outcome.verdict.duplicateOf));
   }
   if (parts.length === 0) return "";
 
