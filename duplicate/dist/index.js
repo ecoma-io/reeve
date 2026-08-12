@@ -32520,6 +32520,68 @@ function findClosingRun(text2, from, runLength) {
   return -1;
 }
 
+// src/core/meter.ts
+var STAGE = {
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging",
+  screen: "Screening",
+  triage: "Triage",
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check"
+};
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
 // src/core/provider.ts
 var DEFAULT_TIMEOUT_MS = 12e4;
 var EXCERPT_CHARS = 200;
@@ -32634,6 +32696,37 @@ function createRoutedProvider(endpoints) {
       const completion = await provider.complete(id, messages, options);
       return { ...completion, model, endpoint: alias };
     }
+  };
+}
+function resolveEndpoints(shared) {
+  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
+  return [
+    {
+      alias: null,
+      baseUrl: shared.baseUrl,
+      apiKey: shared.apiKey,
+      timeoutMs: shared.requestTimeoutMs
+    },
+    ...shared.endpoints.map((endpoint2) => ({
+      alias: endpoint2.alias,
+      baseUrl: endpoint2.baseUrl,
+      apiKey: keyed.get(endpoint2.alias) ?? "",
+      timeoutMs: endpoint2.timeoutMs ?? shared.requestTimeoutMs
+    }))
+  ];
+}
+function assembleClient(shared, meter, purposes, extraRosters = []) {
+  const weather = createWeather(new Set(shared.endpoints.map((endpoint2) => endpoint2.alias)), [
+    ...shared.models,
+    ...extraRosters.flat()
+  ]);
+  const provider = createRoutedProvider(resolveEndpoints(shared));
+  return {
+    weather,
+    provider,
+    stages: Object.fromEntries(
+      purposes.map((purpose) => [purpose, metered(provider, meter, purpose, shared.temperature)])
+    )
   };
 }
 function readCompletion(model, status, text2) {
@@ -32832,15 +32925,11 @@ async function detectLanguage(text2, languages, pick) {
   }
   return { language: null, by: "none", candidates };
 }
-function createLanguagePicker(provider, models, weather, temperature) {
+function createLanguagePicker(provider, models, weather) {
   return async (text2, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) => provider.complete(
-        model,
-        question(text2, candidates),
-        temperature === void 0 ? void 0 : { temperature }
-      ),
+      (model) => provider.complete(model, question(text2, candidates)),
       weather
     );
     if (!rotation.success) return null;
@@ -33813,23 +33902,6 @@ function parseTemperature(raw) {
   }
   return value;
 }
-function resolveEndpoints(shared) {
-  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
-  return [
-    {
-      alias: null,
-      baseUrl: shared.baseUrl,
-      apiKey: shared.apiKey,
-      timeoutMs: shared.requestTimeoutMs
-    },
-    ...shared.endpoints.map((endpoint2) => ({
-      alias: endpoint2.alias,
-      baseUrl: endpoint2.baseUrl,
-      apiKey: keyed.get(endpoint2.alias) ?? "",
-      timeoutMs: endpoint2.timeoutMs ?? shared.requestTimeoutMs
-    }))
-  ];
-}
 function parseSince(raw) {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
@@ -33929,64 +34001,6 @@ function isReeveProposalPr(thread) {
   return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
 }
 
-// src/core/meter.ts
-var STAGE = {
-  detect: "Detection",
-  draft: "Drafting",
-  judge: "Judging",
-  screen: "Screening",
-  triage: "Triage",
-  pivot: "Pivot translation",
-  duplicate: "Duplicate check"
-};
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(model, messages, options);
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
-}
-
 // src/core/sanitize.ts
 var OPENER = "<!--";
 var CLOSER = "-->";
@@ -34034,11 +34048,11 @@ function defangReferences(prose) {
 
 // src/core/pivot.ts
 async function translateToPivot(request2) {
-  const { provider, models, title, body, to, weather, temperature } = request2;
+  const { provider, models, title, body, to, weather } = request2;
   const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages, temperature),
+    (model) => answer(provider, model, messages),
     weather
   );
   if (!rotation.success) return { draft: null, failures: rotation.failures };
@@ -34049,12 +34063,8 @@ async function translateToPivot(request2) {
     failures: rotation.failures
   };
 }
-async function answer(provider, model, messages, temperature) {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === void 0 ? void 0 : { temperature }
-  );
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,
@@ -34783,14 +34793,14 @@ function matchShortlist(input) {
 var NOTHING = { duplicateOf: null, confidence: 0, rationale: "" };
 var EXCERPT = 1e3;
 async function judge(request2) {
-  const { provider, models, weather, candidates, temperature } = request2;
+  const { provider, models, weather, candidates } = request2;
   if (candidates.length === 0) {
     return { verdict: NOTHING, failures: [], unreadable: null, model: null };
   }
   const messages = prompt2(request2);
   const rotation = await rotateModels(
     models,
-    (model) => answer2(provider, model, messages, temperature),
+    (model) => answer2(provider, model, messages),
     weather
   );
   if (!rotation.success) {
@@ -34804,12 +34814,8 @@ async function judge(request2) {
     model: rotation.success.model
   };
 }
-async function answer2(provider, model, messages, temperature) {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === void 0 ? void 0 : { temperature }
-  );
+async function answer2(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,
@@ -34998,14 +35004,10 @@ async function run() {
   let bulk = null;
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)), base.models);
+    const client = assembleClient(base, meter, ["detect", "duplicate", "pivot"]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-    const stages = {
-      detect: metered(provider, meter, "detect"),
-      duplicate: metered(provider, meter, "duplicate"),
-      pivot: metered(provider, meter, "pivot")
-    };
+    const stages = client.stages;
     const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     const authority = await resolveAuthority(read, base.warrant, api, context2.repo);
     const denied = authority.warrant.unnamed("duplicate");
@@ -35094,7 +35096,7 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
     // The title when there is no body — a one-line issue is a real issue.
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature)
+    createLanguagePicker(stages.detect, settings.models, weather)
   );
   const language = detection.language?.label ?? null;
   info(
@@ -35121,8 +35123,7 @@ ${body}`];
       title: standing.title,
       body,
       to: pivotLanguage,
-      weather,
-      ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+      weather
     });
     for (const failure of pivot.failures) {
       warning(`match: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
@@ -35149,8 +35150,7 @@ ${pivot.draft.body}`);
     body,
     language,
     candidates: ranked.map((entry) => entry.candidate),
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+    weather
   });
   for (const failure of judged.failures) {
     warning(`duplicate: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);

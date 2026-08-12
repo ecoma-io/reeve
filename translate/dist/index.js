@@ -32559,6 +32559,68 @@ function narrow(granted, requested) {
   };
 }
 
+// src/core/meter.ts
+var STAGE = {
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging",
+  screen: "Screening",
+  triage: "Triage",
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check"
+};
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
 // src/core/provider.ts
 var DEFAULT_TIMEOUT_MS = 12e4;
 var EXCERPT_CHARS = 200;
@@ -32690,6 +32752,37 @@ function createRoutedProvider(endpoints) {
       const completion = await provider.complete(id, messages, options);
       return { ...completion, model, endpoint: alias };
     }
+  };
+}
+function resolveEndpoints(shared2) {
+  const keyed = new Map(shared2.apiKeys.map((entry) => [entry.alias, entry.key]));
+  return [
+    {
+      alias: null,
+      baseUrl: shared2.baseUrl,
+      apiKey: shared2.apiKey,
+      timeoutMs: shared2.requestTimeoutMs
+    },
+    ...shared2.endpoints.map((endpoint2) => ({
+      alias: endpoint2.alias,
+      baseUrl: endpoint2.baseUrl,
+      apiKey: keyed.get(endpoint2.alias) ?? "",
+      timeoutMs: endpoint2.timeoutMs ?? shared2.requestTimeoutMs
+    }))
+  ];
+}
+function assembleClient(shared2, meter, purposes, extraRosters = []) {
+  const weather = createWeather(new Set(shared2.endpoints.map((endpoint2) => endpoint2.alias)), [
+    ...shared2.models,
+    ...extraRosters.flat()
+  ]);
+  const provider = createRoutedProvider(resolveEndpoints(shared2));
+  return {
+    weather,
+    provider,
+    stages: Object.fromEntries(
+      purposes.map((purpose) => [purpose, metered(provider, meter, purpose, shared2.temperature)])
+    )
   };
 }
 function readCompletion(model, status, text2) {
@@ -33003,23 +33096,6 @@ function parseTemperature(raw) {
   }
   return value;
 }
-function resolveEndpoints(shared2) {
-  const keyed = new Map(shared2.apiKeys.map((entry) => [entry.alias, entry.key]));
-  return [
-    {
-      alias: null,
-      baseUrl: shared2.baseUrl,
-      apiKey: shared2.apiKey,
-      timeoutMs: shared2.requestTimeoutMs
-    },
-    ...shared2.endpoints.map((endpoint2) => ({
-      alias: endpoint2.alias,
-      baseUrl: endpoint2.baseUrl,
-      apiKey: keyed.get(endpoint2.alias) ?? "",
-      timeoutMs: endpoint2.timeoutMs ?? shared2.requestTimeoutMs
-    }))
-  ];
-}
 function parseSince(raw) {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
@@ -33110,64 +33186,6 @@ var PROPOSE_MARKER = markerFor("propose");
 function isReeveProposalPr(thread) {
   if (!thread.isPullRequest) return false;
   return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
-}
-
-// src/core/meter.ts
-var STAGE = {
-  detect: "Detection",
-  draft: "Drafting",
-  judge: "Judging",
-  screen: "Screening",
-  triage: "Triage",
-  pivot: "Pivot translation",
-  duplicate: "Duplicate check"
-};
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(model, messages, options);
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
 }
 
 // src/core/summary.ts
@@ -34204,15 +34222,11 @@ async function detectLanguage(text2, languages, pick) {
   }
   return { language: null, by: "none", candidates };
 }
-function createLanguagePicker(provider, models, weather, temperature) {
+function createLanguagePicker(provider, models, weather) {
   return async (text2, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) => provider.complete(
-        model,
-        question(text2, candidates),
-        temperature === void 0 ? void 0 : { temperature }
-      ),
+      (model) => provider.complete(model, question(text2, candidates)),
       weather
     );
     if (!rotation.success) return null;
@@ -34448,7 +34462,7 @@ function links(prose) {
 
 // src/duties/translate/draft.ts
 async function translate(request2) {
-  const { provider, models, source, from, to, languages, drafts, weather, temperature } = request2;
+  const { provider, models, source, from, to, languages, drafts, weather } = request2;
   const messages = prompt(source, from, to);
   const attempts = [];
   const refused2 = [];
@@ -34459,7 +34473,7 @@ async function translate(request2) {
     if (order.length === 0) break;
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages, temperature),
+      (model) => answer(provider, model, messages),
       weather
     );
     for (const failure of rotation.failures) {
@@ -34487,12 +34501,8 @@ function remaining(models, draft, exhausted2) {
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
 }
-async function answer(provider, model, messages, temperature) {
-  const completion = await provider.complete(
-    model,
-    messages,
-    temperature === void 0 ? void 0 : { temperature }
-  );
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
   if (completion.ok && completion.finishReason === "length") {
     return {
       ok: false,
@@ -34548,7 +34558,7 @@ function onlyFence(markdown) {
 
 // src/core/judge.ts
 async function judge(request2) {
-  const { provider, judges, candidates, by, ballot: ballot2, weather, temperature } = request2;
+  const { provider, judges, candidates, by, ballot: ballot2, weather } = request2;
   const [leader] = candidates;
   if (leader === void 0 || candidates.length < 2 || judges.length === 0) {
     return { winner: leader ?? null, decidedBy: "score", votes: [], failures: [] };
@@ -34565,7 +34575,7 @@ async function judge(request2) {
       continue;
     }
     const shown2 = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown2, ballot2, weather, temperature);
+    const cast = await fill(provider, order, shown2, ballot2, weather);
     for (const failure of cast.failures) {
       spent.add(failure.model);
       failures.push(failure);
@@ -34581,21 +34591,14 @@ async function judge(request2) {
   }
   return { winner: elected, decidedBy: votes.length > 0 ? "judges" : "score", votes, failures };
 }
-async function fill(provider, order, shown2, ballot2, weather, temperature) {
+async function fill(provider, order, shown2, ballot2, weather) {
   const failures = [];
   for (const model of order) {
     if (weather?.grounded(model) === true) {
       failures.push(weatherFailure(model));
       continue;
     }
-    const counted = read(
-      await provider.complete(
-        model,
-        ballot2(shown2),
-        temperature === void 0 ? void 0 : { temperature }
-      ),
-      shown2
-    );
+    const counted = read(await provider.complete(model, ballot2(shown2)), shown2);
     if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);
@@ -34651,15 +34654,14 @@ function excerpt2(text2) {
 
 // src/duties/translate/judge.ts
 async function judge2(request2) {
-  const { provider, judges, source, to, attempts, weather, temperature } = request2;
+  const { provider, judges, source, to, attempts, weather } = request2;
   const panel = {
     provider,
     judges,
     candidates: attempts,
     by: (attempt) => attempt.model,
     ballot: (shown2) => ballot(source, to, shown2),
-    ...weather === void 0 ? {} : { weather },
-    ...temperature === void 0 ? {} : { temperature }
+    ...weather === void 0 ? {} : { weather }
   };
   return judge(panel);
 }
@@ -34705,8 +34707,7 @@ async function translateChunk(to, settings, stages, from, source, weather) {
     to,
     languages: settings.languages,
     drafts: settings.drafts,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+    weather
   });
   const model = (id) => shown(settings.modelNames, id);
   for (const failure of drafted.failures) {
@@ -34723,8 +34724,7 @@ async function translateChunk(to, settings, stages, from, source, weather) {
     source,
     to,
     attempts: drafted.attempts,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+    weather
   });
   const seat = (id) => shown(settings.judgeNames, id);
   for (const failure of verdict.failures) {
@@ -35232,7 +35232,7 @@ async function translateText(what, body, thread, settings, stages, weather, mete
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature)
+    createLanguagePicker(stages.detect, settings.models, weather)
   );
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
@@ -35504,17 +35504,12 @@ async function run() {
   let bulk = null;
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)), [
-      ...base.models,
-      ...base.judges.flat()
+    const client = assembleClient(base, meter, ["detect", "draft", "judge"], [
+      base.judges.flat()
     ]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-    const stages = {
-      detect: metered(provider, meter, "detect"),
-      draft: metered(provider, meter, "draft"),
-      judge: metered(provider, meter, "judge")
-    };
+    const stages = client.stages;
     const read2 = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     authority2 = await resolveAuthority(read2, base.warrant, api, context2.repo);
     const denied = authority2.warrant.unnamed("translate");

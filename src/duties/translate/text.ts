@@ -127,7 +127,7 @@ export async function translateText(
   const detection = await detectLanguage(
     source,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
+    createLanguagePicker(stages.detect, settings.models, weather),
   );
   core.info(
     detection.language === null

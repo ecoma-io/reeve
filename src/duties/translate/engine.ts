@@ -63,7 +63,6 @@ export async function translateChunk(
     languages: settings.languages,
     drafts: settings.drafts,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   // Named as the workflow named them, everywhere a person reads them. A
@@ -88,7 +87,6 @@ export async function translateChunk(
     to,
     attempts: drafted.attempts,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   const seat = (id: string): string => shown(settings.judgeNames, id);

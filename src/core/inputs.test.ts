@@ -12,7 +12,6 @@ import {
   parseTimeout,
   readCore,
   readShared,
-  resolveEndpoints,
   threadNumber,
   whole,
 } from "./inputs.js";
@@ -573,72 +572,5 @@ describe("readCore", () => {
     given({ ...COMPLETE, "api-keys": "fast = sk-secret" });
 
     expect(() => readCore()).toThrow("api-keys: `fast` is not declared in `endpoints`.");
-  });
-});
-
-describe("resolveEndpoints", () => {
-  it("always leads with the default `base-url`/`api-key` pair, aliased null", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: [],
-      apiKeys: [],
-    });
-
-    expect(resolved).toEqual([
-      {
-        alias: null,
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: "sk-default",
-        timeoutMs: 120_000,
-      },
-    ]);
-  });
-
-  it("keys every configured endpoint from api-keys by alias", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: parseEndpoints("fast = https://a.example.com/v1"),
-      apiKeys: parseApiKeys("fast = sk-fast"),
-    });
-
-    expect(resolved).toContainEqual({
-      alias: "fast",
-      baseUrl: "https://a.example.com/v1",
-      apiKey: "sk-fast",
-      timeoutMs: 120_000,
-    });
-  });
-
-  it("falls back to an empty key for an endpoint api-keys never named", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: parseEndpoints("open = https://a.example.com/v1"),
-      apiKeys: [],
-    });
-
-    expect(resolved).toContainEqual({
-      alias: "open",
-      baseUrl: "https://a.example.com/v1",
-      apiKey: "",
-      timeoutMs: 120_000,
-    });
-  });
-
-  it("prefers an endpoint's own `timeout=` over `request-timeout`", () => {
-    const resolved = resolveEndpoints({
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "sk-default",
-      requestTimeoutMs: 120_000,
-      endpoints: parseEndpoints("fast = https://a.example.com/v1 timeout=5s"),
-      apiKeys: [],
-    });
-
-    expect(resolved.find((endpoint) => endpoint.alias === "fast")?.timeoutMs).toBe(5000);
   });
 });

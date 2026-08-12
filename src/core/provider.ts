@@ -34,7 +34,9 @@
  * every stage calls to ask a provider anything — enforcing it here means no
  * stage has to remember to.
  */
+import type { Core } from "./inputs.js";
 import { parseList } from "./list.js";
+import { metered, type Meter, type Purpose } from "./meter.js";
 
 /** A chat message, in the only two roles Reeve sends. */
 export interface Message {
@@ -462,6 +464,85 @@ export function createRoutedProvider(endpoints: readonly RoutedEndpoint[]): Prov
       const completion = await provider.complete(id, messages, options);
       return { ...completion, model, endpoint: alias };
     },
+  };
+}
+
+/**
+ * Every endpoint a run can route to, resolved from the shared inputs into what
+ * `createRoutedProvider` actually needs: the default `base-url`/`api-key`
+ * pair first, then every `endpoints` line with its key looked up out of
+ * `api-keys` and its timeout defaulted to `request-timeout` when its own
+ * line named none.
+ *
+ * Takes the five fields it needs rather than the whole of `Core`, so a test
+ * can name a routing table without assembling a run's worth of inputs around
+ * it.
+ */
+export function resolveEndpoints(
+  shared: Pick<Core, "baseUrl" | "apiKey" | "requestTimeoutMs" | "endpoints" | "apiKeys">,
+): readonly RoutedEndpoint[] {
+  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
+
+  return [
+    {
+      alias: null,
+      baseUrl: shared.baseUrl,
+      apiKey: shared.apiKey,
+      timeoutMs: shared.requestTimeoutMs,
+    },
+    ...shared.endpoints.map((endpoint) => ({
+      alias: endpoint.alias,
+      baseUrl: endpoint.baseUrl,
+      apiKey: keyed.get(endpoint.alias) ?? "",
+      timeoutMs: endpoint.timeoutMs ?? shared.requestTimeoutMs,
+    })),
+  ];
+}
+
+/** Everything a duty needs to ask a model anything, assembled in one call. */
+export interface Client<P extends Purpose> {
+  /** This run's capacity memory, seeded with every alias and model configured. */
+  readonly weather: Weather;
+  /** The routed provider underneath every stage, unmetered and unattributed. */
+  readonly provider: Provider;
+  /** One metered provider per purpose asked for, each counting under its own name. */
+  readonly stages: Readonly<Record<P, Provider>>;
+}
+
+/**
+ * The four lines every duty's `run` opened with: seed the weather, route the
+ * provider, and wrap one metered copy of it per stage.
+ *
+ * Five duties spelling this out five times is five chances for a roster to be
+ * left out of the weather — which is the one of these that fails silently. A
+ * model missing from `createWeather` is not refused, it simply never gets
+ * counted as starved, and the run keeps asking an endpoint that has already
+ * said no. So the rosters are a parameter: `models` is always in, and a duty
+ * with a second or third one names it rather than remembering to.
+ *
+ * `temperature` is applied here, once, rather than threaded through every
+ * stage helper down to the request: it is a property of the run, not of the
+ * call, and the version where each helper carried it was seventeen chances to
+ * drop it silently.
+ */
+export function assembleClient<P extends Purpose>(
+  shared: Core,
+  meter: Meter,
+  purposes: readonly P[],
+  extraRosters: readonly (readonly string[])[] = [],
+): Client<P> {
+  const weather = createWeather(new Set(shared.endpoints.map((endpoint) => endpoint.alias)), [
+    ...shared.models,
+    ...extraRosters.flat(),
+  ]);
+  const provider = createRoutedProvider(resolveEndpoints(shared));
+
+  return {
+    weather,
+    provider,
+    stages: Object.fromEntries(
+      purposes.map((purpose) => [purpose, metered(provider, meter, purpose, shared.temperature)]),
+    ) as Record<P, Provider>,
   };
 }
 

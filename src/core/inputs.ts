@@ -16,7 +16,7 @@ import * as core from "@actions/core";
 import { context } from "@actions/github";
 
 import { parseList } from "./list.js";
-import { parseModels, type Names, type RoutedEndpoint } from "./provider.js";
+import { parseModels, type Names } from "./provider.js";
 
 /**
  * The provider-and-repository half of the shared inputs: everything a duty
@@ -324,45 +324,6 @@ export function parseTemperature(raw: string): number | undefined {
     throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
   }
   return value;
-}
-
-/**
- * Every endpoint a run can route to, resolved from `Shared` into what
- * `createRoutedProvider` actually needs: the default `base-url`/`api-key`
- * pair first, then every `endpoints` line with its key looked up out of
- * `api-keys` and its timeout defaulted to `request-timeout` when its own
- * line named none.
- *
- * One function rather than four call sites doing the same lookup, because
- * every duty builds its provider from these same five fields — this is the
- * one place that assembly happens, so a duty's own `main.ts` never touches
- * an `EndpointSpec` or an `ApiKeySpec` directly.
- *
- * Takes the five fields it needs rather than the whole of `Shared`, because
- * `respond` assembles its settings by hand — it has no `sweep`/`since`/`limit`
- * concept, so it is never a `Shared` — and this is the shape every duty's
- * settings actually has in common for routing, whether or not it went through
- * `readShared` to get there.
- */
-export function resolveEndpoints(
-  shared: Pick<Shared, "baseUrl" | "apiKey" | "requestTimeoutMs" | "endpoints" | "apiKeys">,
-): readonly RoutedEndpoint[] {
-  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
-
-  return [
-    {
-      alias: null,
-      baseUrl: shared.baseUrl,
-      apiKey: shared.apiKey,
-      timeoutMs: shared.requestTimeoutMs,
-    },
-    ...shared.endpoints.map((endpoint) => ({
-      alias: endpoint.alias,
-      baseUrl: endpoint.baseUrl,
-      apiKey: keyed.get(endpoint.alias) ?? "",
-      timeoutMs: endpoint.timeoutMs ?? shared.requestTimeoutMs,
-    })),
-  ];
 }
 
 /**

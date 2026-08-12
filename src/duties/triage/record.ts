@@ -199,7 +199,6 @@ async function computePivot(
     body,
     to: pivotLanguage,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of rendered.failures) {
     core.warning(`record: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
@@ -335,7 +334,6 @@ export async function recordCorrection(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
-      settings.temperature,
     ),
   );
   // The code, because that is what the store and the pivot comparison below
@@ -462,7 +460,6 @@ export async function recordReversal(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
-      settings.temperature,
     ),
   );
   const code = detection.language?.code ?? null;

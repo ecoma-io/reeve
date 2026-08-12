@@ -56,23 +56,15 @@ import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { createEffects, listReplies, readStanding, type Location } from "../../core/forge.js";
-import {
-  bounded,
-  fraction,
-  readCore,
-  resolveEndpoints,
-  threadNumber,
-  whole,
-  type Core,
-} from "../../core/inputs.js";
+import { bounded, fraction, readCore, threadNumber, whole, type Core } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
-import { createMeter, metered } from "../../core/meter.js";
+import { createMeter } from "../../core/meter.js";
 import { parseApply, narrow } from "../../core/enforce.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   parseModels,
   parseSeats,
@@ -364,7 +356,6 @@ async function decide(
     body,
     about: settings.about,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -383,7 +374,7 @@ async function decide(
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
+    createLanguagePicker(stages.detect, settings.models, weather),
   );
   const language = detection.language;
   core.info(
@@ -434,7 +425,6 @@ async function decide(
         body,
         to: pivotLanguage,
         weather,
-        ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
       });
       for (const failure of pivot.failures) {
         core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
@@ -478,7 +468,6 @@ async function decide(
     guidance,
     drafts: settings.drafts,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
 
   const modelName = (id: string) => shown(settings.modelNames, id);
@@ -502,7 +491,6 @@ async function decide(
     body,
     attempts: drafted.attempts,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   const judgeName = (id: string) => shown(settings.judgeNames, id);
   for (const failure of verdict.failures)
@@ -610,21 +598,15 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
-      ...base.models,
-      ...base.screenModels,
-      ...base.judges.flat(),
-    ]);
+    const client = assembleClient(
+      base,
+      meter,
+      ["screen", "detect", "draft", "judge", "pivot"] as const,
+      [base.screenModels, base.judges.flat()],
+    );
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-
-    const stages: Stages = {
-      screen: metered(provider, meter, "screen"),
-      detect: metered(provider, meter, "detect"),
-      draft: metered(provider, meter, "draft"),
-      judge: metered(provider, meter, "judge"),
-      pivot: metered(provider, meter, "pivot"),
-    };
+    const stages: Stages = client.stages;
 
     const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     authority = await resolveAuthority(read, base.warrant, api, context.repo);

@@ -114,12 +114,10 @@ export interface JudgeRequest<T> {
    * of room drafting is not asked to judge either.
    */
   readonly weather?: Weather;
-  /** Passed to every ballot asked. Omitted from the request when not set. */
-  readonly temperature?: number;
 }
 
 export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
-  const { provider, judges, candidates, by, ballot, weather, temperature } = request;
+  const { provider, judges, candidates, by, ballot, weather } = request;
 
   // One candidate is already the answer, and none means the work was skipped
   // before this. Asking which of one is best spends a request on a foregone
@@ -154,7 +152,7 @@ export async function judge<T>(request: JudgeRequest<T>): Promise<Verdict<T>> {
     // every ballot. The order is this seat's alone, and the number its judge
     // answers with is read back through the same order.
     const shown = rotated(candidates, seat);
-    const cast = await fill(provider, order, shown, ballot, weather, temperature);
+    const cast = await fill(provider, order, shown, ballot, weather);
 
     for (const failure of cast.failures) {
       spent.add(failure.model);
@@ -210,7 +208,6 @@ async function fill<T>(
   shown: readonly T[],
   ballot: (shown: readonly T[]) => readonly Message[],
   weather?: Weather,
-  temperature?: number,
 ): Promise<Cast<T>> {
   const failures: Failure[] = [];
 
@@ -220,14 +217,7 @@ async function fill<T>(
       continue;
     }
 
-    const counted = read(
-      await provider.complete(
-        model,
-        ballot(shown),
-        temperature === undefined ? undefined : { temperature },
-      ),
-      shown,
-    );
+    const counted = read(await provider.complete(model, ballot(shown)), shown);
     if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
     reckon(counted, weather);
     failures.push(counted);

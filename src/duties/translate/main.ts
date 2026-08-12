@@ -79,7 +79,6 @@ import { listOpenThreads, readStanding } from "../../core/forge.js";
 import {
   bounded,
   readShared,
-  resolveEndpoints,
   whole,
   type ApiKeySpec,
   type EndpointSpec,
@@ -87,7 +86,7 @@ import {
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   parseSeats,
   settleAuth,
@@ -95,7 +94,7 @@ import {
   type Names,
   type Weather,
 } from "../../core/provider.js";
-import { createMeter, metered, type Meter } from "../../core/meter.js";
+import { createMeter, type Meter } from "../../core/meter.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
@@ -422,18 +421,12 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
-      ...base.models,
-      ...base.judges.flat(),
+    const client = assembleClient(base, meter, ["detect", "draft", "judge"] as const, [
+      base.judges.flat(),
     ]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-
-    const stages: Stages = {
-      detect: metered(provider, meter, "detect"),
-      draft: metered(provider, meter, "draft"),
-      judge: metered(provider, meter, "judge"),
-    };
+    const stages: Stages = client.stages;
 
     const read = await readWarrant(base.warrant, { defaultPath: DEFAULT_WARRANT_PATH });
     authority = await resolveAuthority(read, base.warrant, api, context.repo);

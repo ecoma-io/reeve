@@ -86,13 +86,13 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import { bounded, counted, fraction, readShared, resolveEndpoints } from "../../core/inputs.js";
+import { bounded, counted, fraction, readShared } from "../../core/inputs.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
-import { createMeter, metered } from "../../core/meter.js";
+import { createMeter } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   parseModels,
   settleAuth,
@@ -579,19 +579,12 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), [
-      ...base.models,
-      ...base.screenModels,
+    const client = assembleClient(base, meter, ["detect", "screen", "triage", "pivot"] as const, [
+      base.screenModels,
     ]);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-
-    const stages: Stages = {
-      detect: metered(provider, meter, "detect"),
-      screen: metered(provider, meter, "screen"),
-      triage: metered(provider, meter, "triage"),
-      pivot: metered(provider, meter, "pivot"),
-    };
+    const stages: Stages = client.stages;
 
     // The authority first, and before anything is spent. A file that does not
     // parse is a run with no allowlist, and the fail-safe direction is to stop
@@ -902,7 +895,6 @@ async function decide(
       stages.detect,
       settings.screenModels.length > 0 ? settings.screenModels : settings.models,
       weather,
-      settings.temperature,
     ),
   );
   const language = detection.language?.label ?? null;
@@ -919,7 +911,6 @@ async function decide(
     body,
     about: settings.about,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of sifted.failures) {
     core.warning(`screen: ${shown(settings.screenNames, failure.model)} — ${failure.reason}`);
@@ -979,7 +970,6 @@ async function decide(
         body,
         to: pivotLanguage,
         weather,
-        ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
       });
       for (const failure of pivot.failures) {
         core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
@@ -1027,7 +1017,6 @@ async function decide(
     language,
     recalled,
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of triaged.failures) {
     core.warning(`triage: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);

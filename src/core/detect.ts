@@ -134,17 +134,11 @@ export function createLanguagePicker(
   provider: Provider,
   models: readonly string[],
   weather?: Weather,
-  temperature?: number,
 ): LanguagePicker {
   return async (text, candidates) => {
     const rotation = await rotateModels(
       models,
-      (model) =>
-        provider.complete(
-          model,
-          question(text, candidates),
-          temperature === undefined ? undefined : { temperature },
-        ),
+      (model) => provider.complete(model, question(text, candidates)),
       weather,
     );
     if (!rotation.success) return null;

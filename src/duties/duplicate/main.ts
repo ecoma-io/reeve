@@ -91,17 +91,16 @@ import {
   fraction,
   parseSince,
   readShared,
-  resolveEndpoints,
   whole,
   type ApiKeySpec,
   type EndpointSpec,
 } from "../../core/inputs.js";
 import type { Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import { createMeter, metered } from "../../core/meter.js";
+import { createMeter } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
-  createRoutedProvider,
+  assembleClient,
   createWeather,
   settleAuth,
   shown,
@@ -399,15 +398,10 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
-    weather = createWeather(new Set(base.endpoints.map((endpoint) => endpoint.alias)), base.models);
+    const client = assembleClient(base, meter, ["detect", "duplicate", "pivot"] as const);
+    weather = client.weather;
     const api = getOctokit(base.token);
-    const provider = createRoutedProvider(resolveEndpoints(base));
-
-    const stages: Stages = {
-      detect: metered(provider, meter, "detect"),
-      duplicate: metered(provider, meter, "duplicate"),
-      pivot: metered(provider, meter, "pivot"),
-    };
+    const stages: Stages = client.stages;
 
     // The authority first, and before anything is spent — the same order and
     // the same reason `triage/main.ts` reads it in.
@@ -593,7 +587,7 @@ async function decide(
     // The title when there is no body — a one-line issue is a real issue.
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather, settings.temperature),
+    createLanguagePicker(stages.detect, settings.models, weather),
   );
   const language = detection.language?.label ?? null;
   core.info(
@@ -635,7 +629,6 @@ async function decide(
       body,
       to: pivotLanguage,
       weather,
-      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
     });
     for (const failure of pivot.failures) {
       core.warning(`match: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
@@ -667,7 +660,6 @@ async function decide(
     language,
     candidates: ranked.map((entry) => entry.candidate),
     weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
   });
   for (const failure of judged.failures) {
     core.warning(`duplicate: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
