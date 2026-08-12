@@ -34241,6 +34241,16 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/duties/translate/budget.ts
+function createBudget() {
+  return { denied: false };
+}
+function budgetExhausted(settings, meter, budget) {
+  const exhausted2 = settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
+  if (exhausted2) budget.denied = true;
+  return exhausted2;
+}
+
 // src/core/sanitize.ts
 var OPENER = "<!--";
 var CLOSER = "-->";
@@ -35212,14 +35222,6 @@ function parseChunkChars(raw) {
     );
   }
   return value;
-}
-function createBudget() {
-  return { denied: false };
-}
-function budgetExhausted(settings, meter, budget) {
-  const exhausted2 = settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
-  if (exhausted2) budget.denied = true;
-  return exhausted2;
 }
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };

@@ -86,7 +86,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
-import { createMeter, metered, total, type Meter } from "../../core/meter.js";
+import { createMeter, metered, type Meter } from "../../core/meter.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
@@ -97,6 +97,7 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
+import { budgetExhausted, createBudget, type Budget } from "./budget.js";
 import { translateInto, type Stages } from "./engine.js";
 import { summarize, summarizeSweep, type Looked, type Run, type SweptThread } from "./summary.js";
 import {
@@ -282,57 +283,6 @@ function parseChunkChars(raw: string): number {
     );
   }
   return value;
-}
-
-/**
- * Whether this run ever genuinely turned work away for `max-requests` —
- * the one thing `budget-exhausted` reports, distinct from whether the meter
- * happens to sit at or past the ceiling once the run is over.
- *
- * A single mutable object rather than a `boolean` recomputed at the end,
- * because recomputing from the final meter reading gets both directions
- * wrong: a thread that needed exactly `max-requests` requests and had
- * nothing left to ask for reads identically, at the end, to one that had a
- * language turned away — the meter sits at the ceiling either way — and a
- * sweep's last candidate can deny work inside its own per-language or
- * per-reply checkpoint with no further candidate left for the sweep's own
- * pre-thread check to ever run again and notice. `denied` is set exactly
- * once, at the moment `budgetExhausted` itself answers `true` — every call
- * site below only asks the question immediately before a real piece of work
- * it would otherwise do, so that answer is always a genuine denial.
- */
-interface Budget {
-  denied: boolean;
-}
-
-function createBudget(): Budget {
-  return { denied: false };
-}
-
-/**
- * Whether this run has already spent `max-requests`, across every purpose —
- * detection, drafting and judging combined, the same total the summary's own
- * spend table adds up to. `null` is no bound, the default, and never
- * exhausted.
- *
- * A different kind of stop than `starved`, deliberately: a roster out of
- * capacity is weather from the provider's own side, something happened to it.
- * A budget this run set for itself running out is not that — it is a ceiling
- * this run chose, working exactly as configured. Conflating the two would
- * have a maintainer watching `starved` for exactly the wrong reason once
- * `max-requests` started tripping it instead of a real outage.
- *
- * Checked at each place a fresh request is about to be spent — before
- * detection, a language, a reply, a sweep's next thread — rather than once
- * up front, because the budget can run out partway through any of those, and
- * what already happened stands: a translation already drafted and published
- * is not un-published because the next language could not be started.
- */
-function budgetExhausted(settings: Settings, meter: Meter, budget: Budget): boolean {
-  const exhausted =
-    settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
-  if (exhausted) budget.denied = true;
-  return exhausted;
 }
 
 /**
@@ -875,10 +825,9 @@ export async function run(): Promise<void> {
   // early by capacity starvation, which leaves `bulk` holding every thread
   // already processed before the loop broke.
   const meter = createMeter();
-  // The one place `budget.denied` is set — inside `budgetExhausted` itself —
-  // and the one place it is read — `finally`, below — so both the
-  // single-thread path and the sweep answer `budget-exhausted` off the same
-  // genuine-denial tracker rather than each recomputing its own guess.
+  // `denied` is set exactly once, by `budgetExhausted` — see `createBudget`'s
+  // doc comment in `budget.ts` for why one mutable object rather than a
+  // recomputed boolean.
   const budget = createBudget();
   // Reassigned once `readSettings` has answered, inside the `try` below —
   // `endpoints` is not known until then. Left at its empty-alias default if
@@ -1011,15 +960,8 @@ export async function run(): Promise<void> {
         );
       }
 
-      // `budget.denied` answers this the same way for both modes — set the
-      // moment any checkpoint, in either mode, first turned real work away —
-      // rather than recomputed here from the meter's final reading, which
-      // gets both directions wrong: a thread that needed exactly
-      // `max-requests` requests and had nothing left to deny reads
-      // identically, at the end, to one that actually had a language turned
-      // away, and a sweep's last candidate can deny work inside its own
-      // per-language or per-reply checkpoint with no further candidate left
-      // for the sweep's own pre-thread check to notice.
+      // `budget.denied` answers this the same way for both modes — see
+      // `createBudget`'s doc comment in `budget.ts`.
       const budgetSpent = budget.denied;
       if (budgetSpent) {
         core.warning(
