@@ -89,6 +89,14 @@ no warrant file at all. Once a `capabilities:` block is written into
 of it grants this duty nothing, and the run says so rather than guessing. See
 [the capabilities table](../../guides/warrant.md#capabilities).
 
+**`apply`** is the workflow's own half of the same gate — `edit-body`, or
+`none` for a run that detects, drafts and judges but never writes. The
+narrower of `apply` and the warrant always wins: a capability the warrant
+withholds is a reason not to publish, not a reason not to have decided, so
+detection, drafting and judging spend exactly what they would spend either
+way and only the write at the end is gated. `apply: none` is a good way to
+watch what a run would have published before it is allowed to.
+
 ## Required inputs
 
 `models` is the only input this action requires — model ids, comma or
@@ -110,9 +118,11 @@ Every input `translate/action.yml` declares.
 | `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                      |
 | `languages`         | no       | `en, vi, zh`                | What to translate **into**. Says nothing about what an author may write in. Ignored once the warrant's own `languages:` key is written.                                    |
 | `warrant`           | no       | `.github/reeve.yml`         | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at this default path is not a failure.                                               |
+| `apply`             | no       | `edit-body`                 | What this run may do: `edit-body`, or `none` to decide and report without touching the thread. The narrower of this and the warrant file wins.                             |
 | `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                 |
 | `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                                                              |
 | `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
+| `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                     |
 | `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                           |
 | `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                          |
 | `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                         |
@@ -132,8 +142,14 @@ limit later translates the rest, because the fingerprint is over the part
 that was actually read.
 
 Whatever `max-body-chars` reads, it is never sent to a model in one piece.
-The body is split into chunks a few thousand characters wide before drafting
-starts, each translated in its own draft-and-judge pass, one at a time. A
+The body is split into chunks up to `chunk-chars` wide (`6000` by default)
+before drafting starts, each translated in its own draft-and-judge pass, one
+at a time. `chunk-chars` is refused below `500` — a chunk that small stops
+paying for translation and starts paying a whole request's fixed overhead
+(the system prompt, the glossary, the examples) for a shrinking sliver of
+actual text — and has no ceiling: a larger value trades fewer requests for a
+coarser failure grain, one chunk failing losing more of a language's
+translation. A
 fenced code block is never split across two chunks — a chunk that would cut
 one in half is grown past the budget instead — and a chunk that is entirely
 code is reused verbatim rather than spent on an answer already known: the

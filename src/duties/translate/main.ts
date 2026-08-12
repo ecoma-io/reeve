@@ -57,6 +57,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage, residue } from "../../core/detect.js";
+import { narrow, parseApply } from "../../core/enforce.js";
 import {
   createReply,
   createThread,
@@ -144,7 +145,12 @@ interface Settings {
   readonly modelNames: Names;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  /** What the warrant grants this duty. Checked once per run, not per text. */
+  /** The `apply` input, parsed. This run's half of the double-gate — see `permitted`. */
+  readonly apply: readonly Capability[];
+  /**
+   * The narrower of what the warrant grants and what `apply` asks for.
+   * Checked once per run, not per text — see `core/enforce.ts`'s `narrow`.
+   */
   readonly permitted: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   /** What to call each seat, keyed by every model that seat may be filled by. */
@@ -155,6 +161,8 @@ interface Settings {
   readonly replies: boolean;
   /** How many of a thread's newest replies one run reads. `null` is no bound. */
   readonly maxReplies: number | null;
+  /** How large one chunk of a body can be before it is its own request. See `parseChunkChars`. */
+  readonly chunkChars: number;
   readonly attribution: Attribution;
   readonly dryRun: boolean;
   readonly baseUrl: string;
@@ -188,12 +196,14 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
   return {
     ...shared,
     warrant: core.getInput("warrant", { required: true }),
+    apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
     replies: core.getBooleanInput("translate-replies"),
     maxReplies: bounded("max-replies", core.getInput("max-replies")),
+    chunkChars: parseChunkChars(core.getInput("chunk-chars")),
     attribution: readAttribution(),
   };
 }
@@ -263,19 +273,34 @@ interface Stages {
 }
 
 /**
- * How large one chunk of a body can be before it is asked for as its own
- * request rather than folded into a larger one.
+ * `chunk-chars`'s own floor.
  *
- * Matches `max-body-chars`'s own default deliberately: it is the size every
- * body this duty was built for already fit inside a single request, back
- * when `max-body-chars: none` meant "translate it whole in one request" and
- * anything past a bound meant "the tail is lost". A body under this size is
- * one chunk and behaves exactly as it always has; a larger one — which used
- * to mean a truncated tail whenever a bound was configured — is now split
- * rather than cut, and `none` can mean "translate every character" without
- * asking one model to answer for an unbounded body in one request.
+ * Below this, a chunk stops being a request-sizing decision and starts being
+ * a way to ask a model to translate one sentence at a time — more requests
+ * than the body could ever need, each one paying a fixed cost (system
+ * prompt, glossary, examples) for a shrinking amount of actual text. There is
+ * no ceiling: a maintainer who wants larger chunks is trading the failure
+ * granularity `chunks()`'s own doc comment describes, a trade this duty is
+ * not in a position to refuse on their behalf.
  */
-const CHUNK_CHARS = 6000;
+const MIN_CHUNK_CHARS = 500;
+
+/**
+ * `chunk-chars`, refused below `MIN_CHUNK_CHARS` rather than clamped — the
+ * same reasoning as every other refused-not-clamped input in this project:
+ * a typo that silently produced thousands of one-paragraph requests would be
+ * far more expensive to notice than a run that fails on the first thread.
+ */
+function parseChunkChars(raw: string): number {
+  const trimmed = raw.trim();
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < MIN_CHUNK_CHARS) {
+    throw new Error(
+      `chunk-chars: expected a whole number of ${String(MIN_CHUNK_CHARS)} or more, got \`${raw}\`.`,
+    );
+  }
+  return value;
+}
 
 /** One chunk's own draft-and-judge pass — everything a single-chunk body used to get, once. */
 interface ChunkResult {
@@ -392,7 +417,7 @@ async function translateInto(
   source: string,
   weather: Weather,
 ): Promise<Posted | null> {
-  const pieces = chunks(source, CHUNK_CHARS);
+  const pieces = chunks(source, settings.chunkChars);
   const results: ChunkResult[] = [];
 
   for (const piece of pieces) {
@@ -414,7 +439,7 @@ async function translateInto(
     results.push(outcome);
   }
 
-  // Almost always one entry — a body under `CHUNK_CHARS` is one chunk and
+  // Almost always one entry — a body under `chunk-chars` is one chunk and
   // every chunk of it was won by the same model, which is what makes the
   // common case read exactly as it always has. A body chunked across more
   // than one model reports every one of them rather than picking a winner
@@ -575,17 +600,22 @@ async function translateText(
 
   // Guarded here and nowhere earlier: detection, drafting and judging all ran
   // and all spent whatever they were going to spend, exactly as they would
-  // under an `apply: none` narrowing in triage — a capability the warrant
+  // under an `apply: none` narrowing — a capability the warrant or `apply`
   // withheld is a reason not to write, not a reason not to have decided.
   if (!settings.permitted.includes("edit-body")) {
     // The note reaches the summary and the sweep's outcome column, so a
-    // reader can tell a write the warrant blocked from a run where no draft
-    // survived — the two look identical once `posted` is emptied. Only set
-    // when something was actually withheld: with no drafts, "no draft
-    // survived" is the true story whatever the warrant says.
+    // reader can tell a write the double-gate blocked from a run where no
+    // draft survived — the two look identical once `posted` is emptied. Only
+    // set when something was actually withheld: with no drafts, "no draft
+    // survived" is the true story whatever `apply` and the warrant say.
+    //
+    // Named generically rather than blaming one half — `apply: none` and a
+    // warrant that never named `translate` both land here the same way, and
+    // the upfront `withheld` warning above is where the specific one, if
+    // there is one, was already said.
     if (posted.length > 0) {
       core.warning(
-        `${what}: \`${settings.warrant}\` does not grant \`edit-body\` to translate, so ` +
+        `${what}: \`edit-body\` is not permitted this run, so ` +
           `${posted.length === 1 ? "the translation" : `${String(posted.length)} translations`} ` +
           `drafted this run ${posted.length === 1 ? "was" : "were"} not published.`,
       );
@@ -595,7 +625,7 @@ async function translateText(
         posted: [],
         skipped,
         note:
-          `\`${settings.warrant}\` does not grant \`edit-body\`, so the ` +
+          `\`edit-body\` is not permitted this run, so the ` +
           `${posted.length === 1 ? "translation" : `${String(posted.length)} translations`} ` +
           `drafted this run ${posted.length === 1 ? "was" : "were"} not published`,
         published: false,
@@ -906,10 +936,26 @@ export async function run(): Promise<void> {
       );
     }
 
+    // The narrower of the two authorities, exactly as triage computes it — the
+    // file may restrict what `apply` asked for, never widen it. `withheld` is
+    // reported once here, up front, rather than per thread: a run that never
+    // reaches a single translatable thread should still say why `apply`'s own
+    // request is not the whole story.
+    const { permitted, withheld } = narrow(
+      authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
+      base.apply,
+    );
+    for (const capability of withheld) {
+      core.warning(
+        `\`apply\` asks for \`${capability}\`, which \`${base.warrant}\` does not grant to translate. ` +
+          "The narrower of the two wins.",
+      );
+    }
+
     settings = {
       ...base,
       languages: resolution === null ? [] : resolution.languages,
-      permitted: authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
+      permitted,
     };
 
     if (settings.sweep) {

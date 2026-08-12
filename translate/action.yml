@@ -96,6 +96,23 @@ inputs:
     required: false
     default: .github/reeve.yml
 
+  apply:
+    description: >-
+      What this run may do: `edit-body`, or `none` for a run that drafts,
+      judges and reports without touching the thread. `edit-body` is this
+      duty's only capability, so unlike `triage`'s `apply` there is nothing
+      to comma-separate — the choice is the whole thing or nothing.
+
+      The narrower of this and the warrant file wins, always — the same
+      double-gate every other duty applies, with the same shape: detection,
+      drafting and judging all run and spend whatever they were going to
+      spend regardless of this input, and only the write at the end is
+      gated. A capability the warrant withholds is a reason not to publish,
+      not a reason not to have decided — `none` is a good way to watch what
+      this duty would have written before it is allowed to write it.
+    required: false
+    default: edit-body
+
   drafts:
     description: >-
       How many translations to ask for per language. Every answer is scored
@@ -136,6 +153,21 @@ inputs:
       a language missing its middle paragraph because one chunk ran out of
       models is worse than a language skipped outright, so a single chunk
       failing skips the whole thing.
+    required: false
+    default: "6000"
+
+  chunk-chars:
+    description: >-
+      How large one chunk of a body can be before it is asked for as its own
+      request, rather than folded into a larger one — see `max-body-chars`
+      for what chunking is and why. Refused below `500`: a chunk that small
+      stops being a request-sizing decision and starts being a way to pay a
+      whole request's fixed overhead — the system prompt, the glossary, the
+      examples — for a shrinking sliver of actual text. No ceiling: a larger
+      value trades fewer requests for a coarser failure grain, one chunk
+      failing losing more of a language's translation, and that trade is
+      this project's to make on your own body sizes, not this action's to
+      refuse on your behalf.
     required: false
     default: "6000"
 

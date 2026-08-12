@@ -408,9 +408,11 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     // bundle, which is the only place the built artifact's ICU is exercised.
     languages: "en, vi",
     warrant,
+    apply: "edit-body",
     drafts: "1",
     "judge-models": "",
     "max-body-chars": "6000",
+    "chunk-chars": "6000",
     "translate-replies": "false",
     "max-replies": "100",
     "show-attribution": "none",
@@ -897,6 +899,14 @@ describe("the action", () => {
     expect(stub.asked).toHaveLength(0);
   });
 
+  it("refuses a chunk size below the floor, rather than paying full overhead per sentence", async () => {
+    const run = await runAction(stub, { "chunk-chars": "499" });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("chunk-chars: expected a whole number of 500 or more, got `499`");
+    expect(stub.asked).toHaveLength(0);
+  });
+
   it("fails loudly on an attribution level it has no rendering for", async () => {
     // Silently falling back to `none` would publish a hundred bodies with less
     // in them than the workflow asked for, and the fingerprint means the run
@@ -1341,7 +1351,31 @@ describe("the warrant", () => {
     expect(run.code).toBe(0);
     expect(stub.body).toBe(VIETNAMESE);
     expect(stub.asked.length).toBeGreaterThan(0);
-    expect(run.summary).toContain("does not grant `edit-body`");
+    expect(run.summary).toContain("`edit-body` is not permitted this run");
+  });
+
+  it("says which half withheld it, once, up front, when `apply` asks for more than the warrant grants", async () => {
+    await writeFile(warrantPath, ["version: 1", "capabilities:", "  translate: [none]"].join("\n"));
+
+    const run = await runAction(stub, { languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain(
+      `\`apply\` asks for \`edit-body\`, which \`${warrantPath}\` does not grant to translate.`,
+    );
+  });
+
+  it("narrows `edit-body` away when `apply` alone withholds it, warrant granting freely", async () => {
+    const run = await runAction(stub, { apply: "none", languages: "en, vi" });
+
+    expect(run.code).toBe(0);
+    // Detection, drafting and judging still ran and spent — only the write is gated.
+    expect(stub.asked.length).toBeGreaterThan(0);
+    expect(stub.body).toBe(VIETNAMESE);
+    // Nothing was withheld from what `apply` asked for — it asked for nothing —
+    // so the upfront warning never fires; only the generic not-published note does.
+    expect(run.log).not.toContain("does not grant");
+    expect(run.summary).toContain("`edit-body` is not permitted this run");
   });
 
   it("grants translate nothing in a sweep too, checked once before the listing", async () => {
