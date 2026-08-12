@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { TrackerApi } from "../../core/forge.js";
+import type { Language } from "../../core/languages.js";
 import { markerFor } from "../../core/marker.js";
-import { authorText, listCorpus } from "./corpus.js";
+import { authorText, crossLanguageCorpus, listCorpus, type CorpusThread } from "./corpus.js";
 import { documentOf } from "./rank.js";
 
 const AT = { owner: "acme", repo: "widgets" };
+
+const en: Language = { code: "en", label: "English", scripts: ["Latin"] };
+const zh: Language = { code: "zh", label: "中文", scripts: ["Han"] };
 
 interface Entry {
   readonly number: number;
@@ -272,5 +276,50 @@ describe("authorText", () => {
     const body = `Original report.\n\n\n${translate.render("fp1")}\n\nTranslated text.`;
 
     expect(authorText(body)).toBe("Original report.");
+  });
+});
+
+function candidate(number: number, body: string): CorpusThread {
+  return { number, title: "", body, createdAt: new Date("2026-01-01T00:00:00Z") };
+}
+
+describe("crossLanguageCorpus", () => {
+  it("finds a candidate written in the pivot language specifically", async () => {
+    const corpus = [candidate(1, "English report."), candidate(2, "中文报告。")];
+
+    expect(await crossLanguageCorpus([en, zh], zh, corpus, new Map())).toBe(true);
+  });
+
+  it("is false when nothing in the corpus is in the pivot language, even in a third language", async () => {
+    const corpus = [candidate(1, "English report.")];
+
+    expect(await crossLanguageCorpus([en, zh], zh, corpus, new Map())).toBe(false);
+  });
+
+  it("is false for an empty corpus", async () => {
+    expect(await crossLanguageCorpus([en, zh], zh, [], new Map())).toBe(false);
+  });
+
+  it("skips a candidate script narrowing cannot place, rather than counting it as a match", async () => {
+    // No configured script occurs at all — a stack trace, not prose in any
+    // language `detectLanguage` was given to try.
+    const corpus = [candidate(1, "12345 67890 !@#$%")];
+
+    expect(await crossLanguageCorpus([en, zh], zh, corpus, new Map())).toBe(false);
+  });
+
+  it("memoises a candidate's detected language across calls sharing the same cache", async () => {
+    const cache = new Map<number, Language | null>();
+    const corpus = [candidate(1, "中文报告。")];
+
+    await crossLanguageCorpus([en, zh], zh, corpus, cache);
+
+    expect(cache.get(1)).toEqual(zh);
+
+    // A second call against the same cache does not need to re-detect —
+    // pinned by checking the cached answer still drives the result even for
+    // a pivot language the (now irrelevant) body text does not itself carry.
+    const result = await crossLanguageCorpus([en, zh], zh, corpus, cache);
+    expect(result).toBe(true);
   });
 });

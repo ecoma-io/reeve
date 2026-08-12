@@ -97,7 +97,7 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { authorText, listCorpus, type CorpusThread } from "./corpus.js";
+import { authorText, crossLanguageCorpus, listCorpus, type CorpusThread } from "./corpus.js";
 import { page, report, reportSweep, sweepPage } from "./outputs.js";
 import { matchShortlist } from "./proposal.js";
 import {
@@ -108,7 +108,7 @@ import {
   type Posted,
   type Proposal,
 } from "./publish.js";
-import { documentOf, rank } from "./rank.js";
+import { rank } from "./rank.js";
 import { type Done, type PivotInfo, type RankInfo, type SweptThread } from "./summary.js";
 import { judge } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
@@ -727,47 +727,6 @@ async function decide(
     rationale: match.rationale,
     ungranted: null,
   };
-}
-
-/**
- * Whether at least one corpus candidate is written in the pivot language
- * specifically — not merely in some language other than the thread's own —
- * which is the fact `action.yml`'s own `languages` input promises triggers
- * the bridge, and the fact that makes `translateToPivot` worth a request. A
- * corpus that holds a candidate in a third configured language but none in
- * the pivot would still fail to match after the bridge ran, so checking
- * "not the thread's language" would spend a translation a same-language BM25
- * pass could never have used anyway.
- *
- * Every check here is free: `detectLanguage` is called with no `pick`
- * argument, so it never reaches past script narrowing and the local
- * byte-ngram profile — no model, no request, whatever the size of `corpus`.
- * A candidate `detectLanguage` cannot place at all (`by: "none"`) proves
- * nothing either way and is skipped rather than counted as a match, the same
- * caution `detectLanguage`'s own callers use everywhere else.
- *
- * `cache` memoises a candidate's detected language by its issue number.
- * Cheap on its own, but a sweep offers the same candidate to this function
- * once per thread the walk checks it against, and without this the free
- * detection above would repeat that many times over for no new answer.
- */
-async function crossLanguageCorpus(
-  languages: readonly Language[],
-  pivotLanguage: Language,
-  corpus: readonly CorpusThread[],
-  cache: Map<number, Language | null>,
-): Promise<boolean> {
-  for (const candidate of corpus) {
-    let detected: Language | null;
-    if (cache.has(candidate.number)) {
-      detected = cache.get(candidate.number) ?? null;
-    } else {
-      detected = (await detectLanguage(documentOf(candidate), languages)).language;
-      cache.set(candidate.number, detected);
-    }
-    if (detected !== null && detected.code === pivotLanguage.code) return true;
-  }
-  return false;
 }
 
 /**

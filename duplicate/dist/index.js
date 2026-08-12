@@ -34201,6 +34201,82 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/core/memory.ts
+var K1 = 1.2;
+var B = 0.75;
+var lexical = (query, documents) => {
+  const asked = new Set(tokenise(query));
+  if (asked.size === 0 || documents.length === 0) return documents.map(() => 0);
+  const tokenised = documents.map(tokenise);
+  const lengths = tokenised.map((tokens) => tokens.length);
+  const average = lengths.reduce((sum, length) => sum + length, 0) / documents.length;
+  const carrying = /* @__PURE__ */ new Map();
+  for (const tokens of tokenised) {
+    for (const term of new Set(tokens)) {
+      if (asked.has(term)) carrying.set(term, (carrying.get(term) ?? 0) + 1);
+    }
+  }
+  return tokenised.map((tokens, index) => {
+    const counts = /* @__PURE__ */ new Map();
+    for (const term of tokens) counts.set(term, (counts.get(term) ?? 0) + 1);
+    const length = lengths[index] ?? 0;
+    const normalised = average === 0 ? 1 : length / average;
+    let score = 0;
+    for (const term of asked) {
+      const frequency = counts.get(term);
+      if (frequency === void 0) continue;
+      const documentsWith = carrying.get(term) ?? 0;
+      const weight = Math.log(1 + (documents.length - documentsWith + 0.5) / (documentsWith + 0.5));
+      score += weight * (frequency * (K1 + 1) / (frequency + K1 * (1 - B + B * normalised)));
+    }
+    return score;
+  });
+};
+var RUN = /[\p{Letter}\p{Number}]+/gu;
+var LETTER = new RegExp("\\p{Letter}", "u");
+var LONGEST_RUN = 40;
+function tokenise(text2) {
+  const terms = [];
+  for (const [run2] of text2.toLowerCase().matchAll(RUN)) {
+    terms.push(run2);
+    if (run2.length < 2 || run2.length > LONGEST_RUN) continue;
+    if (!LETTER.test(run2) || cased(run2)) continue;
+    const characters = Array.from(run2);
+    for (let at = 0; at + 1 < characters.length; at += 1) {
+      terms.push(`${characters[at] ?? ""}${characters[at + 1] ?? ""}`);
+    }
+  }
+  return terms;
+}
+function cased(run2) {
+  return Array.from(run2).some((character) => character.toLowerCase() !== character.toUpperCase());
+}
+
+// src/duties/duplicate/rank.ts
+function documentOf(candidate) {
+  return [candidate.title, candidate.body].join("\n\n");
+}
+function rank(queries, candidates, limit, similarity = lexical) {
+  if (candidates.length === 0 || limit <= 0) return [];
+  const documents = candidates.map(documentOf);
+  const best = /* @__PURE__ */ new Map();
+  for (const query of queries) {
+    if (query.trim().length === 0) continue;
+    const scores = similarity(query, documents);
+    scores.forEach((score, index) => {
+      if (score <= 0) return;
+      const candidate = candidates[index];
+      if (candidate === void 0) return;
+      const current = best.get(index);
+      if (current === void 0 || score > current.score) best.set(index, { candidate, score });
+    });
+  }
+  return [...best.values()].sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    return right.candidate.number - left.candidate.number;
+  }).slice(0, limit);
+}
+
 // src/duties/duplicate/corpus.ts
 var CORPUS_PAGE = 100;
 var ANY_MARKER = /<!-- reeve:[a-z][a-z0-9-]*\ssource=/;
@@ -34243,6 +34319,19 @@ async function listCorpus(api, at, exclude, limit, since, maxBodyChars = null) {
     if (stop || data.length < CORPUS_PAGE) break;
   }
   return corpus;
+}
+async function crossLanguageCorpus(languages, pivotLanguage, corpus, cache) {
+  for (const candidate of corpus) {
+    let detected;
+    if (cache.has(candidate.number)) {
+      detected = cache.get(candidate.number) ?? null;
+    } else {
+      detected = (await detectLanguage(documentOf(candidate), languages)).language;
+      cache.set(candidate.number, detected);
+    }
+    if (detected !== null && detected.code === pivotLanguage.code) return true;
+  }
+  return false;
 }
 
 // src/core/chrome.ts
@@ -34672,82 +34761,6 @@ function matchShortlist(duplicateOf, confidence, rawRationale, ranked, query, co
     fingerprint: eligible ? fp : null,
     proposal
   };
-}
-
-// src/core/memory.ts
-var K1 = 1.2;
-var B = 0.75;
-var lexical = (query, documents) => {
-  const asked = new Set(tokenise(query));
-  if (asked.size === 0 || documents.length === 0) return documents.map(() => 0);
-  const tokenised = documents.map(tokenise);
-  const lengths = tokenised.map((tokens) => tokens.length);
-  const average = lengths.reduce((sum, length) => sum + length, 0) / documents.length;
-  const carrying = /* @__PURE__ */ new Map();
-  for (const tokens of tokenised) {
-    for (const term of new Set(tokens)) {
-      if (asked.has(term)) carrying.set(term, (carrying.get(term) ?? 0) + 1);
-    }
-  }
-  return tokenised.map((tokens, index) => {
-    const counts = /* @__PURE__ */ new Map();
-    for (const term of tokens) counts.set(term, (counts.get(term) ?? 0) + 1);
-    const length = lengths[index] ?? 0;
-    const normalised = average === 0 ? 1 : length / average;
-    let score = 0;
-    for (const term of asked) {
-      const frequency = counts.get(term);
-      if (frequency === void 0) continue;
-      const documentsWith = carrying.get(term) ?? 0;
-      const weight = Math.log(1 + (documents.length - documentsWith + 0.5) / (documentsWith + 0.5));
-      score += weight * (frequency * (K1 + 1) / (frequency + K1 * (1 - B + B * normalised)));
-    }
-    return score;
-  });
-};
-var RUN = /[\p{Letter}\p{Number}]+/gu;
-var LETTER = new RegExp("\\p{Letter}", "u");
-var LONGEST_RUN = 40;
-function tokenise(text2) {
-  const terms = [];
-  for (const [run2] of text2.toLowerCase().matchAll(RUN)) {
-    terms.push(run2);
-    if (run2.length < 2 || run2.length > LONGEST_RUN) continue;
-    if (!LETTER.test(run2) || cased(run2)) continue;
-    const characters = Array.from(run2);
-    for (let at = 0; at + 1 < characters.length; at += 1) {
-      terms.push(`${characters[at] ?? ""}${characters[at + 1] ?? ""}`);
-    }
-  }
-  return terms;
-}
-function cased(run2) {
-  return Array.from(run2).some((character) => character.toLowerCase() !== character.toUpperCase());
-}
-
-// src/duties/duplicate/rank.ts
-function documentOf(candidate) {
-  return [candidate.title, candidate.body].join("\n\n");
-}
-function rank(queries, candidates, limit, similarity = lexical) {
-  if (candidates.length === 0 || limit <= 0) return [];
-  const documents = candidates.map(documentOf);
-  const best = /* @__PURE__ */ new Map();
-  for (const query of queries) {
-    if (query.trim().length === 0) continue;
-    const scores = similarity(query, documents);
-    scores.forEach((score, index) => {
-      if (score <= 0) return;
-      const candidate = candidates[index];
-      if (candidate === void 0) return;
-      const current = best.get(index);
-      if (current === void 0 || score > current.score) best.set(index, { candidate, score });
-    });
-  }
-  return [...best.values()].sort((left, right) => {
-    if (right.score !== left.score) return right.score - left.score;
-    return right.candidate.number - left.candidate.number;
-  }).slice(0, limit);
 }
 
 // src/duties/duplicate/verdict.ts
@@ -35180,19 +35193,6 @@ ${body}`,
     rationale: match.rationale,
     ungranted: null
   };
-}
-async function crossLanguageCorpus(languages, pivotLanguage, corpus, cache) {
-  for (const candidate of corpus) {
-    let detected;
-    if (cache.has(candidate.number)) {
-      detected = cache.get(candidate.number) ?? null;
-    } else {
-      detected = (await detectLanguage(documentOf(candidate), languages)).language;
-      cache.set(candidate.number, detected);
-    }
-    if (detected !== null && detected.code === pivotLanguage.code) return true;
-  }
-  return false;
 }
 function notGranted(warrant) {
   return {
