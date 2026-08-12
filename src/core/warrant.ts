@@ -763,6 +763,21 @@ export function resolvePivot(warrant: Warrant, languages: readonly Language[]): 
   return found;
 }
 
+/**
+ * {@link resolvePivot}, for the four call sites that have to cope with a run
+ * that configured no languages at all.
+ *
+ * There is no pivot to resolve when nothing is configured to bridge between,
+ * and that is not an error: a single-language project recalls in its own
+ * language and never spends a request on a translation. `resolvePivot` throws
+ * on an empty list because a caller that has already committed to bridging
+ * needs to hear about it; a caller still deciding whether to bridge asks this
+ * instead and reads `null` as "there is nothing here worth a bridge".
+ */
+export function pivotOrNone(warrant: Warrant, languages: readonly Language[]): Language | null {
+  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
+}
+
 /** What resolving `about` against the warrant and the input decided. */
 export interface AboutResolution {
   readonly about: string;

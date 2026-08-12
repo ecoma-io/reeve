@@ -33690,6 +33690,9 @@ function resolvePivot(warrant, languages) {
   }
   return found;
 }
+function pivotOrNone(warrant, languages) {
+  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
+}
 function resolveAbout(warrant, rawInput) {
   if (warrant.about !== null) {
     return {
@@ -34585,6 +34588,7 @@ function isReeveProposalPr(thread) {
 import { readdir as readdir2, readFile as readFile2 } from "node:fs/promises";
 import { join as join2 } from "node:path";
 var EXCERPT = 500;
+var RECALLED = 4;
 function createMemory(corrections, similarity = lexical) {
   const ownDocuments = corrections.map(searchable);
   function ranked(text2, against) {
@@ -34899,6 +34903,114 @@ function readAnswer(text2) {
   if (typeof record.title !== "string" || typeof record.body !== "string") return null;
   if (record.title.trim().length === 0) return null;
   return { title: record.title, body: record.body };
+}
+
+// src/core/recall.ts
+var DECISIONS_HEADING = "--- DECISIONS THIS PROJECT ALREADY MADE ---";
+var REVERSED_HEADING = "--- REVERSED: A HUMAN UNDID ONE OF REEVE'S OWN ACTIONS ---";
+function renderRecall(recalled) {
+  const decisions2 = recalled.filter((correction) => correction.outcome === null);
+  const reversed = recalled.filter((correction) => correction.outcome === "overruled");
+  const sections = [];
+  if (decisions2.length > 0) {
+    sections.push([DECISIONS_HEADING, ...decisions2.map(renderDecision)].join("\n"));
+  }
+  if (reversed.length > 0) {
+    sections.push([REVERSED_HEADING, ...reversed.map(renderReversed)].join("\n"));
+  }
+  return sections.join("\n\n");
+}
+function renderDecision(correction) {
+  const lines = [
+    `#${String(correction.thread)}: ${correction.title}`,
+    `  DECIDED: ${labelList(correction.decided)}`
+  ];
+  if (differs(correction)) {
+    lines.push(`  (proposed at the time: ${labelList(correction.proposed)})`);
+  }
+  if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
+  return lines.join("\n");
+}
+function renderReversed(correction) {
+  const lines = [`#${String(correction.thread)}: ${correction.title}`];
+  if (correction.duplicateOf !== null) {
+    lines.push(
+      `  Automation closed this thread as a duplicate of #${String(correction.duplicateOf)}.`,
+      "  A human reopened it: that close was reversed."
+    );
+  } else {
+    const removed = correction.proposed.filter((label) => !correction.decided.includes(label));
+    lines.push(
+      removed.length === 0 ? "  Automation labeled this thread. A human corrected the labels." : `  Automation applied ${labelList(removed)}. A human removed it.`,
+      `  It stands as: ${labelList(correction.decided)}.`
+    );
+  }
+  if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
+  return lines.join("\n");
+}
+function labelList(labels) {
+  return labels.length === 0 ? "no labels" : labels.join(", ");
+}
+function differs(correction) {
+  const decided = [...correction.decided].sort();
+  const proposed = [...correction.proposed].sort();
+  return decided.length !== proposed.length || decided.some((name, at) => name !== proposed[at]);
+}
+async function readStoreWarned(path) {
+  const store = await readStore(path);
+  for (const line of store.unreadable) {
+    warning(`corrections: ${line}`);
+  }
+  return store;
+}
+async function bridgeQueries(queries, bridge) {
+  const { rosters } = bridge;
+  const models = rosters.screenModels.length > 0 ? rosters.screenModels : rosters.models;
+  const names = rosters.screenModels.length > 0 ? rosters.screenNames : rosters.modelNames;
+  const pivot = await translateToPivot({
+    provider: bridge.provider,
+    models,
+    title: bridge.title,
+    body: bridge.body,
+    to: bridge.to,
+    weather: bridge.weather
+  });
+  for (const failure of pivot.failures) {
+    warning(`recall: ${shown(names, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (pivot.draft !== null) {
+    queries.push({
+      text: `${pivot.draft.title}
+${pivot.draft.body}`,
+      against: { pivot: bridge.to.code }
+    });
+  } else {
+    info(
+      "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
+    );
+  }
+}
+async function recallCorrections(request2) {
+  if (request2.count <= 0) {
+    info(
+      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
+    );
+    return { corrections: [], size: 0, crossLanguage: 0, read: false };
+  }
+  const store = await readStoreWarned(request2.path);
+  const memory = createMemory(store.corrections);
+  const queries = [{ text: `${request2.title}
+${request2.body}`, against: "own" }];
+  const own = request2.language?.code ?? null;
+  const bridge = request2.bridge;
+  if (bridge !== null && own !== null && store.corrections.some((correction) => correction.language !== own)) {
+    await bridgeQueries(queries, bridge);
+  }
+  const corrections = memory.recallAcrossQueries(queries, request2.count);
+  const crossLanguage = own === null ? 0 : corrections.filter(
+    (correction) => correction.language !== null && correction.language !== own
+  ).length;
+  return { corrections, size: memory.size, crossLanguage, read: true };
 }
 
 // src/core/screen.ts
@@ -35423,7 +35535,7 @@ function recordGrantedByRun(permitted) {
   return permitted.includes("record");
 }
 async function computePivot(warrant, standing, body, code, settings, stages, weather) {
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
   if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
     return { pivot: null, pivotNote: null };
   }
@@ -36537,58 +36649,6 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
   }
 }
 
-// src/core/recall.ts
-var DECISIONS_HEADING = "--- DECISIONS THIS PROJECT ALREADY MADE ---";
-var REVERSED_HEADING = "--- REVERSED: A HUMAN UNDID ONE OF REEVE'S OWN ACTIONS ---";
-function renderRecall(recalled) {
-  const decisions2 = recalled.filter((correction) => correction.outcome === null);
-  const reversed = recalled.filter((correction) => correction.outcome === "overruled");
-  const sections = [];
-  if (decisions2.length > 0) {
-    sections.push([DECISIONS_HEADING, ...decisions2.map(renderDecision)].join("\n"));
-  }
-  if (reversed.length > 0) {
-    sections.push([REVERSED_HEADING, ...reversed.map(renderReversed)].join("\n"));
-  }
-  return sections.join("\n\n");
-}
-function renderDecision(correction) {
-  const lines = [
-    `#${String(correction.thread)}: ${correction.title}`,
-    `  DECIDED: ${labelList(correction.decided)}`
-  ];
-  if (differs(correction)) {
-    lines.push(`  (proposed at the time: ${labelList(correction.proposed)})`);
-  }
-  if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
-  return lines.join("\n");
-}
-function renderReversed(correction) {
-  const lines = [`#${String(correction.thread)}: ${correction.title}`];
-  if (correction.duplicateOf !== null) {
-    lines.push(
-      `  Automation closed this thread as a duplicate of #${String(correction.duplicateOf)}.`,
-      "  A human reopened it: that close was reversed."
-    );
-  } else {
-    const removed = correction.proposed.filter((label) => !correction.decided.includes(label));
-    lines.push(
-      removed.length === 0 ? "  Automation labeled this thread. A human corrected the labels." : `  Automation applied ${labelList(removed)}. A human removed it.`,
-      `  It stands as: ${labelList(correction.decided)}.`
-    );
-  }
-  if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
-  return lines.join("\n");
-}
-function labelList(labels) {
-  return labels.length === 0 ? "no labels" : labels.join(", ");
-}
-function differs(correction) {
-  const decided = [...correction.decided].sort();
-  const proposed = [...correction.proposed].sort();
-  return decided.length !== proposed.length || decided.some((name, at) => name !== proposed[at]);
-}
-
 // src/duties/triage/verdict.ts
 var NOTHING = { labels: [], confidence: 0, duplicateOf: null, rationale: "" };
 async function triage(request2) {
@@ -36703,7 +36763,6 @@ function describe2(label) {
 var DEFAULT_CAPABILITIES = ["label"];
 
 // src/duties/triage/main.ts
-var RECALLED = 4;
 function newAccumulator2() {
   return { ...newAccumulator(), recording: false };
 }
@@ -37073,58 +37132,33 @@ async function decide(authority2, standing, settings, stages, weather) {
     info(`Screened out as ${sifted.dropped.reason} \u2014 ${sifted.dropped.note}.`);
     return stopped(sifted.dropped, language);
   }
-  const recallCount = warrant.memory?.recall ?? RECALLED;
   const threadLanguage = detection.language;
-  let recalled = [];
-  let memorySize = 0;
-  let pivotRecalled = 0;
-  if (recallCount > 0) {
-    const store = await readStore(settings.corrections);
-    for (const line of store.unreadable) {
-      warning(`corrections: ${line}`);
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
+  const memory = await recallCorrections({
+    count: warrant.memory?.recall ?? RECALLED,
+    path: settings.corrections,
+    title: standing.title,
+    body,
+    language: threadLanguage,
+    // A bridge is worth having whenever this run has a pivot language at all;
+    // whether it is worth *buying* depends on the store, which `recall.ts`
+    // checks. Triage does not exclude a thread already written in the pivot
+    // language the way respond does — reconciling that is its own change.
+    bridge: pivotLanguage === null ? null : {
+      provider: stages.pivot,
+      rosters: settings,
+      title: standing.title,
+      body,
+      to: pivotLanguage,
+      weather
     }
-    const memory = createMemory(store.corrections);
-    memorySize = memory.size;
-    const queries = [{ text: `${standing.title}
-${body}`, against: "own" }];
-    const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-    const worthBridging = threadLanguage !== null && pivotLanguage !== null && store.corrections.some((correction) => correction.language !== threadLanguage.code);
-    if (worthBridging) {
-      const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-      const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-      const pivot = await translateToPivot({
-        provider: stages.pivot,
-        models: pivotModels,
-        title: standing.title,
-        body,
-        to: pivotLanguage,
-        weather
-      });
-      for (const failure of pivot.failures) {
-        warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
-      }
-      if (pivot.draft !== null) {
-        queries.push({
-          text: `${pivot.draft.title}
-${pivot.draft.body}`,
-          against: { pivot: pivotLanguage.code }
-        });
-      } else {
-        info(
-          "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-        );
-      }
-    }
-    recalled = memory.recallAcrossQueries(queries, recallCount);
-    pivotRecalled = threadLanguage === null ? 0 : recalled.filter(
-      (correction) => correction.language !== null && correction.language !== threadLanguage.code
-    ).length;
+  });
+  const recalled = memory.corrections;
+  const memorySize = memory.size;
+  const pivotRecalled = memory.crossLanguage;
+  if (memory.read) {
     info(
       `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
-    );
-  } else {
-    info(
-      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
     );
   }
   const triaged = await triage({

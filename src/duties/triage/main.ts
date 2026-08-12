@@ -95,9 +95,8 @@ import {
 } from "../../core/forge.js";
 import { bounded, counted, fraction, readShared } from "../../core/inputs.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
+import { RECALLED } from "../../core/memory.js";
 import { createMeter } from "../../core/meter.js";
-import { translateToPivot } from "../../core/pivot.js";
 import {
   assembleClient,
   createWeather,
@@ -108,6 +107,7 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
+import { recallCorrections } from "../../core/recall.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
 import { authSection, writeSummary } from "../../core/summary.js";
@@ -121,8 +121,8 @@ import {
   checkLabelsExist,
   dutyLanguages,
   openAuthority,
+  pivotOrNone,
   resolveAbout,
-  resolvePivot,
   type Authority,
   type Capability,
   type Label,
@@ -162,20 +162,6 @@ import {
 } from "./propose.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-
-/**
- * How many corrections reach the prompt, when the warrant's `memory:` block
- * never wrote a `recall` of its own.
- *
- * Not an input, deliberately. The number that matters is how many are close
- * enough to be worth showing, and that is what retrieval already decides —
- * anything scoring nothing is dropped before this cap applies. What is left is
- * a ceiling on prompt length, and a consumer tuning it would be tuning a proxy
- * for a cost the summary already shows them directly. `memory: { recall: }`
- * exists for the one consumer who still wants to, without inventing an input
- * for it.
- */
-const RECALLED = 4;
 
 /**
  * One provider per stage, each counting its own requests.
@@ -864,91 +850,43 @@ async function decide(
     return stopped(sifted.dropped, language);
   }
 
-  // `recall: 0` (or a negative override) is a promise as much as a setting:
-  // the store is not touched at all, not merely searched-and-returns-nothing.
-  // That distinction matters for a maintainer who points `corrections` at a
-  // path they would rather this run never open.
-  const recallCount = warrant.memory?.recall ?? RECALLED;
   const threadLanguage = detection.language;
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
 
-  let recalled: readonly Correction[] = [];
-  let memorySize = 0;
-  let pivotRecalled = 0;
+  const memory = await recallCorrections({
+    count: warrant.memory?.recall ?? RECALLED,
+    path: settings.corrections,
+    title: standing.title,
+    body,
+    language: threadLanguage,
+    // A bridge is worth having whenever this run has a pivot language at all;
+    // whether it is worth *buying* depends on the store, which `recall.ts`
+    // checks. Triage does not exclude a thread already written in the pivot
+    // language the way respond does — reconciling that is its own change.
+    bridge:
+      pivotLanguage === null
+        ? null
+        : {
+            provider: stages.pivot,
+            rosters: settings,
+            title: standing.title,
+            body,
+            to: pivotLanguage,
+            weather,
+          },
+  });
 
-  if (recallCount > 0) {
-    const store = await readStore(settings.corrections);
-    for (const line of store.unreadable) {
-      // Loud, because this is a committed file that maintainers open by hand:
-      // losing one example is not worth losing the verdict, and losing it
-      // silently is not worth anything.
-      core.warning(`corrections: ${line}`);
-    }
-    const memory = createMemory(store.corrections);
-    memorySize = memory.size;
+  const recalled = memory.corrections;
+  const memorySize = memory.size;
+  const pivotRecalled = memory.crossLanguage;
 
-    const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
-
-    // The pivot bridge is worth a request only when it could change the answer:
-    // the thread's own language has to be known, a pivot language has to be
-    // configured, and the store has to hold at least one correction that is not
-    // already in the thread's own language. A store that shares one language
-    // with the thread has nothing a translated query would reach that the plain
-    // one above does not already reach — so that case, the common one, spends
-    // no provider call here at all.
-    const pivotLanguage =
-      settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-    const worthBridging =
-      threadLanguage !== null &&
-      pivotLanguage !== null &&
-      store.corrections.some((correction) => correction.language !== threadLanguage.code);
-
-    if (worthBridging) {
-      const pivotModels =
-        settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-      const pivotNames =
-        settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-      const pivot = await translateToPivot({
-        provider: stages.pivot,
-        models: pivotModels,
-        title: standing.title,
-        body,
-        to: pivotLanguage,
-        weather,
-      });
-      for (const failure of pivot.failures) {
-        core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
-      }
-      if (pivot.draft !== null) {
-        queries.push({
-          text: `${pivot.draft.title}\n${pivot.draft.body}`,
-          against: { pivot: pivotLanguage.code },
-        });
-      } else {
-        core.info(
-          "Cross-language recall could not translate this thread into the pivot language this run " +
-            "— recall used the thread's own language only.",
-        );
-      }
-    }
-
-    recalled = memory.recallAcrossQueries(queries, recallCount);
-    pivotRecalled =
-      threadLanguage === null
-        ? 0
-        : recalled.filter(
-            (correction) =>
-              correction.language !== null && correction.language !== threadLanguage.code,
-          ).length;
+  if (memory.read) {
     core.info(
       `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) ` +
         `from \`${settings.corrections}\`` +
         (pivotRecalled > 0
           ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.`
           : "."),
-    );
-  } else {
-    core.info(
-      "Recall is disabled (`memory.recall` is 0 or lower) — the corrections store was not read.",
     );
   }
 

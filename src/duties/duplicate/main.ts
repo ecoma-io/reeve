@@ -119,7 +119,7 @@ import {
 import {
   dutyLanguages,
   openAuthority,
-  resolvePivot,
+  pivotOrNone,
   type Authority,
   type Capability,
   type Warrant,
@@ -572,8 +572,7 @@ async function decide(
   let pivotUsed = false;
   let pivotNote: string | null = null;
 
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(authority.warrant, settings.languages) : null;
+  const pivotLanguage = pivotOrNone(authority.warrant, settings.languages);
   const threadLanguage = detection.language;
 
   if (

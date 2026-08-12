@@ -13,6 +13,7 @@ import {
   implicitWarrant,
   openAuthority,
   parseWarrant,
+  pivotOrNone,
   readWarrant,
   resolveAbout,
   resolveLanguages,
@@ -652,6 +653,29 @@ describe("resolvePivot", () => {
 
   it("refuses when there are no languages to pivot among, even absent", () => {
     expect(() => resolvePivot(warrant(MINIMAL), [])).toThrow(/no languages are configured/);
+  });
+});
+
+describe("pivotOrNone", () => {
+  const EN = { code: "en", label: "English", scripts: ["Latn"] };
+  const VI = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
+
+  it("answers exactly what `resolvePivot` answers when there is a list to choose from", () => {
+    expect(pivotOrNone(warrant(`${MINIMAL}pivot: vi\n`), [EN, VI])).toBe(VI);
+  });
+
+  it("reads an empty list as nothing to bridge, rather than as a fault", () => {
+    // A single-language project recalls in its own language and never spends
+    // a request on a translation — that is not a misconfiguration to refuse.
+    expect(pivotOrNone(warrant(MINIMAL), [])).toBeNull();
+  });
+
+  it("still refuses a `pivot:` that names a language outside the list", () => {
+    // The leniency is about the empty list only. A pivot nothing translates
+    // into or out of is still a warrant that cannot mean what it says.
+    expect(() => pivotOrNone(warrant(`${MINIMAL}pivot: zh\n`), [EN, VI])).toThrow(
+      /`pivot: zh` is not one of the configured languages/,
+    );
   });
 });
 

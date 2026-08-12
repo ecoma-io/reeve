@@ -33238,6 +33238,9 @@ function resolvePivot(warrant, languages) {
   }
   return found;
 }
+function pivotOrNone(warrant, languages) {
+  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
+}
 function load(path, source) {
   let document2;
   try {
@@ -35153,7 +35156,7 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
 ${body}`];
   let pivotUsed = false;
   let pivotNote = null;
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(authority.warrant, settings.languages) : null;
+  const pivotLanguage = pivotOrNone(authority.warrant, settings.languages);
   const threadLanguage = detection.language;
   if (threadLanguage !== null && pivotLanguage !== null && threadLanguage.code !== pivotLanguage.code && await crossLanguageCorpus(settings.languages, pivotLanguage, corpus, languageCache)) {
     const pivot = await translateToPivot({

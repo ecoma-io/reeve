@@ -33329,6 +33329,7 @@ function isReeveProposalPr(thread) {
 // src/core/memory.ts
 import { readdir as readdir2, readFile } from "node:fs/promises";
 import { join } from "node:path";
+var RECALLED = 4;
 function createMemory(corrections, similarity = lexical) {
   const ownDocuments = corrections.map(searchable);
   function ranked(text2, against) {
@@ -33676,6 +33677,9 @@ function resolvePivot(warrant, languages) {
     );
   }
   return found;
+}
+function pivotOrNone(warrant, languages) {
+  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
 }
 function resolveAbout(warrant, rawInput) {
   if (warrant.about !== null) {
@@ -34237,6 +34241,15 @@ function narrowWarned(granted, requested, duty, warrantPath) {
   return narrowed;
 }
 
+// src/core/publish.ts
+function assemble(official, marker2, publication2) {
+  return [
+    authorHalf(official),
+    marker2.render(publication2.fingerprint),
+    ...publication2.sections
+  ].join("\n\n");
+}
+
 // src/core/sanitize.ts
 var OPENER = "<!--";
 var CLOSER = "-->";
@@ -34350,13 +34363,62 @@ function readAnswer(text2) {
   return { title: record.title, body: record.body };
 }
 
-// src/core/publish.ts
-function assemble(official, marker2, publication2) {
-  return [
-    authorHalf(official),
-    marker2.render(publication2.fingerprint),
-    ...publication2.sections
-  ].join("\n\n");
+// src/core/recall.ts
+async function readStoreWarned(path) {
+  const store = await readStore(path);
+  for (const line of store.unreadable) {
+    warning(`corrections: ${line}`);
+  }
+  return store;
+}
+async function bridgeQueries(queries, bridge) {
+  const { rosters } = bridge;
+  const models = rosters.screenModels.length > 0 ? rosters.screenModels : rosters.models;
+  const names = rosters.screenModels.length > 0 ? rosters.screenNames : rosters.modelNames;
+  const pivot = await translateToPivot({
+    provider: bridge.provider,
+    models,
+    title: bridge.title,
+    body: bridge.body,
+    to: bridge.to,
+    weather: bridge.weather
+  });
+  for (const failure of pivot.failures) {
+    warning(`recall: ${shown(names, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (pivot.draft !== null) {
+    queries.push({
+      text: `${pivot.draft.title}
+${pivot.draft.body}`,
+      against: { pivot: bridge.to.code }
+    });
+  } else {
+    info(
+      "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
+    );
+  }
+}
+async function recallCorrections(request2) {
+  if (request2.count <= 0) {
+    info(
+      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
+    );
+    return { corrections: [], size: 0, crossLanguage: 0, read: false };
+  }
+  const store = await readStoreWarned(request2.path);
+  const memory = createMemory(store.corrections);
+  const queries = [{ text: `${request2.title}
+${request2.body}`, against: "own" }];
+  const own = request2.language?.code ?? null;
+  const bridge = request2.bridge;
+  if (bridge !== null && own !== null && store.corrections.some((correction) => correction.language !== own)) {
+    await bridgeQueries(queries, bridge);
+  }
+  const corrections = memory.recallAcrossQueries(queries, request2.count);
+  const crossLanguage = own === null ? 0 : corrections.filter(
+    (correction) => correction.language !== null && correction.language !== own
+  ).length;
+  return { corrections, size: memory.size, crossLanguage, read: true };
 }
 
 // src/core/spam.ts
@@ -35118,7 +35180,6 @@ function withheld(run2) {
 var DEFAULT_CAPABILITIES = [];
 
 // src/duties/respond/main.ts
-var RECALLED = 4;
 function readSettings() {
   const base = readCore();
   const panel = parseSeats(getInput("judge-models"));
@@ -35247,49 +35308,26 @@ async function decide(api, at, warrant, settings, stages, weather) {
     language === null ? `#${String(at.number)}: language not identified (${String(detection.candidates.length)} candidate(s)).` : `#${String(at.number)}: language ${language.code} (by ${detection.by}).`
   );
   const record = responseFingerprint(standing.title, body, language?.code ?? null);
-  const recallCount = warrant.memory?.recall ?? RECALLED;
-  let recalled = [];
-  if (recallCount > 0) {
-    const store = await readStore(settings.corrections);
-    for (const line of store.unreadable) warning(`corrections: ${line}`);
-    const memory = createMemory(store.corrections);
-    const queries = [{ text: `${standing.title}
-${body}`, against: "own" }];
-    const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-    const worthBridging = language !== null && pivotLanguage !== null && language.code !== pivotLanguage.code && store.corrections.some((correction) => correction.language !== language.code);
-    if (worthBridging) {
-      const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-      const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-      const pivot = await translateToPivot({
-        provider: stages.pivot,
-        models: pivotModels,
-        title: standing.title,
-        body,
-        to: pivotLanguage,
-        weather
-      });
-      for (const failure of pivot.failures) {
-        warning(`recall: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
-      }
-      if (pivot.draft !== null) {
-        queries.push({
-          text: `${pivot.draft.title}
-${pivot.draft.body}`,
-          against: { pivot: pivotLanguage.code }
-        });
-      } else {
-        info(
-          "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-        );
-      }
+  const pivotLanguage = pivotOrNone(warrant, settings.languages);
+  const memory = await recallCorrections({
+    count: warrant.memory?.recall ?? RECALLED,
+    path: settings.corrections,
+    title: standing.title,
+    body,
+    language,
+    bridge: pivotLanguage === null || language === null || language.code === pivotLanguage.code ? null : {
+      provider: stages.pivot,
+      rosters: settings,
+      title: standing.title,
+      body,
+      to: pivotLanguage,
+      weather
     }
-    recalled = memory.recallAcrossQueries(queries, recallCount);
+  });
+  const recalled = memory.corrections;
+  if (memory.read) {
     info(
       `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`
-    );
-  } else {
-    info(
-      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
     );
   }
   const guidance = await readGuidance(settings.guidance);
