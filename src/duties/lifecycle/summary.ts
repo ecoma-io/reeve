@@ -10,6 +10,7 @@
  * importing them directly — `main.ts` calls `run()` at import, so nothing
  * should ever import it back, tests included.
  */
+import { chromeFallbackNote } from "../../core/chrome.js";
 import { cell, table } from "../../core/summary.js";
 import type { Capability, LifecycleTrack } from "../../core/warrant.js";
 
@@ -91,6 +92,18 @@ function withheldLine(warrantPath: string, withheld: readonly Capability[]): str
   );
 }
 
+/**
+ * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
+ * one — see its own doc comment. `outcome.language` is the only code this
+ * duty's chrome (`footer()`) is ever keyed by, and `footer()` is only ever
+ * called for a real write — a dry run logs what it would have said and never
+ * reaches it, so there is no chrome to report a fallback for.
+ */
+function chromeGap(outcome: OutcomeSummary, done: DoneSummary, dryRun: boolean): string {
+  if (dryRun || !done.commented) return "";
+  return chromeFallbackNote([outcome.language]) ?? "";
+}
+
 export interface SweptThreadSummary {
   readonly number: number;
   readonly outcome: OutcomeSummary;
@@ -130,11 +143,15 @@ export function renderSweepPage(
   parts.push("", rendered.length === 0 ? "Nothing was processed this run." : rendered);
 
   const gaps = new Set<string>();
+  const chromeGaps = new Set<string>();
   for (const result of results) {
     const line = withheldLine(warrantPath, result.outcome.withheld);
     if (line.length > 0) gaps.add(line);
+    const note = chromeGap(result.outcome, result.done, dryRun);
+    if (note.length > 0) chromeGaps.add(note);
   }
   for (const gap of gaps) parts.push("", gap);
+  for (const note of chromeGaps) parts.push("", note);
 
   return `${parts.join("\n").trimEnd()}\n`;
 }
@@ -170,6 +187,9 @@ export function renderThreadPage(
 
     const gap = withheldLine(warrantPath, outcome.withheld);
     if (gap.length > 0) parts.push("", gap);
+
+    const note = chromeGap(outcome, done, dryRun);
+    if (note.length > 0) parts.push("", note);
   }
 
   return `${parts.join("\n").trimEnd()}\n`;

@@ -10,6 +10,7 @@ function run(over: Partial<Run> = {}): Run {
     dryRun: false,
     warrant: ".github/reeve.yml",
     language: "English",
+    languageCode: "en",
     ungranted: null,
     duplicateOf: 12,
     confidence: 0.9,
@@ -82,6 +83,40 @@ describe("summarize", () => {
 
   it("names the proposed candidate", () => {
     expect(summarize(run({ duplicateOf: 12 }))).toContain("Proposed as a duplicate of #12.");
+  });
+
+  it("says nothing about a chrome fallback when there is no proposal to carry chrome", () => {
+    expect(
+      summarize(run({ duplicateOf: null, confidence: 0, posted: null, languageCode: null })),
+    ).not.toContain("no translation for");
+  });
+
+  it("notes a chrome fallback once for a proposal in a language chrome has no row for", () => {
+    const page = summarize(run({ duplicateOf: 12, languageCode: "fr" }));
+
+    expect(page).toContain("`fr`");
+    expect(page).toContain("no translation for");
+    expect(page.match(/`fr`/g)).toHaveLength(1);
+  });
+
+  it("says nothing about a chrome fallback when `comment` is not permitted — nothing was posted", () => {
+    const page = summarize(
+      run({ duplicateOf: 12, languageCode: "fr", posted: null, done: { commented: false } }),
+    );
+    expect(page).not.toContain("no translation for");
+  });
+
+  it("says nothing about a chrome fallback on a dry run, since nothing was actually posted", () => {
+    const page = summarize(
+      run({
+        dryRun: true,
+        duplicateOf: 12,
+        languageCode: "fr",
+        posted: "posted",
+        done: { commented: false },
+      }),
+    );
+    expect(page).not.toContain("no translation for");
   });
 
   it("explains a verdict that was under the floor rather than reporting nothing", () => {

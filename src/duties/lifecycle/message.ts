@@ -13,6 +13,7 @@
  * is a deliberate simplification of the design's own text — see the PR
  * description for the fuller argument.
  */
+import { chrome } from "../../core/chrome.js";
 import type { LifecycleExempt, LifecycleSay, LifecycleTrack } from "../../core/warrant.js";
 
 const BUILTIN_REMINDER: Readonly<Record<string, string>> = {
@@ -46,20 +47,30 @@ export function renderClose(language: string | null): string {
  * The fixed lines every lifecycle comment carries beneath its own text —
  * what restarts the clock, what stops the track outright, and the permanent
  * escape hatch, so a reader never has to go read the warrant to find out.
+ *
+ * The comment above this footer already resolved to one language — `say:`
+ * through `renderSay`, or the close text through `renderClose`, both against
+ * the same `language` — so the footer follows it the same way, English
+ * fallback and all: the same shape as `renderSay` itself.
  */
-export function footer(track: LifecycleTrack, exempt: LifecycleExempt): string {
+export function footer(
+  track: LifecycleTrack,
+  exempt: LifecycleExempt,
+  language: string | null,
+): string {
   const lines: string[] = [];
   lines.push(
-    track.resets === "author"
-      ? "A reply from this thread's author restarts the clock."
-      : "Any activity here restarts the clock.",
+    chrome(
+      track.resets === "author" ? "lifecycleFooterResetsAuthor" : "lifecycleFooterResetsAny",
+      language,
+    ),
   );
   if (track.when !== null) {
-    lines.push(`Removing the \`${track.when}\` label also stops this track.`);
+    lines.push(chrome("lifecycleFooterWhenLabel", language, { label: track.when }));
   }
   const escapeLabel = exempt.labels[0];
   if (escapeLabel !== undefined) {
-    lines.push(`Adding \`${escapeLabel}\` stops this permanently.`);
+    lines.push(chrome("lifecycleFooterEscape", language, { label: escapeLabel }));
   }
-  return `${lines.join(" ")}\n\n<sub>lifecycle — a policy this repository's own warrant configured.</sub>`;
+  return `${lines.join(" ")}\n\n<sub>${chrome("lifecycleFooterAttribution", language)}</sub>`;
 }

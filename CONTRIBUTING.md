@@ -220,9 +220,10 @@ duty's judgement is a different kind of change from a change to the machine
 underneath all of them:
 
 core — `action`, `provider`, `language`, `warrant`, `score`, `judge`,
-`sanitize`, `memory`, `forge`, `publish`, `atlas`, `marker`; duties —
-`translate`, `triage`, `duplicate`, `respond`, `lifecycle`; and around them —
-`eval`, `brand`, `docs`, `workspace`, `deps`, `ci`.
+`sanitize`, `memory`, `forge`, `publish`, `atlas`, `marker`, `chrome`,
+`doctor`; duties — `translate`, `triage`, `duplicate`, `respond`,
+`lifecycle`; and around them — `eval`, `brand`, `docs`, `workspace`, `deps`,
+`ci`.
 
 `deps` and `ci` are on that list because Renovate writes them: it opens
 `chore(deps):` and `chore(ci):` pull requests, and a scope list without them

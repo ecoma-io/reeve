@@ -68,12 +68,7 @@ import {
   resolveOwnLogin,
   type LifecycleApi,
 } from "./timeline.js";
-
-/** `lifecycle`'s own default, once a `lifecycle:` policy exists and no `capabilities:` block says otherwise. */
-const DEFAULT_CAPABILITIES: readonly Capability[] = ["label", "comment"];
-
-/** The full ladder this duty ever asks for — anything else the warrant names for it is inert here, not an error; see `Warrant.granted`'s own doc comment for why a per-duty enumeration is not this module's to validate. */
-const LIFECYCLE_CAPABILITIES: readonly Capability[] = ["label", "comment", "close"];
+import { DEFAULT_CAPABILITIES, LIFECYCLE_CAPABILITIES } from "./capabilities.js";
 
 /** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
@@ -351,7 +346,9 @@ async function act(
         const closeText = action.step.close ? renderClose(outcome.language) : null;
         const body = [say, closeText].filter((line): line is string => line !== null).join("\n\n");
         const marker = MARKER.render(fingerprintFor(action.track, action.stepIndex, action.anchor));
-        await effects.comment(`${body}\n\n${footer(action.track, exempt)}\n\n${marker}`);
+        await effects.comment(
+          `${body}\n\n${footer(action.track, exempt, outcome.language)}\n\n${marker}`,
+        );
       }
       commented = true;
     }

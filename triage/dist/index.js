@@ -36093,8 +36093,10 @@ function describe2(label) {
   return lines.join("\n");
 }
 
-// src/duties/triage/main.ts
+// src/duties/triage/capabilities.ts
 var DEFAULT_CAPABILITIES = ["label"];
+
+// src/duties/triage/main.ts
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
 var SWEEP_STATES = ["open", "closed", "all"];

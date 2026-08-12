@@ -112,6 +112,62 @@ configuration surface — the input and warrant keys on that page are how you
 tell this layer what to work with; this page is why it is shaped the way it
 is.
 
+## Chrome: Reeve's own words, apart from a duty's
+
+Everything above is about content — the thread's own text, and what a duty
+decides or writes about it. Every duty that touches a thread also wraps that
+content in a little of Reeve's own scaffolding: the boundary note above a
+translation, the footer under a first reply, the line explaining a duplicate
+proposal, a lifecycle reminder's own attribution. None of that is a duty's
+judgement and none of it is a model's output — it is fixed English,
+Vietnamese, and Chinese text, committed in `src/core/chrome.ts` and reviewed
+in the diff the same as any other line of code.
+
+**This is a different question from whether a duty can translate a thread's
+content, and it is answered differently on purpose.** A thread's content
+goes through detection and, where a duty calls for it, a model — because
+what the author wrote is open-ended and the whole point is to handle
+whatever language that turns out to be. Chrome is a fixed, short, known set
+of sentences decided once by the people who maintain this project, so
+translating it is a one-time reviewed pull request instead of a per-run
+model call: zero model calls for any of it, deterministically, on every run,
+forever — the same posture this project takes toward every cost that can be
+paid once in review instead of repeatedly at runtime.
+
+**Chrome follows the language of the block it wraps, at the moment that
+block is published.** A block that already belongs to one language
+throughout — a lifecycle comment resolved to the thread's own language, a
+first reply, a duplicate proposal — gets its chrome in that same language. A
+block that introduces several language sections at once — `translate`'s
+boundary note above every translated section, and its footer below all of
+them — is shared by every language the thread actually got translated into,
+so it renders once per language present, English line first. Neither rule
+picks one language to speak _about_ the others in. Chrome is not part of a
+block's fingerprint: a block published before this table carried a language,
+or before this version existed at all, keeps the chrome it was published
+with — stale chrome is a smaller, quieter cost than re-editing every comment
+this project has ever posted the moment a translation is added. It only
+catches up the next time that block's own content changes and it re-renders.
+
+**A language chrome has no row for falls back to English, deterministically
+— never a guess, never a model call.** This is keyed by the language a
+thread's content actually resolved to, detected per run for `respond`,
+`duplicate`, and `lifecycle` (and per translated section for `translate`) —
+not by the repository's configured `languages:` list. A repository configured
+for only `languages: [vi]` still gets this note the first time a French
+thread reaches a duty's chrome, because the fallback is about what a thread
+turned out to be written in, not what a warrant expected. The first time a
+run's chrome would have fallen back this way, the job summary says so once,
+naming the language and what it fell back from, rather than silently reading
+English scaffolding around content in a thread's own language forever.
+
+**Adding a language to this table is one pull request, touching only
+`src/core/chrome.ts`:** a new entry in the supported-language list, a full
+row of translations for it added to every chrome string, and the file's own
+completeness test — which checks every string against every configured
+language — fails loudly at that same pull request if a single one was
+missed.
+
 ---
 
 **Related:** [Languages](../guides/languages.md) · [The authority model](authority-model.md) · [The warrant](../guides/warrant.md)

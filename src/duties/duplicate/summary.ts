@@ -13,6 +13,7 @@
  * that spent against it are — `duplicate` for the judge, `pivot` for the
  * cross-language bridge, when either ran.
  */
+import { chromeFallbackNote } from "../../core/chrome.js";
 import type { Spend } from "../../core/meter.js";
 import { shown, type Names } from "../../core/provider.js";
 import { cell, cost, table } from "../../core/summary.js";
@@ -44,8 +45,15 @@ export interface Run {
   readonly dryRun: boolean;
   /** Where the authority was read from, so a withheld capability can name the file. */
   readonly warrant: string;
-  /** The detected author language, or null for `unknown`. */
+  /** The detected author language's display label, or null for `unknown`. */
   readonly language: string | null;
+  /**
+   * The same language, as the code a proposal's own chrome is keyed by
+   * (`Proposal.language` in `publish.ts`) rather than the display label
+   * {@link language} carries above. Null whenever there is no `proposal` to
+   * carry chrome at all, not only when detection itself found nothing.
+   */
+  readonly languageCode: string | null;
   /**
    * Why this duty was granted nothing, when a written `capabilities:` block
    * simply does not name it — distinct from every other reason nothing was
@@ -92,11 +100,28 @@ export function summarize(run: Run): string {
     `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was applied" : ""}.`,
     "",
     verdict(run),
+    ...chromeNote(run),
     "",
     cost(run.spent, (spend) => shown(run.modelNames, spend.model)),
   ];
 
   return `${parts.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
+ * one — see its own doc comment. `run.languageCode` names the language a
+ * `proposal` was built for, but the proposal's own chrome only actually
+ * rendered on a real, applied write — `!dryRun && done.commented`, the same
+ * gate `lifecycle/summary.ts`'s own `chromeGap` uses. `outcome.proposal` (and
+ * so `languageCode`) stays non-null on a dry run and when `comment` is not
+ * permitted (see `act` in `main.ts`), neither of which ever put chrome-wrapped
+ * text anywhere a reader can see it.
+ */
+function chromeNote(run: Run): readonly string[] {
+  if (run.dryRun || !run.done.commented) return [];
+  const note = chromeFallbackNote([run.languageCode]);
+  return note === null ? [] : ["", note];
 }
 
 /** The headline: what happened to this thread, in the fewest lines that are true. */

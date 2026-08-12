@@ -8,6 +8,7 @@ import { summarize, summarizeSweep, type Looked, type Run, type SweepRun } from 
 
 const ENGLISH: Language = { code: "en", label: "English", scripts: ["Latin"] };
 const VIETNAMESE: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latin"] };
+const FRENCH: Language = { code: "fr", label: "Français", scripts: ["Latin"] };
 
 function posted(overrides: Partial<Posted> = {}): Posted {
   return { to: ENGLISH, text: "Hello", model: "House model", ...overrides };
@@ -71,6 +72,18 @@ describe("the run summary", () => {
     expect(summary).toContain("| #42 | English (en) | translated | House model |");
     expect(summary).toContain("1 translation this run.");
     expect(summary).toContain("Source language — #42: Tiếng Việt.");
+  });
+
+  it("says nothing about a chrome fallback when every posted language has chrome", () => {
+    const summary = subject({ looked: [looked({ posted: [posted()] })] });
+    expect(summary).not.toContain("no translation for");
+  });
+
+  it("notes a chrome fallback once for a posted language chrome has no row for", () => {
+    const summary = subject({ looked: [looked({ posted: [posted({ to: FRENCH })] })] });
+    expect(summary).toContain("`fr`");
+    expect(summary).toContain("no translation for");
+    expect(summary.match(/`fr`/g)).toHaveLength(1);
   });
 
   it("reports the score, the drafts and the votes of a contested translation", () => {

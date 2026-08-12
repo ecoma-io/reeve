@@ -9,6 +9,7 @@
  * branch here exactly as it does in `triage/summary.ts` and
  * `translate/summary.ts`.
  */
+import { chromeFallbackNote } from "../../core/chrome.js";
 import type { Spend } from "../../core/meter.js";
 import { shown, type Names } from "../../core/provider.js";
 import { cell, cost, fence, table } from "../../core/summary.js";
@@ -102,6 +103,7 @@ export function summarize(run: Run): string {
     ...(run.implicit ? [authority(run), ""] : []),
     verdict(run),
     ...withheld(run),
+    ...chromeNote(run),
     "",
     cost(run.spent, (spend) =>
       shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model),
@@ -109,6 +111,21 @@ export function summarize(run: Run): string {
   ];
 
   return `${parts.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
+ * one — see its own doc comment. `responded.languageCode` is the only code
+ * this duty's chrome is ever keyed by, and `publish()`'s chrome only ever
+ * renders on the one path that actually posts a comment — `run.published`,
+ * never for a withheld draft (below the floor, `comment` not granted, an
+ * empty draft) or a dry run, every one of which leaves the draft unread
+ * anywhere the chrome-wrapped text would be.
+ */
+function chromeNote(run: Run): readonly string[] {
+  if (!run.published || run.responded === null || run.responded.text.length === 0) return [];
+  const note = chromeFallbackNote([run.responded.languageCode]);
+  return note === null ? [] : ["", note];
 }
 
 function verdict(run: Run): string {

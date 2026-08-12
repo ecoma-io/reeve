@@ -10,6 +10,7 @@
  * duty's: a language, a draft's score, a panel's votes. What the core owns is
  * the page it is written to and the arithmetic on the bill.
  */
+import { chromeFallbackNote } from "../../core/chrome.js";
 import type { Spend } from "../../core/meter.js";
 import type { Language } from "../../core/languages.js";
 import { shown, type Names } from "../../core/provider.js";
@@ -107,6 +108,7 @@ export function summarize(run: Run): string {
     "",
     ...(run.implicit ? [authority(run), ""] : []),
     translations(run.looked),
+    ...chromeNote(run.looked),
     "",
     cost(run.spent, (spend) =>
       shown(spend.purpose === "judge" ? run.judgeNames : run.modelNames, spend.model),
@@ -114,6 +116,19 @@ export function summarize(run: Run): string {
   ];
 
   return `${parts.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
+ * one — see its own doc comment. Every language this run actually posted
+ * chrome for, across every text it looked at, is the input: the boundary and
+ * footer render once per posted language, so that is the whole set chrome
+ * was keyed by this run.
+ */
+function chromeNote(looked: readonly Looked[]): readonly string[] {
+  const codes = looked.flatMap((text) => text.posted.map((entry) => entry.to.code));
+  const note = chromeFallbackNote(codes);
+  return note === null ? [] : ["", note];
 }
 
 /** Every language of every text, in the order the run reached them. */

@@ -91,6 +91,11 @@ jobs:
 One repository, one version line, one core — and each duty keeps its own inputs,
 so nothing you write is meaningless to the thing you are configuring.
 
+Before granting a capability for real, check what your warrant would actually
+do with `uses: ecoma-io/reeve@v0.1` and `doctor: true` — it reads your file
+and this repository's labels and reports what a duty would find, writing
+nothing. See [Doctor](docs/guides/doctor.md).
+
 ## A reeve, and why that is the word
 
 A reeve was the officer who ran an estate on the owner's behalf: the daily work,

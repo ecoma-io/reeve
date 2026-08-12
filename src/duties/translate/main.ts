@@ -111,16 +111,7 @@ import {
   type Posted,
   type Translated,
 } from "./publish.js";
-
-/**
- * What this duty may do when the warrant says nothing about it.
- *
- * `edit-body` and nothing else — it is the only thing this duty has ever
- * done, and the default belongs here rather than in the warrant reader
- * because only this duty knows that editing the body is the whole of its
- * work.
- */
-const DEFAULT_CAPABILITIES: readonly Capability[] = ["edit-body"];
+import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /**
  * `warrant`'s own default in `action.yml`, repeated here rather than read

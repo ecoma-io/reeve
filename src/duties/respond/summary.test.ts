@@ -18,6 +18,7 @@ function decision(over: Partial<Decision> = {}): Decision {
 function responded(over: Partial<Responded> = {}): Responded {
   return {
     language: "English",
+    languageCode: "en",
     text: "Thanks for the report.",
     model: "House model",
     decision: null,
@@ -96,6 +97,39 @@ describe("the run summary", () => {
     expect(summary).toContain("| Language | English |");
     expect(summary).toContain("| Confidence | 0.90 of 1.00 (floor 0.75) |");
     expect(summary).toContain("| Outcome | posted |");
+  });
+
+  it("says nothing about a chrome fallback for a draft in a language chrome covers", () => {
+    const summary = subject({ responded: responded(), confidence: 0.9, published: true });
+    expect(summary).not.toContain("no translation for");
+  });
+
+  it("notes a chrome fallback once for a draft in a language chrome has no row for", () => {
+    const summary = subject({
+      responded: responded({ language: "Français", languageCode: "fr" }),
+      confidence: 0.9,
+      published: true,
+    });
+
+    expect(summary).toContain("`fr`");
+    expect(summary).toContain("no translation for");
+    expect(summary.match(/`fr`/g)).toHaveLength(1);
+  });
+
+  it("says nothing about a chrome fallback when no draft survived to carry any chrome", () => {
+    const summary = subject({ responded: null });
+    expect(summary).not.toContain("no translation for");
+  });
+
+  it("says nothing about a chrome fallback for a draft withheld below the floor", () => {
+    const summary = subject({
+      responded: responded({ language: "Français", languageCode: "fr" }),
+      confidence: 0.4,
+      floor: 0.75,
+      published: false,
+      permitted: ["comment"],
+    });
+    expect(summary).not.toContain("no translation for");
   });
 
   it("reports drafts, decided-by and votes for a contested reply", () => {

@@ -31,6 +31,7 @@ function decision(over: Partial<Decision> = {}): Decision {
 function responded(over: Partial<Responded> = {}): Responded {
   return {
     language: "English",
+    languageCode: "en",
     text: "Thanks for the report — could you share the version you're running?",
     model: "model-a",
     decision: null,
@@ -119,6 +120,30 @@ describe("publication", () => {
 
   it("tells a reader this comment is the record of a once-only answer", () => {
     expect(body()).toContain("Reeve answers a thread once. This comment is the record of it.");
+  });
+
+  it("follows the reply's own language for the boundary note and footer", () => {
+    const rendered = body({ language: "Tiếng Việt", languageCode: "vi" });
+    expect(rendered).toContain("Phản hồi này do [Reeve]");
+    expect(rendered).toContain("Chưa có maintainer nào xem xét phản hồi này");
+    expect(rendered).toContain("Chủ đề này được viết bằng Tiếng Việt.");
+    expect(rendered).toContain("Reeve chỉ trả lời mỗi chủ đề một lần.");
+    expect(rendered).not.toContain("This reply was drafted by");
+  });
+
+  it("falls back to English chrome for a language code chrome has no row for", () => {
+    const rendered = body({ language: "Français", languageCode: "fr" });
+    expect(rendered).toContain("This reply was drafted by");
+    expect(rendered).toContain("The thread was written in Français.");
+  });
+
+  it("falls back to English chrome when languageCode is null even if language has a label", () => {
+    // Detection reached no answer, so there is nothing for the reply's own
+    // chrome to follow — both fields are null together, per publish.ts's doc
+    // comment on Responded.languageCode, but this pins the fallback shape too.
+    const rendered = body({ language: null, languageCode: null });
+    expect(rendered).toContain("This reply was drafted by");
+    expect(rendered).toContain("could not identify the thread's language");
   });
 
   it("escapes a model id, which arrives from a workflow file", () => {
