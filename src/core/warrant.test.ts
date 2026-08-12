@@ -458,6 +458,10 @@ describe("memory", () => {
     expect(() => warrant(`${MINIMAL}memory: {}\n`)).toThrow(/`memory` has no `recall`/);
   });
 
+  it("refuses `memory:` written with nothing under it, rather than reading it as absent", () => {
+    expect(() => warrant(`${MINIMAL}memory:\n`)).toThrow(/writes `memory:` with nothing under it/);
+  });
+
   it("refuses a `memory` key that is not a mapping", () => {
     expect(() => warrant(`${MINIMAL}memory: 4\n`)).toThrow(/`memory` as .+4.+, expected a mapping/);
   });

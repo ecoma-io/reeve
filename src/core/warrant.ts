@@ -48,7 +48,7 @@ import { parse, YAMLParseError } from "yaml";
 
 import type { Location, TrackerApi } from "./forge.js";
 import { listRepositoryLabels } from "./forge.js";
-import { parseLanguages, type Language } from "./languages.js";
+import { findLanguage, parseLanguages, type Language } from "./languages.js";
 
 /**
  * What a duty may do to a thread. The closed set; a name outside it is refused.
@@ -309,10 +309,21 @@ export function parseWarrant(path: string, source: string): Warrant {
  * Case-sensitive, because GitHub applies a label by its exact name. It is also
  * where a rename that only changed case gets caught, which is otherwise
  * invisible in the tracker's own UI.
+ *
+ * Checks `taxonomy`, not `warrant.labels`, and defaults to the latter only
+ * because most callers have not narrowed anything. A run scoped by the
+ * `labels` input has already narrowed its taxonomy before this is called —
+ * checking the warrant's whole one instead would fail a run over a label
+ * renamed in an area it was never asked to touch, which is exactly the
+ * isolation this narrowing exists to give it.
  */
-export function checkLabelsExist(warrant: Warrant, existing: readonly string[]): void {
+export function checkLabelsExist(
+  warrant: Warrant,
+  existing: readonly string[],
+  taxonomy: readonly Label[] = warrant.labels,
+): void {
   const present = new Set(existing);
-  const missing = warrant.labels.map((label) => label.name).filter((name) => !present.has(name));
+  const missing = taxonomy.map((label) => label.name).filter((name) => !present.has(name));
   if (missing.length === 0) return;
 
   // Every missing name at once. Reporting the first would make fixing a
@@ -507,8 +518,7 @@ export function resolvePivot(warrant: Warrant, languages: readonly Language[]): 
     return first;
   }
 
-  const named = warrant.pivot.toLowerCase();
-  const found = languages.find((language) => language.code.toLowerCase() === named);
+  const found = findLanguage(languages, warrant.pivot);
   if (found === undefined) {
     throw new Error(
       `warrant: \`${warrant.path}\`'s \`pivot: ${warrant.pivot}\` is not one of the configured ` +
@@ -697,11 +707,19 @@ function readPivot(path: string, raw: unknown): string | null {
 /**
  * The `memory:` block. Absent entirely is `null`, which leaves a duty's own
  * default in charge — see {@link Warrant.memory}. Present, `recall` is
- * required: a block with nothing in it is the same half-finished-edit shape
- * `capabilities:` and `languages:` both refuse rather than guess at.
+ * required: a block with nothing in it — including `memory:` written with
+ * nothing under it, which parses as YAML `null` — is the same half-finished-
+ * edit shape `capabilities:` and `languages:` both refuse rather than guess
+ * at.
  */
 function readMemory(path: string, raw: unknown): MemorySettings | null {
-  if (raw === undefined || raw === null) return null;
+  if (raw === undefined) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, ` +
+        "or remove the key to leave the duty's own default in charge.",
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
   }
