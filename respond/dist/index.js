@@ -32965,16 +32965,15 @@ async function listReplies(api, at, options) {
     const all = first.data.map(toReply);
     return { replies: all.slice(-max), more: all.length > max };
   }
-  const pagesNeeded = Math.min(
-    REPLY_PAGES,
-    Math.ceil(Math.min(max, REPLY_PAGE * REPLY_PAGES) / REPLY_PAGE),
-    lastPage
-  );
-  const firstPageWalked = lastPage - pagesNeeded + 1;
   const collected = [];
-  for (let n = lastPage; n >= firstPageWalked; n -= 1) {
+  let firstPageWalked;
+  let pagesFetched = 0;
+  for (let n = lastPage; ; n -= 1) {
     const { data } = n === 1 ? first : await page2(n);
     collected.unshift(...data.map(toReply));
+    firstPageWalked = n;
+    pagesFetched += 1;
+    if (collected.length >= max || n === 1 || pagesFetched >= REPLY_PAGES) break;
   }
   return {
     replies: collected.slice(-max),

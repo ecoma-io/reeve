@@ -32986,6 +32986,7 @@ var EVENT_PAGE = 100;
 var EVENT_PAGES = 10;
 async function listLabelEvents(api, at) {
   const events = [];
+  let complete = true;
   for (let page2 = 1; page2 <= EVENT_PAGES; page2 += 1) {
     const { data } = await api.rest.issues.listEvents({
       owner: at.owner,
@@ -33001,8 +33002,9 @@ async function listLabelEvents(api, at) {
       events.push({ label: name, action: entry.event, isBot: isBotAuthor(entry.actor) });
     }
     if (data.length < EVENT_PAGE) break;
+    if (page2 === EVENT_PAGES) complete = false;
   }
-  return events;
+  return { events, complete };
 }
 function isMissing(error2) {
   return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
@@ -34713,7 +34715,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
         weather,
         "sweep"
       );
-      if (outcome.machineOnly) {
+      if (outcome.machineOnly || outcome.unattributable) {
         acc.skipped += 1;
       } else {
         acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
@@ -35057,9 +35059,23 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
   const warrant = authority2.warrant;
   let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
   if (by === "sweep" && decidedLabels.length > 0) {
-    const events = await listLabelEvents(api, at);
+    const history = await listLabelEvents(api, at);
+    if (!history.complete) {
+      info(
+        `#${String(at.number)}: label history is longer than one run reads \u2014 cannot attribute, nothing imported.`
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: false,
+        unattributable: true
+      };
+    }
     const lastLabeledByBot = /* @__PURE__ */ new Map();
-    for (const event of events) {
+    for (const event of history.events) {
       if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
     }
     decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
@@ -35073,7 +35089,8 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
         decided: [],
         pivot: false,
         pivotNote: null,
-        machineOnly: true
+        machineOnly: true,
+        unattributable: false
       };
     }
   }
@@ -35145,7 +35162,8 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     decided: decidedLabels,
     pivot: pivot !== null,
     pivotNote,
-    machineOnly: false
+    machineOnly: false,
+    unattributable: false
   };
 }
 var WRITE_ATTEMPTS = 3;
@@ -35166,6 +35184,7 @@ async function writeCorrection(contentsApi, at, path, correction) {
 async function attemptWrite(contentsApi, at, path, correction) {
   const files = await listCorrectionFiles(contentsApi, at, path);
   const unreadable = [];
+  const shards = [];
   for (const file of files) {
     let read2;
     try {
@@ -35179,22 +35198,32 @@ async function attemptWrite(contentsApi, at, path, correction) {
       continue;
     }
     if (read2 === null) continue;
-    const lines = read2.text.split("\n");
-    const index = lines.findIndex((line) => {
+    shards.push({ path: file.path, lines: read2.text.split("\n"), sha: read2.sha });
+  }
+  const singleRepoStore = unreadable.length === 0 && shards.every(
+    (shard2) => shard2.lines.every((line) => {
+      if (line.trim().length === 0) return true;
+      const existing2 = parseCorrection(line);
+      return existing2 === null || existing2.repo === "" || existing2.repo === correction.repo;
+    })
+  );
+  for (const shard2 of shards) {
+    const index = shard2.lines.findIndex((line) => {
       if (line.trim().length === 0) return false;
       const existing2 = parseCorrection(line);
-      return existing2 !== null && existing2.thread === correction.thread && (existing2.repo === correction.repo || existing2.repo === "");
+      return existing2 !== null && existing2.thread === correction.thread && (existing2.repo === correction.repo || singleRepoStore && existing2.repo === "");
     });
     if (index !== -1) {
+      const lines = [...shard2.lines];
       lines[index] = formatCorrection(correction);
       await writeContentsFile(
         contentsApi,
         at,
-        file.path,
+        shard2.path,
         `${lines.join("\n").replace(/\n*$/, "")}
 `,
         commitMessage(correction),
-        file.sha
+        shard2.sha
       );
       return;
     }
