@@ -1,0 +1,767 @@
+/**
+ * The lifecycle duty, driven the way a runner drives it.
+ *
+ * `main.ts` calls `run()` at import, so it cannot be imported and measured —
+ * importing it would run it. What a runner actually does is spawn
+ * `lifecycle/dist/index.js` with `INPUT_*` in the environment and read
+ * `GITHUB_OUTPUT` afterwards, and that is exactly what happens below.
+ *
+ * This is also the only place several of PR review batch 1's fixes are
+ * exercised end to end rather than against `clock.ts`'s pure functions in
+ * isolation: the attribution-gated un-staling (A1), the same-run
+ * apply-then-remove guard (A3), `threads:` filtering and budget discipline in
+ * an actual sweep (A2, A4), a mid-sweep capacity error (A5), and a dry run
+ * reporting the full would-do ledger instead of "Nothing due." (A6). A unit
+ * test can show `evaluateTrack` computes the right `toUnstale`; only this can
+ * show that nothing downstream removed the label anyway.
+ *
+ * The bundle is real, rebuilt here so a case can never pass against a stale
+ * artifact. GitHub is a local HTTP server — `@actions/github` reads its base
+ * URL from `GITHUB_API_URL` — so nothing in this file reaches a real network.
+ * Unlike every other duty's own integration suite, there is no model stub:
+ * `main.ts`'s own doc comment is the reason — this duty never calls one.
+ */
+import { spawn, execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+
+import { fingerprint, markerFor } from "../../core/marker.js";
+
+vi.setConfig({ testTimeout: 30_000 });
+
+const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
+const DUTY = join(ROOT, "lifecycle");
+const BUNDLE = join(DUTY, "dist", "index.js");
+
+const MARKER = markerFor("lifecycle");
+
+function daysAgo(n: number): Date {
+  return new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+}
+
+/** A track's marker fingerprint, computed exactly as `clock.ts`'s `fingerprintFor` does — see its own doc comment: only the track's `name` and step index feed the digest, never the rest of the parsed shape. */
+function markerFingerprint(trackName: string, stepIndex: number, anchor: Date): string {
+  return fingerprint(anchor.toISOString(), [trackName, String(stepIndex)]);
+}
+
+/** Two-step track: label after 14d, close after 14d more (cumulative from the label's own firing). Shared by every case that does not need a second track. */
+const WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: A defect.",
+  "lifecycle:",
+  "  tracks:",
+  "    - name: stale",
+  "      steps:",
+  "        - label: stale",
+  "          after: 14d",
+  "        - close: true",
+  "          after: 14d",
+  "  exempt:",
+  "    labels: [pinned]",
+  "capabilities:",
+  "  lifecycle: [label, comment, close]",
+].join("\n");
+
+/** `threads:` narrowed to pull requests only, otherwise identical to `WARRANT`. */
+const PRS_ONLY_WARRANT = WARRANT.replace("lifecycle:\n", "lifecycle:\n  threads: prs\n");
+
+/** Two tracks: one whose due `close` is blocked by `exempt.comments`, one an unrelated `when:` reminder. */
+const TWO_TRACK_WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: A defect.",
+  "lifecycle:",
+  "  tracks:",
+  "    - name: closing",
+  "      resets: author",
+  "      steps:",
+  "        - say: true",
+  "          after: 14d",
+  "        - close: true",
+  "          after: 14d",
+  "    - name: reminder",
+  "      when: needs-attention",
+  "      steps:",
+  "        - say: true",
+  "          after: 14d",
+  "  exempt:",
+  "    labels: [pinned]",
+  "    comments: 1",
+  "capabilities:",
+  "  lifecycle: [label, comment, close]",
+].join("\n");
+
+beforeAll(async () => {
+  await promisify(execFile)(process.execPath, [join(ROOT, "tools", "build.mjs")], { cwd: ROOT });
+}, 120_000);
+
+// ---------------------------------------------------------------------------
+// The stub standing in for GitHub.
+// ---------------------------------------------------------------------------
+
+interface ThreadRecord {
+  title: string;
+  body: string;
+  labels: string[];
+  closed: boolean;
+  milestone: string | null;
+  assignees: string[];
+  authorLogin: string;
+  createdAt: string;
+  isPullRequest: boolean;
+  draft: boolean;
+  comments: { id: number; body: string; login: string; bot: boolean; createdAt: string }[];
+  events: {
+    event: string;
+    label?: string;
+    login: string;
+    bot: boolean;
+    createdAt: string;
+  }[];
+}
+
+function thread(over: Partial<ThreadRecord> = {}): ThreadRecord {
+  return {
+    title: "A thread",
+    body: "Some body text.",
+    labels: [],
+    closed: false,
+    milestone: null,
+    assignees: [],
+    authorLogin: "carol",
+    createdAt: daysAgo(90).toISOString(),
+    isPullRequest: false,
+    draft: false,
+    comments: [],
+    events: [],
+    ...over,
+  };
+}
+
+interface State {
+  ownLogin: string;
+  threads: Map<number, ThreadRecord>;
+  /** The order a sweep's listing hands threads back in — `main.ts` re-sorts oldest-first itself, so this need not be pre-sorted. */
+  listing: number[];
+  repositoryLabels: string[];
+  effects: {
+    applied: { number: number; label: string }[];
+    removed: { number: number; label: string }[];
+    comments: { number: number; body: string }[];
+    closed: number[];
+  };
+  /** A thread number whose standing read answers 429 — simulates GitHub's own capacity running out mid-sweep (D12). */
+  capacityFailAt: number | null;
+}
+
+type Stub = State & { readonly url: string; close(): Promise<void> };
+
+async function startStub(): Promise<Stub> {
+  const state: State = {
+    ownLogin: "reeve[bot]",
+    threads: new Map(),
+    listing: [],
+    repositoryLabels: ["bug", "stale", "pinned", "needs-attention"],
+    effects: { applied: [], removed: [], comments: [], closed: [] },
+    capacityFailAt: null,
+  };
+
+  const server = createServer((request, response) => {
+    void route(state, request, response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the stub server did not open a port");
+  }
+
+  return Object.assign(state, {
+    url: `http://127.0.0.1:${String(address.port)}`,
+    close: () =>
+      new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      ),
+  });
+}
+
+async function route(
+  stub: State,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  const path = (request.url ?? "/").split("?")[0] ?? "/";
+  const query = new URLSearchParams((request.url ?? "").split("?")[1] ?? "");
+  const method = request.method ?? "GET";
+  const raw = await readAll(request);
+
+  if (method === "GET" && path === "/user") {
+    send(response, 200, { login: stub.ownLogin });
+    return;
+  }
+
+  const single = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path);
+  if (method === "GET" && single) {
+    const number = Number(single[1]);
+    if (stub.capacityFailAt === number) {
+      send(response, 429, { message: "rate limited" });
+      return;
+    }
+    const record = stub.threads.get(number);
+    if (record === undefined) {
+      send(response, 404, { message: "Not Found" });
+      return;
+    }
+    send(response, 200, {
+      number,
+      title: record.title,
+      body: record.body,
+      labels: record.labels.map((name) => ({ name })),
+      state: record.closed ? "closed" : "open",
+      user: { login: record.authorLogin, type: "User" },
+      milestone: record.milestone === null ? null : { title: record.milestone },
+      assignees: record.assignees.map((login) => ({ login })),
+      created_at: record.createdAt,
+      ...(record.isPullRequest ? { pull_request: {} } : {}),
+    });
+    return;
+  }
+
+  if (method === "PATCH" && single) {
+    const number = Number(single[1]);
+    const payload = parsed(raw) as { state?: string; state_reason?: string };
+    const record = stub.threads.get(number);
+    if (
+      record !== undefined &&
+      payload.state === "closed" &&
+      payload.state_reason === "not_planned"
+    ) {
+      record.closed = true;
+      stub.effects.closed.push(number);
+    }
+    send(response, 200, { number });
+    return;
+  }
+
+  const pull = /^\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(path);
+  if (method === "GET" && pull) {
+    const record = stub.threads.get(Number(pull[1]));
+    send(response, 200, { draft: record?.draft === true });
+    return;
+  }
+
+  const comments = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path);
+  if (method === "GET" && comments) {
+    const number = Number(comments[1]);
+    const record = stub.threads.get(number);
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      page === 1
+        ? (record?.comments ?? []).map((entry) => ({
+            id: entry.id,
+            body: entry.body,
+            user: { login: entry.login, type: entry.bot ? "Bot" : "User" },
+            created_at: entry.createdAt,
+          }))
+        : [],
+    );
+    return;
+  }
+  if (method === "POST" && comments) {
+    const number = Number(comments[1]);
+    const payload = parsed(raw) as { body?: string };
+    const body = payload.body ?? "";
+    stub.effects.comments.push({ number, body });
+    const record = stub.threads.get(number);
+    if (record !== undefined) {
+      record.comments.push({
+        id: record.comments.length + 1,
+        body,
+        login: stub.ownLogin,
+        bot: true,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    send(response, 201, { id: 1, body });
+    return;
+  }
+
+  const events = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/events$/.exec(path);
+  if (method === "GET" && events) {
+    const number = Number(events[1]);
+    const record = stub.threads.get(number);
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      page === 1
+        ? (record?.events ?? []).map((entry) => ({
+            event: entry.event,
+            label: entry.label !== undefined ? { name: entry.label } : undefined,
+            actor: { login: entry.login, type: entry.bot ? "Bot" : "User" },
+            created_at: entry.createdAt,
+          }))
+        : [],
+    );
+    return;
+  }
+
+  const labels = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/labels\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && labels) {
+    const number = Number(labels[1]);
+    const name = decodeURIComponent(labels[2] ?? "");
+    stub.effects.removed.push({ number, label: name });
+    const record = stub.threads.get(number);
+    if (record !== undefined) record.labels = record.labels.filter((entry) => entry !== name);
+    send(response, 200, {});
+    return;
+  }
+
+  const labelsAdd = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/labels$/.exec(path);
+  if (method === "POST" && labelsAdd) {
+    const number = Number(labelsAdd[1]);
+    const payload = parsed(raw) as { labels?: string[] };
+    const names = payload.labels ?? [];
+    for (const name of names) stub.effects.applied.push({ number, label: name });
+    const record = stub.threads.get(number);
+    if (record !== undefined) {
+      for (const name of names) if (!record.labels.includes(name)) record.labels.push(name);
+    }
+    send(
+      response,
+      200,
+      (record?.labels ?? []).map((name) => ({ name })),
+    );
+    return;
+  }
+
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues$/.test(path)) {
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      page === 1
+        ? stub.listing
+            .map((number) => stub.threads.get(number))
+            .filter((record): record is ThreadRecord => record !== undefined)
+            .map((record, index) => ({
+              number: stub.listing[index],
+              title: record.title,
+              body: record.body,
+              labels: record.labels.map((name) => ({ name })),
+              created_at: record.createdAt,
+              ...(record.isPullRequest ? { pull_request: {} } : {}),
+            }))
+        : [],
+    );
+    return;
+  }
+
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/labels$/.test(path)) {
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      (page === 1 ? stub.repositoryLabels : []).map((name) => ({ name, description: null })),
+    );
+    return;
+  }
+
+  send(response, 404, { message: `no stub for ${method} ${path}` });
+}
+
+function parsed(raw: string): unknown {
+  return raw.length === 0 ? {} : JSON.parse(raw);
+}
+
+async function readAll(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk as Buffer));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function send(response: ServerResponse, status: number, payload: unknown): void {
+  const text = JSON.stringify(payload);
+  response.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": String(Buffer.byteLength(text)),
+  });
+  response.end(text);
+}
+
+// ---------------------------------------------------------------------------
+// Driving the bundle.
+// ---------------------------------------------------------------------------
+
+interface Run {
+  readonly code: number | null;
+  readonly log: string;
+  readonly outputs: Record<string, string>;
+  readonly summary: string;
+}
+
+function baseInputs(warrant: string): Record<string, string> {
+  return {
+    "github-token": "stub-token",
+    number: "42",
+    warrant,
+    apply: "label, comment, close",
+    languages: "",
+    "dry-run": "false",
+    sweep: "false",
+    since: "",
+    limit: "30",
+  };
+}
+
+let scratch: string;
+let warrantPath: string;
+
+async function runAction(
+  stub: Stub,
+  inputs: Record<string, string> = {},
+  extra: NodeJS.ProcessEnv = {},
+): Promise<Run> {
+  const outputFile = join(scratch, "outputs");
+  const summaryFile = join(scratch, "summary.md");
+  await writeFile(outputFile, "");
+  await writeFile(summaryFile, "");
+
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    GITHUB_REPOSITORY: "ecoma-io/reeve",
+    GITHUB_API_URL: stub.url,
+    GITHUB_OUTPUT: outputFile,
+    GITHUB_STEP_SUMMARY: summaryFile,
+    GITHUB_EVENT_NAME: "issues",
+    ...extra,
+  };
+  const settings = { ...baseInputs(warrantPath), ...inputs };
+  for (const [name, value] of Object.entries(settings)) {
+    env[`INPUT_${name.toUpperCase()}`] = value;
+  }
+
+  const child = spawn(process.execPath, [BUNDLE], {
+    cwd: ROOT,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let log = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => (log += chunk));
+  child.stderr.on("data", (chunk: string) => (log += chunk));
+  const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
+
+  return {
+    code,
+    log,
+    outputs: readOutputs(await readFile(outputFile, "utf8")),
+    summary: await readFile(summaryFile, "utf8"),
+  };
+}
+
+function readOutputs(text: string): Record<string, string> {
+  const outputs: Record<string, string> = {};
+  for (const match of text.matchAll(/^([^\r\n<]+)<<(\S+)\r?\n([\s\S]*?)\r?\n\2\r?$/gm)) {
+    const [, name, , value] = match;
+    if (name !== undefined && value !== undefined) outputs[name] = value;
+  }
+  return outputs;
+}
+
+// ---------------------------------------------------------------------------
+
+let stub: Stub;
+
+beforeEach(async () => {
+  stub = await startStub();
+  scratch = await mkdtemp(join(tmpdir(), "reeve-lifecycle-"));
+  warrantPath = join(scratch, "reeve.yml");
+  await writeFile(warrantPath, WARRANT);
+  stub.threads.set(42, thread());
+});
+
+afterEach(async () => {
+  await stub.close();
+  await rm(scratch, { recursive: true, force: true });
+});
+
+describe("the action", () => {
+  it("applies a due step's label and reports it on every output", async () => {
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([{ number: 42, label: "stale" }]);
+    expect(run.outputs.labeled).toBe("1");
+    expect(run.outputs.reminded).toBe("false");
+    expect(run.outputs.closed).toBe("false");
+    expect(run.outputs.skipped).toBe("false");
+  });
+
+  it("is a green no-op naming the missing key when the warrant writes no `lifecycle:` policy", async () => {
+    await writeFile(
+      warrantPath,
+      "version: 1\nlabels:\n  - name: bug\n    description: A defect.\n",
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([]);
+    expect(run.outputs.skipped).toBe("true");
+    expect(run.summary).toContain("no `lifecycle:` key");
+  });
+
+  it("fails loudly when the warrant cannot be read, before spending anything", async () => {
+    const run = await runAction(stub, { warrant: join(scratch, "nowhere.yml") });
+
+    expect(run.code).toBe(1);
+    expect(run.log).toContain("this run has no authority");
+    expect(stub.effects.applied).toEqual([]);
+  });
+
+  it("changes nothing on a dry run, but reports the full would-do ledger", async () => {
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    // Nothing was actually written to the stub...
+    expect(stub.effects.applied).toEqual([]);
+    expect(stub.effects.comments).toEqual([]);
+    expect(stub.effects.closed).toEqual([]);
+    // ...but the ledger this run computed is reported in full, not the
+    // pre-fix `NOTHING_DONE` early return.
+    expect(run.outputs.labeled).toBe("1");
+    expect(run.summary).toContain("**dry run**, nothing was applied");
+    expect(run.summary).toContain("labeled `stale`");
+  });
+
+  it("never touches an already-closed thread named directly", async () => {
+    stub.threads.set(42, thread({ closed: true, labels: [] }));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([]);
+    expect(stub.effects.closed).toEqual([]);
+    expect(run.outputs.skipped).toBe("true");
+    expect(run.log + run.summary).toContain("already closed");
+  });
+
+  it(
+    "the clock-hand exception: never removes a label a human hand-applied, even once it reads " +
+      "as stale",
+    async () => {
+      // `stale` is on the thread, but the most recent `labeled` event for it
+      // was raised by a human, not this run's own login — A1's attribution
+      // gate. Pre-fix, `clock.ts` queued any present-but-unfired label for
+      // removal with no attribution check at all.
+      stub.threads.set(
+        42,
+        thread({
+          labels: ["stale"],
+          events: [
+            {
+              event: "labeled",
+              label: "stale",
+              login: "alice",
+              bot: false,
+              createdAt: daysAgo(30).toISOString(),
+            },
+          ],
+        }),
+      );
+
+      const run = await runAction(stub);
+
+      expect(run.code).toBe(0);
+      expect(stub.effects.removed).toEqual([]);
+      expect(run.outputs.unstaled).toBe("0");
+      expect(stub.threads.get(42)?.labels).toContain("stale");
+    },
+  );
+
+  it("never removes a due step's own label in the same run it (re)applies it", async () => {
+    // Our own bot applied `stale` 30 days ago; a later human comment (from
+    // someone other than the thread's author, so it still counts under the
+    // default `resets: any`) moved the track's anchor past that firing
+    // evidence, so the step reads as not-yet-fired and becomes due again —
+    // the exact same-run apply-then-remove hazard A3 closes.
+    stub.threads.set(
+      42,
+      thread({
+        labels: ["stale"],
+        events: [
+          {
+            event: "labeled",
+            label: "stale",
+            login: stub.ownLogin,
+            bot: true,
+            createdAt: daysAgo(30).toISOString(),
+          },
+        ],
+        comments: [
+          {
+            id: 1,
+            body: "Still relevant, please keep open.",
+            login: "maintainer-bob",
+            bot: false,
+            createdAt: daysAgo(20).toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([]);
+    expect(run.outputs.unstaled).toBe("0");
+    // The step still fires — the label is (re)applied, not silently
+    // dropped — it is only ever removal that the same run must not do.
+    expect(stub.effects.applied).toEqual([{ number: 42, label: "stale" }]);
+  });
+
+  it("posts an unrelated track's due reminder even while another track's close is blocked", async () => {
+    await writeFile(warrantPath, TWO_TRACK_WARRANT);
+
+    // One `Date` instance, reused for both the thread's `createdAt` and the
+    // fingerprint below — two separate `daysAgo(60)` calls would each read
+    // `Date.now()` afresh and could round-trip to different milliseconds,
+    // which would make the marker's fingerprint simply never match.
+    const threadCreatedAt = daysAgo(60);
+    const closingFp = markerFingerprint("closing", 0, threadCreatedAt);
+    stub.threads.set(
+      42,
+      thread({
+        createdAt: threadCreatedAt.toISOString(),
+        authorLogin: "carol",
+        labels: ["needs-attention"],
+        comments: [
+          {
+            id: 1,
+            body: `Still checking in.\n\n${MARKER.render(closingFp)}`,
+            login: stub.ownLogin,
+            bot: true,
+            createdAt: daysAgo(40).toISOString(),
+          },
+          // From a maintainer, not the thread's author — trips
+          // `exempt.comments` (which blocks only `close` steps) without
+          // resetting `closing`'s own `resets: author` anchor.
+          {
+            id: 2,
+            body: "Any update on this?",
+            login: "maintainer-bob",
+            bot: false,
+            createdAt: daysAgo(10).toISOString(),
+          },
+        ],
+        events: [
+          {
+            event: "labeled",
+            label: "needs-attention",
+            login: "maintainer-bob",
+            bot: false,
+            createdAt: daysAgo(20).toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    // `closing`'s close step is due (anchored on the marker above, 40 days
+    // ago, plus a 14d step) but blocked by the human comment guard.
+    expect(stub.effects.closed).toEqual([]);
+    // `reminder`'s own due step is a different track entirely, and fires.
+    expect(stub.effects.comments).toHaveLength(1);
+    expect(run.outputs.reminded).toBe("true");
+    expect(run.outputs.closed).toBe("false");
+  });
+});
+
+describe("the sweep", () => {
+  beforeEach(() => {
+    stub.threads.delete(42);
+  });
+
+  it("filters a `threads:` kind mismatch out of the listing for free — it never consumes `limit`", async () => {
+    // Five pull requests (kind-mismatched under the default `threads:
+    // issues`), older than the two real, due issues — so the sweep's
+    // oldest-first walk meets every mismatched thread first. Pre-fix, every
+    // examined thread — including the exempt ones — consumed `limit`, so a
+    // sweep whose oldest backlog happened to be mismatched threads could
+    // starve the real candidates behind them forever, never reaching them at
+    // all.
+    for (let index = 0; index < 5; index += 1) {
+      const number = 600 + index;
+      stub.threads.set(
+        number,
+        thread({ isPullRequest: true, createdAt: daysAgo(100 + index).toISOString() }),
+      );
+      stub.listing.push(number);
+    }
+    stub.threads.set(701, thread({ createdAt: daysAgo(50).toISOString() }));
+    stub.threads.set(702, thread({ createdAt: daysAgo(40).toISOString() }));
+    stub.listing.push(701, 702);
+
+    const run = await runAction(stub, { sweep: "true", number: "", limit: "2" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("2");
+    expect(run.outputs.skipped).toBe("5");
+    expect(run.outputs.remaining).toBe("0");
+    expect(stub.effects.applied.map((entry) => entry.number).sort()).toEqual([701, 702]);
+  });
+
+  it("sweeps only pull requests under `threads: prs`, leaving every issue alone", async () => {
+    await writeFile(warrantPath, PRS_ONLY_WARRANT);
+
+    stub.threads.set(801, thread({ isPullRequest: false, createdAt: daysAgo(90).toISOString() }));
+    stub.threads.set(802, thread({ isPullRequest: true, createdAt: daysAgo(80).toISOString() }));
+    stub.listing.push(801, 802);
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([{ number: 802, label: "stale" }]);
+    expect(run.outputs.skipped).toBe("1");
+  });
+
+  it(
+    "stops mid-sweep on a capacity error, keeps what it already did, and reports a starved, " +
+      "still-green run",
+    async () => {
+      stub.threads.set(901, thread({ createdAt: daysAgo(90).toISOString() }));
+      stub.threads.set(902, thread({ createdAt: daysAgo(80).toISOString() }));
+      stub.threads.set(903, thread({ createdAt: daysAgo(70).toISOString() }));
+      stub.listing.push(901, 902, 903);
+      // Oldest-first, so 901 succeeds before this one stops the sweep — 903
+      // is never even attempted.
+      stub.capacityFailAt = 902;
+
+      const run = await runAction(stub, { sweep: "true", number: "" });
+
+      // D12: capacity is weather, not a broken configuration — still green.
+      expect(run.code).toBe(0);
+      expect(run.outputs.starved).toBe("true");
+      expect(run.outputs.processed).toBe("1");
+      expect(stub.effects.applied).toEqual([{ number: 901, label: "stale" }]);
+      expect(run.summary).toContain("Stopped early");
+    },
+  );
+});

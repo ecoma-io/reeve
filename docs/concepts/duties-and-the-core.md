@@ -2,7 +2,7 @@
 
 _Understand the boundary between the core and a duty, and why it is drawn there. Prerequisites: [The authority model](authority-model.md)._
 
-Every duty — `triage`, `translate`, `duplicate`, `respond` — is a decision
+Every duty — `triage`, `translate`, `duplicate`, `respond`, `lifecycle` — is a decision
 sitting on top of the same pipeline, the same warrant, the same guardrails.
 Knowing where that boundary runs is what makes the rest of the model
 predictable: once you have used one duty, you already know what any other

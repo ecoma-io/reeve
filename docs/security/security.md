@@ -223,7 +223,12 @@ A change that breaks one of these is a breaking change regardless of what any
    intersection of the file and the workflow input.
 4. **An unparseable model answer yields an empty result**, loudly.
 5. **A maintainer's decision is never reverted** — no label removed, no assignment
-   overwritten, no closed thread reopened.
+   overwritten, no closed thread reopened. One bounded exception, and only one:
+   `lifecycle` removes a label its own actor applied as a track's declared
+   clock-hand, and never one a person put there — see
+   [the clock-hand exception](../reference/duties/lifecycle.md#the-clock-hand-exception).
+   Declaring the label in the warrant is the maintainer's decision that makes
+   the removal obedience, not a reversal.
 6. **The api key is registered as a secret before anything can log it.**
 7. **Nothing is sent anywhere except `base-url` and the GitHub API.**
 8. **A run that cannot do its job fails red.** It never reports an empty result in

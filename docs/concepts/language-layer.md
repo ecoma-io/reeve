@@ -102,6 +102,10 @@ The layer is only worth having if duties actually consume it. Concretely:
   both get read in the same language before anything ranks them.
 - **`respond`** writes to the author, in the author's language, about a project
   whose documentation is in the project's.
+- **`lifecycle`** calls no model, and still consumes the layer at its cheapest:
+  it reads `languages` and detects a thread's language only to pick which
+  `say:` text a step posts — the built-in reminder text, or the per-language
+  mapping a track's own step wrote.
 
 This is the concept behind [Languages](../guides/languages.md)'s
 configuration surface — the input and warrant keys on that page are how you

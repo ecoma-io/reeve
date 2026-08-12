@@ -32925,7 +32925,11 @@ async function readStanding(api, at) {
     // that silently makes every guardrail think the thread is unlabelled.
     labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
     closed: data.state === "closed",
-    author: { login, isBot: isBotAuthor(data.user) }
+    author: { login, isBot: isBotAuthor(data.user) },
+    milestone: data.milestone?.title ?? null,
+    assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
+    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0),
+    isPullRequest: data.pull_request !== void 0
   };
 }
 var LABEL_PAGE = 100;
@@ -32947,9 +32951,9 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since, state = "open") {
+async function listOpenThreads(api, at, since, state = "open", maxPages) {
   const listed = [];
-  for (let page2 = 1; ; page2 += 1) {
+  for (let page2 = 1; maxPages === void 0 || page2 <= maxPages; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
@@ -32987,9 +32991,17 @@ var CAPABILITIES = [
   "comment",
   "close",
   "assign",
-  "record"
+  "record",
+  "propose"
 ];
 var VERSION7 = 1;
+var DEFAULT_PROPOSE_WORKSPACE = {
+  name: "area:{package}",
+  except: [],
+  evidence: 3,
+  window: 90 * 24 * 60 * 60 * 1e3,
+  retire: false
+};
 var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
 async function readWarrant(path, options) {
   let source;
@@ -33021,6 +33033,8 @@ function parseWarrant(path, source) {
   const pivot = readPivot(path, document2.pivot);
   const memory = readMemory(path, document2.memory);
   const about = readAbout(path, document2.about);
+  const lifecycle = readLifecycle(path, document2.lifecycle);
+  const propose = readPropose(path, document2.propose);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -33040,6 +33054,8 @@ function parseWarrant(path, source) {
     pivot,
     memory,
     about,
+    lifecycle,
+    propose,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -33061,7 +33077,10 @@ function implicitWarrant(path, repositoryLabels) {
       examples: [],
       owner: null,
       exclusiveWith: [],
-      confidence: null
+      confidence: null,
+      paths: [],
+      create: false,
+      color: null
     });
   }
   const byName = new Map(labels.map((label) => [label.name, label]));
@@ -33073,6 +33092,8 @@ function implicitWarrant(path, repositoryLabels) {
       pivot: null,
       memory: null,
       about: null,
+      lifecycle: null,
+      propose: DEFAULT_PROPOSE_WORKSPACE,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
       labelNamed: (name) => byName.get(name)
@@ -33164,7 +33185,10 @@ function readLabels(path, raw) {
       examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
       owner: nullable(owner),
       exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
-      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence)
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence),
+      paths: strings(`${at} (\`${name}\`)`, "paths", fields.paths),
+      create: booleanField(`${at} (\`${name}\`)`, "create", fields.create, false),
+      color: colorField(`${at} (\`${name}\`)`, "color", fields.color)
     });
   }
   return labels;
@@ -33232,6 +33256,274 @@ function readAbout(path, raw) {
   }
   const value = raw.trim();
   return value.length === 0 ? null : value;
+}
+function readLifecycle(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`lifecycle:\` with nothing under it. Write \`tracks:\` under it, or remove the key to leave the duty unwired.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads"
+  ]);
+  const tracks = readLifecycleTracks(path, fields.tracks);
+  const exempt = readLifecycleExempt(path, fields.exempt);
+  const overrides = readLifecycleOverrides(path, fields.overrides);
+  const threadsRaw = fields.threads;
+  const threads = threadsRaw === void 0 ? "issues" : threadsRaw;
+  if (threads !== "issues" && threads !== "prs" && threads !== "both") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.threads\` is ${describe(threadsRaw)}, expected \`issues\`, \`prs\`, or \`both\`.`
+    );
+  }
+  const hasClose = tracks.some((track) => track.steps.some((step) => step.close));
+  if (hasClose && exempt.labels.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` configures a \`close\` step, but \`exempt.labels\` is empty. A permanent escape hatch must exist before closing may be configured at all.`
+    );
+  }
+  return { tracks, exempt, overrides, threads };
+}
+function readLifecycleTracks(path, raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` has no \`tracks\` \u2014 a lifecycle with no tracks decides nothing. Delete the key, or write a track.`
+    );
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.tracks\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
+    const name = text(at, "name", fields.name, { required: true });
+    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+      throw new Error(
+        `warrant: ${at} names the track \`${name}\`, expected lowercase letters, digits and hyphens, starting with a letter.`
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`lifecycle.tracks\` names \`${name}\` more than once.`
+      );
+    }
+    seen.add(name);
+    const named = `${at} (\`${name}\`)`;
+    const when = nullable(text(named, "when", fields.when, { required: false }));
+    const resets = resetsField(named, fields.resets, when !== null ? "author" : "any");
+    const stepsRaw = fields.steps;
+    if (!Array.isArray(stepsRaw) || stepsRaw.length === 0) {
+      throw new Error(
+        `warrant: ${named} has no \`steps\` \u2014 a track with no steps decides nothing.`
+      );
+    }
+    const steps = stepsRaw.map(
+      (step, stepIndex) => readLifecycleStep(
+        `${named} step ${String(stepIndex + 1)}`,
+        step,
+        stepIndex === stepsRaw.length - 1
+      )
+    );
+    if (when === null && steps[0]?.close === true) {
+      throw new Error(
+        `warrant: ${named} is an inactivity track whose first step closes \u2014 a close with no prior warning is refused. Add a \`when:\` start, or a warning step before the close.`
+      );
+    }
+    return { name, when, resets, steps };
+  });
+}
+function resetsField(at, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (raw === "author" || raw === "any") return raw;
+  throw new Error(
+    `warrant: ${at} has \`resets\` as ${describe(raw)}, expected \`author\` or \`any\`.`
+  );
+}
+function readLifecycleStep(at, raw, isLast) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
+  const after = durationField(at, "after", fields.after, { allowNever: false });
+  const label = nullable(text(at, "label", fields.label, { required: false }));
+  const say = readSay(at, fields.say);
+  const close = closeField(at, fields.close);
+  if (close && !isLast) {
+    throw new Error(
+      `warrant: ${at} has \`close\` on a step that is not the track's last \u2014 close must be the terminal step.`
+    );
+  }
+  if (label === null && say === null && !close) {
+    throw new Error(
+      `warrant: ${at} carries none of \`label\`, \`say\`, \`close\` \u2014 a step must do something.`
+    );
+  }
+  return { after, label, say, close };
+}
+function readSay(at, raw) {
+  if (raw === void 0 || raw === null || raw === false) return null;
+  if (raw === true) return { kind: "built-in" };
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (value.length === 0) throw new Error(`warrant: ${at} has an empty \`say\`.`);
+    return { kind: "text", text: value };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const map = /* @__PURE__ */ new Map();
+    for (const [lang, value] of Object.entries(raw)) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`warrant: ${at}'s \`say.${lang}\` is ${describe(value)}, expected text.`);
+      }
+      map.set(lang, value.trim());
+    }
+    if (map.size === 0) throw new Error(`warrant: ${at} writes \`say:\` with nothing under it.`);
+    return { kind: "map", map };
+  }
+  throw new Error(
+    `warrant: ${at} has \`say\` as ${describe(raw)}, expected true, text, or a mapping of language to text.`
+  );
+}
+function closeField(at, raw) {
+  if (raw === void 0 || raw === null || raw === false) return false;
+  if (raw === true || raw === "not_planned") return true;
+  if (raw === "completed") {
+    throw new Error(
+      `warrant: ${at} has \`close: completed\` \u2014 Reeve closes only as \`not_planned\`. Write \`close: true\`.`
+    );
+  }
+  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw)}, expected true or false.`);
+}
+function readLifecycleExempt(path, raw) {
+  const at = `\`${path}\`'s \`lifecycle.exempt\``;
+  if (raw === void 0 || raw === null) {
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true
+    };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts"
+  ]);
+  return {
+    labels: strings(at, "labels", fields.labels),
+    milestones: guardField(at, "milestones", fields.milestones, true),
+    assignees: guardField(at, "assignees", fields.assignees, true),
+    taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true)
+  };
+}
+function guardField(at, key, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string" || Array.isArray(raw)) return strings(at, key, raw);
+  throw new Error(
+    `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true, false, or a list of names.`
+  );
+}
+function readLifecycleOverrides(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw)}, expected a list.`
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.overrides\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
+    }
+    const fields = entry;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
+    const label = text(at, "label", fields.label, { required: true });
+    const hasAfter = fields.after !== void 0 && fields.after !== null;
+    const never = booleanField(at, "never", fields.never, false);
+    if (hasAfter && never) {
+      throw new Error(
+        `warrant: ${at} (\`${label}\`) has both \`after\` and \`never\` \u2014 write one.`
+      );
+    }
+    if (!hasAfter && !never) {
+      throw new Error(`warrant: ${at} (\`${label}\`) has neither \`after\` nor \`never\`.`);
+    }
+    const after = hasAfter ? durationField(at, "after", fields.after, { allowNever: false }) : null;
+    return { label, after, never };
+  });
+}
+function readPropose(path, raw) {
+  if (raw === void 0) return DEFAULT_PROPOSE_WORKSPACE;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`propose:\` with nothing under it. Write \`workspace:\` under it, or remove the key to take the defaults.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`propose\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
+  const workspaceRaw = fields.workspace;
+  if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
+  if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`propose.workspace\` is ${describe(workspaceRaw)}, expected a mapping.`
+    );
+  }
+  const w = workspaceRaw;
+  const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
+  const nameRaw = text(at, "name", w.name, { required: false });
+  const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
+  if ((name.match(/\{package\}/g) ?? []).length !== 1) {
+    throw new Error(
+      `warrant: ${at} has \`name: ${name}\`, expected exactly one \`{package}\` placeholder.`
+    );
+  }
+  const except = strings(at, "except", w.except);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
+  const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
+  const retire = booleanField(at, "retire", w.retire, false);
+  return { name, except, evidence, window: window2, retire };
+}
+function wholeNumber(at, key, raw, min) {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a whole number of ${String(min)} or more.`
+    );
+  }
+  return raw;
+}
+function optionalWholeNumber(at, key, raw, min) {
+  if (raw === void 0 || raw === null) return null;
+  return wholeNumber(at, key, raw, min);
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
@@ -33308,6 +33600,45 @@ function confidenceField(at, key, raw) {
     );
   }
   return raw;
+}
+function booleanField(at, key, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw !== "boolean") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true or false.`);
+  }
+  return raw;
+}
+var HEX_COLOR = /^[0-9a-fA-F]{6}$/;
+function colorField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string" || !HEX_COLOR.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a 6-digit hex color with no \`#\`.`
+    );
+  }
+  return raw.trim().toLowerCase();
+}
+function durationField(at, key, raw, options) {
+  if (options.allowNever && raw === "never") return null;
+  if (typeof raw !== "string" || !/^\d+d$/.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a duration like \`14d\`` + (options.allowNever ? " or `never`." : ".")
+    );
+  }
+  const days = Number(raw.trim().slice(0, -1));
+  if (days === 0) {
+    throw new Error(
+      `warrant: ${at} has \`${key}: 0d\`, which is not a duration. Write \`never\`, or remove the step.`
+    );
+  }
+  return days * 24 * 60 * 60 * 1e3;
+}
+function rejectUnknownKeys(at, fields, known) {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -33552,6 +33883,45 @@ function fraction(name, raw) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
   }
   return value;
+}
+
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
 }
 
 // src/core/meter.ts
@@ -33829,40 +34199,6 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
-}
-
-// src/core/marker.ts
-import { createHash } from "node:crypto";
-var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
-var SUFFIX = " -->";
-function markerFor(duty) {
-  if (!DUTY_NAME.test(duty)) {
-    throw new Error(
-      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
-    );
-  }
-  const prefix = `<!-- reeve:${duty} source=`;
-  return {
-    duty,
-    render(fingerprint2) {
-      return `${prefix}${fingerprint2}${SUFFIX}`;
-    },
-    split(body) {
-      const at = body.indexOf(prefix);
-      if (at === -1) return { official: authorHalf(body), fingerprint: null };
-      const from = at + prefix.length;
-      const to = body.indexOf(SUFFIX, from);
-      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
-      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
-    }
-  };
-}
-function authorHalf(text2) {
-  return text2.replace(/\s+$/u, "");
-}
-function fingerprint(text2, keys) {
-  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
-  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
 }
 
 // src/duties/duplicate/corpus.ts
@@ -34358,7 +34694,13 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
       // it — only `readStanding`'s single-thread fetch does — and nothing in
       // `duplicate`'s own decision reads it: ranking a candidate against the
       // thread in hand never turns on who either one's author is.
-      author: { login: "", isBot: false }
+      author: { login: "", isBot: false },
+      // Nor does it carry milestone/assignee state — `duplicate` never reads
+      // either, so both are left at their honest "unknown" value.
+      milestone: null,
+      assignees: [],
+      createdAt: thread.createdAt,
+      isPullRequest: thread.isPullRequest
     };
     const outcome = await decide(
       api,
@@ -34452,6 +34794,7 @@ async function run() {
   }
 }
 async function decide(api, authority, thread, standing, settings, stages, weather, corpusSource = null, languageCache = /* @__PURE__ */ new Map()) {
+  if (isReeveProposalPr(standing)) return recursionGuardOutcome();
   const warrant = authority.warrant;
   const rawBody = authorText(standing.body);
   const body = settings.maxBodyChars === null ? rawBody : rawBody.slice(0, settings.maxBodyChars);
@@ -34638,6 +34981,23 @@ function notGranted(warrant) {
     fingerprint: null,
     rationale: null,
     ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
+  };
+}
+function recursionGuardOutcome() {
+  return {
+    language: null,
+    duplicateOf: null,
+    confidence: 0,
+    lexicalScore: 0,
+    permitted: [],
+    withheld: [],
+    note: null,
+    rank: { corpusSize: 0, offered: 0 },
+    pivot: { used: false, note: null },
+    proposal: null,
+    fingerprint: null,
+    rationale: null,
+    ungranted: "This is Reeve's own proposal pull request \u2014 every duty skips it, duplicate included."
   };
 }
 async function act(api, at, outcome, dryRun) {

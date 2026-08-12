@@ -44,40 +44,46 @@ every load-bearing part of the agent architecture, under other names.** The
 argument that the hard trust decisions were already made — made, reviewed,
 and dogfooded — in the 1.x line:
 
-| 1.x, shipped today                                                                                                                             | 2.x generalisation                                                                                               |
-| ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| The warrant — `.github/reeve.yml`, an allowlist checked in code ([D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded)) | `.reeve/authority.yaml` — the same grant, plus a `forbidden:` floor ([the governance tree](agent-governance.md)) |
-| A duty — a fixed pipeline invoked by name                                                                                                      | A capability — the same pipeline, invocable by the agent as well as by a workflow line                           |
-| A duty's proposed effects, checked by [`src/core/enforce.ts`](../../src/core/enforce.ts) before publish                                        | A capability request, checked by the Authority Kernel — the same module's job, given a name and a boundary       |
-| The `apply` input and the warrant, narrower one winning                                                                                        | The kernel's grant resolution — unchanged rule, more callers                                                     |
-| Idempotency markers in the thread ([D9](../doctrine/north-star.md#d9--re-running-is-cheap-and-safe))                                           | The Verify stage — a loop step that reads the marker the publish step wrote                                      |
-| The corrections store, plain files in the repository ([D6](../doctrine/north-star.md#d6--the-repository-is-the-database))                      | `.reeve/memory/` — the same files, relocated under the governance roof                                           |
-| The taxonomy's `not:` fields — a project's own rulings, in prose                                                                               | `.reeve/duties/` — per-duty doctrine, same idea with room to grow                                                |
-| `dry-run`, and `apply` withholding a write                                                                                                     | Agent Mode's report-only phase — the plan written to the summary, nothing executed                               |
-| The sweep — `sweep`, `since`, `limit` bounding a run over a backlog                                                                            | The Observe stage's enumeration — bounded the same way, for the same reason                                      |
-| Weather ([D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)) — a starved roster delivers what finished       | A loop stop condition — an agent run out of provider delivers what it verified and names the remainder           |
-| The job summary — what was decided per item, and what it cost                                                                                  | The plan-and-verify transcript — the same page, now also showing what the kernel refused                         |
+| 1.x, shipped today                                                                                                                             | 2.x generalisation                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| The warrant — `.github/reeve.yml`, an allowlist checked in code ([D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded)) | `.reeve/authority.yaml` — the same grant, plus a `forbidden:` floor ([the governance tree](agent-governance.md))   |
+| A duty — a fixed pipeline invoked by name                                                                                                      | A capability — the same pipeline, invocable by the agent as well as by a workflow line                             |
+| A duty's proposed effects, checked by [`src/core/enforce.ts`](../../src/core/enforce.ts) before publish                                        | A capability request, checked by the Authority Kernel — the same module's job, given a name and a boundary         |
+| The `apply` input and the warrant, narrower one winning                                                                                        | The kernel's grant resolution — unchanged rule, more callers                                                       |
+| Idempotency markers in the thread ([D9](../doctrine/north-star.md#d9--re-running-is-cheap-and-safe))                                           | The Verify stage — a loop step that reads the marker the publish step wrote                                        |
+| The corrections store, plain files in the repository ([D6](../doctrine/north-star.md#d6--the-repository-is-the-database))                      | `.reeve/memory/` — the same files, relocated under the governance roof                                             |
+| The taxonomy's `not:` fields — a project's own rulings, in prose                                                                               | `.reeve/duties/` — per-duty doctrine, same idea with room to grow                                                  |
+| `dry-run`, and `apply` withholding a write                                                                                                     | Agent Mode's report-only phase — the plan written to the summary, nothing executed                                 |
+| The sweep — `sweep`, `since`, `limit` bounding a run over a backlog                                                                            | The Observe stage's enumeration — bounded the same way, for the same reason                                        |
+| Weather ([D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)) — a starved roster delivers what finished       | A loop stop condition — an agent run out of provider delivers what it verified and names the remainder             |
+| The job summary — what was decided per item, and what it cost                                                                                  | The plan-and-verify transcript — the same page, now also showing what the kernel refused                           |
+| The `lifecycle:` policy — staleness tracks declared in the warrant, run in code against timestamps alone                                       | A scheduled capability — the same declared clocks, ticked by the agent's own loop instead of a cron line           |
+| The atlas — a monorepo's own package layout, read as bounded evidence and never authority                                                      | The Observe stage's repository model — the same bounded read, feeding more capabilities than one                   |
+| `propose` — drift delivered as one reviewable pull request Reeve can never merge                                                               | The governance tree's self-amendment boundary — `forbidden: [pull_request.merge]`: an agent drafts, a human merges |
 
 Two of these rows carry the whole argument and are worth saying in one line
 each. **The warrant is the seed of the Authority Kernel** — not its
 inspiration, its ancestor: the kernel is `enforce.ts`'s job description with
 more callers, and a consumer who trusts today's warrant check is trusting the
 same check tomorrow. **The duties are the capability set** — Agent Mode
-composes `triage`, `translate`, `duplicate` and `respond`; it does not
-replace them, and a capability added later is added the way a duty is added
-today, by [earning its place](../doctrine/north-star.md#d10--a-duty-must-earn-its-place).
+composes `triage`, `translate`, `duplicate`, `respond` and `lifecycle`; it
+does not replace them, and a capability added later is added the way a duty
+is added today, by [earning its place](../doctrine/north-star.md#d10--a-duty-must-earn-its-place).
 
 ## Phase 0 — the ground · **standing, and finishing**
 
 The phase that is not proposed, because it exists. Named here so the rest of
 the page is anchored to something checkable rather than to an idea of 1.x.
 
-**Standing today:** four duties ship and are dogfooded on this repository —
+**Standing today:** five duties ship —
 [`triage`](../reference/duties/triage.md),
 [`translate`](../reference/duties/translate.md),
-[`duplicate`](../reference/duties/duplicate.md) and
-[`respond`](../reference/duties/respond.md), the last two proven in
-report-only mode first, which is the same discipline Phase 3 below borrows.
+[`duplicate`](../reference/duties/duplicate.md),
+[`respond`](../reference/duties/respond.md) and
+[`lifecycle`](../reference/duties/lifecycle.md). The first four are dogfooded
+on this repository, the last two of those in report-only mode first, which
+is the same discipline Phase 3 below borrows; `lifecycle` is the newest and
+does not yet have a workflow of its own here.
 The warrant is the whole answer for authority, with total enumeration once a
 `capabilities:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog
@@ -119,13 +125,13 @@ the point, and it is what makes the phase reviewable.
 
 The argument for doing this before anything visible: the kernel is the one
 component the whole 2.x line stands on, and a component like that must exist
-and be exercised — by all four duties, on real threads, through every
-dogfooded run this repository already does — before the first line of agent
-code is allowed to call it. A kernel born alongside the agent would be tested
-only by the agent; a kernel extracted first is tested by the whole standing
-body of explicit-mode behaviour that must not change under it.
+and be exercised — by every duty, on real threads, through every dogfooded
+run this repository already does — before the first line of agent code is
+allowed to call it. A kernel born alongside the agent would be tested only by
+the agent; a kernel extracted first is tested by the whole standing body of
+explicit-mode behaviour that must not change under it.
 
-**Delivers:** the kernel module; the capability-request shape; the four
+**Delivers:** the kernel module; the capability-request shape; the five
 duties registered as capabilities behind their existing names; the same tests
 green before and after, plus new ones pinning the request boundary itself.
 

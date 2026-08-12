@@ -21,9 +21,10 @@ which moved first, in its own commit, per that document's own amendment
 rule.
 
 > [!IMPORTANT]
-> **Nothing on this page ships today.** Reeve today runs exactly four duties —
-> `triage`, `translate`, `duplicate`, `respond` — each a fixed pipeline of
-> reviewed TypeScript, exactly as described in [Architecture](architecture.md).
+> **Nothing on this page ships today.** Reeve today runs exactly five duties —
+> `triage`, `translate`, `duplicate`, `respond`, `lifecycle` — each a fixed
+> pipeline of reviewed TypeScript, exactly as described in
+> [Architecture](architecture.md).
 > There is no agent runtime in this repository's `src/`, no workflow can opt
 > into one, and no warrant key turns one on. This page is direction for a
 > 2.x line, written down now so that when the work starts, it starts inside
@@ -176,7 +177,9 @@ way no `apply` value today can make `duplicate` skip its double gate:
   See [Non-goals](#non-goals) below.
 - Modifying the warrant file itself. An agent cannot grant itself a wider
   warrant; only a human editing `.github/reeve.yml` in a reviewed pull
-  request can.
+  request can. Reeve may _draft_ that edit as a pull request — `triage`'s
+  `propose` capability does exactly this today — because drafting is not the
+  boundary; merging is, and no capability of Reeve's merges one.
 - Any network egress beyond `base-url` and the GitHub API — the same egress
   invariant [Security](../security/security.md#egress) already holds duties
   to.

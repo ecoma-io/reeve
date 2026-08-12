@@ -58,26 +58,32 @@ and the names the duty asks for stop matching. A rename in one place alone would
 otherwise leave the duty reading an empty string on every run, silently.
 
 Then add the entry point to `tools/build.mjs` and the duty's directory to the
-archive step in `.github/workflows/release.yml`. Both are short lists naming
-every duty, and a duty missing from the second one builds on your machine and is
-absent from the release tree.
+`duties` list in the archive step of `.github/workflows/release.yml`. Both are
+short lists naming every duty. The archive step checks its own list both ways
+at release time — a listed duty with no directory, or a directory carrying a
+top-level `action.yml` the list does not name, fails the release loudly rather
+than shipping a broken or unattested pin — so a duty missed here is caught at
+the first release, not by a consumer's workflow.
 
 ### 6. Add the commit scope
 
 `commitlint.config.mjs` and `CONTRIBUTING.md`. A duty whose commits cannot name
 it is a duty whose history cannot be read.
 
-## The four inputs every duty shares
+## The inputs every duty shares
 
-`github-token`, `base-url`, `api-key`, `models`. Same names, same defaults, same
-meanings, everywhere.
+`github-token` everywhere, and — for every duty that calls a model —
+`base-url`, `api-key`, `models`. Same names, same defaults, same meanings,
+wherever they appear. `lifecycle` is the one duty with no model to call, so it
+declares `github-token` alone of these; a shared name never appears with a
+different meaning, but a duty does not declare an input it could never read.
 
 A duty that needed `model` instead of `models`, or `token` instead of
 `github-token`, would make a consumer relearn the core for each duty — which is
 the whole thing one repository and one version line exist to avoid.
 
-`dry-run` is the fifth. It is not optional: a duty a consumer cannot rehearse is a
-duty they have to arm to evaluate.
+`dry-run` is shared without exception. It is not optional: a duty a consumer
+cannot rehearse is a duty they have to arm to evaluate.
 
 ## Testing a duty
 

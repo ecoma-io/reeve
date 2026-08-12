@@ -32,8 +32,8 @@
 </p>
 
 > [!IMPORTANT]
-> **Reeve is being assembled, not announced.** It is on a `0.x` line: four
-> duties ship and all four are dogfooded on this repository — `duplicate` and
+> **Reeve is being assembled, not announced.** It is on a `0.x` line: five
+> duties ship, dogfooded on this repository as they land — `duplicate` and
 > `respond` in report-only mode, writing verdicts to job summaries and touching
 > nothing — and the rest of [the roadmap](docs/doctrine/north-star.md#7-roadmap) is
 > still open. `1.0` is the
@@ -108,7 +108,7 @@ on this page.
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Act outside its warrant**     | What Reeve may do is a file in your repository, or its narrowest built-in default where you wrote no file at all. A label your taxonomy does not name is never applied; a capability you did not grant is never used. Checked against the file — never against the model's own claim about what it was allowed to do. |
 | **Rewrite what a person wrote** | Titles and bodies belong to whoever wrote them. Machine output sits beside human text, marked, never in place of it.                                                                                                                                                                                                  |
-| **Overrule a maintainer**       | It never removes a label, never reassigns, never reopens. It proposes; you decide.                                                                                                                                                                                                                                    |
+| **Overrule a maintainer**       | It never removes a label a person applied, never reassigns, never reopens. It proposes; you decide. (The one bounded carve-out: [`lifecycle`'s clock-hand exception](docs/reference/duties/lifecycle.md#the-clock-hand-exception) takes back a label its own actor applied, and only that.)                           |
 | **Close, lock, or delete**      | Off by default and staying that way. Everything past the cheapest reversible action is opt-in, one at a time.                                                                                                                                                                                                         |
 | **Write code**                  | Reeve reads and decides. It does not author diffs, run your tests, or fix your bugs. That is a different tool, and a crowded one.                                                                                                                                                                                     |
 | **Guess when it cannot read**   | Model output that does not parse yields **no** result and a loud failure — not a best-effort read of the parts that looked fine. The shapes that fail to parse are the ones an injection produced.                                                                                                                    |
@@ -130,6 +130,7 @@ state kept as files in your repository — and differs only in what it decides:
 | `translate` | Puts every issue and pull request in every language your project reads — in the thread's own body, marked as the version that counts.                                        | [Reference](docs/reference/duties/translate.md) |
 | `duplicate` | Finds the thread that already reported this — across the language it was reported in. Top rung: opt-in, never on by accident.                                                | [Reference](docs/reference/duties/duplicate.md) |
 | `respond`   | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Top rung: granted nothing until a warrant names it. | [Reference](docs/reference/duties/respond.md)   |
+| `lifecycle` | Runs your own staleness policy — reminders, un-staling, and a final close as not planned — from timestamps and labels alone. No model is ever called.                        | [Reference](docs/reference/duties/lifecycle.md) |
 
 What comes after them is decided by one test, and it is a strict one: the work
 has to recur, be uniformly expensive today, already be work a maintainer stopped

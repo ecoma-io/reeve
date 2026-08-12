@@ -226,6 +226,16 @@ stranger." So an absent warrant, or a written one that is simply silent about
 `capabilities: { respond: [comment] }` names it explicitly. See [the
 `respond` duty](../reference/duties/respond.md#required-permissions).
 
+**Neither does `propose`.** It is `triage`'s own sweep-only capability, not a
+duty of its own — opening or updating one pull request that adds or retires
+taxonomy labels from a monorepo's own package layout, gated by evidence
+before it ever proposes a name. It needs `contents: write` and
+`pull-requests: write` on the token, `triage: [propose]` under
+`capabilities:`, and `propose` in `apply`, same as `record`. It is not
+a self-amending authority: the file it changes is a pull request like any
+other, reviewed and merged by a person — no capability of Reeve's ever
+merges one. See [the `triage` duty's own page](../reference/duties/triage.md).
+
 **A duty also takes an `apply` input, and the narrower of the two wins.** The
 file and the workflow are both reviewable, they can disagree, and the fail-safe
 direction is the intersection. A workflow can restrict what the file granted; it
@@ -273,7 +283,9 @@ nothing written down to read. The input answers the question there too.
 These are not defaults. There is no input, no file key and no flag:
 
 - **Removing a label a maintainer applied.** A label a human put there is a
-  decision. Removing it is Reeve overruling a person.
+  decision. Removing it is Reeve overruling a person. The one bounded
+  exception is `lifecycle`'s own clock-hand labels — see
+  [the clock-hand exception](../reference/duties/lifecycle.md#the-clock-hand-exception).
 - **Reopening what a maintainer closed**, or reassigning what they assigned.
 - **Editing a title, or a person's own body text.** Reeve appends below its own
   marker. Everything above it is kept byte-for-byte on every run.

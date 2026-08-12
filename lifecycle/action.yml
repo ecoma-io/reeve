@@ -1,0 +1,186 @@
+# The `lifecycle` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/lifecycle@v0.1`.
+name: Reeve - lifecycle
+description: Runs a repository's own staleness policy — reminders, un-staling, and a final close as not planned — entirely from timestamps and labels, never a model.
+author: Ecoma
+
+branding:
+  icon: clock
+  color: purple
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read a thread's comments and events, and to apply
+      whatever `apply` and the warrant both grant. `GITHUB_TOKEN` is enough.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The issue or pull request to check. Defaults to the thread that
+      triggered the workflow, and is what a backfill sets to name an old
+      one.
+
+      An event that carries no thread — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for issue `NaN`. Cannot be combined with `sweep`.
+    required: false
+    default: ""
+
+  warrant:
+    description: >-
+      Where the `lifecycle:` policy lives. Unlike most of Reeve, there is no
+      built-in default track — an absent `lifecycle:` key, or a missing file
+      at this default path, is a green no-op naming the missing key, because
+      there is no pre-existing artifact a staleness policy could fall back
+      to the way a taxonomy falls back to a repository's own labels. Write
+      `lifecycle:` to configure it.
+
+      Point this at a path of your own instead, and a file missing there
+      fails the run red, because naming a file that is not there is a
+      configuration mistake rather than an absence. A file that exists but
+      does not parse always fails red, wherever it lives.
+    required: false
+    default: .github/reeve.yml
+
+  apply:
+    description: >-
+      What this run may do: any of `label`, `comment`, `close`, comma or
+      newline separated, or `none`.
+
+      The narrower of this and the warrant file wins, always. A step whose
+      action needs a capability either half withholds is skipped whole —
+      never partially applied — so a run under-permitted for `close` still
+      posts the reminder a step before it asked for, and only the close
+      itself waits.
+    required: false
+    default: "label, comment"
+
+  languages:
+    description: >-
+      The languages your contributors write in, comma or newline separated —
+      used only to pick which `say:` text a step posts, when a track's
+      `say:` is a built-in reminder or a per-language map. Unlike every
+      other duty, an unconfigured pair is not refused here: a repository
+      whose tracks all use plain `say:` text, or stick to the English
+      built-in, never had a reason to write this.
+
+      Ignored once `warrant`'s own `languages:` key is written — the file is
+      the whole answer from there.
+    required: false
+    default: ""
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and change nothing. Every
+      output reads what a real run would have done — read the job summary
+      for the due steps and un-staling a real run would have applied.
+    required: false
+    default: "false"
+
+  sweep:
+    description: >-
+      Check the backlog instead of the one thread this event named: every
+      open issue (and, when the policy's `threads:` includes pull requests,
+      every open pull request too), oldest created first — the thread that
+      has waited longest for a clock check is the one most likely to already
+      be overdue.
+
+      Cannot be combined with `number` — set one or the other.
+    required: false
+    default: "false"
+
+  since:
+    description: >-
+      The oldest thread a sweep will consider, bounded by when it was
+      opened. Empty for no bound, a calendar date (`2026-01-01`), or a
+      duration (`90d`).
+    required: false
+    default: ""
+
+  limit:
+    description: >-
+      The most threads one sweep will actually examine — read in full and
+      run through the clock — or `none` for no cap. A thread `threads:`
+      excludes by kind, or Reeve's own proposal pull request, is filtered
+      out of the listing for free and never counts against this. Kept
+      modest by default because this is the one duty that writes per
+      examined thread — raise it, or set `none`, for a deliberate backfill.
+    required: false
+    default: "30"
+
+outputs:
+  processed:
+    description: >-
+      How many threads a sweep actually examined this run — read in full
+      and run through the clock. `0` outside `sweep`.
+
+  remaining:
+    description: >-
+      Candidates this sweep did not reach — past `limit`, or after a
+      mid-sweep stop (see `starved`). The next sweep starts here. `0`
+      outside `sweep`, and `0` when a sweep finished its whole backlog.
+
+  starved:
+    description: >-
+      Under `sweep`: `true` when GitHub's own capacity (a rate limit, or a
+      slow/unavailable request) ran out mid-sweep and the sweep stopped
+      early. Everything reported alongside it is still real — a starved
+      sweep did the work its outputs claim, just not the whole backlog.
+      `false` outside `sweep`; a single thread either succeeds or the whole
+      run fails red.
+
+  skipped:
+    description: >-
+      Outside `sweep`: `true` when this thread had no policy to run against
+      (no `lifecycle:` key, `capabilities:` not naming this duty, the
+      recursion guard, a closed thread, an unreadable creation date,
+      `threads:` kind mismatch, a draft exemption, or a permanent
+      exemption), `false` otherwise. Under `sweep`: every thread skipped for
+      one of those reasons, including the ones filtered out of the listing
+      before a per-thread read was ever spent — not only `exempt.labels`.
+
+  reminded:
+    description: >-
+      Outside `sweep`: `true` when this run posted a step's `say:` or its
+      close explanation. Under `sweep`: how many examined threads got one.
+      Under `dry-run`, what a real run would have posted — the rehearsal's
+      ledger, not zeros.
+
+  labeled:
+    description: >-
+      Outside `sweep`: how many labels a due step applied this run. Under
+      `sweep`: the same count, summed across every thread examined. Under
+      `dry-run`, what a real run would have applied.
+
+  closed:
+    description: >-
+      Outside `sweep`: `true` when this run closed the thread as not
+      planned. Under `sweep`: how many examined threads were closed. Under
+      `dry-run`, what a real run would have closed — the one number to read
+      before arming `close`.
+
+  unstaled:
+    description: >-
+      Outside `sweep`: how many of this track's own clock-hand labels were
+      removed as stale this run. Under `sweep`: the same count, summed
+      across every thread examined. Under `dry-run`, what a real run would
+      have removed.
+
+  due-not-granted:
+    description: >-
+      Outside `sweep`: how many steps were due this run but skipped whole
+      because `apply` or the warrant withheld a capability the step's
+      action needed. Under `sweep`: the same count, summed across every
+      thread examined. Identical under `dry-run` — the grant check runs the
+      same either way.
+
+runs:
+  using: node24
+  main: dist/index.js

@@ -157,11 +157,15 @@ cannot be unpublished, only superseded. This held the first release pull request
 open until both duties had landed; it is a standing check on the release rather
 than a phase that has passed, because it applies again to every duty added.
 
-**The archive step names every duty by hand.** The `cp -r translate triage …`
-line in the release workflow is what puts a duty's `action.yml` and its bundle
-into the release tree, and `tools/build.mjs` is the matching list of entry
-points. A duty added to one and not the other is a duty that ships broken, so
-adding both is a step in [the duty checklist](duties.md).
+**The archive step names every duty by hand — and checks itself both ways.**
+The release workflow's staging loop is what puts each duty's `action.yml` and
+its bundle into the release tree, and `tools/build.mjs` is the matching list
+of entry points. The loop fails the release rather than shipping a gap: a
+listed duty whose directory is missing stops the step, and so does any
+directory carrying a top-level `action.yml` the list does not name — a duty
+added to `tools/build.mjs` but not to the workflow's own `duties` list is a
+loud failure at release time, not a silently unattested pin. Adding a duty to
+both lists is still a step in [the duty checklist](duties.md).
 
 ## Cutting a release
 

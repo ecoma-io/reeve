@@ -139,8 +139,8 @@ inputs:
   apply:
     description: >-
       What this run may do, comma separated: any of `label`, `comment`,
-      `close`, `assign`, `record`, or `none` for a run that decides and
-      touches nothing.
+      `close`, `assign`, `record`, `propose`, or `none` for a run that
+      decides and touches nothing.
 
       The narrower of this and the warrant file wins, always. This is the
       workflow's half of the answer — useful for turning one effect off on one
@@ -160,6 +160,12 @@ inputs:
       than a human is excluded, so months of this duty's own past output
       cannot be imported back in as though a maintainer had decided it. See
       `sweep-state` below.
+
+      `propose` needs naming here as well as in the file, the same as
+      `record`, and only ever does anything under `sweep`: it opens or
+      updates one pull request adding or retiring taxonomy labels from a
+      monorepo's own package layout, gated by evidence before it names
+      anything — see `docs/reference/duties/triage.md`.
     required: false
     default: label
 

@@ -86,7 +86,9 @@ can reach. See [The authority model](../../concepts/authority-model.md).
 
 Grant `contents: write` on the token only if you also grant the `record`
 capability below — recording a correction is a commit through GitHub's
-Contents API, not a checkout.
+Contents API, not a checkout. Grant `contents: write` **and**
+`pull-requests: write` if you grant `propose` — opening or updating its one
+pull request needs both.
 
 **Warrant capability:** `label` is granted by default, at level 0, with no
 warrant file at all. Wider effects — `comment`, `close`, `assign`, `record` —
@@ -118,7 +120,7 @@ narrower one would only be free to drift from it.
 | `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. Ignored once the warrant's own `languages:` key is written.                                                                          |
 | `warrant`         | no       | `.github/reeve.yml`         | Where the taxonomy and permissions live. Missing at this default path is not a failure — see [The warrant](../../guides/warrant.md).                                       |
 | `labels`          | no       | _(empty)_                   | Which of the warrant's taxonomy this run may propose, or empty for all of it. A name not in the taxonomy fails red — see below.                                            |
-| `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, or `none`. Narrowed by the warrant, never widened past it.                         |
+| `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, `propose`, or `none`. Narrowed by the warrant, never widened past it.              |
 | `confidence`      | no       | `0.75`                      | How sure the verdict has to be before anything is applied, between 0 and 1.                                                                                                |
 | `corrections`     | no       | `.reeve/corrections`        | Directory of `.ndjson` files recording maintainer corrections, shown to the model as examples.                                                                             |
 | `min-body-chars`  | no       | `40`                        | How much authored text is enough to be worth a model, in characters. `0` turns the length screen off.                                                                      |
@@ -210,6 +212,40 @@ rather than on a schedule.
 **A taxonomy entry may carry its own `confidence:` floor**, standing in for
 this run's own `confidence` input for that label alone — see
 [the warrant format reference](../warrant-format.md#label-fields).
+
+**`propose` writes the taxonomy itself, not a verdict, and only ever under
+`sweep`.** Granted like `record` — `capabilities: { triage: [propose] }` in
+the file **and** `apply: propose` on the workflow, the narrower always
+winning — it walks a monorepo's own package layout (read from the default
+branch's own tree, no checkout) and looks for two things: a package no
+label's `paths:` already covers, mentioned by path in enough distinct open
+issues within a rolling window to be real signal rather than one report; and,
+when `retire: true` is set, a templated label whose own package no longer
+exists. Everything it finds becomes one pull request against the warrant
+file, opened once and kept up to date on every later sweep — never merged by
+Reeve itself, because the file it changes is reviewed exactly like every
+other change to it. See [the warrant format reference](../warrant-format.md#propose-fields)
+for the `propose.workspace` knobs — the naming template, the evidence floor,
+the window, and the `except` globs — and
+[the north star](../../doctrine/north-star.md#8-non-goals) for why merging
+its own proposal is not a capability that exists.
+
+Two shapes of candidate are dropped before the evidence gate ever sees them,
+each with a note in the run's own report saying so: a package whose manifest
+carries no description (a label nobody can write a boundary for is not worth
+proposing), and a package whose computed label name would exceed GitHub's
+50-character label ceiling — or carry a character unsafe for the proposal's
+own PR body and marker grammar.
+
+```yaml
+capabilities:
+  triage: [label, propose]
+
+propose:
+  workspace:
+    evidence: 3
+    retire: true
+```
 
 **The action input `labels` narrows which of the file's `labels:` taxonomy this
 run may propose** — two different things sharing one name, so keep them

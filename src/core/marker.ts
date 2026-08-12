@@ -153,3 +153,64 @@ export function fingerprint(text: string, keys: readonly string[]): string {
     .digest("hex")
     .slice(0, 16);
 }
+
+/**
+ * The `propose` capability's own marker grammar, one level finer than
+ * {@link markerFor}.
+ *
+ * `markerFor("propose")` identifies the whole change-set a proposal PR
+ * carries, by one fingerprint — that is what makes an unchanged world cost
+ * nothing. But a closed-unmerged proposal's rejection has to be remembered
+ * per *entry*, not per change-set: a change-set is never the same twice once
+ * a new package appears, so respecting only the old fingerprint would let a
+ * struck entry ride back in, hiding inside a change-set that merely grew.
+ * This is the sibling grammar that names one entry — `add:area:billing` or
+ * `retire:area:billing` — so a rejection can be remembered by name and
+ * survive a change-set that has moved on. Both markers live in the same PR
+ * body; neither substitutes for the other.
+ */
+export function proposeEntryMarker(action: "add" | "retire", name: string): string {
+  return `<!-- reeve:propose:entry ${action}:${name} -->`;
+}
+
+/**
+ * Every entry marker `body` carries, as `"add:area:billing"`-shaped tokens.
+ *
+ * Read from a *closed, unmerged* proposal PR's body — the permanent memory of
+ * what a maintainer rejected by closing rather than merging. Bounded by the
+ * marker's own `-->` closer rather than by whitespace, because a label name
+ * may contain almost anything except a newline.
+ */
+export function readProposeEntryMarkers(body: string): ReadonlySet<string> {
+  const found = new Set<string>();
+  const re = /<!-- reeve:propose:entry ((?:add|retire):[^\n]*?) -->/g;
+  for (const match of body.matchAll(re)) {
+    if (match[1] !== undefined) found.add(match[1]);
+  }
+  return found;
+}
+
+const PROPOSE_MARKER = markerFor("propose");
+
+/**
+ * The recursion guard: whether a thread is Reeve's own proposal pull
+ * request — the one every other duty must never sweep, triage, translate,
+ * label, or let `lifecycle` stale or close.
+ *
+ * The one-open-PR invariant and the struck-entry memory both live only in
+ * that PR's body (see `propose.ts`'s `findOwnOpenPr`/`struckEntries`); a
+ * duty that edited its body, relabelled it, or closed it out from under
+ * `propose` would corrupt state nothing else can reconstruct. `propose.ts`'s
+ * `renderBody` always writes the `propose` marker into every proposal PR it
+ * creates or updates, so the marker's presence is a complete, zero-cost
+ * signal — reading it costs nothing beyond the body every duty's listing
+ * already carries, unlike confirming the pull request's head ref by name,
+ * which would cost a `pulls.get` per pull request candidate in every sweep.
+ */
+export function isReeveProposalPr(thread: {
+  readonly isPullRequest: boolean;
+  readonly body: string;
+}): boolean {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
+}
