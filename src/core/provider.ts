@@ -20,7 +20,7 @@
  * module that returns its failures lets the caller decide what is worth a
  * warning and what is ordinary rotation.
  *
- * **A third rule governs the rotation itself, not one request:** [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * **A third rule governs the rotation itself, not one request:** [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
  * splits every failure into `kind`, and the two kinds do not fail the same way.
  * A `capacity` failure — 429, 5xx, a timeout, a socket that never connected —
  * is weather: `rotateModels` returns it like any other, the caller carries on,
@@ -106,7 +106,7 @@ export interface Failure {
    */
   readonly usage?: Usage | null;
   /**
-   * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)'s
+   * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)'s
    * distinction, decided once, here, so every caller reads the same answer
    * instead of re-deriving it from a reason string:
    *
@@ -604,7 +604,7 @@ export class AuthenticationFailure extends Error {
 /**
  * What this run has already learned about capacity, one model id at a time.
  *
- * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
  * says a model's capacity does not clear inside a run — not inside one call to
  * `rotateModels`, which was already true before this existed, but across every
  * call the run makes, including the ones a sweep makes for threads two, three
@@ -640,7 +640,14 @@ export interface Weather {
    * That assumption is what a second endpoint removes.
    */
   readonly multiEndpoint: boolean;
-  /** Records an auth failure against one endpoint, deferred rather than thrown. */
+  /**
+   * Records an auth failure against one endpoint, deferred rather than
+   * thrown — and grounds that endpoint at the same time: a key refused once
+   * is refused for every model routed there, so asking again would spend a
+   * sweep's whole thread count confirming the same misconfiguration against
+   * a provider's rate limit. The one recorded failure is what `settleAuth`
+   * and the summary judge from.
+   */
   failAuth(alias: string | null, failure: Failure): void;
   /** True once every endpoint this run knows about has an auth failure recorded. */
   readonly authExhausted: boolean;
@@ -678,6 +685,7 @@ export function createWeather(aliases: ReadonlySet<string> = new Set()): Weather
     },
     multiEndpoint: aliases.size > 0,
     failAuth: (alias, failure) => {
+      deadEndpoints.add(alias);
       if (!authFailed.has(alias)) authFailed.set(alias, failure);
     },
     get authExhausted() {
@@ -753,7 +761,7 @@ export function reckon(failure: Failure, weather?: Weather): void {
 
 /**
  * The deferred half of the multi-endpoint amendment to
- * [D12](../../docs/north-star.md#d12--capacity-is-weather-authority-is-configuration):
+ * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration):
  * call once, after a run has tried everything it is going to try. A
  * single-endpoint run never needs this — `reckon` already threw the moment
  * its one endpoint answered unauthenticated. A multi-endpoint run defers

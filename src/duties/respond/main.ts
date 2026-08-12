@@ -83,7 +83,7 @@ import {
 } from "../../core/provider.js";
 import { assemble } from "../../core/publish.js";
 import { sift } from "../../core/spam.js";
-import { writeSummary } from "../../core/summary.js";
+import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
   resolveAuthority,
@@ -705,7 +705,10 @@ export async function run(): Promise<void> {
       }
 
       report(outcome, rosterStarved);
-      await writeSummary(page(settings, authority, outcome, ungranted, meter.spent()));
+      await writeSummary(
+        page(settings, authority, outcome, ungranted, meter.spent()) +
+          authSection(weather.authFailures),
+      );
     }
   }
 }

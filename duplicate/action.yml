@@ -149,7 +149,7 @@ inputs:
 
       Applied after a published block — a translation, most likely — is
       stripped out of the body: see the note on that in
-      `docs/usage/duties/duplicate.md`. The budget is spent on what an author
+      `docs/reference/duties/duplicate.md`. The budget is spent on what an author
       wrote, never on a block Reeve itself appended.
     required: false
     default: "6000"

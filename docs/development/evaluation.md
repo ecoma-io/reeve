@@ -9,7 +9,7 @@ Almost nothing in this category publishes a number. Tools in adjacent spaces shi
 accuracy claims with no method, or no claim at all, and a maintainer deciding
 whether to install one is left with a demo and a feeling.
 
-[D11](../north-star.md#d11--every-duty-ships-with-an-evaluation) makes that a
+[D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation) makes that a
 release blocker rather than a nice-to-have: **a duty ships with a way to measure
 it, or it does not ship.**
 
@@ -53,7 +53,7 @@ A confusion matrix over your own taxonomy, per language.
 
 The confusion matrix is the artefact worth having, not the headline number. It
 tells a maintainer _which_ `not` to write, and it is the reason
-[the warrant page](../usage/warrant.md#not-is-where-the-accuracy-is) tells people
+[the warrant page](../guides/warrant.md#not-is-where-the-accuracy-is) tells people
 to measure before they guess.
 
 Precision and recall trade against each other through `confidence`, which is why
@@ -96,7 +96,7 @@ Both are under the `eval` commit scope. Neither ships in the bundle a consumer
 runs: they are development tooling, and putting them in `dist` would make every
 consumer download the fixture set.
 
-This is [settled](../north-star.md#9-settled-questions) — it was previously an
+This is [settled](../doctrine/north-star.md#9-settled-questions) — it was previously an
 open question whether evaluation belonged in a repository of its own. It does
 not. **Reeve stands on its own**, and a fixture set that lives elsewhere gets
 updated on a different schedule than the duty it measures, at which point it
@@ -106,7 +106,7 @@ measures the wrong thing.
 
 **The pair is the unit, not the thread.** Write the same case in two languages
 — identical content, different language — and any gap between the two results
-is the bug this project cares about most. [Stage 6](../north-star.md#7-roadmap)
+is the bug this project cares about most. [Stage 6](../doctrine/north-star.md#7-roadmap)
 measures the worst-language gap directly from pairs like this rather than
 inferring it from two separate averages taken on unrelated cases, so a fixture
 written once is worth less than the same case written twice. It is also the
@@ -160,7 +160,7 @@ until the number is honest, or withdraw the duty. Publishing the lower number an
 shipping anyway is not one of the options — a number that never blocks anything
 is decoration.
 
-**A duty can be withdrawn.** [D10](../north-star.md#d10--a-duty-must-earn-its-place)
+**A duty can be withdrawn.** [D10](../doctrine/north-star.md#d10--a-duty-must-earn-its-place)
 cuts both ways: a duty that cannot be measured to work is a duty that has not
 earned its place, whatever it looked like in a demo.
 
@@ -180,5 +180,5 @@ The tooling is the same and the method is:
 
 That loop is worth more than any `confidence` value copied from a document. It is
 also the only way to pick one honestly:
-[the input's default](../usage/duties/triage.md#inputs) is a starting point, not
+[the input's default](../reference/duties/triage.md#configuration) is a starting point, not
 a recommendation.

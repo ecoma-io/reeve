@@ -403,8 +403,8 @@ One repository, one core, one version line — and no duty carrying inputs that
 mean nothing to it.
 
 Architecture is documented for contributors in
-[`development/`](development/README.md); the configuration surface is documented
-for users in [`usage/`](usage/README.md).
+[`development/`](../development/README.md); the configuration surface is documented
+for users in [the documentation index](../README.md).
 
 ## 7. Roadmap
 
@@ -417,7 +417,7 @@ list is finished: usable, dogfooded, and free to break its own input surface
 between minors. `1.0` is the release where every stage below is done and every
 number this document promises has been published. It is not a maturity feeling
 and not a marketing moment — it is a state this file can be checked against.
-[Releasing](development/releasing.md) has what that means for a pin.
+[Releasing](../development/releasing.md) has what that means for a pin.
 
 ### Stage 0 — One core, two duties · **landed**
 
@@ -463,7 +463,7 @@ run-wide across every thread it processes, so a `Weather` object exhausted on
 thread one stops thread two from spending a call rather than retrying the
 same dead end; `since` bounds by creation date, never by update, so a sweep's
 own labelling or translating cannot push its own bound forward under it; and
-[`.github/workflows/reeve-sweep.yml`](../.github/workflows/reeve-sweep.yml)
+[`.github/workflows/reeve-sweep.yml`](../../.github/workflows/reeve-sweep.yml)
 runs both duties on a weekly schedule against this repository's own backlog,
 the same dogfooding the per-thread workflows already did for Stage 0.
 
@@ -479,7 +479,7 @@ taxonomy-only warrant leaves every duty on its own default, and a
 all. `translate` now reads the file exactly as `triage` always has, and
 `languages:` moved in alongside the taxonomy — landing as a breaking change on
 a `0.x` minor, per
-[what that means here](development/releasing.md#what-0x-and-10-mean-here).
+[what that means here](../development/releasing.md#what-0x-and-10-mean-here).
 
 **Standing:** the file is parsed, the taxonomy is an allowlist checked in code
 against the parsed file, capabilities are granted per duty, and the narrower
@@ -496,7 +496,7 @@ silent on it, and a run says once, by name, which of the two it read.
 Detection itself — the free script-narrowing and profile steps that resolve
 an author's language before any duty asks for it — was already core state
 before this stage and did not have to change
-([the language layer](development/language.md)).
+([the language layer](../development/language.md)).
 
 ### Stage 4 — Memory, both directions
 
@@ -538,7 +538,7 @@ already used within one language — so what used to hold this stage open is
 settled rather than outstanding.
 
 **Standing:** `duplicate` has landed — see
-[the duty's own page](usage/duties/duplicate.md). It ranks the open backlog
+[the duty's own page](../reference/duties/duplicate.md). It ranks the open backlog
 against the thread in front of it with the same BM25 [memory](#9-settled-questions)
 retrieval already runs on, bridges the query through the pivot only when the
 corpus actually holds a candidate the thread's own language would not reach,
@@ -548,7 +548,7 @@ refused the same as one that failed to parse. Off in both halves by default:
 posting the one comment it may ever write needs `duplicate: [comment]` in the
 warrant **and** `apply: comment` on the workflow, because a wrong duplicate is
 a claim about somebody else's report, not a label one click undoes. `respond`
-has landed too — see [the duty's own page](usage/duties/respond.md). It
+has landed too — see [the duty's own page](../reference/duties/respond.md). It
 writes the first reply itself, once, in the thread's own language, and never
 speaks over a human or its own earlier marker; `DEFAULT_CAPABILITIES` for it
 is empty, so nothing short of an explicit `respond: [comment]` in the warrant

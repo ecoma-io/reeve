@@ -1,5 +1,7 @@
 # Platform limits
 
+_What GitHub's own behaviour, not Reeve's design, forced. Prerequisites: None._
+
 GitHub behaviours that shaped the design. Each one is here because a decision
 elsewhere in this repository is only explicable if you know about it.
 
@@ -54,7 +56,7 @@ read-only token and no access to repository secrets.
 - **The evaluation harness cannot be a required check.** It needs a provider key;
   a fork's pull request has no secrets; a required check that cannot pass on a
   fork closes the project to contributors. See
-  [evaluation](evaluation.md#running-it).
+  [evaluation](../development/evaluation.md#running-it).
 
 ## 4. An issue body has a hard length ceiling
 
@@ -153,7 +155,8 @@ the repository root.
 **What it shapes:** the one-repository-several-duties layout. Consumers get one
 version line and one core; the cost is that individual duties are not separately
 listed on the Marketplace. That trade was made deliberately — see
-[architecture](architecture.md).
+[the root action](root-action.md) and
+[architecture](../development/architecture.md).
 
 ## 11. `runs.using` pins a Node major, and the bundle must be committed
 
@@ -218,3 +221,9 @@ sentence.
 
 If a behaviour turns out to have changed, the entry stays and gains a date. A
 constraint that used to exist explains a decision that still does.
+
+---
+
+**Related:** [The root action](root-action.md) ·
+[Architecture](../development/architecture.md) ·
+[Threat model](../security/threat-model.md)

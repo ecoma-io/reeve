@@ -1,9 +1,12 @@
-# Threat model
+# Security
 
-Why the pipeline is ordered the way it is, what each defence actually stops, and
-what is deliberately left undefended so you can disagree with it in review.
+_The mechanism: why the pipeline is ordered the way it is, what each defence actually stops, and what is deliberately left undefended so you can disagree with it in review. Prerequisites: [Threat model](threat-model.md) — or "None," to start here._
 
-Reporting a vulnerability is a different document: [`SECURITY.md`](../../SECURITY.md).
+[Threat model](threat-model.md) is the shape of what Reeve defends against
+and why. This page is the mechanism underneath it, stage by stage.
+
+Reporting a vulnerability is a different document:
+[Reporting](reporting.md) and [`SECURITY.md`](../../SECURITY.md).
 
 ## The position Reeve runs from
 
@@ -19,8 +22,8 @@ So the interesting question is never "does it work". It is **what does it do whe
 the model does what the attacker asked instead of what we asked**.
 
 Everything below answers that. The design assumption is
-[D8](../north-star.md#d8--every-thread-is-hostile): every thread is hostile, and
-the defences hold whether or not any particular one is.
+[D8](../doctrine/north-star.md#d8--every-thread-is-hostile): every thread is
+hostile, and the defences hold whether or not any particular one is.
 
 ## The load-bearing idea
 
@@ -50,8 +53,8 @@ about to be written into your repository under your token.
 
 ## What the pipeline order buys
 
-The [architecture](architecture.md) stages exist in that order for security
-reasons as much as cost ones.
+The [architecture](../development/architecture.md) stages exist in that
+order for security reasons as much as cost ones.
 
 **Nothing untrusted reaches a model before the drafting stage.** Warrant, intake,
 trust, language and screening all run first, in code. An attacker's text cannot
@@ -229,3 +232,9 @@ A change that breaks one of these is a breaking change regardless of what any
 9. **Thread text never reaches a model outside a per-call nonce boundary.**
 10. **Machine output is sanitised before it is published**, and the author's half
     never is.
+
+---
+
+**Related:** [Threat model](threat-model.md) · [Reporting](reporting.md) ·
+[Architecture](../development/architecture.md) ·
+[The authority model](../concepts/authority-model.md)

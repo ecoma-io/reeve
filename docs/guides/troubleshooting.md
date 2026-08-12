@@ -1,5 +1,7 @@
 # Troubleshooting
 
+_Diagnose a run that did not do what you expected. Prerequisites: [Installation](../getting-started/installation.md)._
+
 A run went red, went green and did nothing, or did something you did not expect.
 
 > [!IMPORTANT]
@@ -100,7 +102,7 @@ Almost always permissions. Check the job's `permissions:` block:
 
 On a fork's pull request under plain `pull_request`, the token is read-only no
 matter what the block says. Use `pull_request_target` and read
-[Installation](installation.md#pull-requests) before you do.
+[Installation](../getting-started/installation.md#pull-requests) before you do.
 
 ## The run went yellow, saying it delivered N of M
 
@@ -214,7 +216,7 @@ they are refused outright rather than ranked.
 `GITHUB_TOKEN` does not start a workflow listening on `issues: [labeled]`. GitHub
 suppresses it to prevent recursion, silently. Pass a GitHub App token from
 `actions/create-github-app-token`. More in
-[platform limits](../development/platform-limits.md).
+[platform limits](../reference/platform-limits.md).
 
 ## Still stuck
 
@@ -223,3 +225,8 @@ it is registered as a secret before anything can log it — and what you expecte
 
 Never a public issue for a vulnerability: [SECURITY.md](../../SECURITY.md) has
 the private channel.
+
+---
+
+**Related:** [The sweep](sweep.md) · [Cost](cost.md) · [Languages](languages.md)
+**Next:** [The authority model](../concepts/authority-model.md) — the model behind every guardrail this page tells you how to read

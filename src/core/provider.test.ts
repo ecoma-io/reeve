@@ -946,6 +946,21 @@ describe("multi-endpoint weather", () => {
     }).toThrow(AuthenticationFailure);
   });
 
+  it("grounds the whole endpoint on a deferred auth failure, so nothing asks it again", () => {
+    const weather = createWeather(new Set(["fast"]));
+
+    reckon({ ok: false, model: "a@fast", reason: "401", kind: "auth", endpoint: "fast" }, weather);
+
+    // Every model routed to the refused endpoint is grounded — a key refused
+    // once is refused for all of them, and a sweep must not spend its threads
+    // confirming that against a provider's rate limit.
+    expect(weather.grounded("a@fast")).toBe(true);
+    expect(weather.grounded("b@fast")).toBe(true);
+    // The default endpoint is untouched, and the run keeps going on it.
+    expect(weather.grounded("c")).toBe(false);
+    expect(weather.authExhausted).toBe(false);
+  });
+
   it("keeps only the first auth failure recorded per endpoint", () => {
     const weather = createWeather(new Set(["fast"]));
 

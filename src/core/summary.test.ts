@@ -6,7 +6,8 @@ import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Spend } from "./meter.js";
-import { cell, cost, count, fence, table, writeSummary } from "./summary.js";
+import type { Failure } from "./provider.js";
+import { authSection, cell, cost, count, fence, table, writeSummary } from "./summary.js";
 
 // `@actions/core` is kept real and driven through the environment, because the
 // environment is what the runner actually gives an action: `GITHUB_STEP_SUMMARY`
@@ -213,5 +214,34 @@ describe("cost", () => {
     expect(cost(spent, byModel)).toContain(
       "1 of 2 requests came back without a `usage` field, so the token counts above are a floor rather than a total.",
     );
+  });
+});
+
+describe("authSection", () => {
+  const refused = (endpoint: string | null): Failure => ({
+    ok: false,
+    model: "m",
+    kind: "auth",
+    usage: null,
+    reason: "HTTP 401: whatever the provider said",
+    endpoint,
+  });
+
+  it("is empty when nothing failed auth, which is every run before this amendment", () => {
+    expect(authSection([])).toBe("");
+  });
+
+  it("names every refused endpoint, with null shown as the default pair", () => {
+    const section = authSection([refused(null), refused("fast")]);
+
+    expect(section).toContain("### Endpoints that failed to authenticate");
+    expect(section).toContain("`default`");
+    expect(section).toContain("`fast`");
+  });
+
+  it("keeps the provider's own words out of the page", () => {
+    // The refusal's reason is a provider's response body — log material, not
+    // markdown this page should render.
+    expect(authSection([refused("fast")])).not.toContain("whatever the provider said");
   });
 });

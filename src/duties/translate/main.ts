@@ -87,7 +87,7 @@ import {
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
 import { createMeter, metered } from "../../core/meter.js";
-import { writeSummary } from "../../core/summary.js";
+import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
   resolveAuthority,
@@ -928,10 +928,15 @@ export async function run(): Promise<void> {
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved);
-        await writeSummary(page(settings, authority, single.number, single.result, meter.spent()));
+        await writeSummary(
+          page(settings, authority, single.number, single.result, meter.spent()) +
+            authSection(weather.authFailures),
+        );
       }
     }
   }

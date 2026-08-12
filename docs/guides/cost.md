@@ -1,5 +1,7 @@
 # Cost
 
+_Control and predict what a run costs. Prerequisites: [Installation](../getting-started/installation.md)._
+
 What a backlog costs before you point Reeve at one, why most of it is free, and
 how to run the whole thing without a key.
 
@@ -95,7 +97,7 @@ tier.
 ## Running it with no key at all
 
 Some providers serve OpenAI-compatible models with no key. That configuration is
-supported by design ([D7](../north-star.md#d7--any-endpoint-including-the-free-ones)),
+supported by design ([D7](../doctrine/north-star.md#d7--any-endpoint-including-the-free-ones)),
 not tolerated:
 
 ```yaml
@@ -200,3 +202,8 @@ mid-sentence is worse than an expensive one.
 Cost is a design constraint here, not a runtime negotiation. If a configuration
 is too expensive, the fix is a cheaper model, screening, or fewer languages —
 each of which you chose, and each of which shows up in a diff.
+
+---
+
+**Related:** [The sweep](sweep.md) · [Dry run](dry-run.md) · [Troubleshooting](troubleshooting.md)
+**Next:** [Troubleshooting](troubleshooting.md) — what to check when a run does not do what you expected

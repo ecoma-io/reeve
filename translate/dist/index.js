@@ -32765,6 +32765,7 @@ function createWeather(aliases = /* @__PURE__ */ new Set()) {
     },
     multiEndpoint: aliases.size > 0,
     failAuth: (alias, failure) => {
+      deadEndpoints.add(alias);
       if (!authFailed.has(alias)) authFailed.set(alias, failure);
     },
     get authExhausted() {
@@ -33331,6 +33332,17 @@ function total(spent) {
 }
 
 // src/core/summary.ts
+function authSection(failures) {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
+  ].join("\n");
+}
 async function writeSummary(markdown) {
   if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
     debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
@@ -34731,10 +34743,10 @@ async function run() {
       }
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+        await writeSummary(sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures));
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved);
-        await writeSummary(page(settings, authority2, single.number, single.result, meter.spent()));
+        await writeSummary(page(settings, authority2, single.number, single.result, meter.spent()) + authSection(weather.authFailures));
       }
     }
   }

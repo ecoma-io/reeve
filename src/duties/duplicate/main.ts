@@ -86,7 +86,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
-import { writeSummary } from "../../core/summary.js";
+import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
   resolveAuthority,
@@ -469,11 +469,14 @@ export async function run(): Promise<void> {
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, rosterStarved);
         await writeSummary(
-          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent()),
+          page(settings, single.number, single.outcome, single.done, single.posted, meter.spent()) +
+            authSection(weather.authFailures),
         );
       }
     }
@@ -835,7 +838,7 @@ function notGranted(warrant: Warrant): Outcome {
  * though `Api`'s `issues.update` could carry `state: "closed"` and `close` is
  * a name `CAPABILITIES` and `parseApply` both already accept.** `close`
  * exists in the warrant's vocabulary because `triage` mirrors it there, not
- * because this duty ever closes anything — see `docs/usage/duties/
+ * because this duty ever closes anything — see `docs/reference/duties/
  * duplicate.md`'s "never closes a thread" section. That means the guard a
  * duty which *does* close needs — refusing to re-close a thread a human just
  * reopened, so a maintainer's `reopened` is never fought — has nothing to
