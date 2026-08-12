@@ -258,6 +258,12 @@ describe("chunks", () => {
   it("returns one empty chunk for empty input, never zero chunks", () => {
     expect(chunks("", 100)).toEqual([""]);
   });
+
+  it("refuses a budget the hard-cut loop could never advance past", () => {
+    for (const bad of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => chunks("text", bad)).toThrow("positive integer");
+    }
+  });
 });
 
 describe("isCodeOnly", () => {

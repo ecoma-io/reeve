@@ -62,6 +62,11 @@ export function segments(markdown: string): Segment[] {
  * reassembling the answers is relying on exactly that.
  */
 export function chunks(markdown: string, maxChars: number): readonly string[] {
+  // The hard-cut loop below advances by `maxChars` — a zero, negative, or
+  // non-finite budget could never terminate it, so refuse one outright.
+  if (!Number.isInteger(maxChars) || maxChars < 1) {
+    throw new Error(`chunks: maxChars must be a positive integer, not ${String(maxChars)}`);
+  }
   const out: string[] = [];
   let current = "";
 

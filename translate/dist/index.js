@@ -32416,6 +32416,9 @@ function segments(markdown) {
   return out;
 }
 function chunks(markdown, maxChars) {
+  if (!Number.isInteger(maxChars) || maxChars < 1) {
+    throw new Error(`chunks: maxChars must be a positive integer, not ${String(maxChars)}`);
+  }
   const out = [];
   let current = "";
   const take = (piece) => {
