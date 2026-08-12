@@ -122,6 +122,11 @@ export function labelChange(): {
  * the file and the workflow's `apply` each withhold `record` independently,
  * and the two are worth telling apart — a file grant `apply` narrowed away is
  * a different maintainer mistake than a file that never granted it at all.
+ *
+ * That first mistake is the common one: `apply` defaults to `label` alone, so
+ * a maintainer who grants `record` only in the file — and never adds it to
+ * the workflow's own `apply` input — gets nothing recorded, silently, until
+ * `recordGrantedByRun`'s half of the gate is understood too.
  */
 export function recordGrantedByFile(grantedCapabilities: readonly Capability[]): boolean {
   return grantedCapabilities.includes("record");

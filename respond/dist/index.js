@@ -35120,7 +35120,7 @@ function readSettings() {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
-async function walkReplies(api, at, stopped) {
+async function walkReplies(api, at, settled) {
   const { replies, more } = await listReplies(api, at);
   let alreadyAnswered = false;
   let humanFirst = false;
@@ -35138,7 +35138,7 @@ async function walkReplies(api, at, stopped) {
     info(
       `#${String(at.number)}: already answered \u2014 respond speaks once and does not converse.`
     );
-    return stopped({
+    return settled({
       note: "This thread already carries this duty's own reply. respond answers a thread once and does not converse \u2014 editing the issue does not earn a second reply, and there is no input that reopens this."
     });
   }
@@ -35146,7 +35146,7 @@ async function walkReplies(api, at, stopped) {
     info(
       `#${String(at.number)}: a human already replied \u2014 this duty only ever writes the first reply.`
     );
-    return stopped({
+    return settled({
       note: "A human already replied to this thread before this run looked at it. Answering the first reply is the whole of what this duty does, and there is no input that lets it speak over a person who got there first."
     });
   }
@@ -35154,7 +35154,7 @@ async function walkReplies(api, at, stopped) {
     warning(
       `#${String(at.number)}: the reply list was truncated before this duty could rule out its own marker or a human reply \u2014 refusing to guess.`
     );
-    return stopped({
+    return settled({
       note: "Could not verify the thread is unanswered (reply list truncated). This duty stops rather than draft \u2014 let alone post \u2014 a first reply it cannot be sure is still owed."
     });
   }
@@ -35170,7 +35170,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to respond. The narrower of the two wins.`
     );
   }
-  const stopped = (over = {}) => ({
+  const settled = (over = {}) => ({
     note: null,
     language: null,
     responded: null,
@@ -35182,17 +35182,17 @@ async function decide(api, at, warrant, settings, stages, weather) {
   });
   const standing = await readStanding(api, at);
   if (isReeveProposalPr(standing)) {
-    return stopped({
+    return settled({
       note: "This is Reeve's own proposal pull request \u2014 every duty skips it, respond included."
     });
   }
   if (standing.author.isBot) {
     info(`#${String(at.number)}: opened by a bot account \u2014 a first reply is not owed to one.`);
-    return stopped({
+    return settled({
       note: "The issue's opener is a bot account, and a first reply is not owed to one \u2014 no draft was written."
     });
   }
-  const walked = await walkReplies(api, at, stopped);
+  const walked = await walkReplies(api, at, settled);
   if (walked !== null) return walked;
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
@@ -35217,7 +35217,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     info(
       `#${String(at.number)}: screened out as ${sifted.dropped.reason} \u2014 ${sifted.dropped.note}.`
     );
-    return stopped({
+    return settled({
       note: `This thread was screened out as ${sifted.dropped.reason} \u2014 ${sifted.dropped.note}. A first reply is not owed to it.`
     });
   }
@@ -35302,7 +35302,7 @@ ${pivot.draft.body}`,
   }
   if (drafted.attempts.length === 0) {
     warning(`#${String(at.number)}: no draft survived this run.`);
-    return stopped({ language: language?.label ?? null });
+    return settled({ language: language?.label ?? null });
   }
   const verdict2 = await judge2({
     provider: stages.judge,
@@ -35318,7 +35318,7 @@ ${pivot.draft.body}`,
     warning(`judge: ${judgeName(failure.model)} \u2014 ${failure.reason}`);
   if (verdict2.winner === null) {
     warning(`#${String(at.number)}: the panel could not settle on a draft this run.`);
-    return stopped({ language: language?.label ?? null });
+    return settled({ language: language?.label ?? null });
   }
   const cast = verdict2.votes.map((vote) => ({
     model: judgeName(vote.model),
@@ -35346,31 +35346,31 @@ ${pivot.draft.body}`,
     warning(
       `#${String(at.number)}: confidence ${confidence.toFixed(2)} is below the floor (${settings.confidence.toFixed(2)}) \u2014 the draft was written to \`respond-text\` but not posted.`
     );
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
   if (!permitted.includes("comment")) {
     warning(
       `#${String(at.number)}: \`comment\` is not granted, so this run's draft was not posted.`
     );
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
   const pub = publication(responded);
   if (pub.sections.length === 0) {
     warning(
       `#${String(at.number)}: the winning draft rendered nothing to post \u2014 refusing to post a marker with no reply under it.`
     );
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
   if (settings.dryRun) {
     const would = assemble("", marker, pub);
     info(`Dry run \u2014 #${String(at.number)} would have received:
 ${would}`);
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
   const effects = createEffects(api, at);
   await effects.comment(assemble("", marker, pub));
   info(`#${String(at.number)}: posted the first reply.`);
-  return stopped({ language: responded.language, responded, confidence, published: true });
+  return settled({ language: responded.language, responded, confidence, published: true });
 }
 function notGranted(warrant) {
   return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`respond\`; once that block exists it is the whole answer, so add \`respond: [comment]\` to it to grant a first reply (or remove the block to return to defaults, which is still nothing \u2014 see \`DEFAULT_CAPABILITIES\`).`;

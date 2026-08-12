@@ -240,7 +240,7 @@ interface Outcome {
   readonly withheld: readonly Capability[];
 }
 
-/** What {@link stopped} lets a call site override — everything else is `decide`'s own default. */
+/** What {@link settled} lets a call site override — everything else is `decide`'s own default. */
 type Settled = Partial<
   Pick<Outcome, "note" | "language" | "responded" | "confidence" | "published">
 >;
@@ -255,7 +255,7 @@ type Settled = Partial<
 async function walkReplies(
   api: ReturnType<typeof getOctokit>,
   at: Location,
-  stopped: (over: Settled) => Outcome,
+  settled: (over: Settled) => Outcome,
 ): Promise<Outcome | null> {
   const { replies, more } = await listReplies(api, at);
   let alreadyAnswered = false;
@@ -274,7 +274,7 @@ async function walkReplies(
     core.info(
       `#${String(at.number)}: already answered — respond speaks once and does not converse.`,
     );
-    return stopped({
+    return settled({
       note:
         "This thread already carries this duty's own reply. respond answers a thread once and " +
         "does not converse — editing the issue does not earn a second reply, and there is no " +
@@ -285,7 +285,7 @@ async function walkReplies(
     core.info(
       `#${String(at.number)}: a human already replied — this duty only ever writes the first reply.`,
     );
-    return stopped({
+    return settled({
       note:
         "A human already replied to this thread before this run looked at it. Answering the " +
         "first reply is the whole of what this duty does, and there is no input that lets it " +
@@ -303,7 +303,7 @@ async function walkReplies(
       `#${String(at.number)}: the reply list was truncated before this duty could rule out its ` +
         "own marker or a human reply — refusing to guess.",
     );
-    return stopped({
+    return settled({
       note:
         "Could not verify the thread is unanswered (reply list truncated). This duty stops rather " +
         "than draft — let alone post — a first reply it cannot be sure is still owed.",
@@ -344,7 +344,7 @@ async function decide(
    * same five defaults; each call site overrides only the fields that one
    * case actually differs by.
    */
-  const stopped = (over: Settled = {}): Outcome => ({
+  const settled = (over: Settled = {}): Outcome => ({
     note: null,
     language: null,
     responded: null,
@@ -362,13 +362,13 @@ async function decide(
   // guard is written explicitly rather than left to that coincidence, the
   // same one spelling every other duty checks.
   if (isReeveProposalPr(standing)) {
-    return stopped({
+    return settled({
       note: "This is Reeve's own proposal pull request — every duty skips it, respond included.",
     });
   }
   if (standing.author.isBot) {
     core.info(`#${String(at.number)}: opened by a bot account — a first reply is not owed to one.`);
-    return stopped({
+    return settled({
       note: "The issue's opener is a bot account, and a first reply is not owed to one — no draft was written.",
     });
   }
@@ -381,7 +381,7 @@ async function decide(
   // since, which is what keeps an edit from farming a second reply. A reply
   // from some other bot, or with neither trait, is neither — it is skipped,
   // and the walk continues past it. See `walkReplies`.
-  const walked = await walkReplies(api, at, stopped);
+  const walked = await walkReplies(api, at, settled);
   if (walked !== null) return walked;
 
   const limit = settings.maxBodyChars;
@@ -412,7 +412,7 @@ async function decide(
     core.info(
       `#${String(at.number)}: screened out as ${sifted.dropped.reason} — ${sifted.dropped.note}.`,
     );
-    return stopped({
+    return settled({
       note:
         `This thread was screened out as ${sifted.dropped.reason} — ${sifted.dropped.note}. A ` +
         "first reply is not owed to it.",
@@ -531,7 +531,7 @@ async function decide(
 
   if (drafted.attempts.length === 0) {
     core.warning(`#${String(at.number)}: no draft survived this run.`);
-    return stopped({ language: language?.label ?? null });
+    return settled({ language: language?.label ?? null });
   }
 
   const verdict = await judge({
@@ -549,7 +549,7 @@ async function decide(
 
   if (verdict.winner === null) {
     core.warning(`#${String(at.number)}: the panel could not settle on a draft this run.`);
-    return stopped({ language: language?.label ?? null });
+    return settled({ language: language?.label ?? null });
   }
 
   const cast = verdict.votes.map((vote) => ({
@@ -583,14 +583,14 @@ async function decide(
       `#${String(at.number)}: confidence ${confidence.toFixed(2)} is below the floor ` +
         `(${settings.confidence.toFixed(2)}) — the draft was written to \`respond-text\` but not posted.`,
     );
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
 
   if (!permitted.includes("comment")) {
     core.warning(
       `#${String(at.number)}: \`comment\` is not granted, so this run's draft was not posted.`,
     );
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
 
   // Computed once and checked here, right before the only two places this
@@ -605,13 +605,13 @@ async function decide(
       `#${String(at.number)}: the winning draft rendered nothing to post — refusing to post a ` +
         "marker with no reply under it.",
     );
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
 
   if (settings.dryRun) {
     const would = assemble("", marker, pub);
     core.info(`Dry run — #${String(at.number)} would have received:\n${would}`);
-    return stopped({ language: responded.language, responded, confidence });
+    return settled({ language: responded.language, responded, confidence });
   }
 
   // Reaching here means the walk above found neither this duty's own marker
@@ -622,7 +622,7 @@ async function decide(
   await effects.comment(assemble("", marker, pub));
   core.info(`#${String(at.number)}: posted the first reply.`);
 
-  return stopped({ language: responded.language, responded, confidence, published: true });
+  return settled({ language: responded.language, responded, confidence, published: true });
 }
 
 function notGranted(warrant: Warrant): string {

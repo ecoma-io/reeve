@@ -58,8 +58,14 @@
  * `inputs.ts` (settings parsing, `readSettings` itself stays here — see its
  * doc comment for why), `store.ts` (the corrections store's write path),
  * `record.ts` (the `record` capability's trigger, gates and both write
- * paths), and `outputs.ts` (every `core.setOutput` call and every summary
- * page this duty renders).
+ * paths), `outputs.ts` (every `core.setOutput` call and every summary page
+ * this duty renders), `capabilities.ts` (the cheapest-reversible-action
+ * default a missing warrant falls back to), `outcome.ts` (what Reeve's own
+ * past actions on a thread were, for the S1/S3 signals recall needs),
+ * `propose.ts` (the `propose` capability's workspace-drift pull requests),
+ * `summary.ts` (the page `outputs.ts` renders onto), and `verdict.ts` (the
+ * one stage that talks to a model, and the only one whose answer is treated
+ * as a suggestion).
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";

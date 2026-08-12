@@ -92,13 +92,21 @@ function findExactLine(existing: Correction, correction: Correction): boolean {
 /**
  * Whether this line proves the store holds more than one repository's
  * history — the fact the loose legacy match below has to stay provably false
- * to fire at all.
+ * to fire at all. Matching it loosely there would let today's repo silently
+ * steal another repository's legacy entry whenever their thread numbers
+ * happened to collide.
  *
  * Two shapes prove it: a line this run could not parse at all (garbage
  * proves nothing about whose history it was, so it counts against the loose
  * match rather than for it), or a line carrying a *different* explicit
  * `repo`. A line sharing this correction's own `repo`, or carrying none at
  * all (the pre-`repo` legacy shape), proves nothing either way.
+ *
+ * A shard this run could not read leaves shared-ness just as unknowable as a
+ * foreign repo's line would — this function alone has no way to see it,
+ * which is why `attemptWrite`'s loose-match branch checks `unreadable.length
+ * === 0` on top of what `provenShared` catches here, rather than trusting
+ * this function's answer by itself.
  */
 function isProvenShared(existing: Correction | null, correction: Correction): boolean {
   if (existing === null) return true;
@@ -118,6 +126,14 @@ function isProvenShared(existing: Correction | null, correction: Correction): bo
  * default, so a reversal write (`duty: "duplicate"`) never loosely claims a
  * thread's pre-`repo` standing-label line as though it were the same
  * correction.
+ *
+ * That is what lets a single-repo store self-migrate: the first write a
+ * thread sees after the field shipped leaves nothing legacy to match loosely
+ * the next time. Even so, only the exact-match branch above, which already
+ * compares `duty`, is allowed to treat two lines as one entry outright —
+ * this one only ever offers a *candidate*, rewritten in place solely once
+ * the whole-store search finishes and {@link isProvenShared} has stayed
+ * false throughout.
  */
 function legacyCandidate(existing: Correction, correction: Correction): boolean {
   return (

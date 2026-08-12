@@ -7,11 +7,13 @@
  * string (or the warrant) to a typed value or a thrown `Error`. `readSettings`
  * itself stays in `main.ts` rather than moving here — see its own doc comment
  * for why — but everything it and the rest of the duty need to turn a raw
- * input into a validated one lives in this module instead. That is also what
- * lets `main.ts` import this module for its type-only import safety — `run()`
- * calls `await run()` at import time (see `vitest.config.ts`'s coverage
- * exclusion), so nothing this module needs may value-import anything from
- * `main.ts` back.
+ * input into a validated one lives in this module instead. That is also the
+ * rule this module answers to: `main.ts` value-imports this one, but nothing
+ * here may value-import anything from `main.ts` back. `main.ts` calls `await
+ * run()` at its own top level (see `vitest.config.ts`'s coverage exclusion),
+ * and a value import running the other way would close that into an import
+ * cycle — a type-only import back, where one is ever needed, is erased
+ * before that would matter.
  */
 import type { ApiKeySpec, EndpointSpec } from "../../core/inputs.js";
 import type { Language } from "../../core/languages.js";

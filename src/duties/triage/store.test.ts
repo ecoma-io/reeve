@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as core from "@actions/core";
+
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  info: vi.fn(),
+  warning: vi.fn(),
+}));
 
 import type { ContentsApi, Location } from "../../core/forge.js";
 import { formatCorrection, type Correction } from "../../core/memory.js";
@@ -13,6 +21,10 @@ import {
 } from "./store.js";
 
 const AT: Location = { owner: "acme", repo: "widgets", number: 42 };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 function correctionOf(over: Partial<Correction> = {}): Correction {
   return {
@@ -131,7 +143,14 @@ describe("repoRelativePath", () => {
     const previous = process.env.GITHUB_WORKSPACE;
     process.env.GITHUB_WORKSPACE = "/home/runner/work/widgets/widgets";
     try {
-      expect(() => repoRelativePath("/etc/corrections")).toThrow(/absolute path record cannot use/);
+      expect(() => repoRelativePath("/etc/corrections")).toThrow(
+        new Error(
+          "`corrections` (`/etc/corrections`) is an absolute path record cannot use — the " +
+            "Contents API only understands a path relative to the repository root. Use a " +
+            "repo-relative path, or one under `GITHUB_WORKSPACE` if the workflow built it from " +
+            "`${{ github.workspace }}`.",
+        ),
+      );
     } finally {
       if (previous === undefined) delete process.env.GITHUB_WORKSPACE;
       else process.env.GITHUB_WORKSPACE = previous;
@@ -190,6 +209,16 @@ describe("isShaConflict", () => {
     expect(isShaConflict({ status: 500 })).toBe(false);
     expect(isShaConflict(new Error("network error"))).toBe(false);
     expect(isShaConflict(null)).toBe(false);
+  });
+
+  it("reads a 422's message from `String(error)` when `error` is not an `Error` instance", () => {
+    // The Contents API's own client throws a plain object on some paths, not
+    // always an `Error` — `isShaConflict` falls back to `String(error)`
+    // rather than assume `.message` exists.
+    expect(isShaConflict({ status: 422, toString: () => 'Invalid request. "sha" missing.' })).toBe(
+      true,
+    );
+    expect(isShaConflict({ status: 422, toString: () => "Invalid request." })).toBe(false);
   });
 });
 
@@ -303,13 +332,86 @@ describe("attemptWrite", () => {
 
     expect(writes).toHaveLength(1);
     expect(writes[0]?.path).toBe("corrections/2025-02.ndjson");
+    expect(core.warning).toHaveBeenCalledWith(
+      "corrections: `corrections/2025-01.ndjson` could not be read, so it was skipped rather " +
+        "than failing the whole write — the search continued through the rest of the store. " +
+        "Split the corrections store into smaller shards.",
+    );
+  });
+
+  it("rethrows a shard read failure that is not an unreadable-file marker, rather than swallowing it", async () => {
+    // A shard `listCorrectionFiles` just listed, but whose read fails with
+    // something other than the "over 1 MB, no base64 content" shape
+    // `UnreadableContentsFile` names — a network error, a permissions
+    // problem, anything not that one specific, recoverable case. That must
+    // still fail the whole write, the same as it always did.
+    const api: ContentsApi = {
+      rest: {
+        repos: {
+          getContent: ({ path }: { path: string }) => {
+            if (path === "corrections") {
+              return Promise.resolve({
+                data: [
+                  { name: "2025-01.ndjson", path: "corrections/2025-01.ndjson", sha: "sha-1" },
+                ],
+              });
+            }
+            return Promise.reject(new Error("network error"));
+          },
+          createOrUpdateFileContents: () => {
+            throw new Error("not reached");
+          },
+        },
+      },
+    };
+
+    await expect(attemptWrite(api, AT, "corrections", correctionOf())).rejects.toThrow(
+      "network error",
+    );
+  });
+
+  it("treats a shard that vanished between listing and reading as though it were never there", async () => {
+    // `listCorrectionFiles` named it, but by the time this reads it the shard
+    // is gone (a 404) — `readContentsFile` answers `null`, the same "nothing
+    // here" it reports for a store that never had this shard at all, and the
+    // search continues rather than treating a race as a hard failure.
+    const shard = "corrections/2025-01.ndjson";
+    const writes: { path: string }[] = [];
+    const api: ContentsApi = {
+      rest: {
+        repos: {
+          getContent: ({ path }: { path: string }) => {
+            if (path === "corrections") {
+              return Promise.resolve({ data: [{ name: "2025-01.ndjson", path: shard, sha: "s" }] });
+            }
+            return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
+          },
+          createOrUpdateFileContents: (params: { path: string }) => {
+            writes.push({ path: params.path });
+            return Promise.resolve(undefined);
+          },
+        },
+      },
+    };
+
+    await attemptWrite(api, AT, "corrections", correctionOf());
+
+    // No exact or legacy match could be read at all, so this falls through
+    // to appending a fresh entry — not an error, and not a skip.
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.path).toBe(`corrections/${monthShard()}.ndjson`);
   });
 
   it("refuses to append when a shard could not be read and no exact match was found", async () => {
     const { api, writes } = contentsOf({ "corrections/2025-01.ndjson": null });
 
     await expect(attemptWrite(api, AT, "corrections", correctionOf())).rejects.toThrow(
-      /could not be read at all/,
+      new Error(
+        "#42 was not found in any shard this run could read, and `corrections/2025-01.ndjson` " +
+          "could not be read at all. Appending a fresh entry cannot rule out duplicating one " +
+          "already sitting in the shard this run could not see, so nothing was written — split " +
+          "the corrections store into smaller shards.",
+      ),
     );
     expect(writes).toHaveLength(0);
   });
@@ -324,6 +426,61 @@ describe("attemptWrite", () => {
     expect(writes).toHaveLength(1);
     expect(writes[0]?.path).toBe(`${base}.2.ndjson`);
   });
+
+  it("rolls over past an unreadable this-month shard to the next numbered one, and warns", async () => {
+    // The directory listing this run sees names no shards at all (an empty
+    // store, from `attemptWrite`'s own search's point of view — so its own
+    // `unreadable`-then-throw path, already covered above, is never reached)
+    // but this month's shard, read directly by `selectShard` once the search
+    // comes up empty, answers unreadable — `selectShard`'s own catch, not
+    // `attemptWrite`'s.
+    const base = `corrections/${monthShard()}`;
+    const writes: { path: string }[] = [];
+    const api: ContentsApi = {
+      rest: {
+        repos: {
+          getContent: ({ path }: { path: string }) => {
+            if (path === `${base}.ndjson`) {
+              return Promise.resolve({ data: { sha: "sha-1", content: "", encoding: "none" } });
+            }
+            return Promise.reject(notFoundError());
+          },
+          createOrUpdateFileContents: (params: { path: string }) => {
+            writes.push({ path: params.path });
+            return Promise.resolve(undefined);
+          },
+        },
+      },
+    };
+
+    await attemptWrite(api, AT, "corrections", correctionOf());
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.path).toBe(`${base}.2.ndjson`);
+    expect(core.warning).toHaveBeenCalledWith(
+      `corrections: \`${base}.ndjson\` could not be read, so a fresh correction rolls over to ` +
+        "the next shard instead. Split the corrections store into smaller shards.",
+    );
+  });
+
+  it("gives up once this month's shard has grown past MAX_SHARD_ATTEMPTS numbered siblings", async () => {
+    const base = `corrections/${monthShard()}`;
+    const full = "x".repeat(900_000);
+    const files: Record<string, string> = {};
+    for (let n = 1; n <= 500; n += 1) {
+      files[n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`] = full;
+    }
+    const { api } = contentsOf(files);
+
+    await expect(attemptWrite(api, AT, "corrections", correctionOf())).rejects.toThrow(
+      new Error(
+        "corrections: this month's store has grown past 500 shards, every one of them already " +
+          "at or past the 900000-byte soft limit. That is almost certainly a runaway write loop " +
+          "rather than a genuinely enormous month, so this stops here rather than trying a " +
+          "shard 501.",
+      ),
+    );
+  }, 20_000);
 });
 
 describe("writeCorrection", () => {
@@ -342,6 +499,10 @@ describe("writeCorrection", () => {
 
     expect(writes).toHaveLength(1);
     expect(writes[0]?.path).toBe(shard);
+    expect(core.info).toHaveBeenCalledWith(
+      "Recording #42 lost a race on the store — another commit landed first. Retrying " +
+        "(attempt 2 of 3).",
+    );
   });
 
   it("propagates a failure that is not a sha conflict on the first attempt", async () => {
@@ -357,5 +518,30 @@ describe("writeCorrection", () => {
     };
 
     await expect(writeCorrection(api, AT, "corrections", correctionOf())).rejects.toThrow("boom");
+  });
+
+  it("exhausts all WRITE_ATTEMPTS on a conflict that never resolves, then rethrows", async () => {
+    const conflict = Object.assign(new Error("sha conflict"), { status: 409 });
+    const api: ContentsApi = {
+      rest: {
+        repos: {
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.reject(conflict),
+        },
+      },
+    };
+
+    await expect(writeCorrection(api, AT, "corrections", correctionOf())).rejects.toBe(conflict);
+    // Two retries logged (attempts 2 and 3) before the third attempt's
+    // failure is finally left to propagate rather than tried a fourth time.
+    expect(core.info).toHaveBeenCalledTimes(2);
+    expect(core.info).toHaveBeenCalledWith(
+      "Recording #42 lost a race on the store — another commit landed first. Retrying " +
+        "(attempt 2 of 3).",
+    );
+    expect(core.info).toHaveBeenCalledWith(
+      "Recording #42 lost a race on the store — another commit landed first. Retrying " +
+        "(attempt 3 of 3).",
+    );
   });
 });

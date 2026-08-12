@@ -114,12 +114,17 @@ describe("NOTHING_DONE", () => {
 });
 
 describe("report", () => {
-  function outputs(): Map<string, string> {
-    const calls = vi.mocked(core.setOutput).mock.calls;
-    return new Map(calls.map(([key, value]) => [key, String(value)]));
+  /**
+   * The raw call log, in call order, values coerced to `string` the same way
+   * `@actions/core`'s own `setOutput` does — unlike a `Map`, this keeps
+   * order and every call, including a duplicate key, rather than collapsing
+   * to whichever write landed last.
+   */
+  function calls(): (readonly [string, string])[] {
+    return vi.mocked(core.setOutput).mock.calls.map(([key, value]) => [key, String(value)]);
   }
 
-  it("writes all twelve keys on an ordinary run", () => {
+  it("writes all twelve keys, in `writeOutputs`' own order, on an ordinary run", () => {
     const outcome = outcomeOf({
       applied: ["bug"],
       verdict: { labels: ["bug", "docs"], confidence: 0.83, duplicateOf: 12, rationale: "" },
@@ -130,22 +135,20 @@ describe("report", () => {
 
     report(outcome, done, false, false);
 
-    expect(outputs()).toEqual(
-      new Map([
-        ["labels", JSON.stringify(["bug"])],
-        ["proposed", JSON.stringify(["bug", "docs"])],
-        ["confidence", "0.83"],
-        ["language", "French"],
-        ["duplicate-of", "12"],
-        ["screened-out", ""],
-        ["applied", JSON.stringify(done)],
-        ["starved", "false"],
-        ["processed", "0"],
-        ["skipped", "0"],
-        ["remaining", "0"],
-        ["recorded", "false"],
-      ]),
-    );
+    expect(calls()).toEqual([
+      ["labels", JSON.stringify(["bug"])],
+      ["proposed", JSON.stringify(["bug", "docs"])],
+      ["confidence", "0.83"],
+      ["language", "French"],
+      ["duplicate-of", "12"],
+      ["screened-out", ""],
+      ["applied", JSON.stringify(done)],
+      ["starved", "false"],
+      ["processed", "0"],
+      ["skipped", "0"],
+      ["remaining", "0"],
+      ["recorded", "false"],
+    ]);
   });
 
   it("reports `applied` as `{}` under a rehearsal, never the `done` it would have taken", () => {
@@ -154,7 +157,7 @@ describe("report", () => {
 
     report(outcome, done, true, false);
 
-    expect(outputs().get("applied")).toBe("{}");
+    expect(calls()).toContainEqual(["applied", "{}"]);
   });
 
   it("reports `duplicate-of` and `screened-out` and `language` empty when the outcome has none", () => {
@@ -166,15 +169,15 @@ describe("report", () => {
 
     report(outcome, NOTHING_DONE, false, false);
 
-    expect(outputs().get("language")).toBe("");
-    expect(outputs().get("duplicate-of")).toBe("");
-    expect(outputs().get("screened-out")).toBe("spam");
+    expect(calls()).toContainEqual(["language", ""]);
+    expect(calls()).toContainEqual(["duplicate-of", ""]);
+    expect(calls()).toContainEqual(["screened-out", "spam"]);
   });
 
   it("reports `starved` from the caller, independent of the outcome", () => {
     report(outcomeOf(), NOTHING_DONE, false, true);
 
-    expect(outputs().get("starved")).toBe("true");
+    expect(calls()).toContainEqual(["starved", "true"]);
   });
 });
 
@@ -207,42 +210,40 @@ describe("reportSweep", () => {
 });
 
 describe("reportRecordRun", () => {
-  function outputs(): Map<string, string> {
-    const calls = vi.mocked(core.setOutput).mock.calls;
-    return new Map(calls.map(([key, value]) => [key, String(value)]));
+  /** Same call-order-and-duplicate-preserving log as `report`'s own `calls()`, above. */
+  function calls(): (readonly [string, string])[] {
+    return vi.mocked(core.setOutput).mock.calls.map(([key, value]) => [key, String(value)]);
   }
 
-  it("writes the full twelve-key contract with the record path's own neutral values", () => {
+  it("writes the full twelve-key contract, in order, with the record path's own neutral values", () => {
     reportRecordRun(recordOutcomeOf({ recorded: true, language: "Spanish" }), false);
 
-    expect(outputs()).toEqual(
-      new Map([
-        ["labels", "[]"],
-        ["proposed", "[]"],
-        ["confidence", "0.00"],
-        ["language", "Spanish"],
-        ["duplicate-of", ""],
-        ["screened-out", ""],
-        ["applied", JSON.stringify(NOTHING_DONE)],
-        ["starved", "false"],
-        ["processed", "0"],
-        ["skipped", "0"],
-        ["remaining", "0"],
-        ["recorded", "true"],
-      ]),
-    );
+    expect(calls()).toEqual([
+      ["labels", "[]"],
+      ["proposed", "[]"],
+      ["confidence", "0.00"],
+      ["language", "Spanish"],
+      ["duplicate-of", ""],
+      ["screened-out", ""],
+      ["applied", JSON.stringify(NOTHING_DONE)],
+      ["starved", "false"],
+      ["processed", "0"],
+      ["skipped", "0"],
+      ["remaining", "0"],
+      ["recorded", "true"],
+    ]);
   });
 
   it("reports `language` empty when the outcome detected none", () => {
     reportRecordRun(recordOutcomeOf({ language: null }), false);
 
-    expect(outputs().get("language")).toBe("");
+    expect(calls()).toContainEqual(["language", ""]);
   });
 
   it("reports `recorded` false when the outcome did not write", () => {
     reportRecordRun(recordOutcomeOf({ recorded: false }), false);
 
-    expect(outputs().get("recorded")).toBe("false");
+    expect(calls()).toContainEqual(["recorded", "false"]);
   });
 });
 

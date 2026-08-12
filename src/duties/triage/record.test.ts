@@ -10,6 +10,14 @@ const { payload } = vi.hoisted((): { payload: Payload } => ({ payload: {} }));
 
 vi.mock("@actions/github", () => ({ context: { payload } }));
 
+import * as core from "@actions/core";
+
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  info: vi.fn(),
+  warning: vi.fn(),
+}));
+
 import type { ContentsApi, Location, Standing, TrackerApi } from "../../core/forge.js";
 import type { Language } from "../../core/languages.js";
 import { parseCorrection, type Correction } from "../../core/memory.js";
@@ -42,6 +50,7 @@ beforeEach(() => {
   delete payload.sender;
   delete payload.label;
   delete process.env.GITHUB_EVENT_NAME;
+  vi.clearAllMocks();
 });
 
 describe("recordTrigger", () => {
@@ -484,6 +493,71 @@ describe("recordCorrection", () => {
 
     expect(outcome).toEqual(outcomeOf({ recorded: true, decided: ["bug"] }));
     expect(writes).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith("Would record #42 as bug — dry run, nothing committed.");
+  });
+
+  it("says `no labels` in the dry-run log when nothing was decided", async () => {
+    const { api, writes } = apiOf();
+    const standing = standingOf({ labels: [] });
+
+    await recordCorrection(
+      api,
+      AT,
+      standing,
+      authorityOf(),
+      settingsOf({ dryRun: true }),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+    );
+
+    expect(writes).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith(
+      "Would record #42 as no labels — dry run, nothing committed.",
+    );
+  });
+
+  it("notes a pivot rendering in the dry-run log when one was produced", async () => {
+    const { api, writes } = apiOf();
+    const standing = standingOf({
+      title: "Dark mode setting is lost between sessions",
+      body: "It resets every time I close the app, which is annoying for daily use.",
+      labels: ["bug"],
+    });
+    const languages: readonly Language[] = [
+      { code: "en", label: "English", scripts: ["Latin"] },
+      { code: "zh", label: "Chinese", scripts: ["Han"] },
+    ];
+    const stages: Stages = {
+      ...stagesOf(),
+      pivot: pivotProvider({
+        title: "深色模式设置在会话之间丢失",
+        body: "每次关闭应用时都会重置。",
+      }),
+    };
+    const authority: Authority = {
+      warrant: { ...warrantOf(), pivot: "zh" },
+      implicit: false,
+      excludedLabels: [],
+    };
+
+    await recordCorrection(
+      api,
+      AT,
+      standing,
+      authority,
+      settingsOf({ dryRun: true, languages }),
+      stages,
+      WEATHER,
+      "maintainer",
+      null,
+    );
+
+    expect(writes).toHaveLength(0);
+    expect(core.info).toHaveBeenCalledWith(
+      "Would record #42 as bug, with a pivot rendering — dry run, nothing committed.",
+    );
   });
 
   it("computes proposed as the honest before/after delta on a single-thread `labeled` event", async () => {
@@ -667,6 +741,60 @@ describe("recordCorrection", () => {
         outcomeOf({ recorded: false, decided: [], machineOnly: true, unattributable: false }),
       );
       expect(writes).toHaveLength(0);
+      expect(core.info).toHaveBeenCalledWith(
+        "#42: every taxonomy label here was machine-applied — nothing to import.",
+      );
+    });
+
+    it("imports a label whose only event is `unlabeled` — no `labeled` event to distrust", async () => {
+      // The self-training guard only ever excludes a label on the strength of
+      // its own most recent `labeled` event's actor — a label with no
+      // `labeled` event at all in what this run read has nothing to distrust,
+      // and `?? false` (record.ts) reads that absence as "not a bot" rather
+      // than fail closed the way an incomplete history does.
+      const { api, writes } = apiOf({
+        eventPages: [
+          [{ event: "unlabeled", label: { name: "bug" }, actor: { login: "maintainer" } }],
+        ],
+      });
+      const standing = standingOf({ labels: ["bug"] });
+
+      const outcome = await recordCorrection(
+        api,
+        AT,
+        standing,
+        authorityOf(),
+        settingsOf(),
+        stagesOf(),
+        WEATHER,
+        "sweep",
+        null,
+      );
+
+      expect(outcome).toEqual(outcomeOf({ decided: ["bug"] }));
+      const correction = writtenCorrection(writes);
+      expect(correction.decided).toEqual(["bug"]);
+    });
+
+    it("imports a standing taxonomy label whose history carries no `labeled` event at all", async () => {
+      const { api, writes } = apiOf({ eventPages: [[{ event: "commented" }]] });
+      const standing = standingOf({ labels: ["bug"] });
+
+      const outcome = await recordCorrection(
+        api,
+        AT,
+        standing,
+        authorityOf(),
+        settingsOf(),
+        stagesOf(),
+        WEATHER,
+        "sweep",
+        null,
+      );
+
+      expect(outcome).toEqual(outcomeOf({ decided: ["bug"] }));
+      const correction = writtenCorrection(writes);
+      expect(correction.decided).toEqual(["bug"]);
     });
 
     it("records nothing, and says why, when the label history is longer than one run reads", async () => {
@@ -690,6 +818,9 @@ describe("recordCorrection", () => {
         outcomeOf({ recorded: false, decided: [], machineOnly: false, unattributable: true }),
       );
       expect(writes).toHaveLength(0);
+      expect(core.info).toHaveBeenCalledWith(
+        "#42: label history is longer than one run reads — cannot attribute, nothing imported.",
+      );
     });
 
     it("never reads label history at all when the thread carries no taxonomy label", async () => {
