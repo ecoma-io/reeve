@@ -34632,10 +34632,14 @@ async function run() {
       }
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
+        );
       } else if (!settings.sweep && recorded !== null) {
         reportRecordRun(recorded.outcome, rosterStarved);
-        await writeSummary(recordPage(settings, recorded.number, recorded.outcome, meter.spent()) + authSection(weather.authFailures));
+        await writeSummary(
+          recordPage(settings, recorded.number, recorded.outcome, meter.spent()) + authSection(weather.authFailures)
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, settings.dryRun, rosterStarved);
         await writeSummary(

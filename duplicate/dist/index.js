@@ -34348,7 +34348,9 @@ async function run() {
       }
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.outcome, single.done, rosterStarved);
         await writeSummary(

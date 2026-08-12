@@ -34743,10 +34743,14 @@ async function run() {
       }
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
-        await writeSummary(sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures));
+        await writeSummary(
+          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
+        );
       } else if (!settings.sweep && single !== null) {
         report(single.result.translated, single.result.replies, rosterStarved);
-        await writeSummary(page(settings, authority2, single.number, single.result, meter.spent()) + authSection(weather.authFailures));
+        await writeSummary(
+          page(settings, authority2, single.number, single.result, meter.spent()) + authSection(weather.authFailures)
+        );
       }
     }
   }

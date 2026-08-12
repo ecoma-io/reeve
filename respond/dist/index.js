@@ -34828,7 +34828,9 @@ async function run() {
         );
       }
       report(outcome2, rosterStarved);
-      await writeSummary(page(settings, authority2, outcome2, ungranted, meter.spent()) + authSection(weather.authFailures));
+      await writeSummary(
+        page(settings, authority2, outcome2, ungranted, meter.spent()) + authSection(weather.authFailures)
+      );
     }
   }
 }
