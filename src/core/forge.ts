@@ -72,6 +72,14 @@ export interface GitHubApi {
           body?: string | null;
           user?: { login?: string; type?: string } | null;
         }[];
+        /**
+         * GitHub's own pagination signal — a real client always includes it.
+         * Optional here only so a hand-built stub answering a single page
+         * (the overwhelming majority of them) is not made to fabricate one:
+         * `listReplies` treats its absence the same as "there is no `last`
+         * page to walk back from", which is exactly true of a one-page thread.
+         */
+        headers?: { readonly link?: string } | undefined;
       }>;
       updateComment(params: {
         owner: string;
@@ -132,17 +140,15 @@ export interface Reply {
 }
 
 /**
- * How many replies one page carries, and how many pages one run will turn
+ * How many replies one page carries, and how many pages deep one run will walk
  * looking for the newest ones.
  *
  * A thread's replies are unbounded — a year-old issue can carry four hundred —
  * and every one of them is a body a duty would read, fingerprint, and possibly
- * spend a request on. GitHub's comment listing has no reverse-chronological
- * order, so "the newest ones" can only be found by walking forward from the
- * start; `REPLY_PAGES` is the ceiling on how far one run will walk to find
- * them; a thread past `REPLY_PAGE * REPLY_PAGES` comments (mirrors
- * `SWEEP_PAGES`'s reasoning) is the pathological case this reports honestly
- * (`more: true`) rather than serves completely.
+ * spend a request on. `REPLY_PAGES` is the ceiling on how many pages of the
+ * thread one run will ever fetch; a thread past `REPLY_PAGE * REPLY_PAGES`
+ * comments (mirrors `SWEEP_PAGES`'s reasoning) is the pathological case this
+ * reports honestly (`more: true`) rather than serves completely.
  *
  * A run that hits either ceiling says so rather than trimming quietly, so the
  * consumer sees a number to raise instead of a silence to misread.
@@ -157,12 +163,40 @@ export interface ListRepliesOptions {
   /**
    * `"oldest"` (the default) reads from the start of the thread and keeps the
    * first `max` — the order `respond` wants, since it answers a thread the
-   * way a reader arrives at it, from the top. `"newest"` walks every page up
-   * to `REPLY_PAGES` and keeps the last `max` — the order a translator wants,
-   * since a discussion nobody has touched in eight months does not need its
-   * middle worked over on the run a new comment triggered.
+   * way a reader arrives at it, from the top. `"newest"` walks backward from
+   * the true end of the thread and keeps the last `max` — the order a
+   * translator wants, since a discussion nobody has touched in eight months
+   * does not need its middle worked over on the run a new comment triggered.
    */
   readonly order?: "oldest" | "newest";
+}
+
+/**
+ * The last page number GitHub's `Link` response header names with `rel="last"`
+ * — its own answer to "how many pages does this listing have", one request
+ * would otherwise have no way to know without walking every page first.
+ *
+ * `null` covers both a listing GitHub judged small enough to need no `Link`
+ * header at all, and a stub in a unit test answering a single page with none
+ * — both mean the same thing to a caller: what came back is everything.
+ */
+function lastPageFrom(link: string | undefined): number | null {
+  if (link === undefined) return null;
+  const match = /<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/.exec(link);
+  return match?.[1] === undefined ? null : Number(match[1]);
+}
+
+function toReply(comment: {
+  id: number;
+  body?: string | null;
+  user?: { login?: string; type?: string } | null;
+}): Reply {
+  return {
+    id: comment.id,
+    body: comment.body ?? "",
+    login: comment.user?.login ?? "",
+    isBot: isBotAuthor(comment.user),
+  };
 }
 
 /**
@@ -178,40 +212,70 @@ export async function listReplies(
 ): Promise<{ replies: readonly Reply[]; more: boolean }> {
   const max = options?.max ?? REPLY_PAGE;
   const order = options?.order ?? "oldest";
-  // Oldest-first never needs more pages than it takes to cover `max` — the
-  // replies past that point are never kept, so there is nothing to walk
-  // forward for. Newest-first has no such shortcut: finding the true end of
-  // the thread means walking every page up to the ceiling.
-  const pageCap =
-    order === "oldest" ? Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE)) : REPLY_PAGES;
 
-  const all: Reply[] = [];
-  let lastPageFull = false;
-  for (let page = 1; page <= pageCap; page += 1) {
-    const { data } = await api.rest.issues.listComments({
+  const page = (n: number) =>
+    api.rest.issues.listComments({
       owner: at.owner,
       repo: at.repo,
       issue_number: at.number,
       per_page: REPLY_PAGE,
-      page,
+      page: n,
     });
 
-    all.push(
-      ...data.map((comment) => ({
-        id: comment.id,
-        body: comment.body ?? "",
-        login: comment.user?.login ?? "",
-        isBot: isBotAuthor(comment.user),
-      })),
-    );
-
-    lastPageFull = data.length === REPLY_PAGE;
-    if (!lastPageFull) break;
-    if (order === "oldest" && all.length >= max) break;
+  if (order === "oldest") {
+    // Never needs more pages than it takes to cover `max` — the replies past
+    // that point are never kept, so there is nothing to walk forward for.
+    const pageCap = Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE));
+    const all: Reply[] = [];
+    let lastPageFull = false;
+    for (let n = 1; n <= pageCap; n += 1) {
+      const { data } = await page(n);
+      all.push(...data.map(toReply));
+      lastPageFull = data.length === REPLY_PAGE;
+      if (!lastPageFull || all.length >= max) break;
+    }
+    return { replies: all.slice(0, max), more: all.length > max || lastPageFull };
   }
 
-  const replies = order === "oldest" ? all.slice(0, max) : all.slice(-max);
-  return { replies, more: all.length > max || lastPageFull };
+  // `"newest"`: one request establishes where the thread actually ends —
+  // GitHub's `Link` header names the true last page, the only way to reach it
+  // without walking every page from the start the way a forward walk would.
+  // A thread with a thousand replies and a duty that wants the newest two
+  // would otherwise spend nine wasted requests, or — the bug this replaces —
+  // give up at the ceiling and hand back the tail of whatever it had walked
+  // so far, which is not the newest anything.
+  const first = await page(1);
+  const lastPage = lastPageFrom(first.headers?.link);
+
+  if (lastPage === null || lastPage <= 1) {
+    const all = first.data.map(toReply);
+    return { replies: all.slice(-max), more: all.length > max };
+  }
+
+  // Walk backward from the true end, only as many pages as `max` can ever
+  // need, capped at `REPLY_PAGES` the same way the oldest-first walk is —
+  // the ceiling this run will pay for, not the ceiling on how large a thread
+  // may be.
+  const pagesNeeded = Math.min(
+    REPLY_PAGES,
+    Math.ceil(Math.min(max, REPLY_PAGE * REPLY_PAGES) / REPLY_PAGE),
+    lastPage,
+  );
+  const firstPageWalked = lastPage - pagesNeeded + 1;
+
+  const collected: Reply[] = [];
+  for (let n = lastPage; n >= firstPageWalked; n -= 1) {
+    // Page 1 was already fetched above, to learn where the thread ends —
+    // reusing it here means a thread short enough to walk back to the start
+    // never pays for it twice.
+    const { data } = n === 1 ? first : await page(n);
+    collected.unshift(...data.map(toReply));
+  }
+
+  return {
+    replies: collected.slice(-max),
+    more: firstPageWalked > 1 || collected.length > max,
+  };
 }
 
 /**
@@ -329,6 +393,19 @@ export interface TrackerApi {
           labels?: (string | { name?: string })[];
           created_at: string;
           pull_request?: unknown;
+        }[];
+      }>;
+      listEvents(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        per_page?: number;
+        page?: number;
+      }): Promise<{
+        data: {
+          event?: string;
+          label?: { name?: string };
+          actor?: { login?: string; type?: string } | null;
         }[];
       }>;
     };
@@ -537,6 +614,56 @@ export async function listOpenThreads(
   }
 
   return listed;
+}
+
+/** One `labeled` or `unlabeled` event on a thread, and who caused it. */
+export interface LabelEvent {
+  readonly label: string;
+  readonly action: "labeled" | "unlabeled";
+  /** Whether the account that made this change is a bot — see `isBotAuthor`. */
+  readonly isBot: boolean;
+}
+
+/** How many event pages one call reads before it stops asking. */
+const EVENT_PAGE = 100;
+const EVENT_PAGES = 10;
+
+/**
+ * Every `labeled`/`unlabeled` event on a thread's timeline, oldest first —
+ * the same order the timeline API returns it in, which is what lets a caller
+ * fold this into "the most recent event for a given label" with a single
+ * pass.
+ *
+ * Read once per candidate, and only where a caller asks for it: this is an
+ * extra request per thread, worth spending only where the alternative is
+ * importing a machine's own old verdict as a maintainer's.
+ */
+export async function listLabelEvents(
+  api: TrackerApi,
+  at: Location,
+): Promise<readonly LabelEvent[]> {
+  const events: LabelEvent[] = [];
+
+  for (let page = 1; page <= EVENT_PAGES; page += 1) {
+    const { data } = await api.rest.issues.listEvents({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: EVENT_PAGE,
+      page,
+    });
+
+    for (const entry of data) {
+      if (entry.event !== "labeled" && entry.event !== "unlabeled") continue;
+      const name = entry.label?.name;
+      if (name === undefined || name.length === 0) continue;
+      events.push({ label: name, action: entry.event, isBot: isBotAuthor(entry.actor) });
+    }
+
+    if (data.length < EVENT_PAGE) break;
+  }
+
+  return events;
 }
 
 /**

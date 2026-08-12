@@ -148,11 +148,24 @@ describe("listReplies", () => {
     ]);
   });
 
-  /** A client whose `listComments` answers a different page every call. */
+  /**
+   * A client whose `listComments` answers a different page every call, and
+   * reports a real `Link` response header naming the true last page — the
+   * signal `listReplies` reads to walk backward from the actual end of the
+   * thread, the way a genuine GitHub response does.
+   */
   function paged(pages: { id: number; body: string }[][]): GitHubApi {
-    const listComments = vi.fn((params: { page?: number }) =>
-      Promise.resolve({ data: pages[(params.page ?? 1) - 1] ?? [] }),
-    );
+    const lastPage = pages.length;
+    const listComments = vi.fn((params: { page?: number }) => {
+      const n = params.page ?? 1;
+      return Promise.resolve({
+        data: pages[n - 1] ?? [],
+        headers:
+          lastPage > 1
+            ? { link: `<https://api.github.com/x?page=${String(lastPage)}>; rel="last"` }
+            : undefined,
+      });
+    });
     return {
       rest: {
         issues: {
@@ -166,9 +179,10 @@ describe("listReplies", () => {
     };
   }
 
-  it("walks forward through every page to find the newest replies", async () => {
+  it("walks backward from the true end of the thread, found through the `Link` header, to reach the newest replies", async () => {
     // GitHub's comment listing has no reverse-chronological order — the only
-    // way to the newest ones is walking forward to the true end.
+    // way to the newest ones without walking every page from the start is the
+    // `Link` header naming where the thread actually ends.
     const oldest = Array.from({ length: 100 }, (_, index) => ({
       id: index,
       body: `old-${String(index)}`,
@@ -186,6 +200,78 @@ describe("listReplies", () => {
       { id: 201, body: "Tôi cũng vậy.", login: "", isBot: false },
     ]);
     expect(more).toBe(true);
+    // One request to learn where the thread ends, one to read that page —
+    // never the whole hundred-page walk the old, forward-only search paid for.
+    expect(api.rest.issues.listComments).toHaveBeenCalledTimes(2);
+  });
+
+  it("reaches replies past the page-walk ceiling that a forward walk would have missed entirely", async () => {
+    // The bug this replaces: a thread with more pages than `REPLY_PAGES`
+    // walked forward from page 1 would stop at page 10, having never seen
+    // pages 11–15 — the pages actually holding the newest replies — and hand
+    // back the tail of page 10 as though it were "the newest ones".
+    const pages = Array.from({ length: 15 }, (_, pageIndex) => {
+      const size = pageIndex === 14 ? 50 : 100;
+      return Array.from({ length: size }, (_, index) => ({
+        id: pageIndex * 100 + index,
+        body: `c-${String(pageIndex * 100 + index)}`,
+      }));
+    });
+    const api = paged(pages);
+
+    // `REPLY_PAGE * REPLY_PAGES` (1000) — the largest `max` the ceiling ever
+    // serves in full.
+    const { replies, more } = await listReplies(api, AT, { max: 1_000, order: "newest" });
+
+    // Genuinely the newest reply on the thread — id 1449, on page 15 — which
+    // a forward walk capped at page 10 could never have reached.
+    expect(replies.at(-1)?.id).toBe(1449);
+    // The oldest reply kept is the first one on page 6 (id 500): the walk
+    // reached back exactly `REPLY_PAGES` pages from the true end (15), to
+    // page 6, and no further.
+    expect(replies[0]?.id).toBe(500);
+    expect(more).toBe(true);
+    // Pages 2 through 5 hold replies older than the walked window and must
+    // never be fetched at all — not "fetched and then discarded".
+    for (const page of [2, 3, 4, 5]) {
+      expect(api.rest.issues.listComments).not.toHaveBeenCalledWith(
+        expect.objectContaining({ page }),
+      );
+    }
+    // Page 1 (the discovery request) plus pages 6 through 15 (the walked
+    // window) — eleven requests for a fifteen-page thread, not fifteen.
+    expect(api.rest.issues.listComments).toHaveBeenCalledTimes(11);
+  });
+
+  it("reuses the discovery page instead of re-fetching it, when the backward walk reaches all the way to page 1", async () => {
+    const pages = Array.from({ length: 3 }, (_, pageIndex) =>
+      Array.from({ length: 100 }, (_, index) => ({
+        id: pageIndex * 100 + index,
+        body: `c-${String(pageIndex * 100 + index)}`,
+      })),
+    );
+    const api = paged(pages);
+
+    const { replies, more } = await listReplies(api, AT, { max: 1_000, order: "newest" });
+
+    expect(replies).toHaveLength(300);
+    expect(replies[0]?.id).toBe(0);
+    expect(replies.at(-1)?.id).toBe(299);
+    // Nothing older exists past what was walked, and `max` was never reached.
+    expect(more).toBe(false);
+    // Three pages, not four — page 1 answers both the discovery request and
+    // the walk's need for it.
+    expect(api.rest.issues.listComments).toHaveBeenCalledTimes(3);
+  });
+
+  it("has nothing to walk back to when the whole thread fits on one page — no `Link` header at all", async () => {
+    const api = paged([[{ id: 1, body: "Only reply." }]]);
+
+    const { replies, more } = await listReplies(api, AT, { max: 5, order: "newest" });
+
+    expect(replies).toEqual([{ id: 1, body: "Only reply.", login: "", isBot: false }]);
+    expect(more).toBe(false);
+    expect(api.rest.issues.listComments).toHaveBeenCalledTimes(1);
   });
 
   it("stops at the first page reading oldest-first, never walking further than `max` needs", async () => {

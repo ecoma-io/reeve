@@ -42,6 +42,9 @@ function stubOf(entries: readonly Entry[]): TrackerApi {
         listLabelsForRepo: () => {
           throw new Error("not used by listCorpus");
         },
+        listEvents: () => {
+          throw new Error("not used by listCorpus");
+        },
       },
     },
   };
