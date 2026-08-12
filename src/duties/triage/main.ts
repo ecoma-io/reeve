@@ -73,16 +73,7 @@ import {
   type Standing,
   type TrackerApi,
 } from "../../core/forge.js";
-import {
-  bounded,
-  counted,
-  fraction,
-  readShared,
-  resolveEndpoints,
-  type ApiKeySpec,
-  type EndpointSpec,
-} from "../../core/inputs.js";
-import { type Language } from "../../core/languages.js";
+import { bounded, counted, fraction, readShared, resolveEndpoints } from "../../core/inputs.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import {
   createMemory,
@@ -100,7 +91,6 @@ import {
   settleAuth,
   shown,
   starved,
-  type Names,
   type Provider,
   type Weather,
 } from "../../core/provider.js";
@@ -120,6 +110,7 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
+import { parseSweepState, resolveTaxonomy, taxonomyNames, type Settings } from "./inputs.js";
 import { checkReversal, closeMarker, gateClose, removedByAutomation } from "./outcome.js";
 import { repoRelativePath, writeCorrection } from "./store.js";
 import {
@@ -165,135 +156,6 @@ const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
  * for it.
  */
 const RECALLED = 4;
-
-interface Settings {
-  readonly token: string;
-  /** The thread to work on, or null in `sweep`. */
-  readonly number: number | null;
-  readonly models: readonly string[];
-  readonly modelNames: Names;
-  /** The cheap roster. Empty turns the model-backed screen off, which is the default. */
-  readonly screenModels: readonly string[];
-  readonly screenNames: Names;
-  readonly languages: readonly Language[];
-  readonly warrant: string;
-  /**
-   * The subset of `warrant.labels` this run may propose — `labels`'s own
-   * answer, in the warrant's order. The whole taxonomy when `labels` named
-   * nothing. See `resolveTaxonomy`.
-   */
-  readonly taxonomy: readonly Label[];
-  readonly apply: readonly Capability[];
-  readonly confidence: number;
-  readonly corrections: string;
-  readonly about: string;
-  readonly minBodyChars: number;
-  /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
-  readonly maxBodyChars: number | null;
-  readonly dryRun: boolean;
-  readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly sweep: boolean;
-  readonly since: Date | null;
-  /** `null` is no ceiling at all — see `bounded`'s doc comment for the sentinel rule. */
-  readonly limit: number | null;
-  readonly endpoints: readonly EndpointSpec[];
-  readonly apiKeys: readonly ApiKeySpec[];
-  readonly requestTimeoutMs: number;
-  readonly temperature: number | undefined;
-  /**
-   * Which resource state a sweep considers — a filter on what it fetches, not
-   * a different mode of the duty. See `parseSweepState`.
-   */
-  readonly sweepState: SweepState;
-}
-
-/** `sweep-state`'s three spellings, as `parseSweepState` reads them. */
-type SweepState = "open" | "closed" | "all";
-const SWEEP_STATES: readonly SweepState[] = ["open", "closed", "all"];
-
-/**
- * Which resource state a sweep considers.
- *
- * A resource filter, not a mode: it changes what `listOpenThreads` fetches,
- * nothing about how a fetched thread is decided. `open` is the default and
- * the ordinary case — a sweep keeping a fresh backlog triaged. `closed` and
- * `all` exist for the case this duty's `record` capability makes possible
- * when it composes with `sweep`: a one-time bulk migration that imports a
- * project's already-decided history — including threads a maintainer closed
- * long before this action existed — into the corrections store in one run,
- * rather than one label event at a time from here on.
- */
-function parseSweepState(raw: string): SweepState {
-  const value = raw.trim().toLowerCase();
-  const match = SWEEP_STATES.find((state) => state === value);
-  if (match === undefined) {
-    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
-  }
-  return match;
-}
-
-/**
- * `labels`, narrowed against the warrant's own taxonomy — in the warrant's
- * order, because that order is what breaks a tie between two proposals, not
- * the input's.
- *
- * Empty is the whole taxonomy, unchanged: a monorepo with one area per
- * directory and one shared `.github/reeve.yml` points every area's workflow
- * at the same file and uses this to keep each one proposing only the labels
- * its own area owns, without maintaining a taxonomy file per area. A name
- * this asks for that the file does not have is refused rather than quietly
- * dropped — a typo here would otherwise triage forever with one label
- * missing from the roster and nothing saying so.
- */
-function resolveTaxonomy(warrant: Warrant, raw: string): readonly Label[] {
-  const requested = raw
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  if (requested.length === 0) return warrant.labels;
-
-  for (const name of requested) {
-    if (warrant.labelNamed(name) === undefined) {
-      throw new Error(
-        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. ` +
-          "Add it there, or correct the name.",
-      );
-    }
-  }
-  const wanted = new Set(requested);
-  return warrant.labels.filter((label) => wanted.has(label.name));
-}
-
-/** `settings.taxonomy`'s own names, for the places that check membership rather than shape. */
-function taxonomyNames(settings: Settings): ReadonlySet<string> {
-  return new Set(settings.taxonomy.map((label) => label.name));
-}
-
-/**
- * Everything but `languages` and `taxonomy`, neither of which can be read
- * here: both need the warrant, and `readWarrant`'s own result is only
- * available once `resolveAuthority` has answered, while every other input
- * here is not async at all. `run` completes the object once it has.
- */
-function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
-  const shared = readShared();
-  const cheap = parseModels(core.getInput("screen-models"));
-
-  return {
-    ...shared,
-    screenModels: cheap.models,
-    screenNames: cheap.names,
-    warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
-    confidence: fraction("confidence", core.getInput("confidence")),
-    corrections: core.getInput("corrections", { required: true }),
-    about: core.getInput("about"),
-    minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
-    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
-    sweepState: parseSweepState(core.getInput("sweep-state")),
-  };
-}
 
 /**
  * One provider per stage, each counting its own requests.
@@ -658,6 +520,38 @@ function describeOutcome(outcome: Outcome, done: Done): string {
   }
   if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
   return "no label";
+}
+
+/**
+ * Everything but `languages` and `taxonomy`, neither of which can be read
+ * here: both need the warrant, and `readWarrant`'s own result is only
+ * available once `resolveAuthority` has answered, while every other input
+ * here is not async at all. `run` completes the object once it has.
+ *
+ * Kept here rather than in `./inputs.js` alongside the rest of this duty's
+ * input contract: `main.integration.test.ts`'s "reads every input it
+ * declares" test finds every `getInput` call by scanning this file's own
+ * source text (and `core/inputs.ts`'s), so a `core.getInput` call moved out
+ * of this file would still run correctly but would go invisible to that
+ * check. `./inputs.js` carries the pure transforms this calls into instead.
+ */
+function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
+  const shared = readShared();
+  const cheap = parseModels(core.getInput("screen-models"));
+
+  return {
+    ...shared,
+    screenModels: cheap.models,
+    screenNames: cheap.names,
+    warrant: core.getInput("warrant", { required: true }),
+    apply: parseApply(core.getInput("apply", { required: true })),
+    confidence: fraction("confidence", core.getInput("confidence")),
+    corrections: core.getInput("corrections", { required: true }),
+    about: core.getInput("about"),
+    minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
+    maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
+    sweepState: parseSweepState(core.getInput("sweep-state")),
+  };
 }
 
 export async function run(): Promise<void> {

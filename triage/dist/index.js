@@ -35063,6 +35063,33 @@ function cost(spent, name) {
   return lines.join("\n");
 }
 
+// src/duties/triage/inputs.ts
+var SWEEP_STATES = ["open", "closed", "all"];
+function parseSweepState(raw) {
+  const value = raw.trim().toLowerCase();
+  const match = SWEEP_STATES.find((state) => state === value);
+  if (match === void 0) {
+    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
+  }
+  return match;
+}
+function resolveTaxonomy(warrant, raw) {
+  const requested = raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  if (requested.length === 0) return warrant.labels;
+  for (const name of requested) {
+    if (warrant.labelNamed(name) === void 0) {
+      throw new Error(
+        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. Add it there, or correct the name.`
+      );
+    }
+  }
+  const wanted = new Set(requested);
+  return warrant.labels.filter((label) => wanted.has(label.name));
+}
+function taxonomyNames(settings) {
+  return new Set(settings.taxonomy.map((label) => label.name));
+}
+
 // src/duties/triage/outcome.ts
 var closeMarker = closeMarkerFor("triage");
 async function removedByAutomation(api, at, label) {
@@ -36251,48 +36278,6 @@ var DEFAULT_CAPABILITIES = ["label"];
 // src/duties/triage/main.ts
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
-var SWEEP_STATES = ["open", "closed", "all"];
-function parseSweepState(raw) {
-  const value = raw.trim().toLowerCase();
-  const match = SWEEP_STATES.find((state) => state === value);
-  if (match === void 0) {
-    throw new Error(`sweep-state: expected one of ${SWEEP_STATES.join(", ")}, got \`${raw}\`.`);
-  }
-  return match;
-}
-function resolveTaxonomy(warrant, raw) {
-  const requested = raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) return warrant.labels;
-  for (const name of requested) {
-    if (warrant.labelNamed(name) === void 0) {
-      throw new Error(
-        `labels: \`${name}\` is not in \`${warrant.path}\`'s taxonomy. Add it there, or correct the name.`
-      );
-    }
-  }
-  const wanted = new Set(requested);
-  return warrant.labels.filter((label) => wanted.has(label.name));
-}
-function taxonomyNames(settings) {
-  return new Set(settings.taxonomy.map((label) => label.name));
-}
-function readSettings() {
-  const shared = readShared();
-  const cheap = parseModels(getInput("screen-models"));
-  return {
-    ...shared,
-    screenModels: cheap.models,
-    screenNames: cheap.names,
-    warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
-    confidence: fraction("confidence", getInput("confidence")),
-    corrections: getInput("corrections", { required: true }),
-    about: getInput("about"),
-    minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
-    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
-    sweepState: parseSweepState(getInput("sweep-state"))
-  };
-}
 var NOTHING_DONE = { labels: [], commented: false, assigned: [], closed: false };
 function newAccumulator() {
   return {
@@ -36462,6 +36447,23 @@ function describeOutcome(outcome, done) {
   }
   if (outcome.verdict.labels.length > 0) return "proposed, not applied (below floor or refused)";
   return "no label";
+}
+function readSettings() {
+  const shared = readShared();
+  const cheap = parseModels(getInput("screen-models"));
+  return {
+    ...shared,
+    screenModels: cheap.models,
+    screenNames: cheap.names,
+    warrant: getInput("warrant", { required: true }),
+    apply: parseApply(getInput("apply", { required: true })),
+    confidence: fraction("confidence", getInput("confidence")),
+    corrections: getInput("corrections", { required: true }),
+    about: getInput("about"),
+    minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
+    maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
+    sweepState: parseSweepState(getInput("sweep-state"))
+  };
 }
 async function run() {
   const meter = createMeter();
