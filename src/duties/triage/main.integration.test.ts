@@ -144,6 +144,13 @@ interface State {
    * exact number of failed attempts it wants before success.
    */
   contentsConflictsRemaining: number;
+  /**
+   * A thread's `labeled`/`unlabeled` timeline, keyed by issue number — read
+   * only by a migration sweep's self-training guard. Empty for every case
+   * that does not set it, which answers every issue's events as "none",
+   * leaving the guard nothing to exclude.
+   */
+  labelEvents: Record<number, { label: string; event: "labeled" | "unlabeled"; bot: boolean }[]>;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -190,6 +197,7 @@ async function startStub(): Promise<Stub> {
     contentsWrites: [],
     contentsForbidden: false,
     contentsConflictsRemaining: 0,
+    labelEvents: {},
   };
 
   const server = createServer((request, response) => {
@@ -240,6 +248,30 @@ async function route(
     const payload = parsed(raw) as { state?: string; state_reason?: string };
     stub.effects.closed = payload.state === "closed" && payload.state_reason === "not_planned";
     send(response, 200, { number: Number(issue[1]) });
+    return;
+  }
+
+  // A migration sweep's self-training guard — read once per candidate, and
+  // only there. Unset for a thread answers "no events", the same as a real
+  // repository whose timeline the stub never populated.
+  const events = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/events$/.exec(path);
+  if (method === "GET" && events) {
+    const page = Number(query.get("page") ?? "1");
+    const forThread = stub.labelEvents[Number(events[1])] ?? [];
+    send(
+      response,
+      200,
+      page === 1
+        ? forThread.map((entry) => ({
+            event: entry.event,
+            label: { name: entry.label },
+            actor: {
+              login: entry.bot ? "reeve[bot]" : "maintainer",
+              type: entry.bot ? "Bot" : "User",
+            },
+          }))
+        : [],
+    );
     return;
   }
 
@@ -993,6 +1025,21 @@ describe("the action", () => {
     expect(stub.effects.applied).toEqual(["bug"]);
   });
 
+  it("honours `memory.recall: 0` by never reading the corrections store at all", async () => {
+    // A malformed line the store would normally warn about by name — proof,
+    // if the warning never appears, that `readStore` was never called rather
+    // than merely called and told to recall nothing.
+    await mkdir(correctionsPath, { recursive: true });
+    await writeFile(join(correctionsPath, "broken.ndjson"), "{not json\n");
+    await writeFile(warrantPath, `${WARRANT}\nmemory:\n  recall: 0\n`);
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).not.toContain("corrections:");
+    expect(run.summary).toContain("Memory: 0 of 0 corrections reached the prompt");
+  });
+
   it("changes nothing on a dry run, and reports what it would have done", async () => {
     const run = await runAction(stub, { "dry-run": "true" });
 
@@ -1282,6 +1329,50 @@ describe("record", () => {
     expect(lines.find((line) => line.thread === 99)?.title).toBe("Someone else's thread");
   });
 
+  it(
+    'treats a legacy `repo: ""` line as this thread\'s own entry, and replaces it in place ' +
+      "with the current repo",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      // A line written before `repo` existed on the dedup key — parses with
+      // `repo: ""`, and would otherwise never be matched by a fresh write for
+      // the same thread, duplicating it on every record from here on.
+      const legacy = JSON.stringify({
+        repo: "",
+        thread: 42,
+        at: "2026-07-01T00:00:00Z",
+        title: "Old title",
+        excerpt: "old excerpt",
+        language: "en",
+        proposed: [],
+        decided: ["docs"],
+        by: "ana",
+        note: null,
+        pivot: null,
+      });
+      stub.contentsFiles.set(shardPath(), { content: `${legacy}\n`, sha: "sha-seed" });
+      stub.labels = ["docs"];
+      const event = await labelEvent();
+
+      const run = await runAction(
+        stub,
+        { apply: "label, record", corrections: CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).toBe(0);
+      const shard = stub.contentsFiles.get(shardPath());
+      const lines = (shard?.content.trim().split("\n") ?? []).map(
+        (line) => JSON.parse(line) as { repo: string; thread: number; title: string },
+      );
+      // Replaced in place — one line for #42, now carrying the real repo —
+      // not a second, duplicate line appended alongside the legacy one.
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ repo: "ecoma-io/reeve", thread: 42 });
+      expect(lines[0]?.title).not.toBe("Old title");
+    },
+  );
+
   it("replaces the prior entry in a healthy shard past an oversized sibling, warning rather than failing", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
     const previous = JSON.stringify({
@@ -1379,6 +1470,86 @@ describe("record", () => {
     expect(shard).toBeDefined();
     const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
     expect(written.thread).toBe(42);
+  });
+
+  it("rolls over once a shard reaches exactly the soft limit — the check is a strict less-than", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // The boundary itself: `existing.text.length < SHARD_SOFT_LIMIT_BYTES`
+    // (900,000) is false once the shard is exactly at the limit, not only once
+    // it is past it — so this, not `900_001`, is the smallest size that rolls
+    // over.
+    const exactlyAtLimit = "x".repeat(900_000);
+    stub.contentsFiles.set(shardPath(), { content: exactlyAtLimit, sha: "sha-at-limit" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // The full shard was never appended to.
+    expect(stub.contentsFiles.get(shardPath())?.content).toBe(exactlyAtLimit);
+    const sibling = `${CORRECTIONS}/${currentShard()}.2.ndjson`;
+    const shard = stub.contentsFiles.get(sibling);
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as { thread: number };
+    expect(written.thread).toBe(42);
+  });
+
+  it("appends to this month's shard, without rolling over, one byte under the soft limit", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const oneUnderLimit = "x".repeat(899_999);
+    stub.contentsFiles.set(shardPath(), { content: oneUnderLimit, sha: "sha-under-limit" });
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    // Appended to the same shard — no numbered sibling was created.
+    const content = stub.contentsFiles.get(shardPath())?.content ?? "";
+    expect(content.startsWith(oneUnderLimit)).toBe(true);
+    const appended = content.slice(oneUnderLimit.length).trim();
+    expect(JSON.parse(appended)).toMatchObject({ thread: 42, decided: ["bug"] });
+    expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.2.ndjson`)).toBeUndefined();
+  });
+
+  it("fails red, naming the limit, once every numbered sibling up to the cap is already full", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    const full = "x".repeat(900_001);
+    // Seed this month's shard and every numbered sibling through the cap
+    // (`MAX_SHARD_ATTEMPTS`, 500) already full — there is nowhere left to
+    // roll forward to, so a 501st shard must never be tried.
+    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-1" });
+    for (let n = 2; n <= 500; n += 1) {
+      stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.${String(n)}.ndjson`, {
+        content: full,
+        sha: `sha-${String(n)}`,
+      });
+    }
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("500 shards");
+    expect(run.log).toContain("shard 501");
+    // No 501st shard was ever written.
+    expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.501.ndjson`)).toBeUndefined();
   });
 
   it("finds and replaces an existing entry sitting in a numbered sibling shard, not only the first", async () => {
@@ -2158,6 +2329,46 @@ describe("the sweep", () => {
       expect(run.summary).toContain("| #802 |");
       expect(run.summary).not.toContain("| #801 |");
     });
+
+    it(
+      "excludes a machine-applied label from what it imports, and skips a candidate left with " +
+        "nothing decidable — the self-training guard",
+      async () => {
+        await writeFile(warrantPath, RECORDING_WARRANT);
+        stub.issues = [
+          // `bug` was applied by a maintainer, `docs` by this duty's own past
+          // sweep — only `bug` is a correction worth importing.
+          candidate(901, "2026-01-02T00:00:00Z", { labels: ["bug", "docs"] }),
+          // Every taxonomy label here is machine-applied — nothing to import.
+          candidate(902, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
+        ];
+        stub.labelEvents = {
+          901: [
+            { label: "bug", event: "labeled", bot: false },
+            { label: "docs", event: "labeled", bot: true },
+          ],
+          902: [{ label: "docs", event: "labeled", bot: true }],
+        };
+
+        const run = await runAction(
+          stub,
+          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        );
+
+        expect(run.code).toBe(0);
+        expect(run.outputs.processed).toBe("1");
+        expect(run.outputs.skipped).toBe("1");
+
+        const shard = stub.contentsFiles.get(shardPath());
+        const written = (shard?.content.trim().split("\n") ?? []).map(
+          (line) => JSON.parse(line) as { thread: number; decided: string[] },
+        );
+        expect(written).toHaveLength(1);
+        expect(written[0]).toMatchObject({ thread: 901, decided: ["bug"] });
+        expect(run.summary).toContain("| #901 |");
+        expect(run.summary).not.toContain("| #902 |");
+      },
+    );
 
     it(
       "leaves an ordinary sweep triaging, and `recorded` false, when `apply` does not " +

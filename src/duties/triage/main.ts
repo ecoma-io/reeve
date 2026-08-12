@@ -63,6 +63,7 @@ import {
   createEffects,
   isBotAuthor,
   listCorrectionFiles,
+  listLabelEvents,
   listOpenThreads,
   listRepositoryLabels,
   readContentsFile,
@@ -421,9 +422,14 @@ async function runSweep(
   }
 
   if (!authority.implicit) {
+    // `settings.taxonomy`, not the warrant's whole one: a sweep scoped to one
+    // area's `labels` subset is checked only against its own area, so a label
+    // renamed in an area this run was never asked to touch does not turn it
+    // red — see `checkLabelsExist`'s own doc comment.
     checkLabelsExist(
       authority.warrant,
       (await listRepositoryLabels(api, context.repo)).map((label) => label.name),
+      settings.taxonomy,
     );
   }
 
@@ -493,7 +499,14 @@ async function runSweep(
         weather,
         "sweep",
       );
-      acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+      // The self-training guard's own skip: counted the same way the
+      // idempotent skip above is, not added to the results table — there is
+      // nothing this thread contributed to the store to show a row for.
+      if (outcome.machineOnly) {
+        acc.skipped += 1;
+      } else {
+        acc.results.push({ number: thread.number, outcome: describeRecordOutcome(outcome) });
+      }
     } else {
       const outcome = await decide(authority, standing, settings, stages, weather);
       const done = settings.dryRun
@@ -626,10 +639,14 @@ export async function run(): Promise<void> {
           // that was renamed fails as the configuration problem it is, rather
           // than arriving as a model that agreed with nothing. Skipped in
           // implicit mode: the taxonomy IS the repository's own labels there,
-          // and checking it against itself would be a tautology.
+          // and checking it against itself would be a tautology. Checked
+          // against `settings.taxonomy`, already narrowed by the `labels`
+          // input — a rename in an area this run was never asked to touch is
+          // not this run's business to fail over.
           checkLabelsExist(
             authority.warrant,
             (await listRepositoryLabels(api, at)).map((label) => label.name),
+            settings.taxonomy,
           );
         }
 
@@ -843,76 +860,94 @@ async function decide(
     return stopped(sifted.dropped, language);
   }
 
-  const store = await readStore(settings.corrections);
-  for (const line of store.unreadable) {
-    // Loud, because this is a committed file that maintainers open by hand:
-    // losing one example is not worth losing the verdict, and losing it
-    // silently is not worth anything.
-    core.warning(`corrections: ${line}`);
-  }
-  const memory = createMemory(store.corrections);
-
-  const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
-
-  // The pivot bridge is worth a request only when it could change the answer:
-  // the thread's own language has to be known, a pivot language has to be
-  // configured, and the store has to hold at least one correction that is not
-  // already in the thread's own language. A store that shares one language
-  // with the thread has nothing a translated query would reach that the plain
-  // one above does not already reach — so that case, the common one, spends
-  // no provider call here at all.
-  const pivotLanguage =
-    settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  // `recall: 0` (or a negative override) is a promise as much as a setting:
+  // the store is not touched at all, not merely searched-and-returns-nothing.
+  // That distinction matters for a maintainer who points `corrections` at a
+  // path they would rather this run never open.
+  const recallCount = warrant.memory?.recall ?? RECALLED;
   const threadLanguage = detection.language;
-  const worthBridging =
-    threadLanguage !== null &&
-    pivotLanguage !== null &&
-    store.corrections.some((correction) => correction.language !== threadLanguage.code);
 
-  if (worthBridging) {
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames =
-      settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const pivot = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-    });
-    for (const failure of pivot.failures) {
-      core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+  let recalled: readonly Correction[] = [];
+  let memorySize = 0;
+  let pivotRecalled = 0;
+
+  if (recallCount > 0) {
+    const store = await readStore(settings.corrections);
+    for (const line of store.unreadable) {
+      // Loud, because this is a committed file that maintainers open by hand:
+      // losing one example is not worth losing the verdict, and losing it
+      // silently is not worth anything.
+      core.warning(`corrections: ${line}`);
     }
-    if (pivot.draft !== null) {
-      queries.push({
-        text: `${pivot.draft.title}\n${pivot.draft.body}`,
-        against: { pivot: pivotLanguage.code },
+    const memory = createMemory(store.corrections);
+    memorySize = memory.size;
+
+    const queries: WeightedQuery[] = [{ text: `${standing.title}\n${body}`, against: "own" }];
+
+    // The pivot bridge is worth a request only when it could change the answer:
+    // the thread's own language has to be known, a pivot language has to be
+    // configured, and the store has to hold at least one correction that is not
+    // already in the thread's own language. A store that shares one language
+    // with the thread has nothing a translated query would reach that the plain
+    // one above does not already reach — so that case, the common one, spends
+    // no provider call here at all.
+    const pivotLanguage =
+      settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+    const worthBridging =
+      threadLanguage !== null &&
+      pivotLanguage !== null &&
+      store.corrections.some((correction) => correction.language !== threadLanguage.code);
+
+    if (worthBridging) {
+      const pivotModels =
+        settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+      const pivotNames =
+        settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+      const pivot = await translateToPivot({
+        provider: stages.pivot,
+        models: pivotModels,
+        title: standing.title,
+        body,
+        to: pivotLanguage,
+        weather,
+        ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
       });
-    } else {
-      core.info(
-        "Cross-language recall could not translate this thread into the pivot language this run " +
-          "— recall used the thread's own language only.",
-      );
+      for (const failure of pivot.failures) {
+        core.warning(`recall: ${shown(pivotNames, failure.model)} — ${failure.reason}`);
+      }
+      if (pivot.draft !== null) {
+        queries.push({
+          text: `${pivot.draft.title}\n${pivot.draft.body}`,
+          against: { pivot: pivotLanguage.code },
+        });
+      } else {
+        core.info(
+          "Cross-language recall could not translate this thread into the pivot language this run " +
+            "— recall used the thread's own language only.",
+        );
+      }
     }
-  }
 
-  const recalled = memory.recallAcrossQueries(queries, warrant.memory?.recall ?? RECALLED);
-  const pivotRecalled =
-    threadLanguage === null
-      ? 0
-      : recalled.filter(
-          (correction) =>
-            correction.language !== null && correction.language !== threadLanguage.code,
-        ).length;
-  core.info(
-    `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) ` +
-      `from \`${settings.corrections}\`` +
-      (pivotRecalled > 0
-        ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.`
-        : "."),
-  );
+    recalled = memory.recallAcrossQueries(queries, recallCount);
+    pivotRecalled =
+      threadLanguage === null
+        ? 0
+        : recalled.filter(
+            (correction) =>
+              correction.language !== null && correction.language !== threadLanguage.code,
+          ).length;
+    core.info(
+      `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) ` +
+        `from \`${settings.corrections}\`` +
+        (pivotRecalled > 0
+          ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.`
+          : "."),
+    );
+  } else {
+    core.info(
+      "Recall is disabled (`memory.recall` is 0 or lower) — the corrections store was not read.",
+    );
+  }
 
   const triaged = await triage({
     provider: stages.triage,
@@ -953,7 +988,7 @@ async function decide(
     permitted,
     withheld,
     note,
-    memory: { size: memory.size, recalled: recalled.length, pivotRecalled },
+    memory: { size: memorySize, recalled: recalled.length, pivotRecalled },
     implicit: authority.implicit,
     excludedLabels: authority.excludedLabels,
     ungranted: null,
@@ -1043,6 +1078,13 @@ interface RecordOutcome {
   readonly pivot: boolean;
   /** Why a pivot rendering was not produced, when one was attempted and it was not. */
   readonly pivotNote: string | null;
+  /**
+   * Set when a migration sweep found every taxonomy label on this thread
+   * machine-applied — see `recordCorrection`'s guard. `recorded` is `false`
+   * alongside it: nothing here was a maintainer's own decision, so nothing
+   * was written. Never set outside a migration sweep.
+   */
+  readonly machineOnly: boolean;
 }
 
 /**
@@ -1060,9 +1102,21 @@ interface RecordOutcome {
  * migration composing `record` with `sweep`: there is no one sender to name
  * for a thread nobody just relabelled, only a run that decided to import what
  * was already decided.
+ *
+ * **Bulk migration guards against training on its own past output.** A
+ * migration sweep imports whatever labels stand on a thread as though they
+ * were a maintainer's correction — but months of ordinary triage sweeps
+ * running with `apply: label` leave plenty of threads carrying labels this
+ * duty applied itself, not a maintainer. Importing those is a self-training
+ * loop, not history: this run's own old verdicts, re-taught back to it as
+ * ground truth. `by === "sweep"` is the one path this can happen on — a
+ * single-thread run is always triggered by a human's own label change, and
+ * has nothing to distrust — and there alone, each candidate taxonomy label is
+ * checked against its most recent `labeled` event; one whose actor is a bot
+ * is excluded. A thread left with nothing decidable is not recorded at all.
  */
 async function recordCorrection(
-  contentsApi: ContentsApi,
+  api: TrackerApi & ContentsApi,
   at: Location,
   standing: Standing,
   authority: Authority,
@@ -1072,6 +1126,40 @@ async function recordCorrection(
   by: string,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
+
+  // Taxonomy-filtered against `settings.taxonomy`, not the whole warrant: a
+  // label some other tool or automation applied is not a maintainer
+  // correcting this duty's taxonomy, and neither is a label from another
+  // area's slice of a shared file this run's own `labels` never named —
+  // recording either would teach recall a category this run was never asked
+  // to propose.
+  let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+
+  if (by === "sweep" && decidedLabels.length > 0) {
+    const events = await listLabelEvents(api, at);
+    // Oldest first, so the last write into this map for a given label is its
+    // most recent `labeled` event — exactly the one the guard cares about.
+    const lastLabeledByBot = new Map<string, boolean>();
+    for (const event of events) {
+      if (event.action === "labeled") lastLabeledByBot.set(event.label, event.isBot);
+    }
+    decidedLabels = decidedLabels.filter((name) => !(lastLabeledByBot.get(name) ?? false));
+
+    if (decidedLabels.length === 0) {
+      core.info(
+        `#${String(at.number)}: every taxonomy label here was machine-applied — nothing to import.`,
+      );
+      return {
+        recorded: false,
+        language: null,
+        decided: [],
+        pivot: false,
+        pivotNote: null,
+        machineOnly: true,
+      };
+    }
+  }
+
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
 
@@ -1092,14 +1180,6 @@ async function recordCorrection(
   // ordinary `decide` path reports, so a workflow reading this action's
   // `language` output sees the same shape whichever path produced it.
   const code = detection.language?.code ?? null;
-
-  // Taxonomy-filtered against `settings.taxonomy`, not the whole warrant: a
-  // label some other tool or automation applied is not a maintainer
-  // correcting this duty's taxonomy, and neither is a label from another
-  // area's slice of a shared file this run's own `labels` never named —
-  // recording either would teach recall a category this run was never asked
-  // to propose.
-  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
 
   const pivotLanguage =
     settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
@@ -1160,7 +1240,7 @@ async function recordCorrection(
         `${pivot !== null ? ", with a pivot rendering" : ""} — dry run, nothing committed.`,
     );
   } else {
-    await writeCorrection(contentsApi, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction);
   }
 
   return {
@@ -1169,6 +1249,7 @@ async function recordCorrection(
     decided: decidedLabels,
     pivot: pivot !== null,
     pivotNote,
+    machineOnly: false,
   };
 }
 
@@ -1259,19 +1340,23 @@ async function attemptWrite(
     if (read === null) continue;
 
     const lines = read.text.split("\n");
-    // `repo` as well as `thread`, so a line written before this field existed
-    // — `repo: ""` once parsed — never matches a fresh write and is never
-    // replaced by one. It stays in the store exactly as it was, still read
-    // for recall, just no longer this thread number's authoritative entry to
-    // overwrite blind. `correction.repo` is always the current run's own
-    // repository, never empty, so this only ever widens what is left alone.
+    // `repo` as well as `thread` — the dedup key widened to the pair once a
+    // store could hold more than one repository's history. A line written
+    // before that field existed parses as `repo: ""`, and a stored empty repo
+    // is not a real repository this run could ever be recording for — it can
+    // only mean "written before this field existed", so it is read as this
+    // thread number's own legacy entry and treated as a match on today's
+    // repo. That is what lets the store self-migrate: the first write this
+    // thread sees after the field shipped rewrites the line in place, this
+    // time with `correction.repo` on it, and there is nothing legacy left to
+    // match loosely the next time.
     const index = lines.findIndex((line) => {
       if (line.trim().length === 0) return false;
       const existing = parseCorrection(line);
       return (
         existing !== null &&
         existing.thread === correction.thread &&
-        existing.repo === correction.repo
+        (existing.repo === correction.repo || existing.repo === "")
       );
     });
 
