@@ -1,6 +1,24 @@
 # The agent runtime — direction, not a shipped feature
 
-_Where a bounded agent runtime is headed for Reeve 2.x, and the ground rules it will be built against. Prerequisites: [North star](../doctrine/north-star.md), [Architecture](architecture.md), [Threat model](../security/threat-model.md)._
+_The architecture of the 2.x agent runtime, and the entry point to the 2.x
+documentation set. Prerequisites: [North star](../doctrine/north-star.md),
+[Architecture](architecture.md), [Threat model](../security/threat-model.md)._
+
+The 2.x direction is documented as a set, and this page is its front door —
+the modes, the loop, the kernel, and the invariants. The rest divides by
+question:
+
+| Page                                                 | The question it answers                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [The 2.x roadmap](roadmap-2x.md)                     | In what order does this get built, and what does each phase refuse to do yet?         |
+| [The governance tree](agent-governance.md)           | What is each `.reeve/` file for, who reviews it, and how does a warrant lift into it? |
+| [The compatibility contract](agent-compatibility.md) | What is every 1.x consumer promised, phase by phase and at `2.0`?                     |
+
+The doctrine half — the part that binds this repository rather than merely
+describing a plan — lives where doctrine lives:
+[the north star's 2.x entry](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships),
+which moved first, in its own commit, per that document's own amendment
+rule.
 
 > [!IMPORTANT]
 > **Nothing on this page ships today.** Reeve today runs exactly four duties —
@@ -40,12 +58,24 @@ using, and the direction below does not change that default.
 **Agent Mode** is a second, bounded shape for the cases Explicit mode is
 structurally the wrong fit for — a backlog that needs several duties applied
 in an order that depends on what the first one found, not an order a
-workflow file can express as a fixed sequence. It runs a loop instead of a
-pipeline:
+workflow file can express as a fixed sequence. Worked example, the shape of
+a run: an issue arrives → the agent observes it → searches the backlog →
+finds a likely duplicate → asks the kernel for `comment` and `label` →
+executes what was granted → verifies both landed → stops. Every step of
+that is a duty Reeve already ships, sequenced rather than replaced.
+
+## The loop
+
+Agent Mode runs a loop instead of a pipeline:
 
 ```
 observe ─► reason ─► plan ─► act ─► verify ─► stop
+   ▲                                   │
+   └────────────── repeat ─────────────┘
 ```
+
+A verified step may loop back to observe — state changed, so it is read
+again rather than assumed — and every path ends at stop.
 
 **Observe.** Read repository state — the same untrusted zones every duty
 already reads: threads, labels, an author's own words. Nothing here is
@@ -95,6 +125,34 @@ do is always a change to the warrant file, reviewed the way every other
 warrant change is reviewed, never a change in what the model decided to ask
 for.
 
+The boundary, drawn as the channel it is:
+
+```
+GitHub event
+     │
+     ▼
+┌──────────────┐  capability request  ┌──────────────────────┐
+│  agent loop  │ ───────────────────► │   Authority Kernel   │
+│  (observe,   │                      │  reads the written   │
+│   reason,    │ ◄─────────────────── │  grant, and nothing  │
+│   plan)      │  grant or refusal    │  a model produced    │
+└──────────────┘                      └──────────┬───────────┘
+                                                 │ granted effect only
+                                                 ▼
+                                   GitHub Actions sandbox
+                                   (label, comment, edit-body, …)
+```
+
+**The capability request is the only channel.** There is no second path
+from the loop to the repository — no shell the plan can reach, no API
+client the reasoning stage holds, no effect that skips the kernel because
+it looked harmless. The boundary is
+`agent → capability request → kernel → sandboxed tool`, never
+`agent → unrestricted shell or API` — which is the same statement
+[Architecture](architecture.md#the-boundary) already makes about a duty
+("a duty may not write to the forge"), promoted from a review rule to the
+only interface that exists.
+
 ### What Agent Mode may do
 
 Bounded by whatever the warrant already grants the duties it is sequencing
@@ -141,76 +199,17 @@ by staying inside the platform duties already run on, which is also why
 is no path from a warrant-checked effect to an arbitrary shell on the
 runner.
 
-## The authority sketch
+## Where the grant is written
 
-**This is a sketch — the final spelling is decided when this stage lands,
-not by this page.** What it fixes now is the shape: capabilities granted by
-name, and a floor of things no grant can reach.
-
-```yaml
-authority:
-  capabilities:
-    - issues.read
-    - issues.search
-    - issues.label
-    - issues.comment
-    - translate
-    - duplicate
-  forbidden:
-    - issues.close
-    - issues.delete
-    - code.write
-    - pull_request.merge
-```
-
-**Again: a sketch, not a schema.** Key names, nesting, and how this relates
-to today's `capabilities:` block are all decided when the work lands, in a
-reviewed change.
-
-The `forbidden:` list is a deliberate new polarity, and it is worth being
-explicit that today's warrant has nothing like it. Today's `capabilities:`
-block is an allowlist alone — what is absent is simply not granted. A floor
-is stronger: it is a list no future warrant edit may silently cross, so
-that widening authority is always a loud diff against a line that says
-_forbidden_, never a quiet addition to a list of grants. `code.write` lives
-there, permanently — see [Doctrine reconciliation](#doctrine-reconciliation).
-
-## The `.reeve/` governance tree
-
-None of this exists yet. When Agent Mode lands, its governance is a
-directory in the consumer's repository — version-controlled, reviewed in
-pull requests, deleted with `rm`, exactly the discipline the warrant
-already follows:
-
-```
-.reeve/
-├── authority.yaml
-├── constitution.md
-├── policies/
-├── duties/
-└── memory/
-```
-
-**`authority.yaml`** is the one file checked in code — the authority sketch
-above is a sketch of it. It is the only file in this tree that grants
-anything.
-
-**`constitution.md`** is prose the agent reads for judgement — what this
-project considers a good first reply, what tone it keeps, what it never
-does. Input to reasoning, never a grant of permission.
-
-**`policies/`** holds the same kind of prose, split by concern, for
-projects whose constitution outgrows one file.
-
-**`duties/`** holds per-duty doctrine — the project's own rulings about how
-a duty should decide, the way the warrant's `not:` fields already carry
-rulings about labels.
-
-**`memory/`** is the files [State](architecture.md#state) already
-describes, relocated under the same roof.
-
-A change to Reeve's authority therefore goes through the normal pull
-request review, like every other file in the repository.
+The file the kernel reads, the `forbidden:` floor that makes widening
+authority a loud diff, the rest of the `.reeve/` tree, and the mechanical
+lift from today's warrant are all specified — at draft precision, clearly
+marked — in [the governance tree](agent-governance.md). One sentence of it
+is load-bearing enough to repeat here rather than only link: **of the whole
+tree, `authority.yaml` is the only file the kernel reads, and the only file
+that grants anything** — everything else is input to judgement, with
+exactly the power persuasive prose in a hostile thread has where authority
+is concerned: none.
 
 ## Doctrine reconciliation
 
@@ -222,15 +221,23 @@ discipline survives as "one _authority_ file." Of the `.reeve/` tree, only
 `authority.yaml` is checked in code; `constitution.md`, `policies/` and
 `memory/` are inputs to reasoning, not grants of permission, so the
 discipline's point — a maintainer can read the whole of what Reeve may do
-in one place — holds. And the sequencing is itself governed: the `.reeve/`
-tree lands only after the north star moves first, in its own commit, per
-[the north star's own amendment rule](../doctrine/north-star.md).
+in one place — holds. And the sequencing is itself governed, and has begun
+in the order the amendment rule requires: the north star moved first, in
+its own commit —
+[its 2.x entry](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships)
+records the direction as doctrine — while the `.reeve/` tree itself still
+lands only in
+[its roadmap phase](roadmap-2x.md#phase-2--the-governance-tree-and-authorityyaml),
+behind the kernel it depends on.
 
-**[Open question §10.4](../doctrine/north-star.md#10-open-questions)
-answered.** "One run, many duties?" is answered by the agent runtime: an
-agent-mode run may invoke several duties' capabilities inside one
-observe–reason–plan–act cycle. An explicit-mode run remains one duty per
-invocation, unchanged.
+**[Open question §10.4](../doctrine/north-star.md#10-open-questions) has
+its answer's direction.** "One run, many duties?" is answered by the agent
+runtime: an agent-mode run may invoke several duties' capabilities inside
+one observe–reason–plan–act cycle. An explicit-mode run remains one duty
+per invocation, unchanged. The north star's entry now says the same and
+moves the question into [§9](../doctrine/north-star.md#9-settled-questions)
+only when the runtime lands — a question is settled by behaviour, not by a
+plan agreeing with itself.
 
 **"Not a workflow engine" holds.** The maintainer still writes no DSL.
 Agent Mode composes duties that are shipped and reviewed as code — there is
@@ -243,8 +250,10 @@ stands, unconditionally.** "Never writes code" remains settled in both
 modes. Agent Mode's Act stage executes effects a duty already has a name
 for; it does not gain a new category of effect by being agentic, and
 `code.write` sits permanently on the forbidden floor in
-[the authority sketch](#the-authority-sketch) — not a default that could be
-widened, a floor that cannot.
+[`authority.yaml`](agent-governance.md#authorityyaml--the-grant) — not a
+default that could be widened, a floor that cannot, and
+[now doctrine](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships)
+rather than only this page's ruling.
 
 ## Non-goals
 
@@ -271,19 +280,26 @@ warrant already allows, never about allowing more.
 
 2.x is an architectural superset of 1.x. Every 1.x workflow keeps working
 unmodified, no capability becomes agent-only, and Explicit mode is not
-deprecated by Agent Mode's existence — this document commits to that in
-writing, ahead of any code that could be tempted to renegotiate it.
+deprecated by Agent Mode's existence — committed to in writing, ahead of
+any code that could be tempted to renegotiate it, and made specific enough
+to catch a violation in review by
+[the compatibility contract](agent-compatibility.md).
 
 ## What "landing" will mean
 
 This page is direction, not doctrine, so it can change — and it will be
-revised as the stage actually lands, in the pull requests that land it.
-User-facing documentation for Agent Mode appears only once there is a real
-workflow to run: no installation page, no reference page, and no guide will
-describe it before a repository can actually invoke it.
+revised as the phases of [the 2.x roadmap](roadmap-2x.md) actually land, in
+the pull requests that land them. User-facing documentation for Agent Mode
+appears only once there is a real workflow to run: no installation page, no
+reference page, and no guide will describe it before a repository can
+actually invoke it — which [the roadmap](roadmap-2x.md#phase-4--agent-mode-acts)
+places in its final phase, deliberately.
 
 ---
 
-**Related:** [North star](../doctrine/north-star.md) ·
+**Related:** [The 2.x roadmap](roadmap-2x.md) ·
+[The governance tree](agent-governance.md) ·
+[The compatibility contract](agent-compatibility.md) ·
+[North star](../doctrine/north-star.md) ·
 [Architecture](architecture.md) · [Threat model](../security/threat-model.md) ·
 [The authority model](../concepts/authority-model.md)
