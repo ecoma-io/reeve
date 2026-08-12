@@ -51,6 +51,15 @@
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API, which is what a runner does — see
  * `main.integration.test.ts`.
+ *
+ * What is left here is the order above, the two `Outcome`/`SweepAccumulator`
+ * shapes every step of it reads and writes, and `run`/`runSweep`'s own
+ * control flow — everything else has its own module, tested on its own:
+ * `inputs.ts` (settings parsing, `readSettings` itself stays here — see its
+ * doc comment for why), `store.ts` (the corrections store's write path),
+ * `record.ts` (the `record` capability's trigger, gates and both write
+ * paths), and `outputs.ts` (every `core.setOutput` call and every summary
+ * page this duty renders).
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
