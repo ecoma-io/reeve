@@ -98,6 +98,7 @@ import {
 } from "../../core/warrant.js";
 
 import { authorText, listCorpus, type CorpusThread } from "./corpus.js";
+import { page, report, reportSweep, sweepPage } from "./outputs.js";
 import { matchShortlist } from "./proposal.js";
 import {
   postOrReplace,
@@ -108,22 +109,14 @@ import {
   type Proposal,
 } from "./publish.js";
 import { documentOf, rank } from "./rank.js";
-import {
-  summarize,
-  summarizeSweep,
-  type Done,
-  type PivotInfo,
-  type RankInfo,
-  type Run,
-  type SweptThread,
-} from "./summary.js";
+import { type Done, type PivotInfo, type RankInfo, type SweptThread } from "./summary.js";
 import { judge } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /** `warrant`'s own default in `action.yml`, repeated here rather than read back out of it. */
 const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
-interface Settings {
+export interface Settings {
   readonly token: string;
   /** The thread to work on, or null in `sweep`. */
   readonly number: number | null;
@@ -206,7 +199,7 @@ interface Stages {
 type Api = TrackerApi & CommentApi;
 
 /** Everything the run concluded, whatever path it took to conclude it. */
-interface Outcome {
+export interface Outcome {
   readonly language: string | null;
   /** The candidate the verdict named, before the confidence floor is checked. Null for no proposal. */
   readonly duplicateOf: number | null;
@@ -244,7 +237,7 @@ interface Outcome {
  * thrown partway down the loop still leaves whatever was already processed
  * readable from `run`'s `finally` block.
  */
-interface SweepAccumulator {
+export interface SweepAccumulator {
   readonly results: SweptThread[];
   starvedRun: boolean;
   candidates: number;
@@ -354,11 +347,6 @@ async function runSweep(
     // starvation the `starved` output already reported.
     if (starved(settings.models, weather)) acc.starvedRun = true;
   }
-}
-
-/** Candidates the walk did not reach — the limit, or the roster running dry. */
-function remainingOf(acc: SweepAccumulator): number {
-  return Math.max(acc.candidates - acc.results.length, 0);
 }
 
 /** One sweep row's outcome, in the fewest words that are true. */
@@ -894,87 +882,6 @@ async function act(
 function excerpt(answer: string): string {
   const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}…`;
-}
-
-/**
- * Every output, written on every single-thread path that reaches an answer —
- * including the ones that answer "nothing". A workflow branching on
- * `duplicate-of` needs it to be an empty string rather than an unset output
- * on the run where nothing was proposed.
- */
-function report(outcome: Outcome, done: Done, rosterStarved: boolean): void {
-  core.setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
-  core.setOutput("score", outcome.confidence.toFixed(2));
-  core.setOutput("language", outcome.language ?? "");
-  core.setOutput("commented", String(done.commented));
-  core.setOutput("starved", String(rosterStarved));
-  // `0`, not unset — a single-thread run answers a sweep's own outputs
-  // honestly at zero rather than leaving a workflow that reads them on every
-  // run reading an empty string on this one.
-  core.setOutput("processed", "0");
-  core.setOutput("remaining", "0");
-}
-
-/**
- * `processed` and `remaining` — a sweep's own outputs. `starved` is shared
- * vocabulary between the two modes, so it keeps the same name here. The
- * single-thread outputs are left unset on a sweep run, the same choice
- * `triage/main.ts`'s own `reportSweep` makes: none of them name one thread,
- * and a workflow reading `duplicate-of` off a sweep was never going to find
- * one thread's answer there either way.
- */
-function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
-  core.setOutput("processed", String(bulk.results.length));
-  core.setOutput("remaining", String(remainingOf(bulk)));
-  core.setOutput("starved", String(rosterStarved));
-}
-
-function page(
-  settings: Settings,
-  thread: number,
-  outcome: Outcome,
-  done: Done,
-  posted: Posted | null,
-  spent: Run["spent"],
-): string {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    // The code the proposal's own chrome is keyed by, not the label
-    // `language` above carries — only present alongside a real `proposal`,
-    // which is exactly when this duty's chrome renders anything at all.
-    languageCode: outcome.proposal?.language ?? null,
-    ungranted: outcome.ungranted,
-    duplicateOf: outcome.duplicateOf,
-    confidence: outcome.confidence,
-    floor: settings.confidence,
-    lexicalScore: outcome.lexicalScore,
-    rank: outcome.rank,
-    pivot: outcome.pivot,
-    note: outcome.note,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    rationale: outcome.rationale,
-    done,
-    posted,
-    spent,
-    modelNames: settings.modelNames,
-  });
-}
-
-function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent"]): string {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    spent,
-    modelNames: settings.modelNames,
-  });
 }
 
 await run();

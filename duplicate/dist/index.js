@@ -34380,6 +34380,171 @@ function chromeFallbackNote(codes) {
   return `${list} \u2014 Reeve's own scaffolding text has no translation for ${missing.size === 1 ? "this language" : "these languages"} yet, so it rendered in English instead. Chrome covers: ${CHROME_LANGUAGES.join(", ")}.`;
 }
 
+// src/duties/duplicate/summary.ts
+function summarize(run2) {
+  const parts = [
+    "## Reeve \xB7 duplicate",
+    "",
+    `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was applied" : ""}.`,
+    "",
+    verdict(run2),
+    ...chromeNote(run2),
+    "",
+    cost(run2.spent, (spend) => shown(run2.modelNames, spend.model))
+  ];
+  return `${parts.join("\n").trimEnd()}
+`;
+}
+function chromeNote(run2) {
+  if (run2.dryRun || !run2.done.commented) return [];
+  const note = chromeFallbackNote([run2.languageCode]);
+  return note === null ? [] : ["", note];
+}
+function verdict(run2) {
+  const lines = ["### Verdict", ""];
+  if (run2.ungranted !== null) {
+    lines.push(
+      run2.ungranted,
+      "",
+      "No expensive model was asked anything. This is a real answer rather than a failure."
+    );
+    return lines.join("\n");
+  }
+  if (run2.note !== null) {
+    lines.push(`No verdict \u2014 ${run2.note}.`, "");
+  }
+  lines.push(
+    run2.duplicateOf === null ? "No duplicate was proposed." : `Proposed as a duplicate of #${String(run2.duplicateOf)}.`
+  );
+  const language = run2.language ?? "not one of the configured languages";
+  lines.push(
+    "",
+    `Confidence ${run2.confidence.toFixed(2)} against a floor of ${run2.floor.toFixed(2)}. Author language: ${language}. ${String(run2.rank.offered)} of ${String(run2.rank.corpusSize)} open thread${run2.rank.corpusSize === 1 ? "" : "s"} reached the judge.`
+  );
+  if (run2.pivot.note !== null) {
+    lines.push("", run2.pivot.note);
+  }
+  if (run2.duplicateOf !== null) {
+    if (run2.confidence < run2.floor) {
+      lines.push(
+        "",
+        "The verdict was under the floor, so it is reported and not applied. `duplicate-of` and `score` still carry it."
+      );
+      lines.push(...why(run2));
+    } else {
+      lines.push("", disposition(run2, run2.duplicateOf));
+      const echoedOnThread = !run2.dryRun && (run2.posted === "posted" || run2.posted === "replaced");
+      if (!echoedOnThread) lines.push(...why(run2));
+    }
+  }
+  const gap = withheld(run2);
+  if (gap.length > 0) lines.push("", gap);
+  return lines.join("\n");
+}
+function disposition(run2, duplicateOf) {
+  if (run2.posted === null) {
+    return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
+  }
+  if (run2.posted === "withheld") {
+    return `Nothing was posted \u2014 this thread carries more comments than one run reads, and none of the ones read were this duty's own, so whether it already commented could not actually be told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so this run left the thread alone rather than guess.`;
+  }
+  const verb = run2.posted === "posted" ? run2.dryRun ? "Would have posted" : "Posted" : run2.posted === "replaced" ? run2.dryRun ? "Would have replaced its own previous comment with" : "Replaced its own previous comment with" : "Left its own previous comment unchanged \u2014 this run reached the same fingerprint as";
+  return `${verb} a comment naming #${String(duplicateOf)}.`;
+}
+function why(run2) {
+  if (run2.rationale === null || run2.rationale.length === 0) return [];
+  return ["", `> ${run2.rationale.replace(/\s+/g, " ").trim()}`];
+}
+function withheld(run2) {
+  if (run2.withheld.length === 0) return "";
+  return `\`apply\` asks for ${run2.withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`;
+}
+function summarizeSweep(run2) {
+  if (run2.ungranted !== null) {
+    return `${["## Reeve \xB7 duplicate \u2014 sweep", "", run2.ungranted, "", cost(run2.spent, () => "")].join("\n").trimEnd()}
+`;
+  }
+  const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
+  const rendered = table(["Thread", "Outcome"], rows);
+  const parts = [
+    "## Reeve \xB7 duplicate \u2014 sweep",
+    "",
+    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, ${String(run2.remaining)} remaining.`,
+    "",
+    rendered.length === 0 ? "Nothing was processed this run." : rendered
+  ];
+  if (run2.starvedRun) {
+    parts.push(
+      "",
+      "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
+    );
+  }
+  parts.push(
+    "",
+    cost(run2.spent, (spend) => shown(run2.modelNames, spend.model))
+  );
+  return `${parts.join("\n").trimEnd()}
+`;
+}
+
+// src/duties/duplicate/outputs.ts
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length, 0);
+}
+function report(outcome, done, rosterStarved) {
+  setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
+  setOutput("score", outcome.confidence.toFixed(2));
+  setOutput("language", outcome.language ?? "");
+  setOutput("commented", String(done.commented));
+  setOutput("starved", String(rosterStarved));
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function reportSweep(bulk, rosterStarved) {
+  setOutput("processed", String(bulk.results.length));
+  setOutput("remaining", String(remainingOf(bulk)));
+  setOutput("starved", String(rosterStarved));
+}
+function page(settings, thread, outcome, done, posted, spent) {
+  return summarize({
+    thread,
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    language: outcome.language,
+    // The code the proposal's own chrome is keyed by, not the label
+    // `language` above carries — only present alongside a real `proposal`,
+    // which is exactly when this duty's chrome renders anything at all.
+    languageCode: outcome.proposal?.language ?? null,
+    ungranted: outcome.ungranted,
+    duplicateOf: outcome.duplicateOf,
+    confidence: outcome.confidence,
+    floor: settings.confidence,
+    lexicalScore: outcome.lexicalScore,
+    rank: outcome.rank,
+    pivot: outcome.pivot,
+    note: outcome.note,
+    permitted: outcome.permitted,
+    withheld: outcome.withheld,
+    rationale: outcome.rationale,
+    done,
+    posted,
+    spent,
+    modelNames: settings.modelNames
+  });
+}
+function sweepPage(settings, bulk, spent) {
+  return summarizeSweep({
+    dryRun: settings.dryRun,
+    warrant: settings.warrant,
+    results: bulk.results,
+    remaining: remainingOf(bulk),
+    starvedRun: bulk.starvedRun,
+    ungranted: bulk.ungranted,
+    spent,
+    modelNames: settings.modelNames
+  });
+}
+
 // src/duties/duplicate/publish.ts
 var marker = markerFor("duplicate");
 function proposalFingerprint(source, candidates) {
@@ -34583,113 +34748,6 @@ function rank(queries, candidates, limit, similarity = lexical) {
     if (right.score !== left.score) return right.score - left.score;
     return right.candidate.number - left.candidate.number;
   }).slice(0, limit);
-}
-
-// src/duties/duplicate/summary.ts
-function summarize(run2) {
-  const parts = [
-    "## Reeve \xB7 duplicate",
-    "",
-    `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was applied" : ""}.`,
-    "",
-    verdict(run2),
-    ...chromeNote(run2),
-    "",
-    cost(run2.spent, (spend) => shown(run2.modelNames, spend.model))
-  ];
-  return `${parts.join("\n").trimEnd()}
-`;
-}
-function chromeNote(run2) {
-  if (run2.dryRun || !run2.done.commented) return [];
-  const note = chromeFallbackNote([run2.languageCode]);
-  return note === null ? [] : ["", note];
-}
-function verdict(run2) {
-  const lines = ["### Verdict", ""];
-  if (run2.ungranted !== null) {
-    lines.push(
-      run2.ungranted,
-      "",
-      "No expensive model was asked anything. This is a real answer rather than a failure."
-    );
-    return lines.join("\n");
-  }
-  if (run2.note !== null) {
-    lines.push(`No verdict \u2014 ${run2.note}.`, "");
-  }
-  lines.push(
-    run2.duplicateOf === null ? "No duplicate was proposed." : `Proposed as a duplicate of #${String(run2.duplicateOf)}.`
-  );
-  const language = run2.language ?? "not one of the configured languages";
-  lines.push(
-    "",
-    `Confidence ${run2.confidence.toFixed(2)} against a floor of ${run2.floor.toFixed(2)}. Author language: ${language}. ${String(run2.rank.offered)} of ${String(run2.rank.corpusSize)} open thread${run2.rank.corpusSize === 1 ? "" : "s"} reached the judge.`
-  );
-  if (run2.pivot.note !== null) {
-    lines.push("", run2.pivot.note);
-  }
-  if (run2.duplicateOf !== null) {
-    if (run2.confidence < run2.floor) {
-      lines.push(
-        "",
-        "The verdict was under the floor, so it is reported and not applied. `duplicate-of` and `score` still carry it."
-      );
-      lines.push(...why(run2));
-    } else {
-      lines.push("", disposition(run2, run2.duplicateOf));
-      const echoedOnThread = !run2.dryRun && (run2.posted === "posted" || run2.posted === "replaced");
-      if (!echoedOnThread) lines.push(...why(run2));
-    }
-  }
-  const gap = withheld(run2);
-  if (gap.length > 0) lines.push("", gap);
-  return lines.join("\n");
-}
-function disposition(run2, duplicateOf) {
-  if (run2.posted === null) {
-    return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
-  }
-  if (run2.posted === "withheld") {
-    return `Nothing was posted \u2014 this thread carries more comments than one run reads, and none of the ones read were this duty's own, so whether it already commented could not actually be told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so this run left the thread alone rather than guess.`;
-  }
-  const verb = run2.posted === "posted" ? run2.dryRun ? "Would have posted" : "Posted" : run2.posted === "replaced" ? run2.dryRun ? "Would have replaced its own previous comment with" : "Replaced its own previous comment with" : "Left its own previous comment unchanged \u2014 this run reached the same fingerprint as";
-  return `${verb} a comment naming #${String(duplicateOf)}.`;
-}
-function why(run2) {
-  if (run2.rationale === null || run2.rationale.length === 0) return [];
-  return ["", `> ${run2.rationale.replace(/\s+/g, " ").trim()}`];
-}
-function withheld(run2) {
-  if (run2.withheld.length === 0) return "";
-  return `\`apply\` asks for ${run2.withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`;
-}
-function summarizeSweep(run2) {
-  if (run2.ungranted !== null) {
-    return `${["## Reeve \xB7 duplicate \u2014 sweep", "", run2.ungranted, "", cost(run2.spent, () => "")].join("\n").trimEnd()}
-`;
-  }
-  const rows = run2.results.map((result) => [`#${String(result.number)}`, cell(result.outcome)]);
-  const rendered = table(["Thread", "Outcome"], rows);
-  const parts = [
-    "## Reeve \xB7 duplicate \u2014 sweep",
-    "",
-    `${run2.dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(run2.results.length)}, ${String(run2.remaining)} remaining.`,
-    "",
-    rendered.length === 0 ? "Nothing was processed this run." : rendered
-  ];
-  if (run2.starvedRun) {
-    parts.push(
-      "",
-      "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
-    );
-  }
-  parts.push(
-    "",
-    cost(run2.spent, (spend) => shown(run2.modelNames, spend.model))
-  );
-  return `${parts.join("\n").trimEnd()}
-`;
 }
 
 // src/duties/duplicate/verdict.ts
@@ -34896,9 +34954,6 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
     acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, acted.done) });
     if (starved(settings.models, weather)) acc.starvedRun = true;
   }
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length, 0);
 }
 function describeOutcome(outcome, done) {
   if (outcome.ungranted !== null) return "not granted";
@@ -35190,59 +35245,6 @@ async function act(api, at, outcome, dryRun) {
 function excerpt3(answer3) {
   const flat = answer3.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
-}
-function report(outcome, done, rosterStarved) {
-  setOutput("duplicate-of", outcome.duplicateOf === null ? "" : String(outcome.duplicateOf));
-  setOutput("score", outcome.confidence.toFixed(2));
-  setOutput("language", outcome.language ?? "");
-  setOutput("commented", String(done.commented));
-  setOutput("starved", String(rosterStarved));
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
-}
-function reportSweep(bulk, rosterStarved) {
-  setOutput("processed", String(bulk.results.length));
-  setOutput("remaining", String(remainingOf(bulk)));
-  setOutput("starved", String(rosterStarved));
-}
-function page(settings, thread, outcome, done, posted, spent) {
-  return summarize({
-    thread,
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    language: outcome.language,
-    // The code the proposal's own chrome is keyed by, not the label
-    // `language` above carries — only present alongside a real `proposal`,
-    // which is exactly when this duty's chrome renders anything at all.
-    languageCode: outcome.proposal?.language ?? null,
-    ungranted: outcome.ungranted,
-    duplicateOf: outcome.duplicateOf,
-    confidence: outcome.confidence,
-    floor: settings.confidence,
-    lexicalScore: outcome.lexicalScore,
-    rank: outcome.rank,
-    pivot: outcome.pivot,
-    note: outcome.note,
-    permitted: outcome.permitted,
-    withheld: outcome.withheld,
-    rationale: outcome.rationale,
-    done,
-    posted,
-    spent,
-    modelNames: settings.modelNames
-  });
-}
-function sweepPage(settings, bulk, spent) {
-  return summarizeSweep({
-    dryRun: settings.dryRun,
-    warrant: settings.warrant,
-    results: bulk.results,
-    remaining: remainingOf(bulk),
-    starvedRun: bulk.starvedRun,
-    ungranted: bulk.ungranted,
-    spent,
-    modelNames: settings.modelNames
-  });
 }
 await run();
 export {
