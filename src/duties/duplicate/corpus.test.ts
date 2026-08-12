@@ -52,6 +52,11 @@ function stubOf(entries: readonly Entry[]): TrackerApi {
           throw new Error("not used by listCorpus");
         },
       },
+      repos: {
+        getCollaboratorPermissionLevel: () => {
+          throw new Error("not used by listCorpus");
+        },
+      },
     },
   };
 }
@@ -117,6 +122,7 @@ describe("listCorpus", () => {
             return Promise.resolve({ data: entries.slice(start, start + perPage) });
           },
         },
+        repos: stubOf(entries).rest.repos,
       },
     };
 

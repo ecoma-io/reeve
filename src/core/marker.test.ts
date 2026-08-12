@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { authorHalf, fingerprint, isReeveProposalPr, markerFor } from "./marker.js";
+import { authorHalf, closeMarkerFor, fingerprint, isReeveProposalPr, markerFor } from "./marker.js";
 
 // Nothing is mocked: there is nothing project-internal here. The digest comes
 // from `node:crypto`, which is the platform rather than a collaborator.
@@ -169,6 +169,63 @@ describe("isReeveProposalPr", () => {
     const triage = markerFor("triage");
     const body = `notes\n\n${triage.render("t1")}`;
     expect(isReeveProposalPr({ isPullRequest: true, body })).toBe(false);
+  });
+});
+
+describe("closeMarkerFor", () => {
+  const triageClose = closeMarkerFor("triage");
+
+  it("renders the target it was given", () => {
+    expect(triageClose.render(7)).toBe("<!-- reeve:triage:closed duplicate-of=7 -->");
+  });
+
+  it.each([["Triage"], ["tri age"], ["3triage"], [""], ["triage/x"], ["-x"]])(
+    "refuses `%s`, which is not a duty name",
+    (name) => {
+      expect(() => closeMarkerFor(name)).toThrow(/is not a duty name/);
+    },
+  );
+
+  it("finds the target inside a comment carrying other text", () => {
+    const body = `Closed as a duplicate of #7.\n\n${triageClose.render(7)}`;
+    expect(triageClose.find(body)).toBe(7);
+  });
+
+  it("finds nothing in a body that never carried the marker", () => {
+    expect(triageClose.find("Closed as a duplicate of #7.")).toBeNull();
+  });
+
+  it("does not find another duty's marker", () => {
+    const duplicateClose = closeMarkerFor("duplicate");
+    expect(triageClose.find(duplicateClose.render(7))).toBeNull();
+  });
+
+  it("finds the most recent of two markers in the same body", () => {
+    // `attributedClose` in `duties/triage/outcome.ts` scans a thread's replies
+    // newest-first and stops at the first match, so within a single reply this
+    // only ever needs to answer with one target — the first one written —
+    // but a body carrying two should still parse cleanly.
+    const body = `${triageClose.render(7)}\n\n${triageClose.render(9)}`;
+    expect(triageClose.find(body)).toBe(7);
+  });
+
+  it.each([
+    ["a leading zero", "07"],
+    ["a plus sign", "+7"],
+    ["a minus sign", "-7"],
+    ["a decimal", "7.5"],
+    ["letters", "abc"],
+    ["nothing", ""],
+  ])("refuses a payload with %s rather than trusting it", (_label, digits) => {
+    expect(triageClose.find(`<!-- reeve:triage:closed duplicate-of=${digits} -->`)).toBeNull();
+  });
+
+  it("treats a marker with no closer as not found", () => {
+    expect(triageClose.find("<!-- reeve:triage:closed duplicate-of=7")).toBeNull();
+  });
+
+  it("does not mistake a mention of the marker's name for the marker", () => {
+    expect(triageClose.find("See the reeve:triage:closed marker in the docs.")).toBeNull();
   });
 });
 

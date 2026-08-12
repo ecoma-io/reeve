@@ -108,6 +108,84 @@ export function markerFor(duty: string): Marker {
   };
 }
 
+/** One duty's close-attribution marker: how it renders one, and how it finds one. */
+export interface CloseMarker {
+  /** The marker for a `duplicate_of` target, which is the only way one is written. */
+  render(duplicateOf: number): string;
+  /**
+   * The `duplicate_of` target the first well-formed marker in `body` names,
+   * or null when the body carries none. Unlike `Marker.split`, this does not
+   * also split off an "official half" — a close comment has no author's text
+   * above the marker to protect, only Reeve's own words and the marker.
+   */
+  find(body: string): number | null;
+}
+
+/**
+ * The marker a duty's own close-as-duplicate leaves in its comment, and the
+ * primitive every reversal signal that needs to attribute a close to Reeve —
+ * rather than to a stranger's forged comment or a different bot entirely —
+ * is built on.
+ *
+ * **Why this has to exist before a human's reversal of it can be recorded.**
+ * The `closed` event's actor is `github-actions[bot]` for any Action running
+ * in the repository, which is not attribution — it is shared with every
+ * other automation a maintainer runs. And the close comment's prose is
+ * unusable for the same reason a marker's fingerprint is unusable as prose: a
+ * comment is localized per D1, so "Closed as a duplicate of #123" in the
+ * project's configured language is not a stable string to search for. What
+ * attribution actually needs is a payload no localization touches, in a place
+ * only Reeve's own comment carries it — which is this marker, checked
+ * alongside `comment.user.type === "Bot"` by the caller (attribution is the
+ * two together; this module only renders and finds the payload).
+ *
+ * **Forgeable text, the same as every other marker.** A public comment
+ * containing this exact string does not make its author Reeve — see
+ * `markerFor`'s own doctrine. The bot-authorship half of attribution is what
+ * closes that gap, and it lives with the caller because this module has no
+ * way to check who posted a body it is handed.
+ *
+ * A separate grammar from `markerFor`'s translate/triage/... markers rather
+ * than a reuse of it: those name a duty and carry an opaque fingerprint for
+ * idempotency ("have I already answered this input"); this one names a duty
+ * and carries a structured claim for attribution ("what did I claim when I
+ * closed this"). Conflating the two would make an idempotency fingerprint
+ * double as a public attribution payload, which is a stronger promise than
+ * `markerFor` was ever asked to keep.
+ */
+export function closeMarkerFor(duty: string): CloseMarker {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`,
+    );
+  }
+
+  const prefix = `<!-- reeve:${duty}:closed duplicate-of=`;
+
+  return {
+    render(duplicateOf) {
+      return `${prefix}${String(duplicateOf)}${SUFFIX}`;
+    },
+
+    find(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return null;
+
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return null;
+
+      const digits = body.slice(from, to);
+      // The same refusal `parseVerdict` applies to a model's own `duplicate_of`:
+      // a leading zero, a sign, or anything but digits is not an issue number,
+      // and a marker that does not parse as one is not attribution — a stranger
+      // who alters the payload should not thereby control what the gate reads.
+      if (!/^[1-9][0-9]*$/.test(digits)) return null;
+      return Number(digits);
+    },
+  };
+}
+
 /**
  * The author's half, canonical.
  *

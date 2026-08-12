@@ -62,6 +62,21 @@ export interface Correction {
   readonly repo: string;
   /** The thread this was decided on. */
   readonly thread: number;
+  /**
+   * Which duty this line is a decision *about* — not which duty wrote the
+   * line, though for every line in the store today the two coincide. `""` or
+   * a missing key reads as `"triage"`, which is what makes an old store line
+   * mean exactly what it always meant: before this field existed there was
+   * only one duty that recorded anything.
+   *
+   * This, together with `repo` and `thread`, is the replacement key: a fresh
+   * write only ever overwrites the line for the same thread *and the same
+   * duty*. Without the duty in the key, a reversal recorded against a
+   * duplicate verdict (`duty: "duplicate"`) would land in the same slot as
+   * the thread's standing label correction (`duty: "triage"`) and one would
+   * silently erase the other on the next write of either.
+   */
+  readonly duty: string;
   /** When, as an ISO-8601 instant. */
   readonly at: string;
   readonly title: string;
@@ -71,12 +86,49 @@ export interface Correction {
   readonly language: string | null;
   /** What was proposed at the time. Empty when nothing was. */
   readonly proposed: readonly string[];
-  /** What a maintainer settled on. This is the part with the authority. */
+  /**
+   * What a maintainer settled on. This is the part with the authority — on
+   * every line except one kind, see below.
+   *
+   * **On a line with `outcome: "overruled"` and a `duplicateOf`, this field
+   * is incidental standing, not the correction.** The correction *is* the
+   * reversal: a human reopened a thread Reeve closed as a duplicate, and
+   * what the store needs to remember is that the close was wrong, not
+   * whatever labels happen to sit on the thread afterward. `decided` is kept
+   * on that line only because every line carries it and a reader should not
+   * have to special-case a missing field — read it as "the labels at the
+   * time of the reversal," never as "what the reversal decided." A future
+   * change that "fixes" this field to omit `decided` from reversal lines, or
+   * that starts treating it as the corrected verdict there, restores the
+   * old invariant in the one place it does not hold.
+   */
   readonly decided: readonly string[];
   /** Who decided. A handle, without the `@`. */
   readonly by: string;
   /** Why, in their words. The highest-value field and the one most often absent. */
   readonly note: string | null;
+  /**
+   * What happened to Reeve's own prior action on this thread, or `null` for
+   * every ordinary correction — which is every line the store has ever held
+   * before this field existed, and most lines after.
+   *
+   * The one value today is `"overruled"`: a human reversed something Reeve
+   * did (removed a bot-applied label, reopened a thread Reeve closed as a
+   * duplicate). This is a **closed enum, and unlike every other field on
+   * this record, an unrecognised value refuses the whole line** rather than
+   * defaulting — see `parseCorrection`. A plain correction and a reversal
+   * are rendered through structurally different frames (`partitionRecall`
+   * in this file); misreading a future outcome kind as "absent" would serve
+   * a warning as a worked example of the thing it warns against, which is
+   * the one mistake this field exists to make impossible.
+   */
+  readonly outcome: "overruled" | null;
+  /**
+   * The thread Reeve's own verdict named as a duplicate, when `outcome` is
+   * a reversal of a duplicate-close. `null` for every other line, including
+   * an ordinary label correction.
+   */
+  readonly duplicateOf: number | null;
   /**
    * This correction's title and excerpt, rendered into the run's pivot
    * language — the first language named in `languages` (or the warrant's own
@@ -484,9 +536,27 @@ export function parseCorrection(line: string): Correction | null {
   // context that can be missing without the record ceasing to mean anything.
   if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
 
+  // `outcome` is the one field held to the store's stricter, enum-shaped
+  // failure mode: every other field defaults when it is missing or the wrong
+  // type, but a value here that is neither absent/null nor the one known
+  // enum member refuses the whole line. A future outcome kind this build
+  // does not know about must never be misread as "no outcome" — that would
+  // serve a warning as an ordinary worked example, which is the one thing
+  // this field exists to prevent. See the doc comment on `Correction.outcome`.
+  const rawOutcome = record.outcome;
+  if (rawOutcome !== undefined && rawOutcome !== null && rawOutcome !== "overruled") return null;
+  const outcome = rawOutcome === "overruled" ? "overruled" : null;
+
+  const rawDuplicateOf = record.duplicateOf;
+  const duplicateOf =
+    typeof rawDuplicateOf === "number" && Number.isInteger(rawDuplicateOf) && rawDuplicateOf >= 1
+      ? rawDuplicateOf
+      : null;
+
   return {
     repo: typeof record.repo === "string" ? record.repo : "",
     thread,
+    duty: typeof record.duty === "string" && record.duty.length > 0 ? record.duty : "triage",
     at: typeof record.at === "string" ? record.at : "",
     title: typeof record.title === "string" ? record.title : "",
     excerpt: typeof record.excerpt === "string" ? record.excerpt : "",
@@ -497,6 +567,8 @@ export function parseCorrection(line: string): Correction | null {
     by: typeof record.by === "string" ? record.by : "",
     note:
       typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
+    outcome,
+    duplicateOf,
     pivot: readPivot(record.pivot),
   };
 }
@@ -540,6 +612,7 @@ export function formatCorrection(correction: Correction): string {
   return JSON.stringify({
     repo: correction.repo,
     thread: correction.thread,
+    duty: correction.duty,
     at: correction.at,
     title: correction.title,
     excerpt: correction.excerpt.slice(0, EXCERPT),
@@ -548,6 +621,8 @@ export function formatCorrection(correction: Correction): string {
     decided: correction.decided,
     by: correction.by,
     note: correction.note,
+    outcome: correction.outcome,
+    duplicateOf: correction.duplicateOf,
     pivot:
       correction.pivot === null
         ? null

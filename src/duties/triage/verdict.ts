@@ -31,6 +31,7 @@ import type { Correction } from "../../core/memory.js";
 import { segments } from "../../core/markdown.js";
 import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
+import { renderRecall } from "../../core/recall.js";
 import type { Label } from "../../core/warrant.js";
 
 /** What the model proposed, before anything has been checked against the file. */
@@ -199,10 +200,11 @@ function unwrapped(answer: string): string {
 export function prompt(request: TriageRequest): Message[] {
   const { title, body, taxonomy, language, recalled } = request;
 
+  const rendered = renderRecall(recalled);
   const material = enclose(
     "untrusted-thread",
     [
-      ...(recalled.length === 0 ? [] : [examples(recalled), ""]),
+      ...(rendered === "" ? [] : [rendered, ""]),
       "--- THREAD TO TRIAGE ---",
       `TITLE: ${title}`,
       "BODY:",
@@ -253,36 +255,4 @@ function describe(label: Label): string {
     lines.push(...label.examples.map((example) => `  e.g. ${example}`));
   }
   return lines.join("\n");
-}
-
-/**
- * The recalled decisions, as the examples they are.
- *
- * `decided` and not `proposed` carries the authority: what a maintainer settled
- * on is the answer, and what was proposed at the time is shown beside it only
- * when the two differ, because a correction where they differ is teaching
- * something a correction where they agree is not.
- */
-function examples(recalled: readonly Correction[]): string {
-  const written = recalled.map((correction) => {
-    const lines = [
-      `#${String(correction.thread)}: ${correction.title}`,
-      `  DECIDED: ${correction.decided.length === 0 ? "no labels" : correction.decided.join(", ")}`,
-    ];
-    if (differs(correction)) {
-      lines.push(
-        `  (proposed at the time: ${correction.proposed.length === 0 ? "no labels" : correction.proposed.join(", ")})`,
-      );
-    }
-    if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
-    return lines.join("\n");
-  });
-
-  return ["--- DECISIONS THIS PROJECT ALREADY MADE ---", ...written].join("\n");
-}
-
-function differs(correction: Correction): boolean {
-  const decided = [...correction.decided].sort();
-  const proposed = [...correction.proposed].sort();
-  return decided.length !== proposed.length || decided.some((name, at) => name !== proposed[at]);
 }

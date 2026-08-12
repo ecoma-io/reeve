@@ -76,6 +76,7 @@ export interface LifecycleApi {
         }[];
       }>;
     };
+    readonly repos: TrackerApi["rest"]["repos"];
   };
 }
 

@@ -251,6 +251,15 @@ maintainer decided. Where machine output and human text sit together, the human
 text is kept byte-for-byte and marked as the version the project is answerable
 for.
 
+This holds even against Reeve's own past decision. A human who reopens a thread
+Reeve closed as a duplicate, or removes a label Reeve applied, has just done the
+same kind of work this doctrine already protects — and triage's enforce stage
+refuses in code, not only in a prompt, to re-close a thread against a reversal
+already on record: whatever a model proposes next, a human's reversal of
+Reeve's own prior action is itself inviolable. See
+[triage's own reference page](../reference/duties/triage.md#configuration)
+for the mechanism.
+
 _Costs us:_ the tidy-the-backlog features that demo best are the ones we refuse.
 
 ### D4 — The work is priced before it is done

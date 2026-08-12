@@ -31585,6 +31585,64 @@ var import_yaml = __toESM(require_dist2(), 1);
 function isBotAuthor(author) {
   return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
 }
+var REPLY_PAGE = 100;
+var REPLY_PAGES = 10;
+function lastPageFrom(link) {
+  if (link === void 0) return null;
+  const match = /<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/.exec(link);
+  return match?.[1] === void 0 ? null : Number(match[1]);
+}
+function toReply(comment2) {
+  return {
+    id: comment2.id,
+    body: comment2.body ?? "",
+    login: comment2.user?.login ?? "",
+    isBot: isBotAuthor(comment2.user)
+  };
+}
+async function listReplies(api, at, options) {
+  const max = options?.max ?? REPLY_PAGE;
+  const order = options?.order ?? "oldest";
+  const page2 = (n) => api.rest.issues.listComments({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number,
+    per_page: REPLY_PAGE,
+    page: n
+  });
+  if (order === "oldest") {
+    const pageCap = Math.min(REPLY_PAGES, Math.ceil(max / REPLY_PAGE));
+    const all = [];
+    let lastPageFull = false;
+    for (let n = 1; n <= pageCap; n += 1) {
+      const { data } = await page2(n);
+      all.push(...data.map(toReply));
+      lastPageFull = data.length === REPLY_PAGE;
+      if (!lastPageFull || all.length >= max) break;
+    }
+    return { replies: all.slice(0, max), more: all.length > max || lastPageFull };
+  }
+  const first = await page2(1);
+  const lastPage = lastPageFrom(first.headers?.link);
+  if (lastPage === null || lastPage <= 1) {
+    const all = first.data.map(toReply);
+    return { replies: all.slice(-max), more: all.length > max };
+  }
+  const collected = [];
+  let firstPageWalked;
+  let pagesFetched = 0;
+  for (let n = lastPage; ; n -= 1) {
+    const { data } = n === 1 ? first : await page2(n);
+    collected.unshift(...data.map(toReply));
+    firstPageWalked = n;
+    pagesFetched += 1;
+    if (collected.length >= max || n === 1 || pagesFetched >= REPLY_PAGES) break;
+  }
+  return {
+    replies: collected.slice(-max),
+    more: firstPageWalked > 1 || collected.length > max
+  };
+}
 async function readStanding(api, at) {
   const { data } = await api.rest.issues.get({
     owner: at.owner,
@@ -34381,6 +34439,29 @@ function markerFor(duty) {
     }
   };
 }
+function closeMarkerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty}:closed duplicate-of=`;
+  return {
+    render(duplicateOf) {
+      return `${prefix}${String(duplicateOf)}${SUFFIX}`;
+    },
+    find(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return null;
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return null;
+      const digits = body.slice(from, to);
+      if (!/^[1-9][0-9]*$/.test(digits)) return null;
+      return Number(digits);
+    }
+  };
+}
 function authorHalf(text2) {
   return text2.replace(/\s+$/u, "");
 }
@@ -34553,9 +34634,15 @@ function parseCorrection(line) {
   const thread = record.thread;
   const decided = strings2(record.decided);
   if (typeof thread !== "number" || !Number.isInteger(thread) || decided === null) return null;
+  const rawOutcome = record.outcome;
+  if (rawOutcome !== void 0 && rawOutcome !== null && rawOutcome !== "overruled") return null;
+  const outcome = rawOutcome === "overruled" ? "overruled" : null;
+  const rawDuplicateOf = record.duplicateOf;
+  const duplicateOf = typeof rawDuplicateOf === "number" && Number.isInteger(rawDuplicateOf) && rawDuplicateOf >= 1 ? rawDuplicateOf : null;
   return {
     repo: typeof record.repo === "string" ? record.repo : "",
     thread,
+    duty: typeof record.duty === "string" && record.duty.length > 0 ? record.duty : "triage",
     at: typeof record.at === "string" ? record.at : "",
     title: typeof record.title === "string" ? record.title : "",
     excerpt: typeof record.excerpt === "string" ? record.excerpt : "",
@@ -34564,6 +34651,8 @@ function parseCorrection(line) {
     decided,
     by: typeof record.by === "string" ? record.by : "",
     note: typeof record.note === "string" && record.note.trim().length > 0 ? record.note.trim() : null,
+    outcome,
+    duplicateOf,
     pivot: readPivot2(record.pivot)
   };
 }
@@ -34585,6 +34674,7 @@ function formatCorrection(correction) {
   return JSON.stringify({
     repo: correction.repo,
     thread: correction.thread,
+    duty: correction.duty,
     at: correction.at,
     title: correction.title,
     excerpt: correction.excerpt.slice(0, EXCERPT),
@@ -34593,6 +34683,8 @@ function formatCorrection(correction) {
     decided: correction.decided,
     by: correction.by,
     note: correction.note,
+    outcome: correction.outcome,
+    duplicateOf: correction.duplicateOf,
     pivot: correction.pivot === null ? null : {
       language: correction.pivot.language,
       title: correction.pivot.title,
@@ -34972,6 +35064,75 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
+}
+
+// src/duties/triage/outcome.ts
+var closeMarker = closeMarkerFor("triage");
+async function removedByAutomation(api, at, label) {
+  const history = await listLabelEvents(api, at);
+  if (!history.complete) return false;
+  let byBot = false;
+  for (const event of history.events) {
+    if (event.action === "labeled" && event.label === label) byBot = event.isBot;
+  }
+  return byBot;
+}
+async function attributedClose(api, at) {
+  const { replies } = await listReplies(api, at, { order: "newest" });
+  for (let index = replies.length - 1; index >= 0; index -= 1) {
+    const reply = replies[index];
+    if (!reply?.isBot) continue;
+    const duplicateOf = closeMarker.find(reply.body);
+    if (duplicateOf !== null) return { duplicateOf };
+  }
+  return null;
+}
+async function isTrustedReopener(api, at, username) {
+  if (username.length === 0) return false;
+  try {
+    const { data } = await api.rest.repos.getCollaboratorPermissionLevel({
+      owner: at.owner,
+      repo: at.repo,
+      username
+    });
+    return data.permission === "admin" || data.permission === "write";
+  } catch {
+    return false;
+  }
+}
+async function checkReversal(api, at, standing, reopener) {
+  const attribution = await attributedClose(api, at);
+  if (attribution === null) return { reversal: null, authorReopen: false };
+  if (reopener !== "" && reopener === standing.author.login) {
+    return { reversal: null, authorReopen: true };
+  }
+  const trusted = await isTrustedReopener(api, at, reopener);
+  if (!trusted) return { reversal: null, authorReopen: false };
+  return { reversal: attribution, authorReopen: false };
+}
+async function gateClose(contentsApi, at, path, repo, thread) {
+  const files = await listCorrectionFiles(contentsApi, at, path);
+  const unreadable = [];
+  for (const file of files) {
+    let read2;
+    try {
+      read2 = await readContentsFile(contentsApi, at, file.path);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      unreadable.push(file.path);
+      continue;
+    }
+    if (read2 === null) continue;
+    for (const line of read2.text.split("\n")) {
+      if (line.trim().length === 0) continue;
+      const correction = parseCorrection(line);
+      if (correction === null) continue;
+      if (correction.repo === repo && correction.thread === thread && correction.outcome === "overruled" && correction.duplicateOf !== null) {
+        return { refuse: true, found: true, unreadable };
+      }
+    }
+  }
+  return { refuse: unreadable.length > 0, found: false, unreadable };
 }
 
 // src/duties/triage/summary.ts
@@ -35770,6 +35931,58 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
   }
 }
 
+// src/core/recall.ts
+var DECISIONS_HEADING = "--- DECISIONS THIS PROJECT ALREADY MADE ---";
+var REVERSED_HEADING = "--- REVERSED: A HUMAN UNDID ONE OF REEVE'S OWN ACTIONS ---";
+function renderRecall(recalled) {
+  const decisions2 = recalled.filter((correction) => correction.outcome === null);
+  const reversed = recalled.filter((correction) => correction.outcome === "overruled");
+  const sections = [];
+  if (decisions2.length > 0) {
+    sections.push([DECISIONS_HEADING, ...decisions2.map(renderDecision)].join("\n"));
+  }
+  if (reversed.length > 0) {
+    sections.push([REVERSED_HEADING, ...reversed.map(renderReversed)].join("\n"));
+  }
+  return sections.join("\n\n");
+}
+function renderDecision(correction) {
+  const lines = [
+    `#${String(correction.thread)}: ${correction.title}`,
+    `  DECIDED: ${labelList(correction.decided)}`
+  ];
+  if (differs(correction)) {
+    lines.push(`  (proposed at the time: ${labelList(correction.proposed)})`);
+  }
+  if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
+  return lines.join("\n");
+}
+function renderReversed(correction) {
+  const lines = [`#${String(correction.thread)}: ${correction.title}`];
+  if (correction.duplicateOf !== null) {
+    lines.push(
+      `  Automation closed this thread as a duplicate of #${String(correction.duplicateOf)}.`,
+      "  A human reopened it: that close was reversed."
+    );
+  } else {
+    const removed = correction.proposed.filter((label) => !correction.decided.includes(label));
+    lines.push(
+      removed.length === 0 ? "  Automation labeled this thread. A human corrected the labels." : `  Automation applied ${labelList(removed)}. A human removed it.`,
+      `  It stands as: ${labelList(correction.decided)}.`
+    );
+  }
+  if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
+  return lines.join("\n");
+}
+function labelList(labels) {
+  return labels.length === 0 ? "no labels" : labels.join(", ");
+}
+function differs(correction) {
+  const decided = [...correction.decided].sort();
+  const proposed = [...correction.proposed].sort();
+  return decided.length !== proposed.length || decided.some((name, at) => name !== proposed[at]);
+}
+
 // src/duties/triage/verdict.ts
 var NOTHING = { labels: [], confidence: 0, duplicateOf: null, rationale: "" };
 async function triage(request2) {
@@ -35829,10 +36042,11 @@ function unwrapped2(answer2) {
 }
 function prompt3(request2) {
   const { title, body, taxonomy, language, recalled } = request2;
+  const rendered = renderRecall(recalled);
   const material = enclose(
     "untrusted-thread",
     [
-      ...recalled.length === 0 ? [] : [examples(recalled), ""],
+      ...rendered === "" ? [] : [rendered, ""],
       "--- THREAD TO TRIAGE ---",
       `TITLE: ${title}`,
       "BODY:",
@@ -35877,27 +36091,6 @@ function describe2(label) {
     lines.push(...label.examples.map((example) => `  e.g. ${example}`));
   }
   return lines.join("\n");
-}
-function examples(recalled) {
-  const written = recalled.map((correction) => {
-    const lines = [
-      `#${String(correction.thread)}: ${correction.title}`,
-      `  DECIDED: ${correction.decided.length === 0 ? "no labels" : correction.decided.join(", ")}`
-    ];
-    if (differs(correction)) {
-      lines.push(
-        `  (proposed at the time: ${correction.proposed.length === 0 ? "no labels" : correction.proposed.join(", ")})`
-      );
-    }
-    if (correction.note !== null) lines.push(`  WHY: ${correction.note}`);
-    return lines.join("\n");
-  });
-  return ["--- DECISIONS THIS PROJECT ALREADY MADE ---", ...written].join("\n");
-}
-function differs(correction) {
-  const decided = [...correction.decided].sort();
-  const proposed = [...correction.proposed].sort();
-  return decided.length !== proposed.length || decided.some((name, at) => name !== proposed[at]);
 }
 
 // src/duties/triage/main.ts
@@ -36024,7 +36217,11 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
         settings,
         stages,
         weather,
-        "sweep"
+        "sweep",
+        // A sweep imports whatever labels stand on a thread; there is no
+        // single labelling event to read a before/after delta from, the
+        // same reason `by === "sweep"` skips the S1 enrichment entirely.
+        null
       );
       if (outcome.machineOnly || outcome.unattributable) {
         acc.skipped += 1;
@@ -36033,7 +36230,14 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       }
     } else {
       const outcome = await decide(authority2, standing, settings, stages, weather);
-      const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
+      const done = settings.dryRun ? NOTHING_DONE : await act(
+        createEffects(api, at),
+        authority2.warrant,
+        outcome,
+        api,
+        at,
+        settings.corrections
+      );
       acc.results.push({ number: thread.number, outcome: describeOutcome(outcome, done) });
     }
   }
@@ -36176,14 +36380,36 @@ async function run() {
           }
           if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
             notice(
-              `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
+              `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
             );
           }
           if (trigger.reason !== "" && permitted.includes("record")) {
             info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
           }
           noticeProposeSweepOnly(authority2);
-          if (trigger.eligible && permitted.includes("record")) {
+          if (trigger.eligible && permitted.includes("record") && trigger.kind === "reopen") {
+            const check = await checkReversal(api, at, standing, senderLogin());
+            if (check.authorReopen) {
+              notice(
+                `#${String(number)} was reopened by the thread's own author \u2014 not recorded as a reversal. A maintainer who agrees the close was wrong can still record it, by toggling a label.`
+              );
+            }
+            if (check.reversal !== null) {
+              recordOutcome = await recordReversal(
+                api,
+                at,
+                standing,
+                authority2,
+                settings,
+                stages,
+                weather,
+                senderLogin(),
+                check.reversal.duplicateOf
+              );
+            } else {
+              outcome = await decide(authority2, standing, settings, stages, weather);
+            }
+          } else if (trigger.eligible && permitted.includes("record")) {
             recordOutcome = await recordCorrection(
               api,
               at,
@@ -36192,7 +36418,8 @@ async function run() {
               settings,
               stages,
               weather,
-              senderLogin()
+              senderLogin(),
+              labelChange()
             );
           } else {
             outcome = await decide(authority2, standing, settings, stages, weather);
@@ -36202,7 +36429,14 @@ async function run() {
       if (recordOutcome !== null) {
         recorded = { number, outcome: recordOutcome };
       } else if (outcome !== null) {
-        const done = settings.dryRun ? NOTHING_DONE : await act(createEffects(api, at), authority2.warrant, outcome);
+        const done = settings.dryRun ? NOTHING_DONE : await act(
+          createEffects(api, at),
+          authority2.warrant,
+          outcome,
+          api,
+          at,
+          settings.corrections
+        );
         single = { number, outcome, done };
       }
     }
@@ -36417,21 +36651,67 @@ ${pivot.draft.body}`,
 }
 function recordTrigger() {
   const eventName = process.env.GITHUB_EVENT_NAME ?? "";
-  if (eventName !== "issues") return { eligible: false, reason: "" };
+  if (eventName !== "issues") return { eligible: false, kind: "label", reason: "" };
   const payload = context2.payload;
+  if (payload.action === "reopened") {
+    if (isBotAuthor(payload.sender)) {
+      return { eligible: false, kind: "reopen", reason: "the reopen came from a bot" };
+    }
+    return { eligible: true, kind: "reopen", reason: "" };
+  }
   if (payload.action !== "labeled" && payload.action !== "unlabeled") {
-    return { eligible: false, reason: "" };
+    return { eligible: false, kind: "label", reason: "" };
   }
   if (isBotAuthor(payload.sender)) {
-    return { eligible: false, reason: "the label change came from a bot" };
+    return { eligible: false, kind: "label", reason: "the label change came from a bot" };
   }
-  return { eligible: true, reason: "" };
+  return { eligible: true, kind: "label", reason: "" };
 }
 function senderLogin() {
   const payload = context2.payload;
   return payload.sender?.login ?? "";
 }
-async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by) {
+function labelChange() {
+  const payload = context2.payload;
+  if (payload.action !== "labeled" && payload.action !== "unlabeled") return null;
+  const label = payload.label?.name;
+  if (label === void 0 || label.length === 0) return null;
+  return { label, action: payload.action };
+}
+async function computePivot(warrant, standing, body, code, settings, stages, weather) {
+  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
+  if (pivotLanguage === null || code === null || code === pivotLanguage.code) {
+    return { pivot: null, pivotNote: null };
+  }
+  const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
+  const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
+  const rendered = await translateToPivot({
+    provider: stages.pivot,
+    models: pivotModels,
+    title: standing.title,
+    body,
+    to: pivotLanguage,
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+  });
+  for (const failure of rendered.failures) {
+    warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (rendered.draft !== null) {
+    return {
+      pivot: {
+        language: pivotLanguage.code,
+        title: rendered.draft.title,
+        excerpt: rendered.draft.body.slice(0, EXCERPT)
+      },
+      pivotNote: null
+    };
+  }
+  const pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
+  info(pivotNote);
+  return { pivot: null, pivotNote };
+}
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed) {
   const warrant = authority2.warrant;
   let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
   if (by === "sweep" && decidedLabels.length > 0) {
@@ -36483,38 +36763,88 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     )
   );
   const code = detection.language?.code ?? null;
-  const pivotLanguage = settings.languages.length > 0 ? resolvePivot(warrant, settings.languages) : null;
-  let pivot = null;
-  let pivotNote = null;
-  if (pivotLanguage !== null && code !== null && code !== pivotLanguage.code) {
-    const pivotModels = settings.screenModels.length > 0 ? settings.screenModels : settings.models;
-    const pivotNames = settings.screenModels.length > 0 ? settings.screenNames : settings.modelNames;
-    const rendered = await translateToPivot({
-      provider: stages.pivot,
-      models: pivotModels,
-      title: standing.title,
-      body,
-      to: pivotLanguage,
-      weather,
-      ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-    });
-    for (const failure of rendered.failures) {
-      warning(`record: ${shown(pivotNames, failure.model)} \u2014 ${failure.reason}`);
-    }
-    if (rendered.draft !== null) {
-      pivot = {
-        language: pivotLanguage.code,
-        title: rendered.draft.title,
-        excerpt: rendered.draft.body.slice(0, EXCERPT)
-      };
-    } else {
-      pivotNote = "A pivot-language rendering could not be produced this run, so the correction was recorded without one.";
-      info(pivotNote);
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather
+  );
+  let proposed = [];
+  let outcomeField = null;
+  if (by !== "sweep" && changed !== null && taxonomyNames(settings).has(changed.label)) {
+    const before = new Set(decidedLabels);
+    if (changed.action === "unlabeled") before.add(changed.label);
+    else before.delete(changed.label);
+    proposed = [...before];
+    if (changed.action === "unlabeled") {
+      outcomeField = await removedByAutomation(api, at, changed.label) ? "overruled" : null;
     }
   }
   const correction = {
     repo: `${at.owner}/${at.repo}`,
     thread: at.number,
+    duty: "triage",
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    title: standing.title,
+    excerpt: body.slice(0, EXCERPT),
+    language: code,
+    proposed,
+    decided: decidedLabels,
+    by,
+    note: null,
+    outcome: outcomeField,
+    duplicateOf: null,
+    pivot
+  };
+  if (settings.dryRun) {
+    info(
+      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
+    );
+  } else {
+    await writeCorrection(api, at, settings.corrections, correction);
+  }
+  return {
+    recorded: true,
+    language: detection.language?.label ?? null,
+    decided: decidedLabels,
+    pivot: pivot !== null,
+    pivotNote,
+    machineOnly: false,
+    unattributable: false
+  };
+}
+async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf) {
+  const warrant = authority2.warrant;
+  const limit = settings.maxBodyChars;
+  const body = limit === null ? standing.body : standing.body.slice(0, limit);
+  const detection = await detectLanguage(
+    body.length === 0 ? standing.title : body,
+    settings.languages,
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather,
+      settings.temperature
+    )
+  );
+  const code = detection.language?.code ?? null;
+  const { pivot, pivotNote } = await computePivot(
+    warrant,
+    standing,
+    body,
+    code,
+    settings,
+    stages,
+    weather
+  );
+  const decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
+  const correction = {
+    repo: `${at.owner}/${at.repo}`,
+    thread: at.number,
+    duty: "duplicate",
     at: (/* @__PURE__ */ new Date()).toISOString(),
     title: standing.title,
     excerpt: body.slice(0, EXCERPT),
@@ -36523,11 +36853,13 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     decided: decidedLabels,
     by,
     note: null,
+    outcome: "overruled",
+    duplicateOf,
     pivot
   };
   if (settings.dryRun) {
     info(
-      `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
+      `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
     );
   } else {
     await writeCorrection(api, at, settings.corrections, correction);
@@ -36584,7 +36916,7 @@ async function attemptWrite(contentsApi, at, path, correction) {
         provenShared = true;
         continue;
       }
-      if (existing2.thread === correction.thread && existing2.repo === correction.repo) {
+      if (existing2.thread === correction.thread && existing2.repo === correction.repo && existing2.duty === correction.duty) {
         const updated = [...lines];
         updated[index] = formatCorrection(correction);
         await writeContentsFile(
@@ -36599,7 +36931,7 @@ async function attemptWrite(contentsApi, at, path, correction) {
         return;
       }
       if (existing2.repo !== "" && existing2.repo !== correction.repo) provenShared = true;
-      if (existing2.repo === "" && existing2.thread === correction.thread && legacyCandidate === null) {
+      if (existing2.repo === "" && existing2.thread === correction.thread && existing2.duty === correction.duty && legacyCandidate === null) {
         legacyCandidate = { path: file.path, lines, sha: read2.sha, index };
       }
     }
@@ -36750,7 +37082,7 @@ function notGranted(warrant) {
     ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block exists it is the whole answer, so add \`triage: [label]\` to it (or remove the block to return to defaults).`
   };
 }
-async function act(effects, warrant, outcome) {
+async function act(effects, warrant, outcome, contentsApi, at, correctionsPath) {
   let labels = [];
   let assigned = [];
   let closed = false;
@@ -36771,8 +37103,28 @@ async function act(effects, warrant, outcome) {
     }
   }
   if (outcome.permitted.includes("close") && outcome.verdict.duplicateOf !== null) {
-    await effects.closeAsNotPlanned();
-    closed = true;
+    const gate = await gateClose(
+      contentsApi,
+      at,
+      repoRelativePath(correctionsPath),
+      `${at.owner}/${at.repo}`,
+      at.number
+    );
+    if (gate.refuse) {
+      if (gate.found) {
+        const aside = gate.unreadable.length > 0 ? ` (${gate.unreadable.map((shard) => `\`${shard}\``).join(", ")} could not be read while checking, but that is not why this was refused)` : "";
+        notice(
+          `#${String(at.number)}: a human already reopened this thread after Reeve closed it as a duplicate \u2014 that close was recorded as reversed, and the gate refuses to repeat it. The model's verdict is not what decides this; D3 is.${aside}`
+        );
+      } else {
+        warning(
+          `#${String(at.number)}: the hard gate could not fully check whether this close was already reversed \u2014 ${gate.unreadable.map((shard) => `\`${shard}\``).join(", ")} could not be read, and an unreadable shard refuses the same as a found record would. The close was refused rather than risk re-closing a thread a human already reopened.`
+        );
+      }
+    } else {
+      await effects.closeAsNotPlanned();
+      closed = true;
+    }
   }
   const said = comment(outcome, { labels, commented: false, assigned, closed });
   let commented = false;
@@ -36792,6 +37144,7 @@ function comment(outcome, done) {
     parts.push(
       done.closed ? `Closed as a duplicate of ${number}.` : `This may duplicate ${number}.`
     );
+    if (done.closed) parts.push(closeMarker.render(outcome.verdict.duplicateOf));
   }
   if (parts.length === 0) return "";
   if (outcome.verdict.rationale.length > 0) parts.push("", `> ${outcome.verdict.rationale}`);

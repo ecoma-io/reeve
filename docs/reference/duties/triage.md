@@ -157,7 +157,7 @@ before you move it.
 narrower of `reeve.yml`'s `capabilities:` block and the workflow's `apply`
 input wins, always, and that rule applies to `record` exactly as it applies
 to `label` or `comment`. Granting `record` in the file alone is not enough:
-`apply` defaults to `label`, and a run triggered on a labelled event with
+`apply` defaults to `label`, and a run triggered on an eligible event with
 `record` left out of `apply` re-triages the thread instead of recording it —
 silently, because nothing about that is a misconfiguration the warrant
 reader could catch. A trigger this duty would otherwise have recorded, doing
@@ -168,7 +168,7 @@ trigger and the grant:
 ```yaml
 on:
   issues:
-    types: [labeled, unlabeled]
+    types: [labeled, unlabeled, reopened]
 
 permissions:
   contents: write
@@ -183,14 +183,14 @@ jobs:
           number: ${{ github.event.issue.number }}
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          apply: label, record
+          apply: label, close, record
 ```
 
 and the file's own half, alongside whatever else `triage` is granted:
 
 ```yaml
 capabilities:
-  triage: [label, record]
+  triage: [label, close, record]
 ```
 
 **Recording writes down what stands, not a fresh verdict.** A labelled or
@@ -198,6 +198,29 @@ unlabelled event from a human — never a re-triage, never a bot — commits
 that thread's taxonomy-filtered current labels to the store, replacing any
 earlier entry for the same thread, through GitHub's Contents API with no
 checkout.
+
+**`record` also commits a human's _reversal_ of one of Reeve's own past
+actions**, not only a forward decision. Two shapes, both requiring nothing
+beyond the grants above:
+
+- A taxonomy label Reeve applied that a human then removed. The ordinary
+  labelled/unlabelled write already covers this; it is enriched with a flag
+  marking it as a correction of automation rather than of another human, so
+  a later prompt can render it under a heading structurally apart from an
+  ordinary decision instead of a plain `DECIDED:` line.
+- A thread Reeve closed as a duplicate that a human then reopened. This is
+  why the trigger above includes `reopened` and the grants include `close`:
+  nothing records the reversal of a close this installation never makes. A
+  reopen from the thread's own author is deliberately excluded — an author's
+  disagreement is not a maintainer's agreement — and surfaced only as a
+  `core.notice`, so a maintainer who agrees can still record it by
+  relabelling.
+
+Either shape, once on record, is checked in code before every close a
+duplicate verdict would otherwise make: re-closing a thread against its own
+recorded reversal is refused outright, whatever the model proposes this run.
+See [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on)
+and [Memory](../../guides/warrant.md#memory) for the full argument.
 
 **`record` also composes with `sweep`, for a one-time bulk migration** — the
 same double grant above, but on a backlog walk instead of a single labelled
@@ -290,20 +313,20 @@ corrections store stays its own.
 
 Every output `triage/action.yml` declares.
 
-| Output         | Value                                                                                                                                                                                                      |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `labels`       | JSON array of the labels that were applied. `[]` is the ordinary answer on a thread nobody could label, never unset.                                                                                       |
-| `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                                                                         |
-| `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                                                                         |
-| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                                                                     |
-| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close`.                                                                                                 |
-| `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.                                                              |
-| `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                                                                         |
-| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                       |
-| `processed`    | How many issues a sweep actually processed this run — under bulk migration, how many it recorded. `0` outside `sweep`.                                                                                     |
-| `skipped`      | How many issues a sweep found already labelled and left alone — under bulk migration, how many carried no taxonomy label to import. `0` outside `sweep`.                                                   |
-| `remaining`    | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                 |
-| `recorded`     | `true` when a labelled or unlabelled event, with `record` granted, wrote this thread's current labels to the corrections store — also `true` for a whole bulk-migration sweep. `false` on every other run. |
+| Output         | Value                                                                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `labels`       | JSON array of the labels that were applied. `[]` is the ordinary answer on a thread nobody could label, never unset.                                                                                                                   |
+| `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                                                                                                     |
+| `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                                                                                                     |
+| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                                                                                                 |
+| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close` — and empty on a run the hard gate refused to close, even though a verdict proposed it.                                      |
+| `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.                                                                                          |
+| `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                                                                                                     |
+| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                   |
+| `processed`    | How many issues a sweep actually processed this run — under bulk migration, how many it recorded. `0` outside `sweep`.                                                                                                                 |
+| `skipped`      | How many issues a sweep found already labelled and left alone — under bulk migration, how many carried no taxonomy label to import. `0` outside `sweep`.                                                                               |
+| `remaining`    | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                                             |
+| `recorded`     | `true` when an eligible event, with `record` granted, wrote this thread's current labels or a reversal of Reeve's own past action to the corrections store — also `true` for a whole bulk-migration sweep. `false` on every other run. |
 
 **The difference between `proposed` and `labels` is what the guardrails
 stopped.** That is the output to watch while tuning `confidence` or a `not`
@@ -356,10 +379,19 @@ estimate across a real month's backlog.
 - **Unreadable output is an empty verdict**, never a best-effort parse of
   the parts that looked fine — the shapes that fail to parse are the shapes
   an injection produced.
+- **A duplicate-close checks the corrections store before it runs, not only
+  the model's verdict.** A thread whose earlier duplicate-close is on record
+  as reversed by a human is refused in code, unconditionally — a prompt
+  cannot talk a model past a check that never reaches the model at all. An
+  unreadable store shard fails this check closed, refusing the close rather
+  than risking a re-close the store could not actually vouch for; an
+  individual unparseable line within an otherwise-readable shard is skipped,
+  not treated as a reason to refuse everything.
 - **What it will never do:** remove a label a maintainer applied; reopen
   what a maintainer closed, or overwrite an assignment; apply a label your
   warrant does not name; edit a title or a body; comment, close or assign
-  without that capability being turned on by name. See
+  without that capability being turned on by name; re-close a thread as a
+  duplicate against a human's own reversal of that same close. See
   [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 
 ## Related concepts
