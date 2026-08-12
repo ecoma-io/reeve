@@ -36,6 +36,16 @@ import { isBotAuthor } from "../../core/forge.js";
  */
 export interface LifecycleApi {
   readonly rest: {
+    /** The token's own identity, resolved once per run — see `resolveOwnLogin`. */
+    readonly users: {
+      getAuthenticated(): Promise<{ data: { login?: string } }>;
+    };
+    /** Read only for `exempt.drafts` — whether a pull-request thread is a draft, a field the issues endpoint does not carry. */
+    readonly pulls: {
+      get(params: { owner: string; repo: string; pull_number: number }): Promise<{
+        data: { draft?: boolean };
+      }>;
+    };
     readonly issues: Omit<TrackerApi["rest"]["issues"], "listEvents"> & {
       listComments(params: {
         owner: string;
@@ -116,6 +126,32 @@ export async function readComments(
     if (data.length < PAGE) break;
   }
   return out;
+}
+
+/**
+ * The login this run's own token authenticates as, resolved exactly once
+ * per run and cached by the caller — the attribution gate the clock-hand
+ * exception reads (see `clock.ts`'s `isOwnApplied`) needs to know who "our
+ * own actor" is before it can tell a label we applied from one a human, or
+ * a different bot, did.
+ */
+export async function resolveOwnLogin(api: LifecycleApi): Promise<string> {
+  const { data } = await api.rest.users.getAuthenticated();
+  return data.login ?? "";
+}
+
+/**
+ * Whether a pull request is a draft — read only when `exempt.drafts` might
+ * apply, since the issues endpoint that every other read in this module
+ * uses does not carry it at all; only the pulls endpoint does.
+ */
+export async function isDraftPr(api: LifecycleApi, at: Location): Promise<boolean> {
+  const { data } = await api.rest.pulls.get({
+    owner: at.owner,
+    repo: at.repo,
+    pull_number: at.number,
+  });
+  return data.draft === true;
 }
 
 export async function readEvents(api: LifecycleApi, at: Location): Promise<readonly TimedEvent[]> {

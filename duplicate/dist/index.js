@@ -32928,7 +32928,8 @@ async function readStanding(api, at) {
     author: { login, isBot: isBotAuthor(data.user) },
     milestone: data.milestone?.title ?? null,
     assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
-    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0)
+    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0),
+    isPullRequest: data.pull_request !== void 0
   };
 }
 var LABEL_PAGE = 100;
@@ -32950,9 +32951,9 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since, state = "open") {
+async function listOpenThreads(api, at, since, state = "open", maxPages) {
   const listed = [];
-  for (let page2 = 1; ; page2 += 1) {
+  for (let page2 = 1; maxPages === void 0 || page2 <= maxPages; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
@@ -33269,6 +33270,12 @@ function readLifecycle(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads"
+  ]);
   const tracks = readLifecycleTracks(path, fields.tracks);
   const exempt = readLifecycleExempt(path, fields.exempt);
   const overrides = readLifecycleOverrides(path, fields.overrides);
@@ -33300,6 +33307,7 @@ function readLifecycleTracks(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
     const name = text(at, "name", fields.name, { required: true });
     if (!/^[a-z][a-z0-9-]*$/.test(name)) {
       throw new Error(
@@ -33348,6 +33356,7 @@ function readLifecycleStep(at, raw, isLast) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
   const after = durationField(at, "after", fields.after, { allowNever: false });
   const label = nullable(text(at, "label", fields.label, { required: false }));
   const say = readSay(at, fields.say);
@@ -33400,18 +33409,34 @@ function closeField(at, raw) {
 function readLifecycleExempt(path, raw) {
   const at = `\`${path}\`'s \`lifecycle.exempt\``;
   if (raw === void 0 || raw === null) {
-    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true
+    };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts"
+  ]);
   return {
     labels: strings(at, "labels", fields.labels),
     milestones: guardField(at, "milestones", fields.milestones, true),
     assignees: guardField(at, "assignees", fields.assignees, true),
     taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
-    comments: optionalWholeNumber(at, "comments", fields.comments, 1)
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true)
   };
 }
 function guardField(at, key, raw, fallback) {
@@ -33435,6 +33460,7 @@ function readLifecycleOverrides(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
     const label = text(at, "label", fields.label, { required: true });
     const hasAfter = fields.after !== void 0 && fields.after !== null;
     const never = booleanField(at, "never", fields.never, false);
@@ -33463,6 +33489,7 @@ function readPropose(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
   const workspaceRaw = fields.workspace;
   if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
   if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
@@ -33472,6 +33499,7 @@ function readPropose(path, raw) {
   }
   const w = workspaceRaw;
   const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
   const nameRaw = text(at, "name", w.name, { required: false });
   const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
   if ((name.match(/\{package\}/g) ?? []).length !== 1) {
@@ -33480,7 +33508,7 @@ function readPropose(path, raw) {
     );
   }
   const except = strings(at, "except", w.except);
-  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 0);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
   const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
   const retire = booleanField(at, "retire", w.retire, false);
   return { name, except, evidence, window: window2, retire };
@@ -33604,6 +33632,13 @@ function durationField(at, key, raw, options) {
     );
   }
   return days * 24 * 60 * 60 * 1e3;
+}
+function rejectUnknownKeys(at, fields, known) {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -33848,6 +33883,45 @@ function fraction(name, raw) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
   }
   return value;
+}
+
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
 }
 
 // src/core/meter.ts
@@ -34125,40 +34199,6 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
-}
-
-// src/core/marker.ts
-import { createHash } from "node:crypto";
-var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
-var SUFFIX = " -->";
-function markerFor(duty) {
-  if (!DUTY_NAME.test(duty)) {
-    throw new Error(
-      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
-    );
-  }
-  const prefix = `<!-- reeve:${duty} source=`;
-  return {
-    duty,
-    render(fingerprint2) {
-      return `${prefix}${fingerprint2}${SUFFIX}`;
-    },
-    split(body) {
-      const at = body.indexOf(prefix);
-      if (at === -1) return { official: authorHalf(body), fingerprint: null };
-      const from = at + prefix.length;
-      const to = body.indexOf(SUFFIX, from);
-      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
-      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
-    }
-  };
-}
-function authorHalf(text2) {
-  return text2.replace(/\s+$/u, "");
-}
-function fingerprint(text2, keys) {
-  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
-  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
 }
 
 // src/duties/duplicate/corpus.ts
@@ -34659,7 +34699,8 @@ async function runSweep(acc, api, authority, settings, stages, weather) {
       // either, so both are left at their honest "unknown" value.
       milestone: null,
       assignees: [],
-      createdAt: thread.createdAt
+      createdAt: thread.createdAt,
+      isPullRequest: thread.isPullRequest
     };
     const outcome = await decide(
       api,
@@ -34753,6 +34794,7 @@ async function run() {
   }
 }
 async function decide(api, authority, thread, standing, settings, stages, weather, corpusSource = null, languageCache = /* @__PURE__ */ new Map()) {
+  if (isReeveProposalPr(standing)) return recursionGuardOutcome();
   const warrant = authority.warrant;
   const rawBody = authorText(standing.body);
   const body = settings.maxBodyChars === null ? rawBody : rawBody.slice(0, settings.maxBodyChars);
@@ -34939,6 +34981,23 @@ function notGranted(warrant) {
     fingerprint: null,
     rationale: null,
     ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
+  };
+}
+function recursionGuardOutcome() {
+  return {
+    language: null,
+    duplicateOf: null,
+    confidence: 0,
+    lexicalScore: 0,
+    permitted: [],
+    withheld: [],
+    note: null,
+    rank: { corpusSize: 0, offered: 0 },
+    pivot: { used: false, note: null },
+    proposal: null,
+    fingerprint: null,
+    rationale: null,
+    ungranted: "This is Reeve's own proposal pull request \u2014 every duty skips it, duplicate included."
   };
 }
 async function act(api, at, outcome, dryRun) {

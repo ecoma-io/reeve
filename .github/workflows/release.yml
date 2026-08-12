@@ -149,11 +149,32 @@ jobs:
           staged="reeve-${TAG#v}"
           mkdir "$staged"
           # The root listing, then one directory per duty — each carrying the
-          # `action.yml` a workflow names and the bundle it runs. A duty added
-          # to `tools/build.mjs` is added here too, or its bytes go unattested
+          # `action.yml` a workflow names and the bundle it runs. The duty
+          # list is explicit and checked both ways: a listed duty whose
+          # directory is missing fails here rather than shipping a broken
+          # pin, and a directory carrying a top-level `action.yml` that this
+          # list does not name fails too, or its bytes would go unattested
           # while the release claims otherwise.
           cp -r dist action.yml LICENSE README.md "$staged/"
-          cp -r translate triage "$staged/"
+          duties="translate triage duplicate respond lifecycle"
+          for duty in $duties; do
+            if [ ! -f "$duty/action.yml" ]; then
+              echo "::error::expected duty directory '$duty' (with a top-level action.yml) is missing — refusing to cut a release that would break its pin."
+              exit 1
+            fi
+            cp -r "$duty" "$staged/"
+          done
+          for found in */action.yml; do
+            dir="${found%/action.yml}"
+            [ "$dir" = "$staged" ] && continue
+            case " $duties " in
+              *" $dir "*) ;;
+              *)
+                echo "::error::'$dir' carries a top-level action.yml but is not in this step's duty list — add it here (and to tools/build.mjs), or its bytes ship unattested."
+                exit 1
+                ;;
+            esac
+          done
           tar --sort=name --owner=0 --group=0 --numeric-owner \
               --mode='a+rX,u+w,go-w' \
               --mtime="@$(git log -1 --format=%ct)" \

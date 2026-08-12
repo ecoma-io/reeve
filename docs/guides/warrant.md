@@ -230,8 +230,8 @@ stranger." So an absent warrant, or a written one that is simply silent about
 duty of its own — opening or updating one pull request that adds or retires
 taxonomy labels from a monorepo's own package layout, gated by evidence
 before it ever proposes a name. It needs `contents: write` and
-`pull-requests: write` on the token, `propose: [propose]` in
-`capabilities.triage`, and `propose` in `apply`, same as `record`. It is not
+`pull-requests: write` on the token, `triage: [propose]` under
+`capabilities:`, and `propose` in `apply`, same as `record`. It is not
 a self-amending authority: the file it changes is a pull request like any
 other, reviewed and merged by a person — no capability of Reeve's ever
 merges one. See [the `triage` duty's own page](../reference/duties/triage.md).

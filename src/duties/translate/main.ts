@@ -63,6 +63,7 @@ import {
   createThread,
   listOpenThreads,
   listReplies,
+  readStanding,
   type Thread,
 } from "../../core/forge.js";
 import {
@@ -74,6 +75,7 @@ import {
   type EndpointSpec,
 } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
+import { isReeveProposalPr } from "../../core/marker.js";
 import { chunks, isCodeOnly } from "../../core/markdown.js";
 import {
   createRoutedProvider,
@@ -897,6 +899,36 @@ function notGranted(warrant: Warrant): string {
 }
 
 /**
+ * A single-thread run's placeholder result for a thread this duty never
+ * reached `translateText` for — shared by the two reasons that short-circuit
+ * before a read: no grant at all, and the recursion guard below.
+ */
+function skippedResult(number: number, reason: string): ThreadResult {
+  return {
+    looked: [],
+    translated: {
+      what: `#${String(number)}`,
+      from: null,
+      posted: [],
+      skipped: [],
+      budgetSkipped: [],
+      note: null,
+      published: false,
+    },
+    replies: 0,
+    ungranted: reason,
+  };
+}
+
+/**
+ * Recursion guard: Reeve never translates its own proposal pull request's
+ * body — see `isReeveProposalPr`'s own doc comment for why the marker alone
+ * is a complete signal.
+ */
+const RECURSION_GUARD_REASON =
+  "This is Reeve's own proposal pull request — every duty skips it, translate included.";
+
+/**
  * A sweep's progress, mutated in place rather than assembled and returned.
  *
  * The reason is the same as triage's: nothing here throws an
@@ -985,6 +1017,14 @@ async function runSweep(
     // here calls the tracker or a model, only `marker.split` on text the
     // listing already fetched.
     if (marker.split(thread.body).fingerprint !== null) {
+      acc.skipped += 1;
+      continue;
+    }
+
+    // Recursion guard: Reeve never translates its own proposal pull request
+    // — the listing already carries `isPullRequest` and `body`, so this
+    // costs nothing beyond the marker check just above it.
+    if (isReeveProposalPr(thread)) {
       acc.skipped += 1;
       continue;
     }
@@ -1125,23 +1165,15 @@ export async function run(): Promise<void> {
       // request to read it.
       let result: ThreadResult;
       if (authority.warrant.unnamed("translate")) {
-        result = {
-          looked: [],
-          translated: {
-            what: `#${String(number)}`,
-            from: null,
-            posted: [],
-            skipped: [],
-            budgetSkipped: [],
-            note: null,
-            published: false,
-          },
-          replies: 0,
-          ungranted: notGranted(authority.warrant),
-        };
+        result = skippedResult(number, notGranted(authority.warrant));
       } else {
-        const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather, meter, budget);
+        const standing = await readStanding(api, at);
+        // Same guard as the sweep's listing-time filter, checked here
+        // instead against the one thread this run named directly — a
+        // `number:` backfill has no listing to have filtered it out of.
+        result = isReeveProposalPr(standing)
+          ? skippedResult(number, RECURSION_GUARD_REASON)
+          : await processThread(api, at, standing.body, settings, stages, weather, meter, budget);
       }
       single = { number, result };
     }

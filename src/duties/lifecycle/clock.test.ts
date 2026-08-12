@@ -24,6 +24,8 @@ import type { TimedComment, TimedEvent } from "./timeline.js";
 const MARKER = markerFor("lifecycle");
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = new Date("2026-01-01T00:00:00Z");
+/** This run's own authenticated login, for the clock-hand attribution gate — see `clock.ts`'s `isOwnApplied`. */
+const OWN_LOGIN = "reeve[bot]";
 
 function comment(over: Partial<TimedComment> = {}): TimedComment {
   return { id: 1, body: "", login: "alice", isBot: false, createdAt: T0, ...over };
@@ -43,6 +45,7 @@ function facts(over: Partial<TrackFacts> = {}): TrackFacts {
     comments: [],
     events: [],
     taxonomyNames: new Set(),
+    ownLogin: OWN_LOGIN,
     ...over,
   };
 }
@@ -61,6 +64,7 @@ const EXEMPT: LifecycleExempt = {
   assignees: true,
   taxonomy: false,
   comments: null,
+  drafts: true,
 };
 
 function policy(over: Partial<LifecyclePolicy> = {}): LifecyclePolicy {
@@ -275,7 +279,7 @@ describe("evaluateTrack", () => {
     expect(result.due?.anchor).toEqual(firedAt);
   });
 
-  it("fires a label-only step from the bot's own latest labeled event, not a marker", () => {
+  it("fires a label-only step from this run's own latest labeled event, not a marker", () => {
     const t = track({
       name: "stale",
       steps: [step({ after: DAY, label: "stale" }), step({ after: DAY, label: "very-stale" })],
@@ -284,7 +288,7 @@ describe("evaluateTrack", () => {
     const f = facts({
       createdAt: T0,
       labels: ["stale"],
-      events: [event({ event: "labeled", label: "stale", isBot: true, createdAt: firedAt })],
+      events: [event({ event: "labeled", label: "stale", login: OWN_LOGIN, createdAt: firedAt })],
     });
     const result = evaluateTrack(
       t,
@@ -305,7 +309,7 @@ describe("evaluateTrack", () => {
       createdAt: T0,
       labels: ["stale"],
       events: [
-        event({ event: "labeled", label: "stale", isBot: true, createdAt: staleApplication }),
+        event({ event: "labeled", label: "stale", login: OWN_LOGIN, createdAt: staleApplication }),
       ],
       comments: [comment({ login: "alice", createdAt: reset })],
     });
@@ -316,6 +320,48 @@ describe("evaluateTrack", () => {
       new Date(reset.getTime() + 1),
     );
     expect(result.toUnstale).toEqual(["stale"]);
+  });
+
+  it("the clock-hand exception: never un-stales a label a human hand-applied, even when it is otherwise stale", () => {
+    const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
+    const staleApplication = new Date(T0.getTime() + DAY);
+    const reset = new Date(staleApplication.getTime() + DAY);
+    const f = facts({
+      createdAt: T0,
+      labels: ["stale"],
+      // A human, not this run's own login, applied the label most recently.
+      events: [
+        event({ event: "labeled", label: "stale", login: "bob", createdAt: staleApplication }),
+      ],
+      comments: [comment({ login: "alice", createdAt: reset })],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(reset.getTime() + 1),
+    );
+    expect(result.toUnstale).toEqual([]);
+  });
+
+  it("the clock-hand exception: never un-stales a label with no matching event in the fetched history — ambiguous attribution is left alone", () => {
+    const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
+    const reset = new Date(T0.getTime() + 2 * DAY);
+    const f = facts({
+      createdAt: T0,
+      labels: ["stale"],
+      // No `labeled` event at all for "stale" — the history this run fetched
+      // does not reach far enough back to say who applied it.
+      events: [],
+      comments: [comment({ login: "alice", createdAt: reset })],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(reset.getTime() + 1),
+    );
+    expect(result.toUnstale).toEqual([]);
   });
 });
 
@@ -393,7 +439,7 @@ describe("evaluateLifecycle", () => {
       createdAt: T0,
       labels: ["stale", "pinned"],
       events: [
-        event({ event: "labeled", label: "stale", isBot: true, createdAt: staleApplication }),
+        event({ event: "labeled", label: "stale", login: OWN_LOGIN, createdAt: staleApplication }),
       ],
       comments: [comment({ login: "alice", createdAt: reset })],
     });
@@ -443,31 +489,73 @@ describe("evaluateLifecycle", () => {
     expect(result.actions).toEqual([]);
   });
 
-  it("blocks a due close step once reopened-after-close guard trips, but not an earlier reminder step", () => {
-    const p = policy({
-      tracks: [track({ name: "stale", steps: [step({ after: DAY, close: true })] })],
+  it("blocks a due close step once the reopened-after-close guard trips, but not an unrelated track's due reminder", () => {
+    // Both steps are parse-legal shapes: `close` is the track's last step,
+    // never its first (an inactivity track's first step closing is refused
+    // by the warrant parser — see `warrant.ts`'s "first step closes" check).
+    // `resets: "author"` keeps the guard's own reopen event (below, by a
+    // maintainer who is not the thread's author) from also counting as
+    // qualifying activity that would reset `close-track`'s own anchor —
+    // this test is about the guard blocking `close`, not about a reopen
+    // restarting the inactivity clock.
+    const closeTrack = track({
+      name: "close-track",
+      resets: "author",
+      steps: [step({ after: DAY, say: { kind: "built-in" } }), step({ after: DAY, close: true })],
     });
+    const reminderTrack = track({
+      name: "reminder-track",
+      steps: [step({ after: DAY, say: { kind: "built-in" } })],
+    });
+    const p = policy({ tracks: [closeTrack, reminderTrack] });
+
+    const firedAt = new Date(T0.getTime() + DAY);
+    const fp0 = fingerprintFor(closeTrack, 0, T0);
     const f = facts({
       createdAt: T0,
+      // `close-track`'s first step already fired, so its close step is next
+      // in line; `reminder-track`'s own (unrelated) step is independently
+      // due by the same clock.
+      comments: [
+        comment({ body: `text\n\n${MARKER.render(fp0)}`, isBot: true, createdAt: firedAt }),
+      ],
       events: [
-        event({ event: "closed", isBot: true, createdAt: T0 }),
-        event({ event: "reopened", isBot: false, createdAt: new Date(T0.getTime() + DAY) }),
+        event({ event: "closed", isBot: true, createdAt: firedAt }),
+        event({
+          event: "reopened",
+          isBot: false,
+          login: "carol",
+          createdAt: new Date(firedAt.getTime() + DAY),
+        }),
       ],
     });
-    const result = evaluateLifecycle(p, f, new Date(T0.getTime() + 10 * DAY));
-    expect(result.actions).toEqual([]);
+    const result = evaluateLifecycle(p, f, new Date(firedAt.getTime() + 10 * DAY));
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]?.track.name).toBe("reminder-track");
   });
 
   it("blocks a due close step once the human comment guard is met", () => {
+    // Parse-legal shape: `close` is the track's second (last) step, not its
+    // first.
+    const closeTrack = track({
+      name: "stale",
+      steps: [step({ after: DAY, say: { kind: "built-in" } }), step({ after: DAY, close: true })],
+    });
     const p = policy({
-      tracks: [track({ name: "stale", steps: [step({ after: DAY, close: true })] })],
+      tracks: [closeTrack],
       exempt: { ...EXEMPT, comments: 2 },
     });
+    const firedAt = new Date(T0.getTime() + DAY);
+    const fp0 = fingerprintFor(closeTrack, 0, T0);
     const f = facts({
       createdAt: T0,
-      comments: [comment({ createdAt: T0 }), comment({ createdAt: T0 })],
+      comments: [
+        comment({ body: `text\n\n${MARKER.render(fp0)}`, isBot: true, createdAt: firedAt }),
+        comment({ createdAt: T0 }),
+        comment({ createdAt: T0 }),
+      ],
     });
-    const result = evaluateLifecycle(p, f, new Date(T0.getTime() + DAY));
+    const result = evaluateLifecycle(p, f, new Date(firedAt.getTime() + DAY));
     expect(result.actions).toEqual([]);
   });
 });

@@ -22,7 +22,7 @@ behind each field, see [The warrant](../guides/warrant.md).
 | `memory`       | no       | mapping — see below                     | How much of the corrections store one run reads. Absent leaves each duty's own default in charge.                                                                                                                                                     |
 | `about`        | no       | text                                    | What this repository is about, in the maintainer's own words. Read only by `triage` and `respond`, the two duties that reason about content rather than only translate or judge it. Absent falls back to the `about` input those duties already read. |
 | `lifecycle`    | no       | mapping — see below                     | The staleness policy `lifecycle` runs. Absent is a no-op — there is no built-in default track. Present but empty (`null`) is refused.                                                                                                                 |
-| `propose`      | no       | mapping — see below                     | How `triage`'s `propose` capability chooses names and gates evidence. Absent takes the design's own defaults.                                                                                                                                         |
+| `propose`      | no       | mapping — see below                     | How `triage`'s `propose` capability chooses names and gates evidence. Absent takes the design's own defaults. Present but empty (`null`) is refused — write `workspace:` under it, or remove the key.                                                 |
 
 ### `memory` fields
 
@@ -34,12 +34,12 @@ behind each field, see [The warrant](../guides/warrant.md).
 
 Full behavioural contract: [the `lifecycle` duty](duties/lifecycle.md). Schema only, here:
 
-| Field       | Required | What it does                                                                                                                                           |
-| ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tracks`    | yes      | Non-empty list of tracks — see below. A `lifecycle:` block with no tracks decides nothing and is refused.                                              |
-| `exempt`    | no       | The permanent escape hatch — see below. Defaults to `{milestones: true, assignees: true, taxonomy: true}` with empty `labels` and no `comments` floor. |
-| `overrides` | no       | Per-label timing exceptions — see below.                                                                                                               |
-| `threads`   | no       | `issues`, `prs`, or `both` — which kind of thread this policy considers. Default `issues`.                                                             |
+| Field       | Required | What it does                                                                                                                                                         |
+| ----------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tracks`    | yes      | Non-empty list of tracks — see below. A `lifecycle:` block with no tracks decides nothing and is refused.                                                            |
+| `exempt`    | no       | The permanent escape hatch — see below. Defaults to `{milestones: true, assignees: true, taxonomy: true, drafts: true}` with empty `labels` and no `comments` floor. |
+| `overrides` | no       | Per-label timing exceptions — see below.                                                                                                                             |
+| `threads`   | no       | `issues`, `prs`, or `both` — which kind of thread this policy considers. Default `issues`.                                                                           |
 
 **A track** (one entry of `tracks:`):
 
@@ -52,47 +52,55 @@ Full behavioural contract: [the `lifecycle` duty](duties/lifecycle.md). Schema o
 
 **A step** (one entry of a track's `steps:`):
 
-| Field   | Required | What it does                                                                                                                                                        |
-| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `after` | yes      | A duration since the clock last reset (`14d`) — whole days only. `0d` is refused.                                                                                   |
-| `label` | no       | A label this step applies.                                                                                                                                          |
-| `say`   | no       | `true` for the built-in reminder text, a non-empty string for your own, or a mapping of language code to text.                                                      |
-| `close` | no       | `true` or `not_planned` to close the thread as not planned. Must be the track's own last step. `completed` is refused by name — Reeve closes only as `not_planned`. |
+| Field   | Required | What it does                                                                                                                                                                                                                                   |
+| ------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `after` | yes      | A duration since the previous step fired — or, for the track's first step, since the clock last reset (`14d`). Cumulative, not parallel: see [the worked example](duties/lifecycle.md#the-lifecycle-policy). Whole days only; `0d` is refused. |
+| `label` | no       | A label this step applies.                                                                                                                                                                                                                     |
+| `say`   | no       | `true` for the built-in reminder text, a non-empty string for your own, a mapping of language code to text — or `false`, accepted as an explicit "no comment".                                                                                 |
+| `close` | no       | `true` or `not_planned` to close the thread as not planned. Must be the track's own last step. `completed` is refused by name — Reeve closes only as `not_planned`.                                                                            |
 
 At least one of `label`, `say`, `close` is required per step. An inactivity
 track's first step may not carry `close` — a close with no prior warning is
 refused.
 
-**`exempt`** (permanent, checked before any track runs):
+**`exempt`** (permanent — a filter on what a due step may _do_, applied after
+evaluation, not a gate that keeps a thread out of a track: an exempt thread's
+clocks still run, and the removal of this duty's own stale clock-hand labels
+deliberately survives every layer here, so a label its own actor applied does
+not linger forever on a thread that later gained a milestone):
 
-| Field        | Required | What it does                                                                                                                                          |
-| ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `labels`     | no       | Labels that exempt a thread outright. **Required non-empty the moment any track anywhere configures a `close` step** — the file is refused otherwise. |
-| `milestones` | no       | `true`/`false`, or a list of milestone names that exempt. Default `true` — any milestone exempts.                                                     |
-| `assignees`  | no       | `true`/`false`, or a list of logins that exempt. Default `true` — any assignee exempts.                                                               |
-| `taxonomy`   | no       | Whether carrying any taxonomy label exempts a thread. Default `true`.                                                                                 |
-| `comments`   | no       | A whole number of comments that exempts a thread once reached. Default no floor.                                                                      |
+| Field        | Required | What it does                                                                                                                                                                 |
+| ------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `labels`     | no       | Labels that exempt a thread from every due action. **Required non-empty the moment any track anywhere configures a `close` step** — the file is refused otherwise.           |
+| `milestones` | no       | `true`/`false`, or a list of milestone names that exempt. Default `true` — any milestone exempts.                                                                            |
+| `assignees`  | no       | `true`/`false`, or a list of logins that exempt. Default `true` — any assignee exempts.                                                                                      |
+| `taxonomy`   | no       | Whether carrying any taxonomy label exempts a thread. A track's own `when:` label does not count — the label that starts a clock cannot also exempt from it. Default `true`. |
+| `comments`   | no       | A whole number of comments that, once reached, blocks `close` steps only — reminders and labels still fire. Default no floor.                                                |
+| `drafts`     | no       | Whether a draft pull request is exempt, when `threads:` includes pull requests at all. Default `true`.                                                                       |
 
 **An override** (one entry of `overrides:`):
 
-| Field   | Required | What it does                                                                                   |
-| ------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `label` | yes      | Which label this override applies to.                                                          |
-| `after` | one of   | A different duration for this label, in place of its step's own. Write one of `after`/`never`. |
-| `never` | one of   | This label is never treated as due. Write one of `after`/`never`.                              |
+| Field   | Required | What it does                                                                                                                                                                                                     |
+| ------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label` | yes      | Which label, carried by a thread, makes this override apply to that thread.                                                                                                                                      |
+| `after` | one of   | A different duration for the **first step of an inactivity track** — the only step an override's timing reaches. Ignored, deliberately, on `when:` tracks and later steps. Write exactly one of `after`/`never`. |
+| `never` | one of   | `true` — no step of any track is ever due on this thread; stale clock-hand cleanup still runs. A separate boolean key, not an `after:` value. Write exactly one of `after`/`never`.                              |
+
+When a thread carries several overridden labels, the longest `after` wins —
+the most patient exception a maintainer wrote is the one honoured.
 
 ### `propose` fields
 
 Full behavioural contract: [`triage`'s `propose` capability](duties/triage.md).
 Schema only, here — everything sits under a `workspace:` sub-key:
 
-| Field      | Required | What it does                                                                                                       |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
-| `name`     | no       | A naming template with exactly one `{package}` placeholder. Default `area:{package}`.                              |
-| `except`   | no       | Glob patterns for package paths never proposed.                                                                    |
-| `evidence` | no       | How many distinct open issues must mention a package before it is proposed. `0` waives the gate. Default `3`.      |
-| `window`   | no       | How far back an issue may date and still count as evidence, as a duration. Default `90d`.                          |
-| `retire`   | no       | Whether an existing templated label with no packages left matching it is proposed for retirement. Default `false`. |
+| Field      | Required | What it does                                                                                                                                            |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | no       | A naming template with exactly one `{package}` placeholder. Default `area:{package}`.                                                                   |
+| `except`   | no       | Glob patterns for package paths never proposed.                                                                                                         |
+| `evidence` | no       | How many distinct open issues must mention a package before it is proposed. Minimum `1` — a floor of zero is no floor, and `0` is refused. Default `3`. |
+| `window`   | no       | How far back an issue may date and still count as evidence, as a duration. Default `90d`.                                                               |
+| `retire`   | no       | Whether an existing templated label with no packages left matching it is proposed for retirement. Default `false`.                                      |
 
 ## Label fields
 
@@ -115,7 +123,7 @@ Schema only, here — everything sits under a `workspace:` sub-key:
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | `label`     | Add a label from the taxonomy. Never remove one — except `lifecycle`'s own clock-hand labels, un-staled in code, and only when its own actor applied the one being removed.                         | on for `triage`, `lifecycle` |
 | `edit-body` | Append Reeve's own block below its marker in a body.                                                                                                                                                | on for `translate`           |
-| `comment`   | Post a rationale as a new comment.                                                                                                                                                                  | off                          |
+| `comment`   | Post a rationale as a new comment.                                                                                                                                                                  | on for `lifecycle`           |
 | `close`     | Close as not planned, with a comment saying why.                                                                                                                                                    | off                          |
 | `assign`    | Assign the `owner` the taxonomy names for a label.                                                                                                                                                  | off                          |
 | `record`    | Commit the thread's current labels to the corrections store, on a labelled or unlabelled event from a human. Needs `contents: write` on the token.                                                  | off                          |

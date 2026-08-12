@@ -10,12 +10,16 @@
  * step's marker was computed against, which is what makes that marker's
  * fingerprint stop matching and a fresh cycle begin — see `evaluateTrack`.
  *
- * **Retraction authority comes from the file, not from history.** A label a
- * track names as its clock-hand is machine-managed by the warrant's own
- * declaration (the north-star's D3 amendment), so un-staling here never
- * checks who applied a label before removing it — contrast a duty that
- * retracts a label nobody declared machine-managed, which would need to
- * check timeline attribution instead. That harder case does not arise here.
+ * **Retraction authority comes from the file, but removal still checks who
+ * applied it.** A label a track names as its clock-hand is machine-managed
+ * by the warrant's own declaration (the north-star's D3 amendment) — that
+ * declaration is what makes removing it thinkable at all. It is not,
+ * however, licence to remove *any* instance of that label: un-staling here
+ * only ever retracts a labelling this duty's own actor is the most recent
+ * author of (see `isOwnApplied`). A human who hand-applied the same label
+ * name, or a different bot migrated away from, is never touched — absent or
+ * ambiguous attribution leaves the label alone and says nothing, the same
+ * "a human's label is not ours to touch" rule the rest of this duty follows.
  */
 import type {
   LifecycleExempt,
@@ -39,6 +43,12 @@ export interface TrackFacts {
   readonly events: readonly TimedEvent[];
   /** Every name in the warrant's taxonomy — for `exempt.taxonomy`. */
   readonly taxonomyNames: ReadonlySet<string>;
+  /**
+   * The login this run's own token authenticates as, resolved once per run
+   * by the caller. Both firing evidence and un-staling attribution compare
+   * against this — see `isOwnApplied`.
+   */
+  readonly ownLogin: string;
 }
 
 const MARKER = markerFor("lifecycle");
@@ -159,10 +169,17 @@ export interface TrackEvaluation {
  *
  * A step that carries a `label:` currently on the thread, but whose firing
  * evidence does not match this run's freshly computed anchor, is stale: the
- * world moved on since it was applied (a reset produced a later anchor), so
- * it is queued for removal in `toUnstale` — see this module's own doc
- * comment on why that check needs no history, only the warrant's
- * declaration that the label is this track's own clock-hand.
+ * world moved on since it was applied (a reset produced a later anchor). It
+ * is queued for removal in `toUnstale` only when it also passes the
+ * clock-hand exception's attribution gate — the most recent `labeled` event
+ * for that label was raised by this run's own login (`isOwnApplied`).
+ * Absent or ambiguous attribution (no matching event in the fetched
+ * history, or someone else's) leaves the label alone: a human's label, or
+ * one left by a different bot a repository is migrating away from, is never
+ * ours to touch. Steps the walk never reaches this run (later rungs of the
+ * ladder) are swept for the same orphaned-label check in a second pass,
+ * since their labels being present at all is evidence enough without an
+ * anchor to compare against.
  *
  * **A step that talks — carries `say:` or `close: true` — fires by marker
  * comment,** the mechanism described above. **A step that only carries
@@ -171,7 +188,7 @@ export interface TrackEvaluation {
  * this duty's own comment can carry is not a record a label-only step can
  * depend on without risking exactly that flip-flop — labelled, found
  * "unmarked" next run for lack of `comment`, un-staled, relabelled, forever.
- * Reading the label's own most recent bot-authored `labeled` event instead
+ * Reading the label's own most recent same-actor `labeled` event instead
  * needs only the `label` capability the step already required, and — since
  * that event's timestamp is compared against the same recomputed `anchor`
  * every marker check already uses — gets the identical reset-invalidates-it
@@ -183,13 +200,26 @@ export function evaluateTrack(
   overrideRes: OverrideResolution,
   now: Date,
 ): TrackEvaluation {
-  if (overrideRes.neverExempt) return { due: null, toUnstale: [] };
+  // A `never` override exempts the track from new actions, but a label our
+  // own actor left behind is still ours to clean up — compute staleness
+  // across the whole track before returning (see the module doc comment).
+  if (overrideRes.neverExempt) {
+    return { due: null, toUnstale: collectStaleLabels(track.steps, facts) };
+  }
 
   const start = trackStart(track, facts);
-  if (start === null) return { due: null, toUnstale: [] };
+  if (start === null) {
+    return { due: null, toUnstale: collectStaleLabels(track.steps, facts) };
+  }
 
   const toUnstale: string[] = [];
   let anchor = start;
+  let due: DueStep | null = null;
+  // Index of the step the walk stopped at — due, or not yet due. Steps past
+  // this one were never reached by the anchor walk this run, so any of
+  // their own labels found on the thread are unconditionally orphaned; see
+  // the loop below this one.
+  let stoppedAt = track.steps.length;
 
   for (let index = 0; index < track.steps.length; index += 1) {
     const step = track.steps[index];
@@ -210,11 +240,16 @@ export function evaluateTrack(
       );
       firedAt = marker?.createdAt ?? null;
     } else if (step.label !== null) {
-      const applied = latestBotLabelEvent(facts.events, step.label);
+      const applied = latestOwnLabelEvent(facts.events, step.label, facts.ownLogin);
       firedAt = applied !== null && applied >= anchor ? applied : null;
     }
 
-    if (step.label !== null && facts.labels.includes(step.label) && firedAt === null) {
+    if (
+      step.label !== null &&
+      facts.labels.includes(step.label) &&
+      firedAt === null &&
+      isOwnApplied(facts.events, step.label, facts.ownLogin)
+    ) {
       toUnstale.push(step.label);
     }
 
@@ -223,19 +258,72 @@ export function evaluateTrack(
       continue;
     }
 
-    const due = now.getTime() >= anchor.getTime() + after;
-    if (!due) return { due: null, toUnstale };
-    return { due: { track, stepIndex: index, step, anchor, fingerprint: fp }, toUnstale };
+    stoppedAt = index;
+    if (now.getTime() >= anchor.getTime() + after) {
+      due = { track, stepIndex: index, step, anchor, fingerprint: fp };
+    }
+    break;
   }
 
-  return { due: null, toUnstale };
+  // Steps beyond the one the walk stopped at were never reached this run —
+  // the ladder cannot have advanced past a step that has not fired, so any
+  // of their labels still on the thread are leftovers, not evidence.
+  for (const label of collectStaleLabels(track.steps.slice(stoppedAt + 1), facts)) {
+    toUnstale.push(label);
+  }
+
+  // The step about to fire this run (if any) is not stale — main.ts is
+  // about to (re)apply its own label as part of firing it, and a same-run
+  // apply-then-remove would silently advance the ladder without the label
+  // ever surviving to be seen.
+  const filtered =
+    due !== null && due.step.label !== null
+      ? toUnstale.filter((label) => label !== due.step.label)
+      : toUnstale;
+
+  return { due, toUnstale: filtered };
 }
 
-/** The latest `labeled` event for `label` a bot account raised — the firing evidence a label-only step reads instead of a marker comment. */
-function latestBotLabelEvent(events: readonly TimedEvent[], label: string): Date | null {
+/** Every step's own label, present on the thread and attributed to our own actor — the un-staling candidates that need no anchor to identify. */
+function collectStaleLabels(steps: readonly LifecycleStep[], facts: TrackFacts): readonly string[] {
+  const stale: string[] = [];
+  for (const step of steps) {
+    if (
+      step.label !== null &&
+      facts.labels.includes(step.label) &&
+      isOwnApplied(facts.events, step.label, facts.ownLogin)
+    ) {
+      stale.push(step.label);
+    }
+  }
+  return stale;
+}
+
+/**
+ * Whether the most recent `labeled` event for `label`, across every actor
+ * this run fetched history for, was raised by `ownLogin` — the attribution
+ * gate un-staling requires. `false` on no event at all (no history reached
+ * far enough back) and on any event authored by someone else, human or
+ * bot: absent or ambiguous attribution is not this duty's to act on.
+ */
+function isOwnApplied(events: readonly TimedEvent[], label: string, ownLogin: string): boolean {
+  let latest: TimedEvent | null = null;
+  for (const event of events) {
+    if (event.event !== "labeled" || event.label !== label) continue;
+    if (latest === null || event.createdAt > latest.createdAt) latest = event;
+  }
+  return latest !== null && latest.login === ownLogin;
+}
+
+/** The latest `labeled` event for `label` this run's own login raised — the firing evidence a label-only step reads instead of a marker comment. */
+function latestOwnLabelEvent(
+  events: readonly TimedEvent[],
+  label: string,
+  ownLogin: string,
+): Date | null {
   let latest: Date | null = null;
   for (const event of events) {
-    if (event.event !== "labeled" || event.label !== label || !event.isBot) continue;
+    if (event.event !== "labeled" || event.label !== label || event.login !== ownLogin) continue;
     if (latest === null || event.createdAt > latest) latest = event.createdAt;
   }
   return latest;

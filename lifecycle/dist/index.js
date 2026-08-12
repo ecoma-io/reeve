@@ -27577,6 +27577,9 @@ function error(message, properties = {}) {
 function warning(message, properties = {}) {
   issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+function notice(message, properties = {}) {
+  issueCommand("notice", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
 function info(message) {
   process.stdout.write(message + os4.EOL);
 }
@@ -32553,7 +32556,8 @@ async function readStanding(api, at) {
     author: { login, isBot: isBotAuthor(data.user) },
     milestone: data.milestone?.title ?? null,
     assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
-    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0)
+    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0),
+    isPullRequest: data.pull_request !== void 0
   };
 }
 var LABEL_PAGE = 100;
@@ -32575,9 +32579,9 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since, state = "open") {
+async function listOpenThreads(api, at, since, state = "open", maxPages) {
   const listed = [];
-  for (let page = 1; ; page += 1) {
+  for (let page = 1; maxPages === void 0 || page <= maxPages; page += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
@@ -32606,6 +32610,14 @@ async function listOpenThreads(api, at, since, state = "open") {
     if (stop || data.length < SWEEP_PAGE) break;
   }
   return listed;
+}
+function isCapacityError(error2) {
+  if (typeof error2 === "object" && error2 !== null && "status" in error2) {
+    const status = error2.status;
+    if (status === 429 || typeof status === "number" && status >= 500) return true;
+  }
+  const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
+  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
 }
 function createEffects(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
@@ -32912,6 +32924,12 @@ function readLifecycle(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads"
+  ]);
   const tracks = readLifecycleTracks(path, fields.tracks);
   const exempt = readLifecycleExempt(path, fields.exempt);
   const overrides = readLifecycleOverrides(path, fields.overrides);
@@ -32943,6 +32961,7 @@ function readLifecycleTracks(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
     const name = text(at, "name", fields.name, { required: true });
     if (!/^[a-z][a-z0-9-]*$/.test(name)) {
       throw new Error(
@@ -32991,6 +33010,7 @@ function readLifecycleStep(at, raw, isLast) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
   const after = durationField(at, "after", fields.after, { allowNever: false });
   const label = nullable(text(at, "label", fields.label, { required: false }));
   const say = readSay(at, fields.say);
@@ -33043,18 +33063,34 @@ function closeField(at, raw) {
 function readLifecycleExempt(path, raw) {
   const at = `\`${path}\`'s \`lifecycle.exempt\``;
   if (raw === void 0 || raw === null) {
-    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true
+    };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts"
+  ]);
   return {
     labels: strings(at, "labels", fields.labels),
     milestones: guardField(at, "milestones", fields.milestones, true),
     assignees: guardField(at, "assignees", fields.assignees, true),
     taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
-    comments: optionalWholeNumber(at, "comments", fields.comments, 1)
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true)
   };
 }
 function guardField(at, key, raw, fallback) {
@@ -33078,6 +33114,7 @@ function readLifecycleOverrides(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
     const label = text(at, "label", fields.label, { required: true });
     const hasAfter = fields.after !== void 0 && fields.after !== null;
     const never = booleanField(at, "never", fields.never, false);
@@ -33106,6 +33143,7 @@ function readPropose(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
   const workspaceRaw = fields.workspace;
   if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
   if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
@@ -33115,6 +33153,7 @@ function readPropose(path, raw) {
   }
   const w = workspaceRaw;
   const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
   const nameRaw = text(at, "name", w.name, { required: false });
   const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
   if ((name.match(/\{package\}/g) ?? []).length !== 1) {
@@ -33123,7 +33162,7 @@ function readPropose(path, raw) {
     );
   }
   const except = strings(at, "except", w.except);
-  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 0);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
   const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
   const retire = booleanField(at, "retire", w.retire, false);
   return { name, except, evidence, window: window2, retire };
@@ -33247,6 +33286,13 @@ function durationField(at, key, raw, options) {
     );
   }
   return days * 24 * 60 * 60 * 1e3;
+}
+function rejectUnknownKeys(at, fields, known) {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -33374,6 +33420,11 @@ function fingerprint(text2, keys) {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
   return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
 }
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
+}
 
 // src/core/summary.ts
 async function writeSummary(markdown) {
@@ -33459,11 +33510,17 @@ function resolveOverrides(overrides, labels) {
   return { neverExempt, firstStepAfter };
 }
 function evaluateTrack(track, facts, overrideRes, now) {
-  if (overrideRes.neverExempt) return { due: null, toUnstale: [] };
+  if (overrideRes.neverExempt) {
+    return { due: null, toUnstale: collectStaleLabels(track.steps, facts) };
+  }
   const start = trackStart(track, facts);
-  if (start === null) return { due: null, toUnstale: [] };
+  if (start === null) {
+    return { due: null, toUnstale: collectStaleLabels(track.steps, facts) };
+  }
   const toUnstale = [];
   let anchor = start;
+  let due = null;
+  let stoppedAt = track.steps.length;
   for (let index = 0; index < track.steps.length; index += 1) {
     const step = track.steps[index];
     if (step === void 0) break;
@@ -33477,26 +33534,49 @@ function evaluateTrack(track, facts, overrideRes, now) {
       );
       firedAt = marker?.createdAt ?? null;
     } else if (step.label !== null) {
-      const applied = latestBotLabelEvent(facts.events, step.label);
+      const applied = latestOwnLabelEvent(facts.events, step.label, facts.ownLogin);
       firedAt = applied !== null && applied >= anchor ? applied : null;
     }
-    if (step.label !== null && facts.labels.includes(step.label) && firedAt === null) {
+    if (step.label !== null && facts.labels.includes(step.label) && firedAt === null && isOwnApplied(facts.events, step.label, facts.ownLogin)) {
       toUnstale.push(step.label);
     }
     if (firedAt !== null) {
       anchor = firedAt;
       continue;
     }
-    const due = now.getTime() >= anchor.getTime() + after;
-    if (!due) return { due: null, toUnstale };
-    return { due: { track, stepIndex: index, step, anchor, fingerprint: fp }, toUnstale };
+    stoppedAt = index;
+    if (now.getTime() >= anchor.getTime() + after) {
+      due = { track, stepIndex: index, step, anchor, fingerprint: fp };
+    }
+    break;
   }
-  return { due: null, toUnstale };
+  for (const label of collectStaleLabels(track.steps.slice(stoppedAt + 1), facts)) {
+    toUnstale.push(label);
+  }
+  const filtered = due !== null && due.step.label !== null ? toUnstale.filter((label) => label !== due.step.label) : toUnstale;
+  return { due, toUnstale: filtered };
 }
-function latestBotLabelEvent(events, label) {
+function collectStaleLabels(steps, facts) {
+  const stale = [];
+  for (const step of steps) {
+    if (step.label !== null && facts.labels.includes(step.label) && isOwnApplied(facts.events, step.label, facts.ownLogin)) {
+      stale.push(step.label);
+    }
+  }
+  return stale;
+}
+function isOwnApplied(events, label, ownLogin) {
   let latest = null;
   for (const event of events) {
-    if (event.event !== "labeled" || event.label !== label || !event.isBot) continue;
+    if (event.event !== "labeled" || event.label !== label) continue;
+    if (latest === null || event.createdAt > latest.createdAt) latest = event;
+  }
+  return latest !== null && latest.login === ownLogin;
+}
+function latestOwnLabelEvent(events, label, ownLogin) {
+  let latest = null;
+  for (const event of events) {
+    if (event.event !== "labeled" || event.label !== label || event.login !== ownLogin) continue;
     if (latest === null || event.createdAt > latest) latest = event.createdAt;
   }
   return latest;
@@ -33624,7 +33704,7 @@ function withheldLine(warrantPath, withheld) {
   if (withheld.length === 0) return "";
   return `\`apply\` asks for ${withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${warrantPath}\` does not grant to lifecycle. The narrower of the two wins, always.`;
 }
-function renderSweepPage(warrantPath, dryRun, results, ungranted) {
+function renderSweepPage(warrantPath, dryRun, results, ungranted, starved = false) {
   if (ungranted !== null) {
     return `${["## Reeve \xB7 lifecycle \u2014 sweep", "", ungranted].join("\n").trimEnd()}
 `;
@@ -33634,10 +33714,15 @@ function renderSweepPage(warrantPath, dryRun, results, ungranted) {
   const parts = [
     "## Reeve \xB7 lifecycle \u2014 sweep",
     "",
-    `${dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(results.length)} thread${results.length === 1 ? "" : "s"}.`,
-    "",
-    rendered.length === 0 ? "Nothing was processed this run." : rendered
+    `${dryRun ? "**Dry run** \u2014 nothing was applied. " : ""}Processed ${String(results.length)} thread${results.length === 1 ? "" : "s"}.`
   ];
+  if (starved) {
+    parts.push(
+      "",
+      "**Stopped early** \u2014 GitHub's own capacity (rate limit, or a slow/unavailable request) ran out mid-sweep. Everything above this line was actually done; the rest of the backlog is still there for the next run."
+    );
+  }
+  parts.push("", rendered.length === 0 ? "Nothing was processed this run." : rendered);
   const gaps = /* @__PURE__ */ new Set();
   for (const result of results) {
     const line = withheldLine(warrantPath, result.outcome.withheld);
@@ -33698,6 +33783,18 @@ async function readComments(api, at) {
     if (data.length < PAGE) break;
   }
   return out;
+}
+async function resolveOwnLogin(api) {
+  const { data } = await api.rest.users.getAuthenticated();
+  return data.login ?? "";
+}
+async function isDraftPr(api, at) {
+  const { data } = await api.rest.pulls.get({
+    owner: at.owner,
+    repo: at.repo,
+    pull_number: at.number
+  });
+  return data.draft === true;
 }
 async function readEvents(api, at) {
   const out = [];
@@ -33771,7 +33868,11 @@ var NOTHING_DONE = {
   unstaled: [],
   dueNotGranted: 0
 };
-async function evaluateThread(api, authority, at, standing, settings) {
+function threadKindAllowed(threads, isPullRequest) {
+  if (threads === "both") return true;
+  return threads === "prs" ? isPullRequest : !isPullRequest;
+}
+async function evaluateThread(api, authority, at, standing, settings, ctx) {
   const warrant = authority.warrant;
   const policy = warrant.lifecycle;
   if (policy === null) {
@@ -33784,12 +33885,29 @@ async function evaluateThread(api, authority, at, standing, settings) {
       `\`${warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`; once that block exists it is the whole answer, so add \`lifecycle: [label, comment]\` to it (or remove the block to return to defaults).`
     );
   }
-  const grantedRaw = warrant.granted("lifecycle", DEFAULT_CAPABILITIES);
-  const granted = grantedRaw.filter((capability) => LIFECYCLE_CAPABILITIES.includes(capability));
-  const { permitted, withheld } = narrow(granted, settings.apply);
-  for (const capability of withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to lifecycle. The narrower of the two wins.`
+  if (isReeveProposalPr(standing)) {
+    return notGranted(
+      "This is Reeve's own proposal pull request \u2014 every duty skips it, lifecycle included."
+    );
+  }
+  if (standing.closed) {
+    return notGranted(
+      `#${String(at.number)} is already closed \u2014 lifecycle only ever acts on open threads.`
+    );
+  }
+  if (!threadKindAllowed(policy.threads, standing.isPullRequest)) {
+    return notGranted(
+      `\`${warrant.path}\`'s \`lifecycle.threads: ${policy.threads}\` does not include ${standing.isPullRequest ? "pull requests" : "issues"}.`
+    );
+  }
+  if (standing.createdAt.getTime() === 0) {
+    return notGranted(
+      `#${String(at.number)}'s creation date could not be read this run \u2014 skipped rather than treated as instantly overdue.`
+    );
+  }
+  if (standing.isPullRequest && policy.exempt.drafts && await isDraftPr(api, at)) {
+    return notGranted(
+      `#${String(at.number)} is a draft pull request, exempt per \`exempt.drafts\`.`
     );
   }
   const [comments, events] = await Promise.all([readComments(api, at), readEvents(api, at)]);
@@ -33808,7 +33926,8 @@ async function evaluateThread(api, authority, at, standing, settings) {
       authorLogin: standing.author.login,
       comments,
       events,
-      taxonomyNames: new Set(warrant.labels.map((label) => label.name))
+      taxonomyNames: new Set(warrant.labels.map((label) => label.name)),
+      ownLogin: ctx.ownLogin
     },
     /* @__PURE__ */ new Date()
   );
@@ -33817,8 +33936,8 @@ async function evaluateThread(api, authority, at, standing, settings) {
     actions: decision.actions,
     unstale: decision.unstale,
     permanentlyExempt: decision.permanentlyExempt,
-    permitted,
-    withheld,
+    permitted: ctx.permitted,
+    withheld: ctx.withheld,
     ungranted: null
   };
 }
@@ -33835,7 +33954,6 @@ function checkRequired(step, permitted) {
   return { ok: missing.length === 0, missing };
 }
 async function act(effects, outcome, exempt, dryRun) {
-  if (dryRun) return NOTHING_DONE;
   const labeled = [];
   let commented = false;
   let closed = false;
@@ -33850,30 +33968,32 @@ async function act(effects, outcome, exempt, dryRun) {
       continue;
     }
     if (action.step.label !== null) {
-      await effects.addLabels([action.step.label]);
+      if (!dryRun) await effects.addLabels([action.step.label]);
       labeled.push(action.step.label);
     }
     if (action.step.say !== null || action.step.close) {
-      const say = action.step.say !== null ? renderSay(action.step.say, outcome.language) : null;
-      const closeText = action.step.close ? renderClose(outcome.language) : null;
-      const body = [say, closeText].filter((line) => line !== null).join("\n\n");
-      const marker = MARKER2.render(fingerprintFor(action.track, action.stepIndex, action.anchor));
-      await effects.comment(`${body}
+      if (!dryRun) {
+        const say = action.step.say !== null ? renderSay(action.step.say, outcome.language) : null;
+        const closeText = action.step.close ? renderClose(outcome.language) : null;
+        const body = [say, closeText].filter((line) => line !== null).join("\n\n");
+        const marker = MARKER2.render(fingerprintFor(action.track, action.stepIndex, action.anchor));
+        await effects.comment(`${body}
 
 ${footer(action.track, exempt)}
 
 ${marker}`);
+      }
       commented = true;
     }
     if (action.step.close) {
-      await effects.closeAsNotPlanned();
+      if (!dryRun) await effects.closeAsNotPlanned();
       closed = true;
     }
   }
   const unstaled = [];
   if (outcome.permitted.includes("label")) {
     for (const label of outcome.unstale) {
-      await effects.removeLabel(label);
+      if (!dryRun) await effects.removeLabel(label);
       unstaled.push(label);
     }
   } else if (outcome.unstale.length > 0) {
@@ -33883,41 +34003,49 @@ ${marker}`);
   }
   return { labeled, commented, closed, unstaled, dueNotGranted };
 }
-async function runSweep(api, authority, settings) {
-  const acc = { results: [], candidates: 0, ungranted: null };
+function newSweepAccumulator() {
+  return { results: [], candidates: 0, skipped: 0, ungranted: null, starved: false };
+}
+async function runSweep(acc, api, authority, settings, ctx) {
   if (authority.warrant.lifecycle === null) {
     acc.ungranted = `\`${authority.warrant.path}\` writes no \`lifecycle:\` key, so this duty has no policy to run.`;
-    return acc;
+    return;
   }
   if (authority.warrant.unnamed("lifecycle")) {
     acc.ungranted = `\`${authority.warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`.`;
-    return acc;
+    return;
   }
-  const existingLabels = (await listRepositoryLabels(api, context2.repo)).map((label) => label.name);
-  checkLifecycleLabelsExist(authority.warrant, existingLabels);
-  const threads = policyIncludesPulls(authority.warrant.lifecycle) ? await listOpenThreads(api, context2.repo, settings.since) : (await listOpenThreads(api, context2.repo, settings.since)).filter(
-    (thread) => !thread.isPullRequest
-  );
-  const ordered = [...threads].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const policy = authority.warrant.lifecycle;
+  const listed = await listOpenThreads(api, context2.repo, settings.since);
+  const ordered = [...listed].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   acc.candidates = ordered.length;
   for (const thread of ordered) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (!threadKindAllowed(policy.threads, thread.isPullRequest) || isReeveProposalPr(thread)) {
+      acc.skipped += 1;
+      continue;
+    }
     const at = { ...context2.repo, number: thread.number };
-    const standing = await readStanding(api, at);
-    const outcome = await evaluateThread(api, authority, at, standing, settings);
-    const effects = createLifecycleEffects(api, at);
-    const done = await act(effects, outcome, authority.warrant.lifecycle.exempt, settings.dryRun);
-    acc.results.push({ number: thread.number, outcome, done });
+    try {
+      const standing = await readStanding(api, at);
+      const outcome = await evaluateThread(api, authority, at, standing, settings, ctx);
+      const effects = createLifecycleEffects(api, at);
+      const done = await act(effects, outcome, policy.exempt, settings.dryRun);
+      acc.results.push({ number: thread.number, outcome, done });
+    } catch (error2) {
+      if (isCapacityError(error2)) {
+        acc.starved = true;
+        break;
+      }
+      throw error2;
+    }
   }
-  return acc;
-}
-function policyIncludesPulls(policy) {
-  return policy.threads === "prs" || policy.threads === "both";
 }
 async function run() {
   let settings = null;
   let single = null;
-  let bulk = null;
+  const bulk = newSweepAccumulator();
+  let ranSweep = false;
   try {
     const base = readSettings();
     const api = getOctokit(base.token);
@@ -33925,14 +34053,39 @@ async function run() {
     const authority = await resolveAuthority(read, base.warrant, api, context2.repo);
     const languages = resolveThreadLanguages(authority.warrant, getInput("languages"));
     settings = { ...base, languages };
+    if (authority.warrant.lifecycle !== null) {
+      const existingLabels = (await listRepositoryLabels(api, context2.repo)).map(
+        (label) => label.name
+      );
+      checkLifecycleLabelsExist(authority.warrant, existingLabels);
+    }
+    const grantedRaw = authority.warrant.granted("lifecycle", DEFAULT_CAPABILITIES);
+    const granted = grantedRaw.filter((capability) => LIFECYCLE_CAPABILITIES.includes(capability));
+    const grantedButUnused = grantedRaw.filter(
+      (capability) => !LIFECYCLE_CAPABILITIES.includes(capability)
+    );
+    if (grantedButUnused.length > 0) {
+      notice(
+        `\`${authority.warrant.path}\` grants lifecycle ${grantedButUnused.map((capability) => `\`${capability}\``).join(", ")}, which this duty has no use for.`
+      );
+    }
+    const { permitted, withheld } = narrow(granted, settings.apply);
+    for (const capability of withheld) {
+      warning(
+        `\`apply\` asks for \`${capability}\`, which \`${settings.warrant}\` does not grant to lifecycle. The narrower of the two wins.`
+      );
+    }
+    const ownLogin = await resolveOwnLogin(api);
+    const ctx = { permitted, withheld, ownLogin };
     if (settings.sweep) {
-      bulk = await runSweep(api, authority, settings);
+      ranSweep = true;
+      await runSweep(bulk, api, authority, settings, ctx);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context2.repo, number };
       const standing = await readStanding(api, at);
-      const outcome = await evaluateThread(api, authority, at, standing, settings);
+      const outcome = await evaluateThread(api, authority, at, standing, settings, ctx);
       const done = authority.warrant.lifecycle === null ? NOTHING_DONE : await act(
         createLifecycleEffects(api, at),
         outcome,
@@ -33945,12 +34098,18 @@ async function run() {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
-      if (settings.sweep && bulk !== null) {
+      if (ranSweep) {
         report(bulk);
         await writeSummary(
-          renderSweepPage(settings.warrant, settings.dryRun, bulk.results, bulk.ungranted)
+          renderSweepPage(
+            settings.warrant,
+            settings.dryRun,
+            bulk.results,
+            bulk.ungranted,
+            bulk.starved
+          )
         );
-      } else if (!settings.sweep && single !== null) {
+      } else if (single !== null) {
         reportSingle(single.outcome, single.done);
         await writeSummary(
           renderThreadPage(
@@ -33980,13 +34139,16 @@ function reportSingle(outcome, done) {
   setOutput("due-not-granted", String(done.dueNotGranted));
 }
 function report(bulk) {
-  const skipped = bulk.results.filter(
+  const evaluatedSkipped = bulk.results.filter(
     (row) => row.outcome.ungranted !== null || row.outcome.permanentlyExempt !== null
   ).length;
   setOutput("processed", String(bulk.results.length));
-  setOutput("remaining", String(Math.max(bulk.candidates - bulk.results.length, 0)));
-  setOutput("starved", "false");
-  setOutput("skipped", String(skipped));
+  setOutput(
+    "remaining",
+    String(Math.max(bulk.candidates - bulk.results.length - bulk.skipped, 0))
+  );
+  setOutput("starved", String(bulk.starved));
+  setOutput("skipped", String(bulk.skipped + evaluatedSkipped));
   setOutput("reminded", String(bulk.results.filter((row) => row.done.commented).length));
   setOutput(
     "labeled",

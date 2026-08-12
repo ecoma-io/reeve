@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { authorHalf, fingerprint, markerFor } from "./marker.js";
+import { authorHalf, fingerprint, isReeveProposalPr, markerFor } from "./marker.js";
 
 // Nothing is mocked: there is nothing project-internal here. The digest comes
 // from `node:crypto`, which is the platform rather than a collaborator.
@@ -143,6 +143,32 @@ describe("fingerprint", () => {
 
   it("is short enough to sit in a body a human reads", () => {
     expect(fingerprint(OFFICIAL, ["en"])).toHaveLength(16);
+  });
+});
+
+describe("isReeveProposalPr", () => {
+  const propose = markerFor("propose");
+
+  it("is true for a pull request whose body carries the propose marker", () => {
+    const body = `Reeve is proposing changes.\n\n${propose.render("abc123")}`;
+    expect(isReeveProposalPr({ isPullRequest: true, body })).toBe(true);
+  });
+
+  it("is false for an issue, even one that somehow carries the marker text", () => {
+    const body = `Reeve is proposing changes.\n\n${propose.render("abc123")}`;
+    expect(isReeveProposalPr({ isPullRequest: false, body })).toBe(false);
+  });
+
+  it("is false for a pull request with no propose marker in its body", () => {
+    expect(isReeveProposalPr({ isPullRequest: true, body: "An ordinary pull request." })).toBe(
+      false,
+    );
+  });
+
+  it("does not mistake another duty's marker for the propose one", () => {
+    const triage = markerFor("triage");
+    const body = `notes\n\n${triage.render("t1")}`;
+    expect(isReeveProposalPr({ isPullRequest: true, body })).toBe(false);
   });
 });
 

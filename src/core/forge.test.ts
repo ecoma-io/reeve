@@ -4,6 +4,7 @@ import {
   createEffects,
   createReply,
   createThread,
+  isCapacityError,
   isMissing,
   listCorrectionFiles,
   listLabelEvents,
@@ -378,6 +379,7 @@ function trackerOf(
     state?: string;
     labels?: (string | { name?: string })[];
     user?: { login?: string; type?: string } | null;
+    pull_request?: unknown;
   } = {},
   pages: { name: string; description?: string | null }[][] = [[]],
 ) {
@@ -430,6 +432,7 @@ describe("readStanding", () => {
       milestone: null,
       assignees: [],
       createdAt: new Date(0),
+      isPullRequest: false,
     });
     expect(get).toHaveBeenCalledWith({ owner: "ecoma-io", repo: "reeve", issue_number: 42 });
   });
@@ -477,7 +480,20 @@ describe("readStanding", () => {
       milestone: null,
       assignees: [],
       createdAt: new Date(0),
+      isPullRequest: false,
     });
+  });
+
+  it("reads isPullRequest true when the issue payload carries a pull_request field", async () => {
+    const { api } = trackerOf({ pull_request: {} });
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({ isPullRequest: true });
+  });
+
+  it("reads isPullRequest false for a plain issue", async () => {
+    const { api } = trackerOf({});
+
+    await expect(readStanding(api, AT)).resolves.toMatchObject({ isPullRequest: false });
   });
 
   it("reads a closed thread as closed", async () => {
@@ -870,6 +886,32 @@ describe("isMissing", () => {
     expect(isMissing(null)).toBe(false);
     expect(isMissing("boom")).toBe(false);
     expect(isMissing(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("isCapacityError", () => {
+  it("is true for a 429 or any 5xx status — D12's weather side", () => {
+    expect(isCapacityError({ status: 429 })).toBe(true);
+    expect(isCapacityError({ status: 500 })).toBe(true);
+    expect(isCapacityError({ status: 503 })).toBe(true);
+  });
+
+  it("is true for a network-timeout-shaped error with no status at all", () => {
+    expect(isCapacityError(new Error("request timed out"))).toBe(true);
+    expect(isCapacityError(new Error("connect ETIMEDOUT"))).toBe(true);
+    expect(isCapacityError(new Error("socket hang up: ECONNRESET"))).toBe(true);
+    expect(isCapacityError(new Error("network error"))).toBe(true);
+  });
+
+  it("is false for auth/configuration statuses — D12's red side", () => {
+    expect(isCapacityError({ status: 401 })).toBe(false);
+    expect(isCapacityError({ status: 403 })).toBe(false);
+    expect(isCapacityError({ status: 404 })).toBe(false);
+  });
+
+  it("is false for an ordinary error with no capacity-shaped message", () => {
+    expect(isCapacityError(new Error("bad request"))).toBe(false);
+    expect(isCapacityError(null)).toBe(false);
   });
 });
 

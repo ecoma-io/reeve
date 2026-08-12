@@ -103,6 +103,7 @@ export function renderSweepPage(
   dryRun: boolean,
   results: readonly SweptThreadSummary[],
   ungranted: string | null,
+  starved = false,
 ): string {
   if (ungranted !== null) {
     return `${["## Reeve · lifecycle — sweep", "", ungranted].join("\n").trimEnd()}\n`;
@@ -117,9 +118,16 @@ export function renderSweepPage(
     `${dryRun ? "**Dry run** — nothing was applied. " : ""}Processed ${String(results.length)} thread${
       results.length === 1 ? "" : "s"
     }.`,
-    "",
-    rendered.length === 0 ? "Nothing was processed this run." : rendered,
   ];
+  if (starved) {
+    parts.push(
+      "",
+      "**Stopped early** — GitHub's own capacity (rate limit, or a slow/unavailable request) " +
+        "ran out mid-sweep. Everything above this line was actually done; the rest of the " +
+        "backlog is still there for the next run.",
+    );
+  }
+  parts.push("", rendered.length === 0 ? "Nothing was processed this run." : rendered);
 
   const gaps = new Set<string>();
   for (const result of results) {

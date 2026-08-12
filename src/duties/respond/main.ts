@@ -65,6 +65,7 @@ import {
   type EndpointSpec,
 } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
+import { isReeveProposalPr } from "../../core/marker.js";
 import { createMemory, readStore, type Correction, type WeightedQuery } from "../../core/memory.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { parseApply, narrow } from "../../core/enforce.js";
@@ -282,6 +283,17 @@ async function decide(
   });
 
   const standing = await readStanding(api, at);
+  // Recursion guard: Reeve never drafts a reply to its own proposal pull
+  // request. In practice `standing.author.isBot` below would already stop
+  // this — the proposal PR is opened under this run's own token — but the
+  // guard is written explicitly rather than left to that coincidence, the
+  // same one spelling every other duty checks.
+  if (isReeveProposalPr(standing)) {
+    return stopped(
+      "This is Reeve's own proposal pull request — every duty skips it, respond included.",
+      null,
+    );
+  }
   if (standing.author.isBot) {
     core.info(`#${String(at.number)}: opened by a bot account — a first reply is not owed to one.`);
     return stopped(

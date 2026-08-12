@@ -72,7 +72,10 @@ they are boundaries the model itself does not participate in setting. Reeve
 does not remove a label a person applied, reopen what a person closed,
 reassign what a person assigned, rewrite a person's own words, apply a label
 outside the taxonomy, or touch code, a pull request, or a test suite on your
-behalf. A maintainer who wants any of that has to do it themselves; no warrant
+behalf. The one bounded carve-out proves the rule:
+[`lifecycle`'s clock-hand exception](../reference/duties/lifecycle.md#the-clock-hand-exception)
+removes only a label its own actor applied as a track's declared clock-hand —
+a label a person applied is still never touched. A maintainer who wants any of that has to do it themselves; no warrant
 entry exists to ask for it, because the answer was decided once, for
 everyone, rather than left open to be reasoned around by a well-crafted
 prompt.

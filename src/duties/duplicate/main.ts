@@ -73,6 +73,7 @@ import {
   type EndpointSpec,
 } from "../../core/inputs.js";
 import type { Language } from "../../core/languages.js";
+import { isReeveProposalPr } from "../../core/marker.js";
 import { createMeter, metered } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
 import {
@@ -338,6 +339,7 @@ async function runSweep(
       milestone: null,
       assignees: [],
       createdAt: thread.createdAt,
+      isPullRequest: thread.isPullRequest,
     };
     const outcome = await decide(
       api,
@@ -514,6 +516,14 @@ async function decide(
   /** A candidate's detected language, memoised by issue number across a sweep's whole walk. Fresh per call outside `sweep`, where it buys nothing. */
   languageCache = new Map<number, Language | null>(),
 ): Promise<Outcome> {
+  // Recursion guard: Reeve never checks its own proposal pull request against
+  // the corpus. `listCorpus` already drops every pull request from the
+  // corpus side, and a sweep's `candidates` filter already drops it from the
+  // threads a walk decides about; the `number:` path has no listing to
+  // filter it out of, so it is checked again here, in the one place both
+  // paths call through.
+  if (isReeveProposalPr(standing)) return recursionGuardOutcome();
+
   const warrant = authority.warrant;
   // Stripped the same way `corpus.ts` strips every candidate — see
   // `authorText`'s own doc comment for why. A thread already carrying a
@@ -832,6 +842,31 @@ function notGranted(warrant: Warrant): Outcome {
       `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block ` +
       "exists it is the whole answer, so add `duplicate: [comment]` to it (or remove the block to " +
       "return to defaults).",
+  };
+}
+
+/**
+ * The outcome of `decide` reaching Reeve's own proposal pull request
+ * directly — via `number:`, since a sweep's own listing never offers it as a
+ * candidate. Green, not red, the same shape `notGranted` gives a run this
+ * duty was never allowed onto at all.
+ */
+function recursionGuardOutcome(): Outcome {
+  return {
+    language: null,
+    duplicateOf: null,
+    confidence: 0,
+    lexicalScore: 0,
+    permitted: [],
+    withheld: [],
+    note: null,
+    rank: { corpusSize: 0, offered: 0 },
+    pivot: { used: false, note: null },
+    proposal: null,
+    fingerprint: null,
+    rationale: null,
+    ungranted:
+      "This is Reeve's own proposal pull request — every duty skips it, duplicate included.",
   };
 }
 

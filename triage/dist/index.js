@@ -31580,6 +31580,200 @@ function getOctokit(token, options, ...additionalPlugins) {
 
 // src/core/atlas.ts
 var import_yaml = __toESM(require_dist2(), 1);
+
+// src/core/forge.ts
+function isBotAuthor(author) {
+  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
+}
+async function readStanding(api, at) {
+  const { data } = await api.rest.issues.get({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number
+  });
+  const login = data.user?.login ?? "";
+  return {
+    title: data.title ?? "",
+    body: data.body ?? "",
+    // The REST API returns a label as an object, and as a bare string when the
+    // request asked for it that way. Both shapes are documented, so both are
+    // read rather than one being assumed and the other becoming an empty list
+    // that silently makes every guardrail think the thread is unlabelled.
+    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+    closed: data.state === "closed",
+    author: { login, isBot: isBotAuthor(data.user) },
+    milestone: data.milestone?.title ?? null,
+    assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
+    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0),
+    isPullRequest: data.pull_request !== void 0
+  };
+}
+var LABEL_PAGE = 100;
+var LABEL_PAGES = 10;
+async function listRepositoryLabels(api, at) {
+  const labels = [];
+  for (let page2 = 1; page2 <= LABEL_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listLabelsForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      per_page: LABEL_PAGE,
+      page: page2
+    });
+    labels.push(
+      ...data.map((label) => ({ name: label.name, description: label.description ?? null }))
+    );
+    if (data.length < LABEL_PAGE) break;
+  }
+  return labels;
+}
+var SWEEP_PAGE = 100;
+async function listOpenThreads(api, at, since, state = "open", maxPages) {
+  const listed = [];
+  for (let page2 = 1; maxPages === void 0 || page2 <= maxPages; page2 += 1) {
+    const { data } = await api.rest.issues.listForRepo({
+      owner: at.owner,
+      repo: at.repo,
+      state,
+      sort: "created",
+      direction: "desc",
+      per_page: SWEEP_PAGE,
+      page: page2
+    });
+    let stop = false;
+    for (const entry of data) {
+      const createdAt = new Date(entry.created_at);
+      if (since !== null && createdAt < since) {
+        stop = true;
+        break;
+      }
+      listed.push({
+        number: entry.number,
+        title: entry.title ?? "",
+        body: entry.body ?? "",
+        labels: (entry.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+        createdAt,
+        isPullRequest: entry.pull_request !== void 0
+      });
+    }
+    if (stop || data.length < SWEEP_PAGE) break;
+  }
+  return listed;
+}
+var EVENT_PAGE = 100;
+var EVENT_PAGES = 10;
+async function listLabelEvents(api, at) {
+  const events = [];
+  let complete = true;
+  for (let page2 = 1; page2 <= EVENT_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listEvents({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: EVENT_PAGE,
+      page: page2
+    });
+    for (const entry of data) {
+      if (entry.event !== "labeled" && entry.event !== "unlabeled") continue;
+      const name = entry.label?.name;
+      if (name === void 0 || name.length === 0) continue;
+      events.push({ label: name, action: entry.event, isBot: isBotAuthor(entry.actor) });
+    }
+    if (data.length < EVENT_PAGE) break;
+    if (page2 === EVENT_PAGES) complete = false;
+  }
+  return { events, complete };
+}
+function isMissing(error2) {
+  return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
+}
+function isCapacityError(error2) {
+  if (typeof error2 === "object" && error2 !== null && "status" in error2) {
+    const status = error2.status;
+    if (status === 429 || typeof status === "number" && status >= 500) return true;
+  }
+  const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
+  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
+}
+async function listCorrectionFiles(api, at, path) {
+  let data;
+  try {
+    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+  } catch (error2) {
+    if (isMissing(error2)) return [];
+    throw error2;
+  }
+  if (!Array.isArray(data)) return [];
+  return data.filter(
+    (entry) => typeof entry === "object" && entry !== null && typeof entry.name === "string" && entry.name.endsWith(".ndjson")
+  ).map((entry) => ({ path: entry.path, sha: entry.sha }));
+}
+async function readContentsFile(api, at, path) {
+  let data;
+  try {
+    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+  } catch (error2) {
+    if (isMissing(error2)) return null;
+    throw error2;
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
+  const file = data;
+  if (typeof file.sha !== "string") return null;
+  if (typeof file.content === "string" && file.encoding === "base64") {
+    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
+  }
+  throw new UnreadableContentsFile(path);
+}
+var UnreadableContentsFile = class extends Error {
+  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
+  path;
+  constructor(path) {
+    super(
+      `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
+    );
+    this.name = "UnreadableContentsFile";
+    this.path = path;
+  }
+};
+async function writeContentsFile(api, at, path, text2, message, sha) {
+  await api.rest.repos.createOrUpdateFileContents({
+    owner: at.owner,
+    repo: at.repo,
+    path,
+    message,
+    content: Buffer.from(text2, "utf8").toString("base64"),
+    ...sha === null ? {} : { sha }
+  });
+}
+function createEffects(api, at) {
+  const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
+  return {
+    async addLabels(names) {
+      if (names.length === 0) return;
+      await api.rest.issues.addLabels({ ...issue2, labels: [...names] });
+    },
+    async comment(body) {
+      await api.rest.issues.createComment({ ...issue2, body });
+    },
+    async assign(users) {
+      if (users.length === 0) return;
+      await api.rest.issues.addAssignees({ ...issue2, assignees: [...users] });
+    },
+    async closeAsNotPlanned() {
+      await api.rest.issues.update({ ...issue2, state: "closed", state_reason: "not_planned" });
+    }
+  };
+}
+async function createRepositoryLabel(api, at, label) {
+  await api.rest.issues.createLabel({
+    owner: at.owner,
+    repo: at.repo,
+    name: label.name,
+    color: label.color ?? "ededed",
+    description: label.description.slice(0, 100)
+  });
+}
+
+// src/core/atlas.ts
 var EMPTY_ATLAS = { packages: [], truncated: false };
 var ATLAS_MAX_PACKAGES = 200;
 var DESCRIPTION_CAP = 200;
@@ -31599,8 +31793,9 @@ async function readFileAt(api, at, path, ref) {
     const { data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path, ref });
     if (Array.isArray(data)) return null;
     return decode(data);
-  } catch {
-    return null;
+  } catch (error2) {
+    if (isMissing(error2)) return null;
+    throw error2;
   }
 }
 function directoriesOf(tree) {
@@ -31730,18 +31925,22 @@ async function readGoMember(api, at, ref, dir) {
   return { name, path: dir, description: "" };
 }
 async function readAtlas(api, at, ref) {
+  const UNREADABLE = { packages: [], truncated: true };
   let head = ref;
   if (head === void 0) {
     try {
       const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
       head = data.default_branch;
-    } catch {
-      return EMPTY_ATLAS;
+    } catch (error2) {
+      if (isMissing(error2)) return EMPTY_ATLAS;
+      if (isCapacityError(error2)) return UNREADABLE;
+      throw error2;
     }
   }
   if (head === void 0 || head.length === 0) return EMPTY_ATLAS;
   const resolvedHead = head;
   let tree;
+  let treeTruncated;
   try {
     const { data } = await api.rest.git.getTree({
       owner: at.owner,
@@ -31750,8 +31949,11 @@ async function readAtlas(api, at, ref) {
       recursive: "1"
     });
     tree = data.tree;
-  } catch {
-    return EMPTY_ATLAS;
+    treeTruncated = data.truncated === true;
+  } catch (error2) {
+    if (isMissing(error2)) return EMPTY_ATLAS;
+    if (isCapacityError(error2)) return UNREADABLE;
+    throw error2;
   }
   const rootFiles = new Set(
     tree.filter((entry) => entry.type === "blob" && entry.path !== void 0).map((entry) => entry.path ?? "")
@@ -31768,17 +31970,34 @@ async function readAtlas(api, at, ref) {
       if (!members.has(dir)) members.set(dir, { dir, read: read2 });
     }
   }
-  await collect("pnpm-workspace.yaml", parsePnpmWorkspace, readNpmMember);
-  await collect("package.json", parseNpmWorkspaces, readNpmMember);
-  await collect("Cargo.toml", parseCargoWorkspace, readCargoMember);
-  await collect("go.work", parseGoWork, readGoMember);
+  try {
+    await collect("pnpm-workspace.yaml", parsePnpmWorkspace, readNpmMember);
+    await collect("package.json", parseNpmWorkspaces, readNpmMember);
+    await collect("Cargo.toml", parseCargoWorkspace, readCargoMember);
+    await collect("go.work", parseGoWork, readGoMember);
+  } catch (error2) {
+    if (isCapacityError(error2)) return UNREADABLE;
+    throw error2;
+  }
   const dirs = [...members.values()];
-  const truncated = dirs.length > ATLAS_MAX_PACKAGES;
-  const bounded2 = truncated ? dirs.slice(0, ATLAS_MAX_PACKAGES) : dirs;
+  const truncated = treeTruncated || dirs.length > ATLAS_MAX_PACKAGES;
+  const bounded2 = dirs.length > ATLAS_MAX_PACKAGES ? dirs.slice(0, ATLAS_MAX_PACKAGES) : dirs;
   const packages = [];
   for (const { dir, read: read2 } of bounded2) {
-    const found = await read2(api, at, resolvedHead, dir);
-    if (found !== null) packages.push({ ...found, description: sanitize(found.description) });
+    let found;
+    try {
+      found = await read2(api, at, resolvedHead, dir);
+    } catch (error2) {
+      if (isCapacityError(error2)) return { packages, truncated: true };
+      throw error2;
+    }
+    if (found !== null) {
+      packages.push({
+        ...found,
+        name: sanitize(found.name),
+        description: sanitize(found.description)
+      });
+    }
   }
   return { packages, truncated };
 }
@@ -33150,191 +33369,6 @@ function residue(text2) {
 // src/core/warrant.ts
 var import_yaml2 = __toESM(require_dist2(), 1);
 import { readFile } from "node:fs/promises";
-
-// src/core/forge.ts
-function isBotAuthor(author) {
-  return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
-}
-async function readStanding(api, at) {
-  const { data } = await api.rest.issues.get({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number
-  });
-  const login = data.user?.login ?? "";
-  return {
-    title: data.title ?? "",
-    body: data.body ?? "",
-    // The REST API returns a label as an object, and as a bare string when the
-    // request asked for it that way. Both shapes are documented, so both are
-    // read rather than one being assumed and the other becoming an empty list
-    // that silently makes every guardrail think the thread is unlabelled.
-    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-    closed: data.state === "closed",
-    author: { login, isBot: isBotAuthor(data.user) },
-    milestone: data.milestone?.title ?? null,
-    assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
-    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0)
-  };
-}
-var LABEL_PAGE = 100;
-var LABEL_PAGES = 10;
-async function listRepositoryLabels(api, at) {
-  const labels = [];
-  for (let page2 = 1; page2 <= LABEL_PAGES; page2 += 1) {
-    const { data } = await api.rest.issues.listLabelsForRepo({
-      owner: at.owner,
-      repo: at.repo,
-      per_page: LABEL_PAGE,
-      page: page2
-    });
-    labels.push(
-      ...data.map((label) => ({ name: label.name, description: label.description ?? null }))
-    );
-    if (data.length < LABEL_PAGE) break;
-  }
-  return labels;
-}
-var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since, state = "open") {
-  const listed = [];
-  for (let page2 = 1; ; page2 += 1) {
-    const { data } = await api.rest.issues.listForRepo({
-      owner: at.owner,
-      repo: at.repo,
-      state,
-      sort: "created",
-      direction: "desc",
-      per_page: SWEEP_PAGE,
-      page: page2
-    });
-    let stop = false;
-    for (const entry of data) {
-      const createdAt = new Date(entry.created_at);
-      if (since !== null && createdAt < since) {
-        stop = true;
-        break;
-      }
-      listed.push({
-        number: entry.number,
-        title: entry.title ?? "",
-        body: entry.body ?? "",
-        labels: (entry.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
-        createdAt,
-        isPullRequest: entry.pull_request !== void 0
-      });
-    }
-    if (stop || data.length < SWEEP_PAGE) break;
-  }
-  return listed;
-}
-var EVENT_PAGE = 100;
-var EVENT_PAGES = 10;
-async function listLabelEvents(api, at) {
-  const events = [];
-  let complete = true;
-  for (let page2 = 1; page2 <= EVENT_PAGES; page2 += 1) {
-    const { data } = await api.rest.issues.listEvents({
-      owner: at.owner,
-      repo: at.repo,
-      issue_number: at.number,
-      per_page: EVENT_PAGE,
-      page: page2
-    });
-    for (const entry of data) {
-      if (entry.event !== "labeled" && entry.event !== "unlabeled") continue;
-      const name = entry.label?.name;
-      if (name === void 0 || name.length === 0) continue;
-      events.push({ label: name, action: entry.event, isBot: isBotAuthor(entry.actor) });
-    }
-    if (data.length < EVENT_PAGE) break;
-    if (page2 === EVENT_PAGES) complete = false;
-  }
-  return { events, complete };
-}
-function isMissing(error2) {
-  return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
-}
-async function listCorrectionFiles(api, at, path) {
-  let data;
-  try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
-  } catch (error2) {
-    if (isMissing(error2)) return [];
-    throw error2;
-  }
-  if (!Array.isArray(data)) return [];
-  return data.filter(
-    (entry) => typeof entry === "object" && entry !== null && typeof entry.name === "string" && entry.name.endsWith(".ndjson")
-  ).map((entry) => ({ path: entry.path, sha: entry.sha }));
-}
-async function readContentsFile(api, at, path) {
-  let data;
-  try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
-  } catch (error2) {
-    if (isMissing(error2)) return null;
-    throw error2;
-  }
-  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
-  const file = data;
-  if (typeof file.sha !== "string") return null;
-  if (typeof file.content === "string" && file.encoding === "base64") {
-    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
-  }
-  throw new UnreadableContentsFile(path);
-}
-var UnreadableContentsFile = class extends Error {
-  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
-  path;
-  constructor(path) {
-    super(
-      `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
-    );
-    this.name = "UnreadableContentsFile";
-    this.path = path;
-  }
-};
-async function writeContentsFile(api, at, path, text2, message, sha) {
-  await api.rest.repos.createOrUpdateFileContents({
-    owner: at.owner,
-    repo: at.repo,
-    path,
-    message,
-    content: Buffer.from(text2, "utf8").toString("base64"),
-    ...sha === null ? {} : { sha }
-  });
-}
-function createEffects(api, at) {
-  const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
-  return {
-    async addLabels(names) {
-      if (names.length === 0) return;
-      await api.rest.issues.addLabels({ ...issue2, labels: [...names] });
-    },
-    async comment(body) {
-      await api.rest.issues.createComment({ ...issue2, body });
-    },
-    async assign(users) {
-      if (users.length === 0) return;
-      await api.rest.issues.addAssignees({ ...issue2, assignees: [...users] });
-    },
-    async closeAsNotPlanned() {
-      await api.rest.issues.update({ ...issue2, state: "closed", state_reason: "not_planned" });
-    }
-  };
-}
-async function createRepositoryLabel(api, at, label) {
-  await api.rest.issues.createLabel({
-    owner: at.owner,
-    repo: at.repo,
-    name: label.name,
-    color: label.color ?? "ededed",
-    description: label.description.slice(0, 100)
-  });
-}
-
-// src/core/warrant.ts
 var CAPABILITIES = [
   "label",
   "edit-body",
@@ -33642,6 +33676,12 @@ function readLifecycle(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads"
+  ]);
   const tracks = readLifecycleTracks(path, fields.tracks);
   const exempt = readLifecycleExempt(path, fields.exempt);
   const overrides = readLifecycleOverrides(path, fields.overrides);
@@ -33673,6 +33713,7 @@ function readLifecycleTracks(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
     const name = text(at, "name", fields.name, { required: true });
     if (!/^[a-z][a-z0-9-]*$/.test(name)) {
       throw new Error(
@@ -33721,6 +33762,7 @@ function readLifecycleStep(at, raw, isLast) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
   const after = durationField(at, "after", fields.after, { allowNever: false });
   const label = nullable(text(at, "label", fields.label, { required: false }));
   const say = readSay(at, fields.say);
@@ -33773,18 +33815,34 @@ function closeField(at, raw) {
 function readLifecycleExempt(path, raw) {
   const at = `\`${path}\`'s \`lifecycle.exempt\``;
   if (raw === void 0 || raw === null) {
-    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true
+    };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts"
+  ]);
   return {
     labels: strings(at, "labels", fields.labels),
     milestones: guardField(at, "milestones", fields.milestones, true),
     assignees: guardField(at, "assignees", fields.assignees, true),
     taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
-    comments: optionalWholeNumber(at, "comments", fields.comments, 1)
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true)
   };
 }
 function guardField(at, key, raw, fallback) {
@@ -33808,6 +33866,7 @@ function readLifecycleOverrides(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
     const label = text(at, "label", fields.label, { required: true });
     const hasAfter = fields.after !== void 0 && fields.after !== null;
     const never = booleanField(at, "never", fields.never, false);
@@ -33836,6 +33895,7 @@ function readPropose(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
   const workspaceRaw = fields.workspace;
   if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
   if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
@@ -33845,6 +33905,7 @@ function readPropose(path, raw) {
   }
   const w = workspaceRaw;
   const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
   const nameRaw = text(at, "name", w.name, { required: false });
   const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
   if ((name.match(/\{package\}/g) ?? []).length !== 1) {
@@ -33853,7 +33914,7 @@ function readPropose(path, raw) {
     );
   }
   const except = strings(at, "except", w.except);
-  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 0);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
   const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
   const retire = booleanField(at, "retire", w.retire, false);
   return { name, except, evidence, window: window2, retire };
@@ -33977,6 +34038,13 @@ function durationField(at, key, raw, options) {
     );
   }
   return days * 24 * 60 * 60 * 1e3;
+}
+function rejectUnknownKeys(at, fields, known) {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -34285,6 +34353,56 @@ function fraction(name, raw) {
     throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
   }
   return value;
+}
+
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+function proposeEntryMarker(action, name) {
+  return `<!-- reeve:propose:entry ${action}:${name} -->`;
+}
+function readProposeEntryMarkers(body) {
+  const found = /* @__PURE__ */ new Set();
+  const re = /<!-- reeve:propose:entry ((?:add|retire):[^\n]*?) -->/g;
+  for (const match of body.matchAll(re)) {
+    if (match[1] !== void 0) found.add(match[1]);
+  }
+  return found;
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
 }
 
 // src/core/memory.ts
@@ -35023,51 +35141,6 @@ function summarizeSweep(run2) {
 `;
 }
 
-// src/core/marker.ts
-import { createHash } from "node:crypto";
-var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
-var SUFFIX = " -->";
-function markerFor(duty) {
-  if (!DUTY_NAME.test(duty)) {
-    throw new Error(
-      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
-    );
-  }
-  const prefix = `<!-- reeve:${duty} source=`;
-  return {
-    duty,
-    render(fingerprint2) {
-      return `${prefix}${fingerprint2}${SUFFIX}`;
-    },
-    split(body) {
-      const at = body.indexOf(prefix);
-      if (at === -1) return { official: authorHalf(body), fingerprint: null };
-      const from = at + prefix.length;
-      const to = body.indexOf(SUFFIX, from);
-      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
-      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
-    }
-  };
-}
-function authorHalf(text2) {
-  return text2.replace(/\s+$/u, "");
-}
-function fingerprint(text2, keys) {
-  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
-  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
-}
-function proposeEntryMarker(action, name) {
-  return `<!-- reeve:propose:entry ${action}:${name} -->`;
-}
-function readProposeEntryMarkers(body) {
-  const found = /* @__PURE__ */ new Set();
-  const re = /<!-- reeve:propose:entry ((?:add|retire):[^\n]*?) -->/g;
-  for (const match of body.matchAll(re)) {
-    if (match[1] !== void 0) found.add(match[1]);
-  }
-  return found;
-}
-
 // src/duties/triage/propose.ts
 var BRANCH = "reeve/propose";
 var MARKER = markerFor("propose");
@@ -35078,6 +35151,7 @@ var SCOPE_PREFIX = /^@[^/]+\//;
 function packageSlug(name) {
   return name.replace(SCOPE_PREFIX, "").toLowerCase();
 }
+var UNSAFE_LABEL_NAME = /[\x00-\x1F\x7F<>`]/;
 function renderName(template, slug) {
   return template.replace("{package}", slug);
 }
@@ -35100,6 +35174,8 @@ function detectAdditions(labels, atlas, cfg) {
   const candidates = [];
   const existingNames = new Set(labels.map((label) => label.name));
   const excludeMatchers = cfg.except.map(globToMatcher);
+  const claimedBy = /* @__PURE__ */ new Map();
+  const collided = /* @__PURE__ */ new Set();
   for (const pkg of atlas.packages) {
     if (excludeMatchers.some((matcher2) => matcher2.test(pkg.path))) continue;
     if (pathCovered(pkg, labels)) continue;
@@ -35114,10 +35190,25 @@ function detectAdditions(labels, atlas, cfg) {
       notes.push(`\`${labelName}\` is longer than ${String(LABEL_NAME_MAX)} characters \u2014 skipped.`);
       continue;
     }
+    if (UNSAFE_LABEL_NAME.test(labelName)) {
+      notes.push(
+        `\`${pkg.name}\`'s computed label name is not safe to propose (a control character or one of \`< > \\\`\` ) \u2014 skipped.`
+      );
+      continue;
+    }
     if (existingNames.has(labelName)) continue;
+    const priorPkg = claimedBy.get(labelName);
+    if (priorPkg !== void 0) {
+      collided.add(labelName);
+      notes.push(
+        `\`${priorPkg.name}\` and \`${pkg.name}\` would both compute the label \`${labelName}\` \u2014 refused, neither was proposed. Rename one, or narrow \`except:\`.`
+      );
+      continue;
+    }
+    claimedBy.set(labelName, pkg);
     candidates.push({ labelName, pkg });
   }
-  return { candidates, notes };
+  return { candidates: candidates.filter((c) => !collided.has(c.labelName)), notes };
 }
 function detectRetirements(labels, atlas, cfg) {
   if (!cfg.retire) return [];
@@ -35127,6 +35218,7 @@ function detectRetirements(labels, atlas, cfg) {
     const slot = templateSuffix(cfg.name, label.name);
     if (slot === null) continue;
     if (currentSlugs.has(slot)) continue;
+    if (label.paths.length > 0 && atlas.packages.some((pkg) => pathCovered(pkg, [label]))) continue;
     out.push({ labelName: label.name });
   }
   return out;
@@ -35235,9 +35327,9 @@ async function branchFrozen(api, at, headSha) {
       repo: at.repo,
       ref: headSha
     });
-    return !isBotAuthor(data.author);
-  } catch {
-    return false;
+    return { frozen: !isBotAuthor(data.author), errorReason: null };
+  } catch (error2) {
+    return { frozen: true, errorReason: error2 instanceof Error ? error2.message : String(error2) };
   }
 }
 async function ensureBranch(api, at, base) {
@@ -35258,6 +35350,30 @@ async function ensureBranch(api, at, base) {
     ref: `refs/heads/${BRANCH}`,
     sha: data.object.sha
   });
+}
+async function resetBranch(api, at, base) {
+  const { data } = await api.rest.git.getRef({
+    owner: at.owner,
+    repo: at.repo,
+    ref: `heads/${base}`
+  });
+  try {
+    await api.rest.git.updateRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `heads/${BRANCH}`,
+      sha: data.object.sha,
+      force: true
+    });
+  } catch (error2) {
+    if (!isMissing(error2)) throw error2;
+    await api.rest.git.createRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `refs/heads/${BRANCH}`,
+      sha: data.object.sha
+    });
+  }
 }
 function yamlScalar(value) {
   return JSON.stringify(value);
@@ -35385,14 +35501,7 @@ function isShaConflict(error2) {
   }
   return false;
 }
-function isWeather(error2) {
-  if (typeof error2 === "object" && error2 !== null && "status" in error2) {
-    const status = error2.status;
-    if (status === 429 || typeof status === "number" && status >= 500) return true;
-  }
-  const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
-}
+var isWeather = isCapacityError;
 async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
   const expected = expectedLabelNames(
     warrant.labels.map((label) => label.name),
@@ -35463,6 +35572,12 @@ async function defaultBranchAndReady(api, at) {
   await ensureBranch(api, at, base);
   return base;
 }
+async function defaultBranchAndReset(api, at) {
+  const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+  const base = data.default_branch ?? "main";
+  await resetBranch(api, at, base);
+  return base;
+}
 function report(over) {
   return {
     eligible: true,
@@ -35476,6 +35591,32 @@ function report(over) {
     ...over
   };
 }
+function proposeSection(report3) {
+  if (report3 === null) return "";
+  const lines = ["", "", "### propose", ""];
+  if (!report3.eligible) {
+    lines.push(report3.notes[report3.notes.length - 1] ?? "Did nothing.");
+    return lines.join("\n");
+  }
+  if (report3.dryRun) {
+    lines.push(`Dry run \u2014 ${report3.notes[report3.notes.length - 1] ?? "nothing to propose."}`);
+  } else if (report3.pr !== null) {
+    const parts = [
+      report3.unchanged ? "unchanged" : `${String(report3.additions)} addition${report3.additions === 1 ? "" : "s"}, ${String(report3.retirements)} retirement${report3.retirements === 1 ? "" : "s"}`
+    ];
+    if (report3.struck > 0) {
+      parts.push(
+        `${String(report3.struck)} previously-rejected entr${report3.struck === 1 ? "y" : "ies"} skipped`
+      );
+    }
+    lines.push(
+      `${report3.frozen ? "Proposal branch left untouched" : "Proposal"} \u2014 #${String(report3.pr)} (${parts.join("; ")}).`
+    );
+  } else {
+    lines.push(report3.notes[report3.notes.length - 1] ?? "Nothing to propose this run.");
+  }
+  return lines.join("\n");
+}
 async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dryRun) {
   if (implicit) {
     return report({
@@ -35487,7 +35628,9 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
   }
   const notes = [];
   if (atlas.truncated) {
-    notes.push("The workspace atlas was truncated \u2014 some packages may not have been considered.");
+    notes.push(
+      "The workspace atlas was truncated \u2014 some packages may not have been considered, so no retirement was proposed this run (a package this run never saw is out of scope, not gone)."
+    );
   }
   const { candidates, notes: detectNotes } = detectAdditions(
     warrant.labels,
@@ -35495,7 +35638,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
     warrant.propose
   );
   notes.push(...detectNotes);
-  const retirements = detectRetirements(warrant.labels, atlas, warrant.propose);
+  const retirements = atlas.truncated ? [] : detectRetirements(warrant.labels, atlas, warrant.propose);
   const evidenced2 = gateByEvidence(candidates, openIssues, warrant.propose, now);
   const short = candidates.length - evidenced2.length;
   if (short > 0) {
@@ -35542,11 +35685,12 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
           unchanged: true
         });
       }
-      if (await branchFrozen(api, at, existing.headSha)) {
+      const frozen = await branchFrozen(api, at, existing.headSha);
+      if (frozen.frozen) {
         return report({
           notes: [
             ...notes,
-            `The proposal branch (#${String(existing.number)}) carries a commit from someone other than this run \u2014 left untouched.`
+            frozen.errorReason === null ? `The proposal branch (#${String(existing.number)}) carries a commit from someone other than this run \u2014 left untouched.` : `The proposal branch (#${String(existing.number)})'s freshness could not be checked (${frozen.errorReason}) \u2014 treated as frozen and left untouched.`
           ],
           additions,
           retirements: retiring,
@@ -35596,7 +35740,7 @@ async function runPropose(api, at, warrant, implicit, atlas, openIssues, now, dr
         dryRun: true
       });
     }
-    const base = await defaultBranchAndReady(api, at);
+    const base = await defaultBranchAndReset(api, at);
     const created = await writeProposal(api, at, warrant, entries, fp, null, base);
     if (created === null) {
       return report({
@@ -35818,21 +35962,23 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
     acc.ungranted = notGranted(authority2.warrant).ungranted;
     return;
   }
+  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  const recording = permitted.includes("record");
+  acc.recording = recording;
   if (!authority2.implicit) {
-    await createMissingLabels(
+    await resolveMissingLabels(
       api,
       context2.repo,
       checkLabelsExist(
         authority2.warrant,
         (await listRepositoryLabels(api, context2.repo)).map((label) => label.name),
         settings.taxonomy
-      )
+      ),
+      permitted,
+      settings.dryRun
     );
   }
-  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
-  const { permitted } = narrow(grantedCapabilities, settings.apply);
-  const recording = permitted.includes("record");
-  acc.recording = recording;
   const listed = await listOpenThreads(api, context2.repo, settings.since, settings.sweepState);
   const candidates = listed.filter((thread) => !thread.isPullRequest);
   acc.candidates = candidates.length;
@@ -35866,7 +36012,8 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       // Nor milestone/assignee state — triage never reads either.
       milestone: null,
       assignees: [],
-      createdAt: thread.createdAt
+      createdAt: thread.createdAt,
+      isPullRequest: thread.isPullRequest
     };
     if (recording) {
       const outcome = await recordCorrection(
@@ -35891,21 +36038,32 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
     }
   }
 }
+var EVIDENCE_LISTING_MAX_PAGES = 10;
 async function runProposeSweep(api, authority2, settings) {
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  if (!grantedCapabilities.includes("propose")) return null;
   const { permitted } = narrow(grantedCapabilities, settings.apply);
   if (!permitted.includes("propose")) {
-    if (grantedCapabilities.includes("propose")) {
-      notice(
-        `\`${authority2.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep did not propose anything. The narrower of the two wins \u2014 add \`propose\` to \`apply\` as well to enable it.`
-      );
-    }
-    return;
+    notice(
+      `\`${authority2.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep did not propose anything. The narrower of the two wins \u2014 add \`propose\` to \`apply\` as well to enable it.`
+    );
+    return report({
+      notes: [
+        "`apply` does not name `propose`, so this sweep declined to propose anything this run."
+      ]
+    });
   }
-  const atlas = await readAtlas(api, context2.repo);
-  const openIssues = (await listOpenThreads(api, context2.repo, settings.since, "open")).filter(
-    (issue2) => !issue2.isPullRequest
-  );
+  let atlas;
+  let openIssues;
+  try {
+    atlas = await readAtlas(api, context2.repo);
+    openIssues = (await listOpenThreads(api, context2.repo, settings.since, "open", EVIDENCE_LISTING_MAX_PAGES)).filter((issue2) => !issue2.isPullRequest);
+  } catch (error2) {
+    if (!isCapacityError(error2)) throw error2;
+    const note = "`propose` hit a capacity error before it could read the workspace or its evidence \u2014 nothing was proposed this run; the next sweep starts fresh.";
+    warning(note);
+    return report({ notes: [note] });
+  }
   const proposeReport = await runPropose(
     api,
     context2.repo,
@@ -35922,6 +36080,7 @@ async function runProposeSweep(api, authority2, settings) {
       `propose: ${proposeReport.unchanged ? "the open proposal" : "the proposal"} is #${String(proposeReport.pr)}.`
     );
   }
+  return proposeReport;
 }
 function noticeProposeSweepOnly(authority2) {
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
@@ -35953,6 +36112,7 @@ async function run() {
   let single = null;
   let recorded = null;
   let bulk = null;
+  let proposeOutcome = null;
   try {
     const base = readSettings();
     weather = createWeather(new Set(base.endpoints.map((endpoint2) => endpoint2.alias)), [
@@ -35984,7 +36144,7 @@ async function run() {
     if (settings.sweep) {
       bulk = newAccumulator();
       await runSweep(bulk, api, authority2, settings, stages, weather);
-      await runProposeSweep(api, authority2, settings);
+      proposeOutcome = await runProposeSweep(api, authority2, settings);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
@@ -35995,42 +36155,48 @@ async function run() {
         outcome = notGranted(authority2.warrant);
       } else {
         const standing = await readStanding(api, at);
-        if (!authority2.implicit) {
-          await createMissingLabels(
-            api,
-            at,
-            checkLabelsExist(
-              authority2.warrant,
-              (await listRepositoryLabels(api, at)).map((label) => label.name),
-              settings.taxonomy
-            )
-          );
-        }
-        const trigger = recordTrigger();
-        const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
-        const { permitted } = narrow(grantedCapabilities, settings.apply);
-        if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
-          notice(
-            `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
-          );
-        }
-        if (trigger.reason !== "" && permitted.includes("record")) {
-          info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
-        }
-        noticeProposeSweepOnly(authority2);
-        if (trigger.eligible && permitted.includes("record")) {
-          recordOutcome = await recordCorrection(
-            api,
-            at,
-            standing,
-            authority2,
-            settings,
-            stages,
-            weather,
-            senderLogin()
-          );
+        if (isReeveProposalPr(standing)) {
+          outcome = recursionGuardOutcome();
         } else {
-          outcome = await decide(authority2, standing, settings, stages, weather);
+          const trigger = recordTrigger();
+          const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+          const { permitted } = narrow(grantedCapabilities, settings.apply);
+          if (!authority2.implicit) {
+            await resolveMissingLabels(
+              api,
+              at,
+              checkLabelsExist(
+                authority2.warrant,
+                (await listRepositoryLabels(api, at)).map((label) => label.name),
+                settings.taxonomy
+              ),
+              permitted,
+              settings.dryRun
+            );
+          }
+          if (trigger.eligible && grantedCapabilities.includes("record") && !permitted.includes("record")) {
+            notice(
+              `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this labelled/unlabelled event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
+            );
+          }
+          if (trigger.reason !== "" && permitted.includes("record")) {
+            info(`\`record\` is granted, but did not fire this run: ${trigger.reason}.`);
+          }
+          noticeProposeSweepOnly(authority2);
+          if (trigger.eligible && permitted.includes("record")) {
+            recordOutcome = await recordCorrection(
+              api,
+              at,
+              standing,
+              authority2,
+              settings,
+              stages,
+              weather,
+              senderLogin()
+            );
+          } else {
+            outcome = await decide(authority2, standing, settings, stages, weather);
+          }
         }
       }
       if (recordOutcome !== null) {
@@ -36054,7 +36220,7 @@ async function run() {
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
         await writeSummary(
-          sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
+          sweepPage(settings, bulk, meter.spent()) + proposeSection(proposeOutcome) + authSection(weather.authFailures)
         );
       } else if (!settings.sweep && recorded !== null) {
         reportRecordRun(recorded.outcome, rosterStarved);
@@ -36534,6 +36700,39 @@ async function createMissingLabels(api, at, toCreate) {
       );
     }
   }
+}
+async function resolveMissingLabels(api, at, toCreate, permitted, dryRun) {
+  if (toCreate.length === 0) return;
+  const names = toCreate.map((label) => `\`${label.name}\``).join(", ");
+  if (!permitted.includes("label")) {
+    notice(
+      `triage: ${toCreate.length === 1 ? "a label" : "labels"} ${names} ${toCreate.length === 1 ? "names" : "name"} \`create: true\`, but \`label\` is not permitted this run \u2014 nothing was created.`
+    );
+    return;
+  }
+  if (dryRun) {
+    info(
+      `Would create ${toCreate.length === 1 ? "label" : "labels"} ${names} (\`create: true\`) \u2014 dry run, nothing created.`
+    );
+    return;
+  }
+  await createMissingLabels(api, at, toCreate);
+}
+function recursionGuardOutcome() {
+  return {
+    language: null,
+    screenedOut: null,
+    verdict: NOTHING,
+    applied: [],
+    refused: [],
+    permitted: [],
+    withheld: [],
+    note: null,
+    memory: { size: 0, recalled: 0, pivotRecalled: 0 },
+    implicit: false,
+    excludedLabels: [],
+    ungranted: "This is Reeve's own proposal pull request \u2014 every duty skips it, triage included."
+  };
 }
 function notGranted(warrant) {
   return {

@@ -33061,6 +33061,29 @@ function createReply(api, at, reply) {
     }
   };
 }
+async function readStanding(api, at) {
+  const { data } = await api.rest.issues.get({
+    owner: at.owner,
+    repo: at.repo,
+    issue_number: at.number
+  });
+  const login = data.user?.login ?? "";
+  return {
+    title: data.title ?? "",
+    body: data.body ?? "",
+    // The REST API returns a label as an object, and as a bare string when the
+    // request asked for it that way. Both shapes are documented, so both are
+    // read rather than one being assumed and the other becoming an empty list
+    // that silently makes every guardrail think the thread is unlabelled.
+    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0),
+    closed: data.state === "closed",
+    author: { login, isBot: isBotAuthor(data.user) },
+    milestone: data.milestone?.title ?? null,
+    assignees: (data.assignees ?? []).map((assignee) => assignee?.login ?? "").filter((login_) => login_.length > 0),
+    createdAt: data.created_at !== void 0 ? new Date(data.created_at) : /* @__PURE__ */ new Date(0),
+    isPullRequest: data.pull_request !== void 0
+  };
+}
 var LABEL_PAGE = 100;
 var LABEL_PAGES = 10;
 async function listRepositoryLabels(api, at) {
@@ -33080,9 +33103,9 @@ async function listRepositoryLabels(api, at) {
   return labels;
 }
 var SWEEP_PAGE = 100;
-async function listOpenThreads(api, at, since, state = "open") {
+async function listOpenThreads(api, at, since, state = "open", maxPages) {
   const listed = [];
-  for (let page2 = 1; ; page2 += 1) {
+  for (let page2 = 1; maxPages === void 0 || page2 <= maxPages; page2 += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
@@ -33383,6 +33406,12 @@ function readLifecycle(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads"
+  ]);
   const tracks = readLifecycleTracks(path, fields.tracks);
   const exempt = readLifecycleExempt(path, fields.exempt);
   const overrides = readLifecycleOverrides(path, fields.overrides);
@@ -33414,6 +33443,7 @@ function readLifecycleTracks(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
     const name = text(at, "name", fields.name, { required: true });
     if (!/^[a-z][a-z0-9-]*$/.test(name)) {
       throw new Error(
@@ -33462,6 +33492,7 @@ function readLifecycleStep(at, raw, isLast) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
   const after = durationField(at, "after", fields.after, { allowNever: false });
   const label = nullable(text(at, "label", fields.label, { required: false }));
   const say = readSay(at, fields.say);
@@ -33514,18 +33545,34 @@ function closeField(at, raw) {
 function readLifecycleExempt(path, raw) {
   const at = `\`${path}\`'s \`lifecycle.exempt\``;
   if (raw === void 0 || raw === null) {
-    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true
+    };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts"
+  ]);
   return {
     labels: strings(at, "labels", fields.labels),
     milestones: guardField(at, "milestones", fields.milestones, true),
     assignees: guardField(at, "assignees", fields.assignees, true),
     taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
-    comments: optionalWholeNumber(at, "comments", fields.comments, 1)
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true)
   };
 }
 function guardField(at, key, raw, fallback) {
@@ -33549,6 +33596,7 @@ function readLifecycleOverrides(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
     }
     const fields = entry;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
     const label = text(at, "label", fields.label, { required: true });
     const hasAfter = fields.after !== void 0 && fields.after !== null;
     const never = booleanField(at, "never", fields.never, false);
@@ -33577,6 +33625,7 @@ function readPropose(path, raw) {
     );
   }
   const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
   const workspaceRaw = fields.workspace;
   if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
   if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
@@ -33586,6 +33635,7 @@ function readPropose(path, raw) {
   }
   const w = workspaceRaw;
   const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
   const nameRaw = text(at, "name", w.name, { required: false });
   const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
   if ((name.match(/\{package\}/g) ?? []).length !== 1) {
@@ -33594,7 +33644,7 @@ function readPropose(path, raw) {
     );
   }
   const except = strings(at, "except", w.except);
-  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 0);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
   const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
   const retire = booleanField(at, "retire", w.retire, false);
   return { name, except, evidence, window: window2, retire };
@@ -33718,6 +33768,13 @@ function durationField(at, key, raw, options) {
     );
   }
   return days * 24 * 60 * 60 * 1e3;
+}
+function rejectUnknownKeys(at, fields, known) {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
 }
 function describe(value) {
   if (value === null) return "empty";
@@ -33989,6 +34046,11 @@ function authorHalf(text2) {
 function fingerprint(text2, keys) {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
   return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
 }
 
 // src/core/publish.ts
@@ -35191,6 +35253,23 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
 function notGranted(warrant) {
   return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`translate\`; once that block exists it is the whole answer, so add \`translate: [edit-body]\` to it (or remove the block to return to defaults).`;
 }
+function skippedResult(number, reason) {
+  return {
+    looked: [],
+    translated: {
+      what: `#${String(number)}`,
+      from: null,
+      posted: [],
+      skipped: [],
+      budgetSkipped: [],
+      note: null,
+      published: false
+    },
+    replies: 0,
+    ungranted: reason
+  };
+}
+var RECURSION_GUARD_REASON = "This is Reeve's own proposal pull request \u2014 every duty skips it, translate included.";
 function newAccumulator() {
   return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
 }
@@ -35222,6 +35301,10 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
   for (const thread of listed) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
     if (marker.split(thread.body).fingerprint !== null) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (isReeveProposalPr(thread)) {
       acc.skipped += 1;
       continue;
     }
@@ -35299,23 +35382,10 @@ async function run() {
       const at = { ...context2.repo, number };
       let result;
       if (authority2.warrant.unnamed("translate")) {
-        result = {
-          looked: [],
-          translated: {
-            what: `#${String(number)}`,
-            from: null,
-            posted: [],
-            skipped: [],
-            budgetSkipped: [],
-            note: null,
-            published: false
-          },
-          replies: 0,
-          ungranted: notGranted(authority2.warrant)
-        };
+        result = skippedResult(number, notGranted(authority2.warrant));
       } else {
-        const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather, meter, budget);
+        const standing = await readStanding(api, at);
+        result = isReeveProposalPr(standing) ? skippedResult(number, RECURSION_GUARD_REASON) : await processThread(api, at, standing.body, settings, stages, weather, meter, budget);
       }
       single = { number, result };
     }

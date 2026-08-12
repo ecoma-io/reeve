@@ -17,12 +17,19 @@
  * site — this module only sanitizes).
  *
  * **A parser that cannot make sense of a manifest degrades to "no atlas",
- * never to a failed run.** Every read here can fail — no root manifest, a
- * malformed one, a repository too large to walk — and every failure returns
- * {@link EMPTY_ATLAS} or a smaller one, not an error. Atlas is optional
- * evidence; nothing downstream may depend on it existing.
+ * never to a failed run.** A missing root manifest, a malformed one, a
+ * repository too large to walk — all of these return {@link EMPTY_ATLAS} or
+ * a smaller one, not an error. Atlas is optional evidence; nothing
+ * downstream may depend on it existing. Two failure shapes are classified
+ * rather than swallowed, though (D12): a capacity error (429/5xx/timeout)
+ * degrades to a partial atlas marked `truncated`, so a read that merely
+ * timed out can never make a package look retired; and an auth error
+ * (401/403) propagates — a token that cannot read the repository is
+ * configuration, not a smaller workspace.
  */
 import { parse as parseYaml } from "yaml";
+
+import { isCapacityError, isMissing } from "./forge.js";
 
 /** The GitHub calls atlas needs — declared locally, structurally, so it stays this module's own diff. */
 export interface AtlasApi {
@@ -101,10 +108,15 @@ async function readFileAt(
     const { data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path, ref });
     if (Array.isArray(data)) return null; // a directory, not a file
     return decode(data);
-  } catch {
-    // A miss here is exactly as cheap as `isMissing()` treats it elsewhere:
-    // the file simply is not there, which is not a failure atlas reports.
-    return null;
+  } catch (error) {
+    // A miss is exactly as cheap as `isMissing()` treats it elsewhere: the
+    // file simply is not there, which is not a failure atlas reports.
+    // Anything else — capacity, auth — is not "no file" and propagates for
+    // `readAtlas`'s own classification to sort out (see the module doc
+    // comment): a read that merely failed must never make a package look
+    // absent.
+    if (isMissing(error)) return null;
+    throw error;
   }
 }
 
@@ -318,13 +330,23 @@ export async function readAtlas(
   at: { readonly owner: string; readonly repo: string },
   ref?: string,
 ): Promise<Atlas> {
+  // A partial read is never a smaller workspace: `truncated: true` is what
+  // tells `propose` to skip every retirement decision this round, so any
+  // failure shape that leaves the walk incomplete answers with it (D12 —
+  // capacity is weather, delivered as an honest partial). Only a genuine
+  // miss (404 — no repository, no tree) is the clean "no atlas" answer, and
+  // an auth error propagates as the configuration failure it is.
+  const UNREADABLE: Atlas = { packages: [], truncated: true };
+
   let head = ref;
   if (head === undefined) {
     try {
       const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
       head = data.default_branch;
-    } catch {
-      return EMPTY_ATLAS;
+    } catch (error) {
+      if (isMissing(error)) return EMPTY_ATLAS;
+      if (isCapacityError(error)) return UNREADABLE;
+      throw error;
     }
   }
   if (head === undefined || head.length === 0) return EMPTY_ATLAS;
@@ -334,6 +356,7 @@ export async function readAtlas(
   const resolvedHead = head;
 
   let tree: readonly { path?: string; type?: string }[];
+  let treeTruncated: boolean;
   try {
     const { data } = await api.rest.git.getTree({
       owner: at.owner,
@@ -342,8 +365,14 @@ export async function readAtlas(
       recursive: "1",
     });
     tree = data.tree;
-  } catch {
-    return EMPTY_ATLAS;
+    // The API's own truncation signal — a tree too large for one recursive
+    // read. A member the response never carried must read as "not seen",
+    // never as "gone".
+    treeTruncated = data.truncated === true;
+  } catch (error) {
+    if (isMissing(error)) return EMPTY_ATLAS;
+    if (isCapacityError(error)) return UNREADABLE;
+    throw error;
   }
 
   const rootFiles = new Set(
@@ -370,19 +399,43 @@ export async function readAtlas(
     }
   }
 
-  await collect("pnpm-workspace.yaml", parsePnpmWorkspace, readNpmMember);
-  await collect("package.json", parseNpmWorkspaces, readNpmMember);
-  await collect("Cargo.toml", parseCargoWorkspace, readCargoMember);
-  await collect("go.work", parseGoWork, readGoMember);
+  try {
+    await collect("pnpm-workspace.yaml", parsePnpmWorkspace, readNpmMember);
+    await collect("package.json", parseNpmWorkspaces, readNpmMember);
+    await collect("Cargo.toml", parseCargoWorkspace, readCargoMember);
+    await collect("go.work", parseGoWork, readGoMember);
+  } catch (error) {
+    if (isCapacityError(error)) return UNREADABLE;
+    throw error;
+  }
 
   const dirs = [...members.values()];
-  const truncated = dirs.length > ATLAS_MAX_PACKAGES;
-  const bounded = truncated ? dirs.slice(0, ATLAS_MAX_PACKAGES) : dirs;
+  const truncated = treeTruncated || dirs.length > ATLAS_MAX_PACKAGES;
+  const bounded = dirs.length > ATLAS_MAX_PACKAGES ? dirs.slice(0, ATLAS_MAX_PACKAGES) : dirs;
 
   const packages: Package[] = [];
   for (const { dir, read } of bounded) {
-    const found = await read(api, at, resolvedHead, dir);
-    if (found !== null) packages.push({ ...found, description: sanitize(found.description) });
+    let found: Package | null;
+    try {
+      found = await read(api, at, resolvedHead, dir);
+    } catch (error) {
+      // Capacity mid-walk: keep every member already read, mark the whole
+      // atlas as the honest partial it now is. The one member whose read
+      // failed must look unseen, never retired.
+      if (isCapacityError(error)) return { packages, truncated: true };
+      throw error;
+    }
+    // `name` gets the same treatment `description` always has — both are
+    // manifest text, and `name` is the one of the two that flows into a
+    // computed label name (`propose.ts`'s `packageSlug`), which itself
+    // ends up inside a PR body and this repository's own marker grammar.
+    if (found !== null) {
+      packages.push({
+        ...found,
+        name: sanitize(found.name),
+        description: sanitize(found.description),
+      });
+    }
   }
 
   return { packages, truncated };

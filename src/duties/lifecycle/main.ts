@@ -35,6 +35,7 @@ import { detectLanguage } from "../../core/detect.js";
 import { narrow, parseApply } from "../../core/enforce.js";
 import {
   createLifecycleEffects,
+  isCapacityError,
   listOpenThreads,
   listRepositoryLabels,
   readStanding,
@@ -43,7 +44,7 @@ import {
 } from "../../core/forge.js";
 import { bounded, parseSince, threadNumber } from "../../core/inputs.js";
 import { parseLanguages, type Language } from "../../core/languages.js";
-import { markerFor } from "../../core/marker.js";
+import { isReeveProposalPr, markerFor } from "../../core/marker.js";
 import { writeSummary } from "../../core/summary.js";
 import {
   checkLifecycleLabelsExist,
@@ -60,7 +61,13 @@ import {
 import { evaluateLifecycle, fingerprintFor, type DueStep } from "./clock.js";
 import { footer, renderClose, renderSay } from "./message.js";
 import { renderSweepPage, renderThreadPage } from "./summary.js";
-import { readComments, readEvents, type LifecycleApi } from "./timeline.js";
+import {
+  isDraftPr,
+  readComments,
+  readEvents,
+  resolveOwnLogin,
+  type LifecycleApi,
+} from "./timeline.js";
 
 /** `lifecycle`'s own default, once a `lifecycle:` policy exists and no `capabilities:` block says otherwise. */
 const DEFAULT_CAPABILITIES: readonly Capability[] = ["label", "comment"];
@@ -130,7 +137,7 @@ interface Outcome {
   readonly permanentlyExempt: string | null;
   readonly permitted: readonly Capability[];
   readonly withheld: readonly Capability[];
-  /** Why nothing was even evaluated — no `lifecycle:` policy, or a `capabilities:` block that does not name this duty. `null` on every other path. */
+  /** Why nothing was even evaluated — no `lifecycle:` policy, a `capabilities:` block that does not name this duty, or one of the hard pre-track skips (recursion guard, closed thread, unreadable creation date, `threads:` kind mismatch, draft exemption). `null` on every other path. */
   readonly ungranted: string | null;
 }
 
@@ -164,12 +171,31 @@ const NOTHING_DONE: Done = {
   dueNotGranted: 0,
 };
 
+/** Whether `threads:` admits a thread of this kind at all. */
+function threadKindAllowed(threads: LifecyclePolicy["threads"], isPullRequest: boolean): boolean {
+  if (threads === "both") return true;
+  return threads === "prs" ? isPullRequest : !isPullRequest;
+}
+
+/**
+ * What every thread this run touches needs answered exactly once, not once
+ * per thread — the capability narrowing (A13) and the run's own identity
+ * (A1's attribution gate) are the same answer for every candidate, so `run()`
+ * resolves them a single time and hands them down.
+ */
+interface RunContext {
+  readonly permitted: readonly Capability[];
+  readonly withheld: readonly Capability[];
+  readonly ownLogin: string;
+}
+
 async function evaluateThread(
   api: LifecycleApi,
   authority: Authority,
   at: Location,
   standing: Standing,
   settings: Settings,
+  ctx: RunContext,
 ): Promise<Outcome> {
   const warrant = authority.warrant;
   const policy = warrant.lifecycle;
@@ -187,13 +213,45 @@ async function evaluateThread(
     );
   }
 
-  const grantedRaw = warrant.granted("lifecycle", DEFAULT_CAPABILITIES);
-  const granted = grantedRaw.filter((capability) => LIFECYCLE_CAPABILITIES.includes(capability));
-  const { permitted, withheld } = narrow(granted, settings.apply);
-  for (const capability of withheld) {
-    core.warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrant.path}\` does not grant to lifecycle. ` +
-        "The narrower of the two wins.",
+  // Recursion guard: Reeve never touches its own proposal pull request —
+  // not a reminder, not a stale label, not a close. A sweep already filters
+  // this out of its listing before spending a read on it; the `number:`
+  // path has no listing to filter, so it is checked again here.
+  if (isReeveProposalPr(standing)) {
+    return notGranted(
+      "This is Reeve's own proposal pull request — every duty skips it, lifecycle included.",
+    );
+  }
+
+  // A maintainer's own close decision is never reopened, spoken to, or
+  // relabelled by a backfill run naming a closed thread directly.
+  if (standing.closed) {
+    return notGranted(
+      `#${String(at.number)} is already closed — lifecycle only ever acts on open threads.`,
+    );
+  }
+
+  // `threads:` gates which kind of thread this policy runs on at all.
+  if (!threadKindAllowed(policy.threads, standing.isPullRequest)) {
+    return notGranted(
+      `\`${warrant.path}\`'s \`lifecycle.threads: ${policy.threads}\` does not include ` +
+        `${standing.isPullRequest ? "pull requests" : "issues"}.`,
+    );
+  }
+
+  // A thread whose creation date this run could not read never starts an
+  // inactivity clock at the Unix epoch — that would read as "instantly
+  // overdue" for every track with no `when:`. Skip rather than guess.
+  if (standing.createdAt.getTime() === 0) {
+    return notGranted(
+      `#${String(at.number)}'s creation date could not be read this run — skipped rather than ` +
+        "treated as instantly overdue.",
+    );
+  }
+
+  if (standing.isPullRequest && policy.exempt.drafts && (await isDraftPr(api, at))) {
+    return notGranted(
+      `#${String(at.number)} is a draft pull request, exempt per \`exempt.drafts\`.`,
     );
   }
 
@@ -216,6 +274,7 @@ async function evaluateThread(
       comments,
       events,
       taxonomyNames: new Set(warrant.labels.map((label) => label.name)),
+      ownLogin: ctx.ownLogin,
     },
     new Date(),
   );
@@ -225,8 +284,8 @@ async function evaluateThread(
     actions: decision.actions,
     unstale: decision.unstale,
     permanentlyExempt: decision.permanentlyExempt,
-    permitted,
-    withheld,
+    permitted: ctx.permitted,
+    withheld: ctx.withheld,
     ungranted: null,
   };
 }
@@ -250,14 +309,21 @@ function checkRequired(step: LifecycleStep, permitted: readonly Capability[]): R
   return { ok: missing.length === 0, missing };
 }
 
+/**
+ * The full ledger of what this thread's evaluation would do — computed the
+ * same way whether or not it is actually written. Dry-run and a live run
+ * disagree only about the `effects.*` calls below, never about what counts
+ * as "would happen": rehearsal is the documented rollout story for the one
+ * duty that closes things, so a dry-run sweep that renders "Nothing due." on
+ * every row would be worse than useless — it would look clean right before
+ * the first live run closes threads nobody previewed.
+ */
 async function act(
   effects: ReturnType<typeof createLifecycleEffects>,
   outcome: Outcome,
   exempt: LifecycleExempt,
   dryRun: boolean,
 ): Promise<Done> {
-  if (dryRun) return NOTHING_DONE;
-
   const labeled: string[] = [];
   let commented = false;
   let closed = false;
@@ -275,21 +341,23 @@ async function act(
     }
 
     if (action.step.label !== null) {
-      await effects.addLabels([action.step.label]);
+      if (!dryRun) await effects.addLabels([action.step.label]);
       labeled.push(action.step.label);
     }
 
     if (action.step.say !== null || action.step.close) {
-      const say = action.step.say !== null ? renderSay(action.step.say, outcome.language) : null;
-      const closeText = action.step.close ? renderClose(outcome.language) : null;
-      const body = [say, closeText].filter((line): line is string => line !== null).join("\n\n");
-      const marker = MARKER.render(fingerprintFor(action.track, action.stepIndex, action.anchor));
-      await effects.comment(`${body}\n\n${footer(action.track, exempt)}\n\n${marker}`);
+      if (!dryRun) {
+        const say = action.step.say !== null ? renderSay(action.step.say, outcome.language) : null;
+        const closeText = action.step.close ? renderClose(outcome.language) : null;
+        const body = [say, closeText].filter((line): line is string => line !== null).join("\n\n");
+        const marker = MARKER.render(fingerprintFor(action.track, action.stepIndex, action.anchor));
+        await effects.comment(`${body}\n\n${footer(action.track, exempt)}\n\n${marker}`);
+      }
       commented = true;
     }
 
     if (action.step.close) {
-      await effects.closeAsNotPlanned();
+      if (!dryRun) await effects.closeAsNotPlanned();
       closed = true;
     }
   }
@@ -297,7 +365,7 @@ async function act(
   const unstaled: string[] = [];
   if (outcome.permitted.includes("label")) {
     for (const label of outcome.unstale) {
-      await effects.removeLabel(label);
+      if (!dryRun) await effects.removeLabel(label);
       unstaled.push(label);
     }
   } else if (outcome.unstale.length > 0) {
@@ -318,69 +386,100 @@ interface SweptThread {
 interface SweepAccumulator {
   readonly results: SweptThread[];
   candidates: number;
+  /** Pre-filtered before a single per-thread read was spent — `threads:` kind mismatch or the recursion guard. Never counts toward `limit`. */
+  skipped: number;
   ungranted: string | null;
+  /** GitHub's own capacity ran out mid-sweep (429/5xx/timeout) — see D12. Everything in `results` up to that point is real and already reported; the rest of the backlog waits for the next run. */
+  starved: boolean;
 }
 
+function newSweepAccumulator(): SweepAccumulator {
+  return { results: [], candidates: 0, skipped: 0, ungranted: null, starved: false };
+}
+
+/**
+ * Mutates `acc` in place rather than building and returning a fresh one, so
+ * that a throw partway through the loop — a 429, a dropped connection —
+ * leaves every write already made sitting in `acc`, visible to `run()`'s
+ * `finally` block. A function that only ever returns its accumulator on the
+ * happy path loses everything it did the moment something above it throws;
+ * D12 says GitHub capacity is weather, not a reason to report zero outputs
+ * and no summary for a sweep that closed twenty threads before the
+ * twenty-first request failed.
+ */
 async function runSweep(
+  acc: SweepAccumulator,
   api: LifecycleApi,
   authority: Authority,
   settings: Settings,
-): Promise<SweepAccumulator> {
-  const acc: SweepAccumulator = { results: [], candidates: 0, ungranted: null };
-
+  ctx: RunContext,
+): Promise<void> {
   if (authority.warrant.lifecycle === null) {
     acc.ungranted =
       `\`${authority.warrant.path}\` writes no \`lifecycle:\` key, so this duty has no policy to ` +
       "run.";
-    return acc;
+    return;
   }
   if (authority.warrant.unnamed("lifecycle")) {
     acc.ungranted = `\`${authority.warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`.`;
-    return acc;
+    return;
   }
 
-  const existingLabels = (await listRepositoryLabels(api, context.repo)).map((label) => label.name);
-  checkLifecycleLabelsExist(authority.warrant, existingLabels);
-
-  const threads = policyIncludesPulls(authority.warrant.lifecycle)
-    ? await listOpenThreads(api, context.repo, settings.since)
-    : (await listOpenThreads(api, context.repo, settings.since)).filter(
-        (thread) => !thread.isPullRequest,
-      );
+  const policy = authority.warrant.lifecycle;
+  const listed = await listOpenThreads(api, context.repo, settings.since);
   // Oldest-created first — the thread that has waited longest for a clock
   // check is the one most likely to already be overdue, unlike a sweep whose
   // own work budget wants the newest backlog first.
-  const ordered = [...threads].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const ordered = [...listed].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   acc.candidates = ordered.length;
 
   for (const thread of ordered) {
     if (settings.limit !== null && acc.results.length >= settings.limit) break;
 
+    // Cheap pre-filters straight off the listing — a thread this policy
+    // could never evaluate, or Reeve's own proposal PR, never costs a
+    // per-thread read (`readStanding` + comments + events) and never
+    // consumes `limit`. Everything else — `exempt.labels`, `never:`
+    // overrides, a permanent exemption — still gets a full read, because
+    // un-staling has to keep working for exactly those threads (see A11);
+    // pre-filtering them here the way this filter drops kind-mismatched
+    // threads would silently break that.
+    if (!threadKindAllowed(policy.threads, thread.isPullRequest) || isReeveProposalPr(thread)) {
+      acc.skipped += 1;
+      continue;
+    }
+
     const at = { ...context.repo, number: thread.number };
-    // The sweep listing carries no milestone/assignee/author state — read
-    // the full standing per candidate, the same per-thread cost
-    // `duplicate`'s sweep accepts for facts its own listing does not carry
-    // either.
-    const standing = await readStanding(api, at);
-    const outcome = await evaluateThread(api, authority, at, standing, settings);
-    // One thread's own effects, not shared across the sweep — `close`/`comment`/`addLabels` all need this thread's own issue number.
-    const effects = createLifecycleEffects(api, at);
-    const done = await act(effects, outcome, authority.warrant.lifecycle.exempt, settings.dryRun);
-    acc.results.push({ number: thread.number, outcome, done });
+    try {
+      // The sweep listing carries no milestone/assignee/author state — read
+      // the full standing per candidate, the same per-thread cost
+      // `duplicate`'s sweep accepts for facts its own listing does not carry
+      // either.
+      const standing = await readStanding(api, at);
+      const outcome = await evaluateThread(api, authority, at, standing, settings, ctx);
+      // One thread's own effects, not shared across the sweep — `close`/`comment`/`addLabels` all need this thread's own issue number.
+      const effects = createLifecycleEffects(api, at);
+      const done = await act(effects, outcome, policy.exempt, settings.dryRun);
+      acc.results.push({ number: thread.number, outcome, done });
+    } catch (error) {
+      if (isCapacityError(error)) {
+        acc.starved = true;
+        break;
+      }
+      // Auth errors (401/403) are configuration, not weather — D12 says
+      // those stay red. Let them propagate to `run()`'s own catch; `acc` is
+      // already visible to the `finally` block either way.
+      throw error;
+    }
   }
-
-  return acc;
-}
-
-function policyIncludesPulls(policy: LifecyclePolicy): boolean {
-  return policy.threads === "prs" || policy.threads === "both";
 }
 
 export async function run(): Promise<void> {
   let settings: Settings | null = null;
   let single: { readonly number: number; readonly outcome: Outcome; readonly done: Done } | null =
     null;
-  let bulk: SweepAccumulator | null = null;
+  const bulk = newSweepAccumulator();
+  let ranSweep = false;
 
   try {
     const base = readSettings();
@@ -391,14 +490,54 @@ export async function run(): Promise<void> {
     const languages = resolveThreadLanguages(authority.warrant, core.getInput("languages"));
     settings = { ...base, languages };
 
+    // The label-existence rehearsal check runs before branching, so the
+    // very first run against a single thread — not just a sweep — catches a
+    // misspelled clock-hand label, the same way it always has for a sweep.
+    if (authority.warrant.lifecycle !== null) {
+      const existingLabels = (await listRepositoryLabels(api, context.repo)).map(
+        (label) => label.name,
+      );
+      checkLifecycleLabelsExist(authority.warrant, existingLabels);
+    }
+
+    // Capability narrowing is the same answer for every thread this run
+    // touches — resolved and warned about once here, not once per thread.
+    const grantedRaw = authority.warrant.granted("lifecycle", DEFAULT_CAPABILITIES);
+    const granted = grantedRaw.filter((capability) => LIFECYCLE_CAPABILITIES.includes(capability));
+    const grantedButUnused = grantedRaw.filter(
+      (capability) => !LIFECYCLE_CAPABILITIES.includes(capability),
+    );
+    if (grantedButUnused.length > 0) {
+      core.notice(
+        `\`${authority.warrant.path}\` grants lifecycle ` +
+          `${grantedButUnused.map((capability) => `\`${capability}\``).join(", ")}, which this duty ` +
+          "has no use for.",
+      );
+    }
+    const { permitted, withheld } = narrow(granted, settings.apply);
+    for (const capability of withheld) {
+      core.warning(
+        `\`apply\` asks for \`${capability}\`, which \`${settings.warrant}\` does not grant to ` +
+          "lifecycle. The narrower of the two wins.",
+      );
+    }
+
+    // Resolved once per run and cached — the attribution gate every
+    // un-staling decision reads needs to know who "our own actor" is before
+    // it can tell a label we applied from one a human, or a different bot,
+    // did.
+    const ownLogin = await resolveOwnLogin(api);
+    const ctx: RunContext = { permitted, withheld, ownLogin };
+
     if (settings.sweep) {
-      bulk = await runSweep(api, authority, settings);
+      ranSweep = true;
+      await runSweep(bulk, api, authority, settings, ctx);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context.repo, number };
       const standing = await readStanding(api, at);
-      const outcome = await evaluateThread(api, authority, at, standing, settings);
+      const outcome = await evaluateThread(api, authority, at, standing, settings, ctx);
       const done =
         authority.warrant.lifecycle === null
           ? NOTHING_DONE
@@ -414,12 +553,18 @@ export async function run(): Promise<void> {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
     if (settings !== null) {
-      if (settings.sweep && bulk !== null) {
+      if (ranSweep) {
         report(bulk);
         await writeSummary(
-          renderSweepPage(settings.warrant, settings.dryRun, bulk.results, bulk.ungranted),
+          renderSweepPage(
+            settings.warrant,
+            settings.dryRun,
+            bulk.results,
+            bulk.ungranted,
+            bulk.starved,
+          ),
         );
-      } else if (!settings.sweep && single !== null) {
+      } else if (single !== null) {
         reportSingle(single.outcome, single.done);
         await writeSummary(
           renderThreadPage(
@@ -451,13 +596,20 @@ function reportSingle(outcome: Outcome, done: Done): void {
 }
 
 function report(bulk: SweepAccumulator): void {
-  const skipped = bulk.results.filter(
+  // `skipped` now covers every exemption layer, not just labels: threads
+  // this sweep never spent a read on (`bulk.skipped` — kind mismatch, the
+  // recursion guard) plus threads it did read but that turned out ungranted
+  // or permanently exempt once evaluated.
+  const evaluatedSkipped = bulk.results.filter(
     (row) => row.outcome.ungranted !== null || row.outcome.permanentlyExempt !== null,
   ).length;
   core.setOutput("processed", String(bulk.results.length));
-  core.setOutput("remaining", String(Math.max(bulk.candidates - bulk.results.length, 0)));
-  core.setOutput("starved", "false");
-  core.setOutput("skipped", String(skipped));
+  core.setOutput(
+    "remaining",
+    String(Math.max(bulk.candidates - bulk.results.length - bulk.skipped, 0)),
+  );
+  core.setOutput("starved", String(bulk.starved));
+  core.setOutput("skipped", String(bulk.skipped + evaluatedSkipped));
   core.setOutput("reminded", String(bulk.results.filter((row) => row.done.commented).length));
   core.setOutput(
     "labeled",

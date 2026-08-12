@@ -29,7 +29,7 @@
  * propagates red, per D12.
  */
 import { matchAtlasEvidence, globToMatcher, type Atlas, type Package } from "../../core/atlas.js";
-import { isBotAuthor, isMissing, type Listed } from "../../core/forge.js";
+import { isBotAuthor, isCapacityError, isMissing, type Listed } from "../../core/forge.js";
 import {
   fingerprint,
   markerFor,
@@ -85,6 +85,20 @@ export interface ProposalsApi {
         ref: string;
         sha: string;
       }): Promise<unknown>;
+      /**
+       * Moves an existing ref to a new commit — a ref *move*, never a merge:
+       * this port still has no method that could merge a pull request, see
+       * this interface's own doc comment. Used only to rebuild `BRANCH` from
+       * the base branch's current head at the start of a round with no open
+       * proposal PR (`resetBranch`); the port gains nothing else through it.
+       */
+      updateRef(params: {
+        owner: string;
+        repo: string;
+        ref: string;
+        sha: string;
+        force?: boolean;
+      }): Promise<unknown>;
     };
     readonly pulls: {
       list(params: {
@@ -137,6 +151,20 @@ function packageSlug(name: string): string {
   return name.replace(SCOPE_PREFIX, "").toLowerCase();
 }
 
+/**
+ * A computed label name is manifest-derived, maintainer-trust-tier text
+ * (see `atlas.ts`'s own doc comment) — but it still ends up in two places
+ * that are not free-text: a PR body's Markdown (`renderBody`) and the
+ * `propose:entry` marker grammar (`proposeEntryMarker`), an HTML comment a
+ * `>` could close early and a control character or newline could otherwise
+ * corrupt. Refused rather than escaped, matching every other shape check
+ * `detectAdditions` already does (length, template shape) — a name that
+ * needs escaping to be safe is not a name propose should be minting a
+ * GitHub label from unattended.
+ */
+// eslint-disable-next-line no-control-regex -- deliberately refusing control characters in a label name
+const UNSAFE_LABEL_NAME = /[\x00-\x1F\x7F<>`]/;
+
 function renderName(template: string, slug: string): string {
   return template.replace("{package}", slug);
 }
@@ -187,6 +215,12 @@ export function detectAdditions(
   const candidates: AddCandidate[] = [];
   const existingNames = new Set(labels.map((label) => label.name));
   const excludeMatchers = cfg.except.map(globToMatcher);
+  // Which package a computed label name was first claimed by, so a second
+  // manifest computing the same name is a refusal rather than a silent
+  // second `- name:` item `applyChangeSet` would happily emit and
+  // `parseWarrant`'s reparse would only catch later, with no word of why.
+  const claimedBy = new Map<string, Package>();
+  const collided = new Set<string>();
 
   for (const pkg of atlas.packages) {
     if (excludeMatchers.some((matcher) => matcher.test(pkg.path))) continue;
@@ -202,11 +236,29 @@ export function detectAdditions(
       notes.push(`\`${labelName}\` is longer than ${String(LABEL_NAME_MAX)} characters — skipped.`);
       continue;
     }
+    if (UNSAFE_LABEL_NAME.test(labelName)) {
+      notes.push(
+        `\`${pkg.name}\`'s computed label name is not safe to propose (a control character or one of ` +
+          "`< > \\`` ) — skipped.",
+      );
+      continue;
+    }
     if (existingNames.has(labelName)) continue;
+
+    const priorPkg = claimedBy.get(labelName);
+    if (priorPkg !== undefined) {
+      collided.add(labelName);
+      notes.push(
+        `\`${priorPkg.name}\` and \`${pkg.name}\` would both compute the label \`${labelName}\` — ` +
+          "refused, neither was proposed. Rename one, or narrow `except:`.",
+      );
+      continue;
+    }
+    claimedBy.set(labelName, pkg);
     candidates.push({ labelName, pkg });
   }
 
-  return { candidates, notes };
+  return { candidates: candidates.filter((c) => !collided.has(c.labelName)), notes };
 }
 
 /** One label the taxonomy names that no current workspace package matches anymore. */
@@ -218,6 +270,14 @@ export interface RetireCandidate {
  * Every taxonomy label matching the naming template's shape whose slot no
  * current atlas package fills — empty unless `cfg.retire` is true, since an
  * unconfigured repository asked for additions only.
+ *
+ * A name-slug mismatch alone is not proof a package is gone: `paths:` is a
+ * maintainer's own explicit scope claim for a label (the same authority
+ * `pathCovered` already gives it in `detectAdditions`), and a package a
+ * `paths:` entry still covers is a rename this label survived — in scope,
+ * not retired — whatever atlas currently calls it. Only a label with no
+ * `paths:` of its own, relying purely on the naming template, is retired on
+ * the slug check alone.
  */
 export function detectRetirements(
   labels: readonly Label[],
@@ -231,6 +291,7 @@ export function detectRetirements(
     const slot = templateSuffix(cfg.name, label.name);
     if (slot === null) continue;
     if (currentSlugs.has(slot)) continue;
+    if (label.paths.length > 0 && atlas.packages.some((pkg) => pathCovered(pkg, [label]))) continue;
     out.push({ labelName: label.name });
   }
   return out;
@@ -386,25 +447,41 @@ async function findOwnOpenPr(
   return null;
 }
 
+/** Whether the branch's own head commit's freshness could not be confirmed, and why. */
+interface Frozen {
+  readonly frozen: boolean;
+  readonly errorReason: string | null;
+}
+
 /**
  * Whether the branch's own head commit was written by someone other than
  * this run — the cheapest honest signal that a maintainer pushed to it by
  * hand, which this module then leaves alone rather than overwriting.
+ *
+ * A check that itself fails — capacity, a permissions edge, anything —
+ * answers `frozen: true` rather than `false`. The question this function
+ * answers is "is it safe to overwrite this branch", and an error means that
+ * is unknown, not that it is safe; failing open here would let a read that
+ * merely timed out silently authorise clobbering a human's hand-pushed
+ * commit. `errorReason` carries why, for the caller to log — this is not
+ * D12's weather/configuration split, because there is no red path here to
+ * defer to: every outcome of this function is the same green "left
+ * untouched" the confirmed-frozen case already gives.
  */
 async function branchFrozen(
   api: ProposalsApi,
   at: { readonly owner: string; readonly repo: string },
   headSha: string,
-): Promise<boolean> {
+): Promise<Frozen> {
   try {
     const { data } = await api.rest.repos.getCommit({
       owner: at.owner,
       repo: at.repo,
       ref: headSha,
     });
-    return !isBotAuthor(data.author);
-  } catch {
-    return false;
+    return { frozen: !isBotAuthor(data.author), errorReason: null };
+  } catch (error) {
+    return { frozen: true, errorReason: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -431,6 +508,53 @@ async function ensureBranch(
     ref: `refs/heads/${BRANCH}`,
     sha: data.object.sha,
   });
+}
+
+/**
+ * Rebuilds `BRANCH` from `base`'s current head, discarding whatever it held.
+ *
+ * `ensureBranch` only ever creates the branch when it is missing — exactly
+ * right for the existing-open-PR path, where the branch's own content is the
+ * proposal being updated. But a round that starts with **no** open proposal
+ * PR has nothing on `BRANCH` worth keeping: this module is `BRANCH`'s only
+ * writer, and the one reader who could still want its old content — a PR —
+ * is gone, merged or hand-closed. Left alone, `writeProposal` reads that
+ * stale content, edits on top of a change-set that has already landed on
+ * `base`, and its own reparse-and-verify check refuses the result forever —
+ * propose bricking itself is exactly the bug this function exists to close.
+ *
+ * `updateRef({force: true})` is a ref *move*, never a merge — `ProposalsApi`
+ * still has no method that could merge a pull request. Falls back to
+ * `createRef` for the one case a moved ref cannot cover: a repository where
+ * `BRANCH` has never existed at all.
+ */
+async function resetBranch(
+  api: ProposalsApi,
+  at: { readonly owner: string; readonly repo: string },
+  base: string,
+): Promise<void> {
+  const { data } = await api.rest.git.getRef({
+    owner: at.owner,
+    repo: at.repo,
+    ref: `heads/${base}`,
+  });
+  try {
+    await api.rest.git.updateRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `heads/${BRANCH}`,
+      sha: data.object.sha,
+      force: true,
+    });
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+    await api.rest.git.createRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `refs/heads/${BRANCH}`,
+      sha: data.object.sha,
+    });
+  }
 }
 
 /** A safe-enough YAML double-quoted scalar for a controlled, machine-authored value. */
@@ -606,22 +730,8 @@ function isShaConflict(error: unknown): boolean {
   return false;
 }
 
-/** Capacity/timeout-shaped errors — weather, per D12 — downgraded to a green report rather than thrown. */
-function isWeather(error: unknown): boolean {
-  if (typeof error === "object" && error !== null && "status" in error) {
-    const status = (error as { status?: unknown }).status;
-    if (status === 429 || (typeof status === "number" && status >= 500)) return true;
-  }
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return (
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    message.includes("network") ||
-    message.includes("econnreset") ||
-    message.includes("etimedout")
-  );
-}
+/** Capacity/timeout-shaped errors — weather, per D12 — downgraded to a green report rather than thrown. The classifier itself is `forge.ts`'s `isCapacityError`, shared with `lifecycle`'s sweep rather than respelled here. */
+const isWeather = isCapacityError;
 
 async function writeProposal(
   api: ProposalsApi,
@@ -713,7 +823,23 @@ async function defaultBranchAndReady(
   return base;
 }
 
-/** What `propose` decided this run, for the caller to log — never wired into the job-summary table. */
+/**
+ * Same as {@link defaultBranchAndReady}, for the round that opens a *new*
+ * proposal PR rather than updating an open one — resets `BRANCH` instead of
+ * merely ensuring it exists. See `resetBranch`'s own doc comment for why the
+ * two paths need different preparation.
+ */
+async function defaultBranchAndReset(
+  api: ProposalsApi,
+  at: { readonly owner: string; readonly repo: string },
+): Promise<string> {
+  const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+  const base = data.default_branch ?? "main";
+  await resetBranch(api, at, base);
+  return base;
+}
+
+/** What `propose` decided this run — logged, and rendered into the sweep's job summary by {@link proposeSection}. */
 export interface ProposeReport {
   readonly eligible: boolean;
   readonly notes: readonly string[];
@@ -726,7 +852,8 @@ export interface ProposeReport {
   readonly dryRun: boolean;
 }
 
-function report(
+/** Exported so `main.ts` can build the same shape of report for the paths that never reach {@link runPropose} at all. */
+export function report(
   over: Partial<ProposeReport> & { readonly notes: readonly string[] },
 ): ProposeReport {
   return {
@@ -740,6 +867,45 @@ function report(
     dryRun: false,
     ...over,
   };
+}
+
+/**
+ * `propose`'s own line for the sweep's job summary — every run this
+ * capability was reachable at all gets one, whether it acted or declined
+ * to, log-only reporting being below this repository's own house bar for
+ * a capability that writes a pull request. `null` (never called, or the
+ * warrant never granted `propose` at all) renders nothing: a capability a
+ * repository never asked for does not get a row saying so, the same as
+ * every other capability's summary section.
+ */
+export function proposeSection(report: ProposeReport | null): string {
+  if (report === null) return "";
+  const lines = ["", "", "### propose", ""];
+  if (!report.eligible) {
+    lines.push(report.notes[report.notes.length - 1] ?? "Did nothing.");
+    return lines.join("\n");
+  }
+  if (report.dryRun) {
+    lines.push(`Dry run — ${report.notes[report.notes.length - 1] ?? "nothing to propose."}`);
+  } else if (report.pr !== null) {
+    const parts = [
+      report.unchanged
+        ? "unchanged"
+        : `${String(report.additions)} addition${report.additions === 1 ? "" : "s"}, ` +
+          `${String(report.retirements)} retirement${report.retirements === 1 ? "" : "s"}`,
+    ];
+    if (report.struck > 0) {
+      parts.push(
+        `${String(report.struck)} previously-rejected entr${report.struck === 1 ? "y" : "ies"} skipped`,
+      );
+    }
+    lines.push(
+      `${report.frozen ? "Proposal branch left untouched" : "Proposal"} — #${String(report.pr)} (${parts.join("; ")}).`,
+    );
+  } else {
+    lines.push(report.notes[report.notes.length - 1] ?? "Nothing to propose this run.");
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -775,7 +941,10 @@ export async function runPropose(
 
   const notes: string[] = [];
   if (atlas.truncated) {
-    notes.push("The workspace atlas was truncated — some packages may not have been considered.");
+    notes.push(
+      "The workspace atlas was truncated — some packages may not have been considered, so no " +
+        "retirement was proposed this run (a package this run never saw is out of scope, not gone).",
+    );
   }
 
   const { candidates, notes: detectNotes } = detectAdditions(
@@ -784,7 +953,13 @@ export async function runPropose(
     warrant.propose,
   );
   notes.push(...detectNotes);
-  const retirements = detectRetirements(warrant.labels, atlas, warrant.propose);
+  // A truncated atlas is an honest partial, never proof a package is gone —
+  // `detectRetirements` only ever sees `atlas.packages` sans whatever the cap
+  // cut off, and a label for a member past the cut would otherwise look
+  // identical to one for a member that was actually removed.
+  const retirements = atlas.truncated
+    ? []
+    : detectRetirements(warrant.labels, atlas, warrant.propose);
   const evidenced = gateByEvidence(candidates, openIssues, warrant.propose, now);
 
   const short = candidates.length - evidenced.length;
@@ -839,12 +1014,16 @@ export async function runPropose(
         });
       }
 
-      if (await branchFrozen(api, at, existing.headSha)) {
+      const frozen = await branchFrozen(api, at, existing.headSha);
+      if (frozen.frozen) {
         return report({
           notes: [
             ...notes,
-            `The proposal branch (#${String(existing.number)}) carries a commit from someone other ` +
-              "than this run — left untouched.",
+            frozen.errorReason === null
+              ? `The proposal branch (#${String(existing.number)}) carries a commit from someone ` +
+                "other than this run — left untouched."
+              : `The proposal branch (#${String(existing.number)})'s freshness could not be checked ` +
+                `(${frozen.errorReason}) — treated as frozen and left untouched.`,
           ],
           additions,
           retirements: retiring,
@@ -898,7 +1077,10 @@ export async function runPropose(
       });
     }
 
-    const base = await defaultBranchAndReady(api, at);
+    // No open proposal PR exists — `BRANCH` is reset to `base`'s current
+    // head rather than merely ensured, so this round never edits on top of
+    // a previous, already-merged one. See `resetBranch`'s own doc comment.
+    const base = await defaultBranchAndReset(api, at);
     const created = await writeProposal(api, at, warrant, entries, fp, null, base);
     if (created === null) {
       return report({

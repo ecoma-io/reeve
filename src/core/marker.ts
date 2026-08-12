@@ -189,3 +189,28 @@ export function readProposeEntryMarkers(body: string): ReadonlySet<string> {
   }
   return found;
 }
+
+const PROPOSE_MARKER = markerFor("propose");
+
+/**
+ * The recursion guard: whether a thread is Reeve's own proposal pull
+ * request — the one every other duty must never sweep, triage, translate,
+ * label, or let `lifecycle` stale or close.
+ *
+ * The one-open-PR invariant and the struck-entry memory both live only in
+ * that PR's body (see `propose.ts`'s `findOwnOpenPr`/`struckEntries`); a
+ * duty that edited its body, relabelled it, or closed it out from under
+ * `propose` would corrupt state nothing else can reconstruct. `propose.ts`'s
+ * `renderBody` always writes the `propose` marker into every proposal PR it
+ * creates or updates, so the marker's presence is a complete, zero-cost
+ * signal — reading it costs nothing beyond the body every duty's listing
+ * already carries, unlike confirming the pull request's head ref by name,
+ * which would cost a `pulls.get` per pull request candidate in every sweep.
+ */
+export function isReeveProposalPr(thread: {
+  readonly isPullRequest: boolean;
+  readonly body: string;
+}): boolean {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
+}

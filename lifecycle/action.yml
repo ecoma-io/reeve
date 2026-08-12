@@ -106,64 +106,80 @@ inputs:
 
   limit:
     description: >-
-      The most threads one sweep will actually process, or `none` for no
-      cap. Kept modest by default to protect a free tier's own rate limit —
-      raise it, or set `none`, for a deliberate backfill.
+      The most threads one sweep will actually examine — read in full and
+      run through the clock — or `none` for no cap. A thread `threads:`
+      excludes by kind, or Reeve's own proposal pull request, is filtered
+      out of the listing for free and never counts against this. Kept
+      modest by default because this is the one duty that writes per
+      examined thread — raise it, or set `none`, for a deliberate backfill.
     required: false
-    default: "50"
+    default: "30"
 
 outputs:
   processed:
     description: >-
-      How many threads a sweep actually evaluated this run. `0` outside
-      `sweep`.
+      How many threads a sweep actually examined this run — read in full
+      and run through the clock. `0` outside `sweep`.
 
   remaining:
     description: >-
-      Candidates this sweep did not reach — past `limit`. The next sweep
-      starts here. `0` outside `sweep`, and `0` when a sweep finished its
-      whole backlog.
+      Candidates this sweep did not reach — past `limit`, or after a
+      mid-sweep stop (see `starved`). The next sweep starts here. `0`
+      outside `sweep`, and `0` when a sweep finished its whole backlog.
 
   starved:
     description: >-
-      Always `false` — this duty calls no model and never rotates a roster,
-      so there is nothing here to run out of capacity. Kept for the same
-      shape every other duty's outputs carry.
+      Under `sweep`: `true` when GitHub's own capacity (a rate limit, or a
+      slow/unavailable request) ran out mid-sweep and the sweep stopped
+      early. Everything reported alongside it is still real — a starved
+      sweep did the work its outputs claim, just not the whole backlog.
+      `false` outside `sweep`; a single thread either succeeds or the whole
+      run fails red.
 
   skipped:
     description: >-
       Outside `sweep`: `true` when this thread had no policy to run against
-      (no `lifecycle:` key, `capabilities:` not naming this duty, or
-      `exempt.labels` matched), `false` otherwise. Under `sweep`: the count
-      of processed threads that were skipped for one of those reasons.
+      (no `lifecycle:` key, `capabilities:` not naming this duty, the
+      recursion guard, a closed thread, an unreadable creation date,
+      `threads:` kind mismatch, a draft exemption, or a permanent
+      exemption), `false` otherwise. Under `sweep`: every thread skipped for
+      one of those reasons, including the ones filtered out of the listing
+      before a per-thread read was ever spent — not only `exempt.labels`.
 
   reminded:
     description: >-
       Outside `sweep`: `true` when this run posted a step's `say:` or its
-      close explanation. Under `sweep`: how many processed threads got one.
+      close explanation. Under `sweep`: how many examined threads got one.
+      Under `dry-run`, what a real run would have posted — the rehearsal's
+      ledger, not zeros.
 
   labeled:
     description: >-
       Outside `sweep`: how many labels a due step applied this run. Under
-      `sweep`: the same count, summed across every thread processed.
+      `sweep`: the same count, summed across every thread examined. Under
+      `dry-run`, what a real run would have applied.
 
   closed:
     description: >-
       Outside `sweep`: `true` when this run closed the thread as not
-      planned. Under `sweep`: how many processed threads were closed.
+      planned. Under `sweep`: how many examined threads were closed. Under
+      `dry-run`, what a real run would have closed — the one number to read
+      before arming `close`.
 
   unstaled:
     description: >-
       Outside `sweep`: how many of this track's own clock-hand labels were
       removed as stale this run. Under `sweep`: the same count, summed
-      across every thread processed.
+      across every thread examined. Under `dry-run`, what a real run would
+      have removed.
 
   due-not-granted:
     description: >-
       Outside `sweep`: how many steps were due this run but skipped whole
       because `apply` or the warrant withheld a capability the step's
       action needed. Under `sweep`: the same count, summed across every
-      thread processed.
+      thread examined. Identical under `dry-run` — the grant check runs the
+      same either way.
 
 runs:
   using: node24

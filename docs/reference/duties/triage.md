@@ -230,6 +230,13 @@ the window, and the `except` globs — and
 [the north star](../../doctrine/north-star.md#8-non-goals) for why merging
 its own proposal is not a capability that exists.
 
+Two shapes of candidate are dropped before the evidence gate ever sees them,
+each with a note in the run's own report saying so: a package whose manifest
+carries no description (a label nobody can write a boundary for is not worth
+proposing), and a package whose computed label name would exceed GitHub's
+50-character label ceiling — or carry a character unsafe for the proposal's
+own PR body and marker grammar.
+
 ```yaml
 capabilities:
   triage: [label, propose]

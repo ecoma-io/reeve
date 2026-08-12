@@ -26,6 +26,8 @@ export default {
         "memory", // the corrections store and retrieval over it
         "forge", // reading from and writing to the hosting platform
         "publish", // idempotency markers and the write path
+        "atlas", // a monorepo's own package layout, read as evidence
+        "marker", // the marker grammar and the guards built on it
 
         // The duties — one scope each. A new duty adds a scope here in the
         // commit that adds the duty.

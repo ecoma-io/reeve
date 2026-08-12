@@ -353,6 +353,8 @@ export interface TrackerApi {
           assignees?: ({ login?: string } | null)[] | null;
           /** Read for `lifecycle`'s inactivity-track clock start. Optional so every existing stub of this call keeps typechecking unchanged. */
           created_at?: string;
+          /** Present (any shape) on a pull request's own issue record, absent on a plain issue — read for `lifecycle`'s `threads:` gate. Optional for the same reason as `created_at`. */
+          pull_request?: unknown;
         };
       }>;
       update(params: {
@@ -472,9 +474,13 @@ export interface Standing {
    * When the thread was opened, or the Unix epoch when the API answered
    * without one — every caller but `lifecycle` already had no use for this
    * field, so a stub built before it existed reads as an impossible date
-   * rather than failing to typecheck.
+   * rather than failing to typecheck. `lifecycle` itself treats the epoch
+   * value as "unknown" rather than as a real date — see its own read of
+   * this field.
    */
   readonly createdAt: Date;
+  /** True when this thread is a pull request's own issue record. Read for `lifecycle`'s `threads:` gate. */
+  readonly isPullRequest: boolean;
 }
 
 export async function readStanding(api: TrackerApi, at: Location): Promise<Standing> {
@@ -502,6 +508,7 @@ export async function readStanding(api: TrackerApi, at: Location): Promise<Stand
       .map((assignee) => assignee?.login ?? "")
       .filter((login_) => login_.length > 0),
     createdAt: data.created_at !== undefined ? new Date(data.created_at) : new Date(0),
+    isPullRequest: data.pull_request !== undefined,
   };
 }
 
@@ -621,10 +628,20 @@ export async function listOpenThreads(
   at: Pick<Location, "owner" | "repo">,
   since: Date | null,
   state: "open" | "closed" | "all" = "open",
+  /**
+   * A hard page cap, for a caller reading this listing for something other
+   * than the sweep's own bounded-by-`limit` candidate walk — `propose`'s
+   * evidence gate is the one today, which reads every open issue in
+   * `since`'s window to pattern-match against, with no per-thread budget of
+   * its own to bound the read by. `undefined` (every other caller) keeps
+   * this exactly as unbounded as it has always been, stopping only at
+   * `since` or a short page.
+   */
+  maxPages?: number,
 ): Promise<readonly Listed[]> {
   const listed: Listed[] = [];
 
-  for (let page = 1; ; page += 1) {
+  for (let page = 1; maxPages === undefined || page <= maxPages; page += 1) {
     const { data } = await api.rest.issues.listForRepo({
       owner: at.owner,
       repo: at.repo,
@@ -797,6 +814,31 @@ export interface CorrectionFile {
 /** Whether a Contents API failure means "not there" rather than something worth failing a run over. */
 export function isMissing(error: unknown): boolean {
   return typeof error === "object" && error !== null && "status" in error && error.status === 404;
+}
+
+/**
+ * Whether a GitHub API failure is capacity, not configuration — D12's
+ * "weather" side. A 429/5xx status, or a network-timeout-shaped error with
+ * no status at all, is the platform being slow or briefly unavailable, not
+ * a mistake in the run's own setup; 401/403 (and everything else) is not
+ * this classifier's business and stays red. Shared rather than
+ * reimplemented per duty — `triage`'s `propose.ts` and `lifecycle`'s sweep
+ * both need the identical answer to "is this worth ending the run over."
+ */
+export function isCapacityError(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 429 || (typeof status === "number" && status >= 500)) return true;
+  }
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("network") ||
+    message.includes("econnreset") ||
+    message.includes("etimedout")
+  );
 }
 
 /**

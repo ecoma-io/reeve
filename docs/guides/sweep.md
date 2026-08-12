@@ -28,8 +28,9 @@ with:
 open thread this duty has not already handled." `since` bounds it by date, and
 `limit` bounds it by count — both exist for the same reason: a scheduled run
 has to end, and ending with an honest partial is the entire point of this
-page. `limit` defaults to `50` when left unset, modest enough to protect a
-free tier's own rate limit; the example above raises it deliberately.
+page. `limit` defaults to `50` when left unset (`30` for `lifecycle`, the one duty
+that writes per examined thread), modest enough to protect a free tier's own
+rate limit; the example above raises it deliberately.
 
 `limit: none` removes the count bound entirely. Paging against the forge
 follows real demand — the listing keeps asking for more until `since` says

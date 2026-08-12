@@ -177,7 +177,9 @@ way no `apply` value today can make `duplicate` skip its double gate:
   See [Non-goals](#non-goals) below.
 - Modifying the warrant file itself. An agent cannot grant itself a wider
   warrant; only a human editing `.github/reeve.yml` in a reviewed pull
-  request can.
+  request can. Reeve may _draft_ that edit as a pull request — `triage`'s
+  `propose` capability does exactly this today — because drafting is not the
+  boundary; merging is, and no capability of Reeve's merges one.
 - Any network egress beyond `base-url` and the GitHub API — the same egress
   invariant [Security](../security/security.md#egress) already holds duties
   to.

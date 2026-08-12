@@ -127,6 +127,8 @@ export interface LifecycleExempt {
   readonly taxonomy: boolean;
   /** `null` = unset = off; a whole number ≥1 blocks `close` steps only. */
   readonly comments: number | null;
+  /** Whether a draft pull request is exempt from every track, when `threads:` includes PRs at all. Defaults `true`. */
+  readonly drafts: boolean;
 }
 
 /** The `lifecycle:` key, in full — `null` when the file never wrote one at all. */
@@ -929,6 +931,12 @@ function readLifecycle(path: string, raw: unknown): LifecyclePolicy | null {
     );
   }
   const fields = raw as Record<string, unknown>;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads",
+  ]);
 
   const tracks = readLifecycleTracks(path, fields.tracks);
   const exempt = readLifecycleExempt(path, fields.exempt);
@@ -973,6 +981,7 @@ function readLifecycleTracks(path: string, raw: unknown): readonly LifecycleTrac
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry as Record<string, unknown>;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
 
     const name = text(at, "name", fields.name, { required: true });
     if (!/^[a-z][a-z0-9-]*$/.test(name)) {
@@ -1033,6 +1042,7 @@ function readLifecycleStep(at: string, raw: unknown, isLast: boolean): Lifecycle
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw as Record<string, unknown>;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
 
   const after = durationField(at, "after", fields.after, { allowNever: false });
   const label = nullable(text(at, "label", fields.label, { required: false }));
@@ -1101,18 +1111,34 @@ function closeField(at: string, raw: unknown): boolean {
 function readLifecycleExempt(path: string, raw: unknown): LifecycleExempt {
   const at = `\`${path}\`'s \`lifecycle.exempt\``;
   if (raw === undefined || raw === null) {
-    return { labels: [], milestones: true, assignees: true, taxonomy: true, comments: null };
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true,
+    };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
   }
   const fields = raw as Record<string, unknown>;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts",
+  ]);
   return {
     labels: strings(at, "labels", fields.labels),
     milestones: guardField(at, "milestones", fields.milestones, true),
     assignees: guardField(at, "assignees", fields.assignees, true),
     taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
     comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true),
   };
 }
 
@@ -1145,6 +1171,7 @@ function readLifecycleOverrides(path: string, raw: unknown): readonly LifecycleO
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
     }
     const fields = entry as Record<string, unknown>;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
     const label = text(at, "label", fields.label, { required: true });
     const hasAfter = fields.after !== undefined && fields.after !== null;
     const never = booleanField(at, "never", fields.never, false);
@@ -1183,6 +1210,7 @@ function readPropose(path: string, raw: unknown): ProposeWorkspace {
     );
   }
   const fields = raw as Record<string, unknown>;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
   const workspaceRaw = fields.workspace;
   if (workspaceRaw === undefined || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
   if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
@@ -1192,6 +1220,7 @@ function readPropose(path: string, raw: unknown): ProposeWorkspace {
   }
   const w = workspaceRaw as Record<string, unknown>;
   const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
 
   const nameRaw = text(at, "name", w.name, { required: false });
   const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
@@ -1202,10 +1231,13 @@ function readPropose(path: string, raw: unknown): ProposeWorkspace {
   }
 
   const except = strings(at, "except", w.except);
+  // A floor of zero is no floor — `evidence: 0` reads as "any candidate
+  // qualifies", which is not what an evidence *requirement* means. The
+  // lowest real requirement is one matching issue.
   const evidence =
     w.evidence === undefined
       ? DEFAULT_PROPOSE_WORKSPACE.evidence
-      : wholeNumber(at, "evidence", w.evidence, 0);
+      : wholeNumber(at, "evidence", w.evidence, 1);
   const window =
     w.window === undefined
       ? DEFAULT_PROPOSE_WORKSPACE.window
@@ -1412,6 +1444,26 @@ function durationField(
     );
   }
   return days * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * Refuses any key in `fields` that is not in `known` — a misspelled
+ * `wehn:` (meant `when:`) or `exmept:` (meant `exempt:`) is not silently
+ * dropped, it is caught the same way any other malformed block here is
+ * (D5). Scoped to the new `lifecycle:`/`propose:` readers only — `readLabels`
+ * and the rest of the taxonomy predate this check and are not retrofitted
+ * by it.
+ */
+function rejectUnknownKeys(
+  at: string,
+  fields: Record<string, unknown>,
+  known: readonly string[],
+): void {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
 }
 
 /** What a wrong value is, for a message that helps rather than quotes YAML at somebody. */

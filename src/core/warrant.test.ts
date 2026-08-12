@@ -643,6 +643,292 @@ describe("checkLifecycleLabelsExist", () => {
   });
 });
 
+describe("readLifecycle", () => {
+  const BASE =
+    "version: 1\n" +
+    "lifecycle:\n" +
+    "  tracks:\n" +
+    "    - name: stale\n" +
+    "      steps:\n" +
+    "        - label: stale\n" +
+    "          after: 14d\n";
+
+  it("is null when `lifecycle:` is never written", () => {
+    expect(warrant(MINIMAL).lifecycle).toBeNull();
+  });
+
+  it("refuses `lifecycle:` written with nothing under it", () => {
+    expect(() => warrant("version: 1\nlifecycle:\n")).toThrow(/nothing under it/);
+  });
+
+  it("refuses `lifecycle:` that is not a mapping", () => {
+    expect(() => warrant("version: 1\nlifecycle: nope\n")).toThrow(/expected a mapping/);
+  });
+
+  it("refuses an unrecognized key on the `lifecycle:` block itself", () => {
+    expect(() => warrant(`${BASE}  wehn: oops\n`)).toThrow(/unrecognized key `wehn`/);
+  });
+
+  it("defaults `threads:` to `issues`", () => {
+    expect(warrant(BASE).lifecycle?.threads).toBe("issues");
+  });
+
+  it("reads `threads: prs` and `threads: both`", () => {
+    expect(warrant(`${BASE}  threads: prs\n`).lifecycle?.threads).toBe("prs");
+    expect(warrant(`${BASE}  threads: both\n`).lifecycle?.threads).toBe("both");
+  });
+
+  it("refuses a `threads:` value that is none of `issues`, `prs`, `both`", () => {
+    expect(() => warrant(`${BASE}  threads: everything\n`)).toThrow(
+      /expected `issues`, `prs`, or `both`/,
+    );
+  });
+
+  it("requires at least one track", () => {
+    expect(() => warrant("version: 1\nlifecycle:\n  tracks: []\n")).toThrow(/no `tracks`/);
+  });
+
+  it("refuses an unrecognized key on a track entry", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      wehn: needs-info\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n";
+    expect(() => warrant(source)).toThrow(/unrecognized key `wehn`/);
+  });
+
+  it("names a track lowercase-hyphenated only", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: Stale Track\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n";
+    expect(() => warrant(source)).toThrow(/expected lowercase letters/);
+  });
+
+  it("refuses two tracks with the same name", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n" +
+      "    - name: stale\n" +
+      "      steps:\n" +
+      "        - label: other\n" +
+      "          after: 7d\n";
+    expect(() => warrant(source)).toThrow(/names `stale` more than once/);
+  });
+
+  it("requires at least one step per track", () => {
+    const source = "version: 1\nlifecycle:\n  tracks:\n    - name: stale\n      steps: []\n";
+    expect(() => warrant(source)).toThrow(/no `steps`/);
+  });
+
+  it("defaults `resets` to `author` for a `when:` track and `any` for an inactivity track", () => {
+    const whenSource =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: reminder\n" +
+      "      when: needs-info\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n";
+    expect(warrant(whenSource).lifecycle?.tracks[0]?.resets).toBe("author");
+    expect(warrant(BASE).lifecycle?.tracks[0]?.resets).toBe("any");
+  });
+
+  it("reads an explicit `resets:` over the shape-based default", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      resets: author\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n";
+    expect(warrant(source).lifecycle?.tracks[0]?.resets).toBe("author");
+  });
+
+  it("refuses a `resets:` that is neither `author` nor `any`", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      resets: everyone\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n";
+    expect(() => warrant(source)).toThrow(/expected `author` or `any`/);
+  });
+
+  it("refuses an inactivity track whose first step closes", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      steps:\n" +
+      "        - close: true\n" +
+      "          after: 14d\n" +
+      "  exempt:\n" +
+      "    labels: [pinned]\n";
+    expect(() => warrant(source)).toThrow(/first step closes/);
+  });
+
+  it("allows a `when:` track whose first step closes — the label application was the warning", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: reminder\n" +
+      "      when: needs-info\n" +
+      "      steps:\n" +
+      "        - close: true\n" +
+      "          after: 14d\n" +
+      "  exempt:\n" +
+      "    labels: [pinned]\n";
+    expect(() => warrant(source)).not.toThrow();
+  });
+
+  it("refuses `close` on a step that is not the track's last", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      steps:\n" +
+      "        - close: true\n" +
+      "          after: 7d\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n" +
+      "  exempt:\n" +
+      "    labels: [pinned]\n";
+    expect(() => warrant(source)).toThrow(/close must be the/);
+  });
+
+  it("refuses a step carrying none of `label`, `say`, `close`", () => {
+    const source =
+      "version: 1\nlifecycle:\n  tracks:\n    - name: stale\n      steps:\n        - after: 14d\n";
+    expect(() => warrant(source)).toThrow(/a step must do something/);
+  });
+
+  it("refuses `after: 0d` — not a duration", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 0d\n";
+    expect(() => warrant(source)).toThrow(/0d.*not a duration/);
+  });
+
+  it("refuses an unrecognized key on a step", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: stale\n" +
+      "      steps:\n" +
+      "        - label: stale\n" +
+      "          after: 14d\n" +
+      "          sya: true\n";
+    expect(() => warrant(source)).toThrow(/unrecognized key `sya`/);
+  });
+
+  it("requires `exempt.labels` non-empty before a `close` step may be configured at all", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: reminder\n" +
+      "      when: needs-info\n" +
+      "      steps:\n" +
+      "        - close: true\n" +
+      "          after: 14d\n";
+    expect(() => warrant(source)).toThrow(/permanent escape hatch must exist/);
+  });
+
+  it("defaults every `exempt` layer, plus `drafts`, when `exempt:` is absent", () => {
+    expect(warrant(BASE).lifecycle?.exempt).toEqual({
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true,
+    });
+  });
+
+  it("reads an explicit `exempt:` block", () => {
+    const source =
+      BASE +
+      "  exempt:\n" +
+      "    labels: [pinned]\n" +
+      "    milestones: false\n" +
+      "    assignees: [carol]\n" +
+      "    taxonomy: false\n" +
+      "    comments: 2\n" +
+      "    drafts: false\n";
+    expect(warrant(source).lifecycle?.exempt).toEqual({
+      labels: ["pinned"],
+      milestones: false,
+      assignees: ["carol"],
+      taxonomy: false,
+      comments: 2,
+      drafts: false,
+    });
+  });
+
+  it("refuses an unrecognized key on `lifecycle.exempt`", () => {
+    const source = `${BASE}  exempt:\n    exmept: [pinned]\n`;
+    expect(() => warrant(source)).toThrow(/unrecognized key `exmept`/);
+  });
+
+  it("reads `lifecycle.overrides`, both the `after` and `never` shapes", () => {
+    const source =
+      BASE +
+      "  overrides:\n" +
+      "    - label: pinned\n" +
+      "      never: true\n" +
+      "    - label: low-priority\n" +
+      "      after: 30d\n";
+    expect(warrant(source).lifecycle?.overrides).toEqual([
+      { label: "pinned", after: null, never: true },
+      { label: "low-priority", after: 30 * 24 * 60 * 60 * 1000, never: false },
+    ]);
+  });
+
+  it("refuses an override with both `after` and `never`", () => {
+    const source = `${BASE}  overrides:\n    - label: pinned\n      after: 30d\n      never: true\n`;
+    expect(() => warrant(source)).toThrow(/has both `after` and `never`/);
+  });
+
+  it("refuses an override with neither `after` nor `never`", () => {
+    const source = `${BASE}  overrides:\n    - label: pinned\n`;
+    expect(() => warrant(source)).toThrow(/has neither `after` nor `never`/);
+  });
+
+  it("refuses an unrecognized key on an override entry", () => {
+    const source = `${BASE}  overrides:\n    - label: pinned\n      never: true\n      afetr: 1d\n`;
+    expect(() => warrant(source)).toThrow(/unrecognized key `afetr`/);
+  });
+});
+
 describe("readPropose", () => {
   it("takes the design's own defaults when `propose:` is never written", () => {
     const found = warrant(MINIMAL).propose;
@@ -697,6 +983,22 @@ describe("readPropose", () => {
     expect(() => warrant("version: 1\npropose:\n  workspace: nope\n")).toThrow(
       /expected a mapping/,
     );
+  });
+
+  it("refuses an unrecognized key on `propose:` itself", () => {
+    expect(() => warrant("version: 1\npropose:\n  wokrspace: {}\n")).toThrow(
+      /unrecognized key `wokrspace`/,
+    );
+  });
+
+  it("refuses an unrecognized key under `propose.workspace`", () => {
+    const source = "version: 1\npropose:\n  workspace:\n    evidnce: 5\n";
+    expect(() => warrant(source)).toThrow(/unrecognized key `evidnce`/);
+  });
+
+  it("refuses `evidence: 0` — a floor of zero is no floor", () => {
+    const source = "version: 1\npropose:\n  workspace:\n    evidence: 0\n";
+    expect(() => warrant(source)).toThrow(/expected a whole number of 1 or more/);
   });
 });
 

@@ -16,6 +16,8 @@ import {
   detectAdditions,
   detectRetirements,
   gateByEvidence,
+  proposeSection,
+  report,
   runPropose,
   type Entry,
   type ProposalsApi,
@@ -167,6 +169,29 @@ describe("detectAdditions", () => {
     );
     expect(candidates).toEqual([]);
   });
+
+  it("refuses a computed label name that could break the PR body or the marker grammar (B4.1)", () => {
+    const { candidates, notes } = detectAdditions(
+      [],
+      atlasOf([pkg({ name: "billing --> injected", path: "apps/billing" })]),
+      cfg(),
+    );
+    expect(candidates).toEqual([]);
+    expect(notes[0]).toContain("not safe to propose");
+  });
+
+  it("refuses both candidates when two manifests compute the same label name, rather than overwriting (B4.6)", () => {
+    const { candidates, notes } = detectAdditions(
+      [],
+      atlasOf([
+        pkg({ name: "Billing", path: "apps/billing" }),
+        pkg({ name: "@internal/billing", path: "services/billing" }),
+      ]),
+      cfg(),
+    );
+    expect(candidates).toEqual([]);
+    expect(notes.some((n) => n.includes("would both compute the label `area:billing`"))).toBe(true);
+  });
 });
 
 describe("detectRetirements", () => {
@@ -183,6 +208,27 @@ describe("detectRetirements", () => {
     const out = detectRetirements(
       [label({ name: "area:billing" })],
       atlasOf([pkg({ name: "shipping" })]),
+      cfg({ retire: true }),
+    );
+    expect(out).toEqual([{ labelName: "area:billing" }]);
+  });
+
+  it("does not retire a label whose own paths: still cover a current package under a new name (B4.5)", () => {
+    // `billing` was renamed to `billing-core` — the template-slot match on
+    // the name alone would call this a removal, but the label's own
+    // `paths:` claim on `apps/billing` still resolves to a real package.
+    const out = detectRetirements(
+      [label({ name: "area:billing", paths: ["apps/billing"] })],
+      atlasOf([pkg({ name: "billing-core", path: "apps/billing" })]),
+      cfg({ retire: true }),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("still retires a label with paths: once nothing atlas sees is covered by them", () => {
+    const out = detectRetirements(
+      [label({ name: "area:billing", paths: ["apps/billing"] })],
+      atlasOf([pkg({ name: "shipping", path: "apps/shipping" })]),
       cfg({ retire: true }),
     );
     expect(out).toEqual([{ labelName: "area:billing" }]);
@@ -349,13 +395,49 @@ interface Recorder {
   } | null;
   updatedPr: { readonly number: number; readonly title?: string; readonly body?: string } | null;
   createdRef: boolean;
+  /**
+   * Every `git.updateRef` call the run made — `resetBranch`'s own trace,
+   * kept as a list rather than a last-write-wins field so a test can assert
+   * both that the reset happened and what it moved `reeve/propose` to.
+   */
+  updateRefCalls: { readonly ref: string; readonly sha: string; readonly force: boolean }[];
 }
 
+const PROPOSE_BRANCH = "reeve/propose";
+
+/** One ref's state, as this fake tracks it — the file it holds and the commit sha it names. */
+interface BranchState {
+  sha: string;
+  content: string;
+}
+
+function notFoundError(): { status: number } & Error {
+  return Object.assign(new Error("Not Found"), { status: 404 });
+}
+
+/**
+ * A ref-aware fake: `getContent`/`createOrUpdateFileContents` read and write
+ * whichever branch the call actually named, and `reeve/propose` starts out
+ * either absent or holding its own content — never silently the same object
+ * as the default branch's. This is what makes a reset (or the lack of one)
+ * observable at all; a fake that answered every ref with the same one string
+ * could not have caught `ensureBranch` never resetting a stale branch (see
+ * the "does not brick itself" test below), because a stale copy and a fresh
+ * one would have looked identical to it.
+ */
 function makeApi(opts: {
   readonly content: string;
   readonly contentSha?: string;
   readonly defaultBranch?: string;
   readonly branchExists?: boolean;
+  /**
+   * What `reeve/propose` already holds, when `branchExists` is true and it
+   * differs from the default branch's own current content — the stale-branch
+   * scenario a reset has to overwrite. Defaults to `content`, i.e. a branch
+   * indistinguishable from a freshly-created one.
+   */
+  readonly branchContent?: string;
+  readonly branchSha?: string;
   readonly openPrs?: readonly {
     readonly number: number;
     readonly body: string;
@@ -370,25 +452,45 @@ function makeApi(opts: {
   readonly listClosedError?: Error;
   readonly writeError?: Error;
 }): { readonly api: ProposalsApi; readonly recorder: Recorder } {
-  const recorder: Recorder = { writes: [], createdPr: null, updatedPr: null, createdRef: false };
-  let branchExists = opts.branchExists ?? false;
+  const recorder: Recorder = {
+    writes: [],
+    createdPr: null,
+    updatedPr: null,
+    createdRef: false,
+    updateRefCalls: [],
+  };
+  const defaultBranch = opts.defaultBranch ?? "main";
+  const branches = new Map<string, BranchState>();
+  branches.set(defaultBranch, { sha: "base-sha", content: opts.content });
+  if (opts.branchExists ?? false) {
+    branches.set(PROPOSE_BRANCH, {
+      sha: opts.branchSha ?? "propose-sha",
+      content: opts.branchContent ?? opts.content,
+    });
+  }
 
   const api: ProposalsApi = {
     rest: {
       repos: {
-        get: () => Promise.resolve({ data: { default_branch: opts.defaultBranch ?? "main" } }),
-        getContent: () =>
-          Promise.resolve({
+        get: () => Promise.resolve({ data: { default_branch: defaultBranch } }),
+        getContent: (params) => {
+          const state = branches.get(params.ref);
+          if (state === undefined) return Promise.reject(notFoundError());
+          return Promise.resolve({
             data: {
-              content: Buffer.from(opts.content, "utf8").toString("base64"),
+              content: Buffer.from(state.content, "utf8").toString("base64"),
               encoding: "base64",
-              sha: opts.contentSha ?? "sha1",
+              sha: opts.contentSha ?? state.sha,
             },
-          }),
+          });
+        },
         createOrUpdateFileContents: (params) => {
           if (opts.writeError !== undefined) return Promise.reject(opts.writeError);
+          const content = Buffer.from(params.content, "base64").toString("utf8");
+          const ref = params.branch ?? defaultBranch;
+          branches.set(ref, { sha: `${ref}-written`, content });
           recorder.writes.push({
-            content: Buffer.from(params.content, "base64").toString("utf8"),
+            content,
             ...(params.sha === undefined ? {} : { sha: params.sha }),
           });
           return Promise.resolve(undefined);
@@ -400,18 +502,28 @@ function makeApi(opts: {
       },
       git: {
         getRef: (params) => {
-          const isBaseBranch = params.ref === `heads/${opts.defaultBranch ?? "main"}`;
-          if (!isBaseBranch && !branchExists) {
-            const notFound: { status: number } & Error = Object.assign(new Error("Not Found"), {
-              status: 404,
-            });
-            return Promise.reject(notFound);
-          }
-          return Promise.resolve({ data: { object: { sha: "base-sha" } } });
+          const name = params.ref.replace(/^heads\//, "");
+          const state = branches.get(name);
+          if (state === undefined) return Promise.reject(notFoundError());
+          return Promise.resolve({ data: { object: { sha: state.sha } } });
         },
-        createRef: () => {
-          branchExists = true;
+        createRef: (params) => {
+          const name = params.ref.replace(/^refs\/heads\//, "");
+          const source = branches.get(defaultBranch);
+          branches.set(name, { sha: params.sha, content: source?.content ?? opts.content });
           recorder.createdRef = true;
+          return Promise.resolve(undefined);
+        },
+        updateRef: (params) => {
+          const name = params.ref.replace(/^heads\//, "");
+          recorder.updateRefCalls.push({
+            ref: name,
+            sha: params.sha,
+            force: params.force ?? false,
+          });
+          if (!branches.has(name)) return Promise.reject(notFoundError());
+          const source = branches.get(defaultBranch);
+          branches.set(name, { sha: params.sha, content: source?.content ?? opts.content });
           return Promise.resolve(undefined);
         },
       },
@@ -526,6 +638,73 @@ describe("runPropose", () => {
     expect(recorder.writes[0]?.content).toContain("area:billing");
     expect(recorder.createdPr?.body).toContain("Package: `apps/billing`");
     expect(recorder.createdPr?.base).toBe("main");
+  });
+
+  it(
+    "resets a stale reeve/propose branch to base's current content before " +
+      "writing, rather than bricking itself on it forever (B1)",
+    async () => {
+      // `reeve/propose` still exists from an earlier, now-gone round (a PR
+      // hand-closed without merging, say) and never got the `area:widgets`
+      // item that has since landed on the base branch some other way. Before
+      // the reset fix, `writeProposal` read this stale text, tried to remove
+      // an item it does not contain, and `applyChangeSet` returned null —
+      // propose reporting "would not parse back cleanly" and doing nothing,
+      // every round, forever. Resetting `reeve/propose` to base's current
+      // content first is what lets the retirement resolve.
+      const staleBranch = WARRANT_SOURCE;
+      const currentBase =
+        "version: 1\nlabels:\n  - name: area:widgets\n    description: Widgets work.\n";
+      const { api, recorder } = makeApi({
+        content: currentBase,
+        branchExists: true,
+        branchContent: staleBranch,
+        branchSha: "stale-sha",
+      });
+      const result = await runPropose(
+        api,
+        AT,
+        warrantWith([label({ name: "area:widgets" })], { retire: true }),
+        false,
+        atlasOf([]),
+        [],
+        NOW,
+        false,
+      );
+      expect(result.notes.some((n) => n.includes("would not parse"))).toBe(false);
+      expect(result.retirements).toBe(1);
+      expect(result.pr).not.toBeNull();
+      expect(recorder.writes).toHaveLength(1);
+      expect(recorder.writes[0]?.content).not.toContain("area:widgets");
+      // The reset itself, visible in the recorder: a forced move of
+      // `reeve/propose` onto the base branch's current head.
+      expect(recorder.updateRefCalls).toHaveLength(1);
+      expect(recorder.updateRefCalls[0]).toEqual({
+        ref: PROPOSE_BRANCH,
+        sha: "base-sha",
+        force: true,
+      });
+    },
+  );
+
+  it("falls back to creating reeve/propose when a reset finds no branch to move (B1)", async () => {
+    const { api, recorder } = makeApi({ content: WARRANT_SOURCE, branchExists: false });
+    const result = await runPropose(
+      api,
+      AT,
+      warrantWith([]),
+      false,
+      billingAtlas(),
+      billingIssues(),
+      NOW,
+      false,
+    );
+    expect(result.pr).toBe(99);
+    // No pre-existing ref to move — `updateRef` 404s and `resetBranch`
+    // falls back to `createRef`, exactly as it does for a repository where
+    // `reeve/propose` has never existed at all.
+    expect(recorder.updateRefCalls).toHaveLength(1);
+    expect(recorder.createdRef).toBe(true);
   });
 
   it("does not write anything on a dry run, but still says what it would do", async () => {
@@ -760,5 +939,54 @@ describe("runPropose", () => {
     await expect(
       runPropose(api, AT, warrantWith([]), false, billingAtlas(), billingIssues(), NOW, false),
     ).rejects.toThrow(/Forbidden/);
+  });
+
+  it("proposes no retirement off a truncated atlas — a package it never saw is out of scope, not gone (B4.2)", async () => {
+    const { api, recorder } = makeApi({ content: WARRANT_SOURCE });
+    const result = await runPropose(
+      api,
+      AT,
+      warrantWith([label({ name: "area:widgets" })], { retire: true }),
+      false,
+      { packages: [], truncated: true },
+      [],
+      NOW,
+      false,
+    );
+    expect(result.retirements).toBe(0);
+    expect(result.pr).toBeNull();
+    expect(recorder.writes).toEqual([]);
+    expect(result.notes.some((n) => n.includes("truncated"))).toBe(true);
+  });
+});
+
+describe("proposeSection", () => {
+  it("renders nothing when propose was never reachable this run", () => {
+    expect(proposeSection(null)).toBe("");
+  });
+
+  it("renders the decline note when the warrant made propose ineligible", () => {
+    const text = proposeSection(report({ eligible: false, notes: ["no explicit warrant"] }));
+    expect(text).toContain("### propose");
+    expect(text).toContain("no explicit warrant");
+  });
+
+  it("renders what a dry run would have done", () => {
+    const text = proposeSection(
+      report({ dryRun: true, notes: ["Dry run — would open a new proposal."] }),
+    );
+    expect(text).toContain("Dry run");
+  });
+
+  it("renders the opened proposal's number and change-set size", () => {
+    const text = proposeSection(report({ notes: [], pr: 12, additions: 2, retirements: 1 }));
+    expect(text).toContain("#12");
+    expect(text).toContain("2 additions");
+    expect(text).toContain("1 retirement");
+  });
+
+  it("says a frozen branch was left untouched", () => {
+    const text = proposeSection(report({ notes: [], pr: 12, frozen: true }));
+    expect(text).toContain("left untouched");
   });
 });

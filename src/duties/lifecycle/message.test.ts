@@ -9,6 +9,7 @@ const EXEMPT_NONE: LifecycleExempt = {
   assignees: true,
   taxonomy: false,
   comments: null,
+  drafts: true,
 };
 
 function track(over: Partial<LifecycleTrack> = {}): LifecycleTrack {

@@ -17,6 +17,11 @@ function b64(text: string): string {
   return Buffer.from(text, "utf8").toString("base64");
 }
 
+/** An error the way the GitHub client actually raises one — carrying an HTTP status. */
+function httpError(status: number): Error {
+  return Object.assign(new Error(`HTTP ${String(status)}`), { status });
+}
+
 interface File {
   readonly path: string;
   readonly content: string;
@@ -39,7 +44,7 @@ function apiWith(files: readonly File[]): AtlasApi {
         get: () => Promise.resolve({ data: { default_branch: REF } }),
         getContent: ({ path }) => {
           const content = byPath.get(path);
-          if (content === undefined) return Promise.reject(new Error("404"));
+          if (content === undefined) return Promise.reject(httpError(404));
           return Promise.resolve({
             data: { type: "file", content: b64(content), encoding: "base64" },
           });
@@ -61,17 +66,43 @@ function apiWith(files: readonly File[]): AtlasApi {
 }
 
 describe("readAtlas", () => {
-  it("returns EMPTY_ATLAS when repos.get fails", async () => {
+  it("returns EMPTY_ATLAS when repos.get says the repository is not there", async () => {
     const api: AtlasApi = {
       rest: {
         repos: {
-          get: () => Promise.reject(new Error("boom")),
+          get: () => Promise.reject(httpError(404)),
           getContent: () => Promise.reject(new Error("unused")),
         },
         git: { getTree: () => Promise.resolve({ data: { tree: [] } }) },
       },
     };
     expect(await readAtlas(api, AT)).toEqual(EMPTY_ATLAS);
+  });
+
+  it("answers a capacity error on repos.get with the truncated empty atlas, not EMPTY_ATLAS", async () => {
+    const api: AtlasApi = {
+      rest: {
+        repos: {
+          get: () => Promise.reject(httpError(429)),
+          getContent: () => Promise.reject(new Error("unused")),
+        },
+        git: { getTree: () => Promise.resolve({ data: { tree: [] } }) },
+      },
+    };
+    expect(await readAtlas(api, AT)).toEqual({ packages: [], truncated: true });
+  });
+
+  it("propagates an auth error on repos.get — configuration, not a smaller workspace", async () => {
+    const api: AtlasApi = {
+      rest: {
+        repos: {
+          get: () => Promise.reject(httpError(403)),
+          getContent: () => Promise.reject(new Error("unused")),
+        },
+        git: { getTree: () => Promise.resolve({ data: { tree: [] } }) },
+      },
+    };
+    await expect(readAtlas(api, AT)).rejects.toThrow("HTTP 403");
   });
 
   it("returns EMPTY_ATLAS when default_branch is empty", async () => {
@@ -87,7 +118,7 @@ describe("readAtlas", () => {
     expect(await readAtlas(api, AT)).toEqual(EMPTY_ATLAS);
   });
 
-  it("returns EMPTY_ATLAS when the tree read fails", async () => {
+  it("returns EMPTY_ATLAS when the tree itself is not there", async () => {
     const api: AtlasApi = {
       rest: {
         repos: {
@@ -95,11 +126,85 @@ describe("readAtlas", () => {
           getContent: () => Promise.reject(new Error("unused")),
         },
         git: {
-          getTree: () => Promise.reject(new Error("boom")),
+          getTree: () => Promise.reject(httpError(404)),
         },
       },
     };
     expect(await readAtlas(api, AT)).toEqual(EMPTY_ATLAS);
+  });
+
+  it("answers a capacity error on the tree read as truncated — a timeout must never look like an empty workspace", async () => {
+    const api: AtlasApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: REF } }),
+          getContent: () => Promise.reject(new Error("unused")),
+        },
+        git: {
+          getTree: () => Promise.reject(httpError(502)),
+        },
+      },
+    };
+    expect(await readAtlas(api, AT)).toEqual({ packages: [], truncated: true });
+  });
+
+  it("marks the atlas truncated when the tree API says its own listing was", async () => {
+    const files = [
+      { path: "pnpm-workspace.yaml", content: "packages:\n  - packages/*\n" },
+      {
+        path: "packages/a/package.json",
+        content: JSON.stringify({ name: "@acme/a", description: "Package A" }),
+      },
+    ];
+    const inner = apiWith(files);
+    const api: AtlasApi = {
+      rest: {
+        ...inner.rest,
+        git: {
+          getTree: async (params) => {
+            const { data } = await inner.rest.git.getTree(params);
+            return { data: { ...data, truncated: true } };
+          },
+        },
+      },
+    };
+    const atlas = await readAtlas(api, AT);
+    expect(atlas.truncated).toBe(true);
+    expect(atlas.packages.map((p) => p.name)).toEqual(["@acme/a"]);
+  });
+
+  it("keeps the members already read and marks truncated when a member read hits capacity", async () => {
+    const files = [
+      { path: "pnpm-workspace.yaml", content: "packages:\n  - packages/*\n" },
+      {
+        path: "packages/a/package.json",
+        content: JSON.stringify({ name: "@acme/a", description: "Package A" }),
+      },
+      {
+        path: "packages/b/package.json",
+        content: JSON.stringify({ name: "@acme/b", description: "Package B" }),
+      },
+    ];
+    const inner = apiWith(files);
+    let manifestReads = 0;
+    const api: AtlasApi = {
+      rest: {
+        ...inner.rest,
+        repos: {
+          ...inner.rest.repos,
+          getContent: (params) => {
+            if (params.path.endsWith("package.json") && params.path !== "package.json") {
+              manifestReads += 1;
+              if (manifestReads > 1) return Promise.reject(httpError(429));
+            }
+            return inner.rest.repos.getContent(params);
+          },
+        },
+      },
+    };
+    const atlas = await readAtlas(api, AT);
+    expect(atlas.truncated).toBe(true);
+    expect(atlas.packages.map((p) => p.name)).toEqual(["@acme/a"]);
   });
 
   it("returns EMPTY_ATLAS when no manifest exists at the root", async () => {
@@ -260,7 +365,7 @@ describe("readAtlas", () => {
             called = true;
             return Promise.resolve({ data: { default_branch: REF } });
           },
-          getContent: () => Promise.reject(new Error("404")),
+          getContent: () => Promise.reject(httpError(404)),
         },
         git: { getTree: () => Promise.resolve({ data: { tree: [] } }) },
       },
