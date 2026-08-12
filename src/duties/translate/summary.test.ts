@@ -206,6 +206,7 @@ function sweepSubject(overrides: Partial<SweepRun> = {}): string {
     skipped: 2,
     remaining: 0,
     starvedRun: false,
+    budgetExhausted: false,
     spent: [],
     modelNames: new Map(),
     judgeNames: new Map(),
@@ -252,6 +253,17 @@ describe("the sweep summary", () => {
 
   it("says nothing about the roster when it was never starved", () => {
     expect(sweepSubject({ starvedRun: false })).not.toContain("ran out of capacity");
+  });
+
+  it("explains an exhausted budget as this run's own ceiling, distinct from a starved roster", () => {
+    const page = sweepSubject({ budgetExhausted: true, remaining: 4 });
+
+    expect(page).toContain("`max-requests` was reached partway through");
+    expect(page).toContain("this run's own ceiling, not the provider's");
+  });
+
+  it("says nothing about the budget when it was never exhausted", () => {
+    expect(sweepSubject({ budgetExhausted: false })).not.toContain("max-requests");
   });
 
   it("bills drafting and judging as separate rows, as a single run does", () => {

@@ -424,6 +424,7 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "api-keys": "",
     "request-timeout": "120s",
     temperature: "",
+    "max-requests": "none",
   };
 }
 
@@ -670,6 +671,7 @@ describe("the action", () => {
       skipped: JSON.stringify([]),
       "replies-translated": "0",
       starved: "false",
+      "budget-exhausted": "false",
       processed: "0",
       remaining: "0",
     });
@@ -855,6 +857,7 @@ describe("the action", () => {
       skipped: JSON.stringify([]),
       "replies-translated": "0",
       starved: "false",
+      "budget-exhausted": "false",
       processed: "0",
       remaining: "0",
     });
@@ -1112,6 +1115,88 @@ describe("the action, translating the replies", () => {
     const run = await runAction(stub, { "translate-replies": "true" });
 
     expect(run.log).toContain("#42 comment 991");
+  });
+});
+
+describe("max-requests", () => {
+  // A self-imposed ceiling, deliberately unlike `starved`: the roster is
+  // healthy the whole time in every case below, and every stop is this run's
+  // own budget running out rather than the provider's.
+
+  it(
+    "stops translating further languages once the budget is reached, publishing what " +
+      "already drafted",
+    async () => {
+      stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+
+      const run = await runAction(stub, { languages: "en, zh, vi", "max-requests": "1" });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+      expect(run.outputs.skipped).toBe(JSON.stringify(["zh"]));
+      expect(run.outputs["budget-exhausted"]).toBe("true");
+      expect(stub.body).toContain(ENGLISH);
+      expect(stub.body).not.toContain(CHINESE);
+      expect(run.log).toContain(
+        "#42: `max-requests` was reached, so zh was not attempted this run. " +
+          "What was already drafted still publishes.",
+      );
+    },
+  );
+
+  it("stops translating further replies once the budget is reached, leaving the rest alone", async () => {
+    const VIETNAMESE_REPLY = "Tôi cũng gặp phải lỗi này trên máy của tôi, và nó xảy ra mỗi lần.";
+    const ENGLISH_REPLY = "I hit this on my machine too, and it happens every single time.";
+    stub.body = "";
+    stub.replies.set(991, VIETNAMESE_REPLY);
+    stub.replies.set(992, `${VIETNAMESE_REPLY} Hai.`);
+    stub.answer = translating({ en: ENGLISH_REPLY });
+
+    const run = await runAction(stub, { "translate-replies": "true", "max-requests": "1" });
+
+    expect(run.code).toBe(0);
+    expect(stub.replies.get(991)).toContain(ENGLISH_REPLY);
+    expect(stub.replies.get(992)).toBe(`${VIETNAMESE_REPLY} Hai.`);
+    expect(run.outputs["replies-translated"]).toBe("1");
+    expect(run.outputs["budget-exhausted"]).toBe("true");
+    expect(run.log).toContain(
+      "#42: `max-requests` was reached, so its remaining replies were not attempted this run.",
+    );
+  });
+
+  it(
+    "stops a sweep from starting a new thread once the budget is reached, distinctly from " +
+      "a starved roster",
+    async () => {
+      stub.issues = [
+        { number: 101, body: VIETNAMESE, createdAt: "2026-01-03T00:00:00Z" },
+        { number: 102, body: VIETNAMESE, createdAt: "2026-01-02T00:00:00Z" },
+      ];
+
+      const run = await runAction(stub, {
+        sweep: "true",
+        number: "",
+        "max-requests": "1",
+      });
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.processed).toBe("1");
+      expect(run.outputs.remaining).toBe("1");
+      expect(run.outputs.starved).toBe("false");
+      expect(run.outputs["budget-exhausted"]).toBe("true");
+      expect(run.summary).toContain("`max-requests` was reached partway through");
+      expect(run.summary).not.toContain("ran out of capacity");
+    },
+  );
+
+  it("never trips on the default (`none`), whatever this run spends", async () => {
+    stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+
+    const run = await runAction(stub, { languages: "en, zh, vi" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en", "zh"]));
+    expect(run.outputs["budget-exhausted"]).toBe("false");
   });
 });
 

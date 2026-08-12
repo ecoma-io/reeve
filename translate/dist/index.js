@@ -34426,6 +34426,12 @@ function summarizeSweep(run2) {
       "The roster ran out of capacity partway through \u2014 every model in `models` failed on capacity this run. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped. Weather, not a failure."
     );
   }
+  if (run2.budgetExhausted) {
+    parts.push(
+      "",
+      "`max-requests` was reached partway through \u2014 this run's own ceiling, not the provider's. What is above was delivered; the rest is `remaining`, and the next sweep picks up where this one stopped."
+    );
+  }
   parts.push(
     "",
     cost(
@@ -34535,6 +34541,7 @@ function readSettings() {
     replies: getBooleanInput("translate-replies"),
     maxReplies: bounded("max-replies", getInput("max-replies")),
     chunkChars: parseChunkChars(getInput("chunk-chars")),
+    maxRequests: bounded("max-requests", getInput("max-requests")),
     attribution: readAttribution()
   };
 }
@@ -34567,6 +34574,9 @@ function parseChunkChars(raw) {
     );
   }
   return value;
+}
+function budgetExhausted(settings, meter) {
+  return settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
 }
 async function translateChunk(to, settings, stages, from, source, weather) {
   const drafted = await translate({
@@ -34658,7 +34668,7 @@ async function translateInto(to, settings, stages, from, source, weather) {
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], note, published: false };
 }
-async function translateText(what, body, thread, settings, stages, weather) {
+async function translateText(what, body, thread, settings, stages, weather, meter) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -34686,9 +34696,18 @@ async function translateText(what, body, thread, settings, stages, weather) {
   info(
     detection.language === null ? `${what}: source language is none of the configured ones (${String(detection.candidates.length)} candidates).` : `${what}: source language ${detection.language.code} (by ${detection.by}).`
   );
+  const toTranslate = targets(settings.languages, detection.language);
   const posted = [];
   const skipped = [];
-  for (const to of targets(settings.languages, detection.language)) {
+  for (const [index, to] of toTranslate.entries()) {
+    if (budgetExhausted(settings, meter)) {
+      const remaining2 = toTranslate.slice(index);
+      skipped.push(...remaining2);
+      warning(
+        `${what}: \`max-requests\` was reached, so ${remaining2.map((language) => language.code).join(", ")} ${remaining2.length === 1 ? "was" : "were"} not attempted this run. What was already drafted still publishes.`
+      );
+      break;
+    }
     const translated2 = await translateInto(
       to,
       settings,
@@ -34758,7 +34777,7 @@ ${assemble(official, marker, would)}`
     published: outcome.action === "published"
   };
 }
-async function translateReplies(api, at, settings, stages, looked, weather) {
+async function translateReplies(api, at, settings, stages, looked, weather, meter) {
   const { replies, more } = await listReplies(api, at, {
     max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
     order: "newest"
@@ -34770,20 +34789,27 @@ async function translateReplies(api, at, settings, stages, looked, weather) {
   }
   let published = 0;
   for (const reply of replies) {
+    if (budgetExhausted(settings, meter)) {
+      warning(
+        `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not attempted this run.`
+      );
+      break;
+    }
     const translated = await translateText(
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
       createReply(api, at, reply),
       settings,
       stages,
-      weather
+      weather,
+      meter
     );
     looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
-async function processThread(api, at, body, settings, stages, weather) {
+async function processThread(api, at, body, settings, stages, weather, meter) {
   const thread = createThread(api, at);
   const translated = await translateText(
     `#${String(at.number)}`,
@@ -34791,17 +34817,25 @@ async function processThread(api, at, body, settings, stages, weather) {
     thread,
     settings,
     stages,
-    weather
+    weather,
+    meter
   );
   const looked = [translated];
-  const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked, weather) : 0;
+  const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked, weather, meter) : 0;
   return { looked, translated, replies, ungranted: null };
 }
 function notGranted(warrant) {
   return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`translate\`; once that block exists it is the whole answer, so add \`translate: [edit-body]\` to it (or remove the block to return to defaults).`;
 }
 function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+  return {
+    results: [],
+    skipped: 0,
+    starvedRun: false,
+    budgetExhausted: false,
+    candidates: 0,
+    ungranted: null
+  };
 }
 function remainingOf(acc) {
   return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
@@ -34821,7 +34855,7 @@ function describeOutcome(result) {
   }
   return parts.join("; ");
 }
-async function runSweep(acc, api, authority2, settings, stages, weather) {
+async function runSweep(acc, api, authority2, settings, stages, weather, meter) {
   if (authority2.warrant.unnamed("translate")) {
     acc.ungranted = notGranted(authority2.warrant);
     return;
@@ -34838,8 +34872,12 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
       acc.starvedRun = true;
       break;
     }
+    if (budgetExhausted(settings, meter)) {
+      acc.budgetExhausted = true;
+      break;
+    }
     const at = { ...context2.repo, number: thread.number };
-    const result = await processThread(api, at, thread.body, settings, stages, weather);
+    const result = await processThread(api, at, thread.body, settings, stages, weather, meter);
     acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
   }
 }
@@ -34890,7 +34928,7 @@ async function run() {
     };
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, authority2, settings, stages, weather);
+      await runSweep(bulk, api, authority2, settings, stages, weather, meter);
     } else {
       const number = settings.number;
       if (number === null) throw new Error("number: required outside `sweep`.");
@@ -34912,7 +34950,7 @@ async function run() {
         };
       } else {
         const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather);
+        result = await processThread(api, at, body, settings, stages, weather, meter);
       }
       single = { number, result };
     }
@@ -34927,13 +34965,19 @@ async function run() {
           "Every model in `models` failed on capacity this run. " + (settings.sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.")
         );
       }
+      const budgetSpent = settings.sweep && bulk !== null ? bulk.budgetExhausted : budgetExhausted(settings, meter);
+      if (budgetSpent) {
+        warning(
+          "`max-requests` was reached this run. " + (settings.sweep ? "The sweep delivered what it could before the budget ran out, and stopped early \u2014 see `remaining`." : "What was already drafted still publishes; anything past the budget was left for a later run.")
+        );
+      }
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, rosterStarved);
+        reportSweep(bulk, rosterStarved, budgetSpent);
         await writeSummary(
           sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures)
         );
       } else if (!settings.sweep && single !== null) {
-        report(single.result.translated, single.result.replies, rosterStarved);
+        report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
         await writeSummary(
           page(settings, authority2, single.number, single.result, meter.spent()) + authSection(weather.authFailures)
         );
@@ -34941,20 +34985,22 @@ async function run() {
     }
   }
 }
-function report(translated, replies, rosterStarved) {
+function report(translated, replies, rosterStarved, budgetSpent) {
   setOutput("source-language", translated.from?.code ?? "");
   setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   setOutput("replies-translated", String(replies));
   setOutput("starved", String(rosterStarved));
+  setOutput("budget-exhausted", String(budgetSpent));
   setOutput("processed", "0");
   setOutput("remaining", "0");
 }
-function reportSweep(bulk, rosterStarved) {
+function reportSweep(bulk, rosterStarved, budgetSpent) {
   setOutput("processed", String(bulk.results.length));
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
+  setOutput("budget-exhausted", String(budgetSpent));
 }
 function page(settings, authority2, thread, result, spent) {
   return summarize({
@@ -34976,6 +35022,7 @@ function sweepPage(settings, bulk, spent) {
     skipped: bulk.skipped,
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
+    budgetExhausted: bulk.budgetExhausted,
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

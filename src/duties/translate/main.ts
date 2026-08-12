@@ -87,7 +87,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
-import { createMeter, metered } from "../../core/meter.js";
+import { createMeter, metered, total, type Meter } from "../../core/meter.js";
 import { authSection, writeSummary } from "../../core/summary.js";
 import {
   readWarrant,
@@ -163,6 +163,12 @@ interface Settings {
   readonly maxReplies: number | null;
   /** How large one chunk of a body can be before it is its own request. See `parseChunkChars`. */
   readonly chunkChars: number;
+  /**
+   * How many provider requests — detection, drafting and judging combined —
+   * this run may spend before it stops asking for more. `null` is no bound.
+   * See `budgetExhausted`.
+   */
+  readonly maxRequests: number | null;
   readonly attribution: Attribution;
   readonly dryRun: boolean;
   readonly baseUrl: string;
@@ -204,6 +210,7 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
     replies: core.getBooleanInput("translate-replies"),
     maxReplies: bounded("max-replies", core.getInput("max-replies")),
     chunkChars: parseChunkChars(core.getInput("chunk-chars")),
+    maxRequests: bounded("max-requests", core.getInput("max-requests")),
     attribution: readAttribution(),
   };
 }
@@ -300,6 +307,29 @@ function parseChunkChars(raw: string): number {
     );
   }
   return value;
+}
+
+/**
+ * Whether this run has already spent `max-requests`, across every purpose —
+ * detection, drafting and judging combined, the same total the summary's own
+ * spend table adds up to. `null` is no bound, the default, and never
+ * exhausted.
+ *
+ * A different kind of stop than `starved`, deliberately: a roster out of
+ * capacity is weather from the provider's own side, something happened to it.
+ * A budget this run set for itself running out is not that — it is a ceiling
+ * this run chose, working exactly as configured. Conflating the two would
+ * have a maintainer watching `starved` for exactly the wrong reason once
+ * `max-requests` started tripping it instead of a real outage.
+ *
+ * Checked at each place a fresh request is about to be spent — a language, a
+ * reply, a sweep's next thread — rather than once up front, because the
+ * budget can run out partway through any of those, and what already
+ * happened stands: a translation already drafted and published is not
+ * un-published because the next language could not be started.
+ */
+function budgetExhausted(settings: Settings, meter: Meter): boolean {
+  return settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
 }
 
 /** One chunk's own draft-and-judge pass — everything a single-chunk body used to get, once. */
@@ -496,6 +526,7 @@ async function translateText(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  meter: Meter,
 ): Promise<Report> {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
@@ -549,9 +580,24 @@ async function translateText(
       : `${what}: source language ${detection.language.code} (by ${detection.by}).`,
   );
 
+  const toTranslate = targets(settings.languages, detection.language);
   const posted: Posted[] = [];
   const skipped: Language[] = [];
-  for (const to of targets(settings.languages, detection.language)) {
+  for (const [index, to] of toTranslate.entries()) {
+    // Checked before spending the request a language is about to cost, not
+    // after — so a budget set tight enough to stop mid-thread stops before
+    // the request that would have gone over it, not after.
+    if (budgetExhausted(settings, meter)) {
+      const remaining = toTranslate.slice(index);
+      skipped.push(...remaining);
+      core.warning(
+        `${what}: \`max-requests\` was reached, so ${remaining.map((language) => language.code).join(", ")} ` +
+          `${remaining.length === 1 ? "was" : "were"} not attempted this run. ` +
+          "What was already drafted still publishes.",
+      );
+      break;
+    }
+
     const translated = await translateInto(
       to,
       settings,
@@ -680,6 +726,7 @@ async function translateReplies(
   stages: Stages,
   looked: Looked[],
   weather: Weather,
+  meter: Meter,
 ): Promise<number> {
   const { replies, more } = await listReplies(api, at, {
     max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
@@ -694,6 +741,17 @@ async function translateReplies(
 
   let published = 0;
   for (const reply of replies) {
+    // Checked before the reply's own first request, same as the per-language
+    // check inside `translateText` — a reply not yet started is cheaper to
+    // leave for a later run than one translated into half its languages.
+    if (budgetExhausted(settings, meter)) {
+      core.warning(
+        `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not ` +
+          "attempted this run.",
+      );
+      break;
+    }
+
     const translated = await translateText(
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
@@ -701,6 +759,7 @@ async function translateReplies(
       settings,
       stages,
       weather,
+      meter,
     );
     looked.push(translated);
     if (translated.published) published += 1;
@@ -737,6 +796,7 @@ async function processThread(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  meter: Meter,
 ): Promise<ThreadResult> {
   const thread = createThread(api, at);
   const translated = await translateText(
@@ -746,11 +806,12 @@ async function processThread(
     settings,
     stages,
     weather,
+    meter,
   );
   const looked: Looked[] = [translated];
 
   const replies = settings.replies
-    ? await translateReplies(api, at, settings, stages, looked, weather)
+    ? await translateReplies(api, at, settings, stages, looked, weather, meter)
     : 0;
 
   return { looked, translated, replies, ungranted: null };
@@ -784,13 +845,22 @@ interface SweepAccumulator {
   readonly results: SweptThread[];
   skipped: number;
   starvedRun: boolean;
+  /** Set once the run's own `max-requests` budget stopped it partway through. */
+  budgetExhausted: boolean;
   candidates: number;
   /** Set once, before the listing, when the warrant never named this duty at all. */
   ungranted: string | null;
 }
 
 function newAccumulator(): SweepAccumulator {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+  return {
+    results: [],
+    skipped: 0,
+    starvedRun: false,
+    budgetExhausted: false,
+    candidates: 0,
+    ungranted: null,
+  };
 }
 
 /** Candidates neither processed nor skipped — what a next sweep still has to look at. */
@@ -837,6 +907,7 @@ async function runSweep(
   settings: Settings,
   stages: Stages,
   weather: Weather,
+  meter: Meter,
 ): Promise<void> {
   // Once, before the listing — exactly as triage's sweep — because the warrant
   // is checked once per run, not once per thread, and a listing this duty was
@@ -868,8 +939,17 @@ async function runSweep(
       break;
     }
 
+    // The same self-imposed ceiling `translateText` and `translateReplies`
+    // check within one thread, checked here as well so a sweep never starts a
+    // thread it cannot even begin — leaving it for `remaining` is cheaper
+    // than starting it and stopping mid-language.
+    if (budgetExhausted(settings, meter)) {
+      acc.budgetExhausted = true;
+      break;
+    }
+
     const at = { ...context.repo, number: thread.number };
-    const result = await processThread(api, at, thread.body, settings, stages, weather);
+    const result = await processThread(api, at, thread.body, settings, stages, weather, meter);
     acc.results.push({ number: thread.number, outcome: describeOutcome(result) });
   }
 }
@@ -960,7 +1040,7 @@ export async function run(): Promise<void> {
 
     if (settings.sweep) {
       bulk = newAccumulator();
-      await runSweep(bulk, api, authority, settings, stages, weather);
+      await runSweep(bulk, api, authority, settings, stages, weather, meter);
     } else {
       const number = settings.number;
       // `readShared` refuses `sweep` combined with `number`, but a bare
@@ -990,7 +1070,7 @@ export async function run(): Promise<void> {
         };
       } else {
         const body = await createThread(api, at).read();
-        result = await processThread(api, at, body, settings, stages, weather);
+        result = await processThread(api, at, body, settings, stages, weather, meter);
       }
       single = { number, result };
     }
@@ -1018,13 +1098,31 @@ export async function run(): Promise<void> {
         );
       }
 
+      // `bulk.budgetExhausted` already answers this for a sweep, set the
+      // moment `runSweep` broke out of its own loop; a single thread has no
+      // accumulator to have set it, so it is read straight off the meter
+      // instead, the same way each checkpoint inside `translateText` and
+      // `translateReplies` did while the run was still going.
+      const budgetSpent =
+        settings.sweep && bulk !== null ? bulk.budgetExhausted : budgetExhausted(settings, meter);
+      if (budgetSpent) {
+        core.warning(
+          "`max-requests` was reached this run. " +
+            (settings.sweep
+              ? "The sweep delivered what it could before the budget ran out, and " +
+                "stopped early — see `remaining`."
+              : "What was already drafted still publishes; anything past the budget " +
+                "was left for a later run."),
+        );
+      }
+
       if (settings.sweep && bulk !== null) {
-        reportSweep(bulk, rosterStarved);
+        reportSweep(bulk, rosterStarved, budgetSpent);
         await writeSummary(
           sweepPage(settings, bulk, meter.spent()) + authSection(weather.authFailures),
         );
       } else if (!settings.sweep && single !== null) {
-        report(single.result.translated, single.result.replies, rosterStarved);
+        report(single.result.translated, single.result.replies, rosterStarved, budgetSpent);
         await writeSummary(
           page(settings, authority, single.number, single.result, meter.spent()) +
             authSection(weather.authFailures),
@@ -1045,12 +1143,18 @@ export async function run(): Promise<void> {
  * — so replies report the one thing that is answerable across all of them: how
  * many got a translation written.
  */
-function report(translated: Report, replies: number, rosterStarved: boolean): void {
+function report(
+  translated: Report,
+  replies: number,
+  rosterStarved: boolean,
+  budgetSpent: boolean,
+): void {
   core.setOutput("source-language", translated.from?.code ?? "");
   core.setOutput("translated", JSON.stringify(translated.posted.map((entry) => entry.to.code)));
   core.setOutput("skipped", JSON.stringify(translated.skipped.map((language) => language.code)));
   core.setOutput("replies-translated", String(replies));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("budget-exhausted", String(budgetSpent));
   // `0`, not unset: `processed`/`remaining` are a sweep's own outputs, and a
   // single-thread run answers both honestly at zero rather than leaving a
   // workflow that reads them on every run reading an empty string on this one.
@@ -1070,11 +1174,12 @@ function report(translated: Report, replies: number, rosterStarved: boolean): vo
  * actually has, and `action.yml` documents both readings under it rather than
  * inventing a second output nobody would think to look for.
  */
-function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
+function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean, budgetSpent: boolean): void {
   core.setOutput("processed", String(bulk.results.length));
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("budget-exhausted", String(budgetSpent));
 }
 
 function page(
@@ -1104,6 +1209,7 @@ function sweepPage(settings: Settings, bulk: SweepAccumulator, spent: Run["spent
     skipped: bulk.skipped,
     remaining: remainingOf(bulk),
     starvedRun: bulk.starvedRun,
+    budgetExhausted: bulk.budgetExhausted,
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

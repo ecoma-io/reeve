@@ -130,6 +130,7 @@ Every input `translate/action.yml` declares.
 | `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                 |
 | `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                    |
 | `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                            |
+| `max-requests`      | no       | `none`                      | How many provider requests — detection, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                         |
 | `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
 | `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
 | `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
@@ -209,6 +210,17 @@ run. **Review comments on a pull request's diff are deliberately not
 included** — a translation appended to a line comment moves the review
 conversation away from the line it is about.
 
+**`max-requests` is a ceiling this run sets for itself, not the provider
+running dry.** `starved` (below) is weather — every model in `models` failed
+on capacity, something happened on the provider's side. `max-requests`
+reaching its bound is the opposite: the roster is healthy, and the run simply
+chose to stop asking for more, on request count alone across detection,
+drafting and judging together. It is checked before each request that would
+spend it — the next language, the next reply, a sweep's next thread — so
+what already published stands, and only the work not yet started is left for
+a later run (or, under `sweep`, counted into `remaining`). `none`, the
+default, never trips it.
+
 **The run report** is written to the job's own summary, not the thread: what
 was translated (model, score, votes), what was not and why, and cost —
 requests and tokens, by stage and by model. `show-attribution` stays `none`
@@ -219,15 +231,16 @@ not to everyone the thread notifies.
 
 Every output `translate/action.yml` declares.
 
-| Output               | Value                                                                                                                                                       |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source-language`    | The detected language code of the thread's body, or empty — empty means none of the configured languages wrote it.                                          |
-| `translated`         | JSON array of the language codes that were published.                                                                                                       |
-| `skipped`            | Outside `sweep`: JSON array of the language codes no model could translate this run. Under `sweep`: a count of threads already carrying this duty's marker. |
-| `replies-translated` | How many replies got a translation. `0` when `translate-replies` is off.                                                                                    |
-| `starved`            | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                        |
-| `processed`          | How many threads a sweep actually processed this run. `0` outside `sweep`.                                                                                  |
-| `remaining`          | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                  |
+| Output               | Value                                                                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source-language`    | The detected language code of the thread's body, or empty — empty means none of the configured languages wrote it.                                                           |
+| `translated`         | JSON array of the language codes that were published.                                                                                                                        |
+| `skipped`            | Outside `sweep`: JSON array of the language codes no model could translate this run. Under `sweep`: a count of threads already carrying this duty's marker.                  |
+| `replies-translated` | How many replies got a translation. `0` when `translate-replies` is off.                                                                                                     |
+| `starved`            | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                         |
+| `budget-exhausted`   | `true` when this run's own `max-requests` ceiling was reached. Never set when `max-requests` is `none`. Distinct from `starved` — this run's own budget, not the provider's. |
+| `processed`          | How many threads a sweep actually processed this run. `0` outside `sweep`.                                                                                                   |
+| `remaining`          | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                   |
 
 All are written on every path that reaches an answer, including the ones
 that answer "nothing" — a step branching on `skipped` reads `[]` on the run

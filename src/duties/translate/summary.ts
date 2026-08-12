@@ -187,6 +187,8 @@ export interface SweepRun {
   readonly remaining: number;
   /** Every model starved on capacity before `limit` was reached. */
   readonly starvedRun: boolean;
+  /** This run's own `max-requests` ceiling was reached before `limit` was. */
+  readonly budgetExhausted: boolean;
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly judgeNames: Names;
@@ -238,6 +240,15 @@ export function summarizeSweep(run: SweepRun): string {
       "The roster ran out of capacity partway through — every model in `models` failed on " +
         "capacity this run. What is above was delivered; the rest is `remaining`, and the next " +
         "sweep picks up where this one stopped. Weather, not a failure.",
+    );
+  }
+
+  if (run.budgetExhausted) {
+    parts.push(
+      "",
+      "`max-requests` was reached partway through — this run's own ceiling, not the provider's. " +
+        "What is above was delivered; the rest is `remaining`, and the next sweep picks up where " +
+        "this one stopped.",
     );
   }
 

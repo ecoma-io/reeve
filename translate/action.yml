@@ -250,6 +250,20 @@ inputs:
     required: false
     default: "50"
 
+  max-requests:
+    description: >-
+      How many provider requests — detection, drafting and judging combined —
+      one run may spend before it stops asking for more, or `none` for no
+      bound. A self-imposed ceiling, deliberately not the same thing `starved`
+      reports: `starved` is the provider running dry, weather from its own
+      side; this is a budget this run chose for itself, working exactly as
+      configured. Checked before each request that would spend it — a
+      language, a reply, a sweep's next thread — so what was already drafted
+      and published still stands, and only the work not yet started is left
+      for a later run. See `budget-exhausted`.
+    required: false
+    default: none
+
   endpoints:
     description: >-
       Additional `alias = url` endpoints, comma or newline separated, each
@@ -341,6 +355,14 @@ outputs:
       `remaining` for what is left. Worth alerting on if a schedule keeps
       producing it, because that is a quota worth raising rather than a run
       worth retrying.
+
+  budget-exhausted:
+    description: >-
+      `true` when this run's own `max-requests` ceiling was reached — never
+      set when `max-requests` is `none`, the default. Distinct from `starved`:
+      this is a bound the run chose for itself, not the provider running dry.
+      Outside `sweep` this run still published whatever it drafted before the
+      budget ran out; under `sweep` see `remaining` for what is left.
 
   processed:
     description: >-
