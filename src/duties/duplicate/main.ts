@@ -46,6 +46,23 @@
  * `score` still answer on every path — a workflow reading them does not need
  * to know which of those reasons produced the empty one.
  *
+ * What is left here, after `proposal.ts` (re-validating a verdict's
+ * `duplicateOf` against the shortlist, computing the fingerprint and
+ * assembling the proposal — step 7's pure half), `outputs.ts` (every
+ * `core.setOutput` call and both job-summary pages) and `corpus.ts` (which
+ * already owned the corpus listing, and now owns `crossLanguageCorpus` too)
+ * each took their own piece, is the wiring above and `readSettings`/
+ * `readAttribution`, which stay here rather than move to a duty-local
+ * `inputs.ts`: `main.integration.test.ts`'s own audit of every
+ * `getInput`/`getBooleanInput` call scans exactly two files — this one and
+ * `core/inputs.ts` — for the call sites it expects, so a function that calls
+ * `core.getInput` directly has to live in one of those two places. Unlike
+ * `translate`, nothing else in this duty's input-reading is a named,
+ * independently pure function — the one candidate (truncating the thread's
+ * own body to `max-body-chars` in `decide`) is two lines inline, next to the
+ * `core.info` call reporting the truncation, not a helper worth a module of
+ * its own.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API — see `main.integration.test.ts`.

@@ -48,6 +48,17 @@
  * translated and whose fourth reply did not is better off published than
  * failed.
  *
+ * What is left here, after `engine.ts` (the draft-and-judge loop), `text.ts`
+ * (steps 2–9, per text), `budget.ts` (the max-requests budget) and
+ * `inputs.ts` (the pure parsing behind `targets`/`readBody`/chunking) each
+ * took their own piece, is the wiring above and the two functions reading
+ * inputs directly: `readSettings` and `readAttribution` stay here rather
+ * than in `inputs.ts` because `main.integration.test.ts`'s own audit of
+ * every `getInput`/`getBooleanInput` call scans exactly two files — this one
+ * and `core/inputs.ts` — for the call sites it expects; a function that
+ * calls `core.getInput` has to live in one of those two places or that test
+ * stops proving what it proves.
+ *
  * This file is excluded from coverage because it calls `run()` at import, so
  * measuring it would execute the action. It is exercised by driving the built
  * bundle against a stub API, which is what a runner does — see
