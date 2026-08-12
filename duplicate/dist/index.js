@@ -33680,13 +33680,30 @@ function narrow(granted, requested) {
 }
 
 // src/core/inputs.ts
-function readShared() {
+function readCore() {
   const apiKey = getInput("api-key");
   if (apiKey.length > 0) setSecret(apiKey);
   const roster = parseModels(getInput("models", { required: true }));
   if (roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+  return {
+    token: getInput("github-token", { required: true }),
+    models: roster.models,
+    modelNames: roster.names,
+    baseUrl: getInput("base-url", { required: true }),
+    apiKey,
+    dryRun: getBooleanInput("dry-run"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
+    temperature: parseTemperature(getInput("temperature"))
+  };
+}
+function readShared() {
   const sweep = getBooleanInput("sweep");
   const configuredNumber = getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -33694,24 +33711,12 @@ function readShared() {
       "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
     );
   }
-  const endpoints = parseEndpoints(getInput("endpoints"));
-  const apiKeys = parseApiKeys(getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
   return {
-    token: getInput("github-token", { required: true }),
+    ...readCore(),
     number: sweep ? null : threadNumber(),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: getBooleanInput("dry-run"),
     sweep,
     since: parseSince(getInput("since")),
-    limit: bounded("limit", getInput("limit")),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
-    temperature: parseTemperature(getInput("temperature"))
+    limit: bounded("limit", getInput("limit"))
   };
 }
 function parseEndpoints(raw) {

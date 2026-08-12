@@ -58,17 +58,12 @@ import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { createEffects, listReplies, readStanding, type Location } from "../../core/forge.js";
 import {
   bounded,
-  checkApiKeysDeclared,
   fraction,
-  parseApiKeys,
-  parseEndpoints,
-  parseTemperature,
-  parseTimeout,
+  readCore,
   resolveEndpoints,
   threadNumber,
   whole,
-  type ApiKeySpec,
-  type EndpointSpec,
+  type Core,
 } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
@@ -122,16 +117,10 @@ const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 /** How many recalled corrections `draft.ts` is handed. Same figure triage uses. */
 const RECALLED = 4;
 
-interface Settings {
-  readonly token: string;
+interface Settings extends Core {
   readonly number: number;
-  readonly models: readonly string[];
-  readonly modelNames: Names;
   /** The languages this run reads. Resolved from the warrant or the input — see `resolveLanguages`. */
   readonly languages: readonly Language[];
-  readonly baseUrl: string;
-  readonly apiKey: string;
-  readonly dryRun: boolean;
   readonly warrant: string;
   /** What this run may do, from the `apply` input alone — narrowed against the warrant per run. */
   readonly apply: readonly Capability[];
@@ -149,21 +138,17 @@ interface Settings {
   readonly screenNames: Names;
   /** What this repository is about, in the maintainer's own words — the same input triage reads. */
   readonly about: string;
-  readonly endpoints: readonly EndpointSpec[];
-  readonly apiKeys: readonly ApiKeySpec[];
-  readonly requestTimeoutMs: number;
-  readonly temperature: number | undefined;
 }
 
 /**
  * The inputs, parsed and rejected here rather than deeper in.
  *
- * Deliberately not built on `readShared` — that helper always reads `sweep`,
- * `since` and `limit`, which this duty does not have an opinion about at all.
- * `respond` answers one thread, the one that triggered it: an issue's first
- * reply is not something a backfill writes retroactively over a backlog, it
- * is something that happens once, when the thread is new. So this reads
- * exactly the inputs `action.yml` declares, no more.
+ * Built on `readCore` rather than `readShared` — that helper also reads
+ * `sweep`, `since` and `limit`, which this duty does not have an opinion
+ * about at all. `respond` answers one thread, the one that triggered it: an
+ * issue's first reply is not something a backfill writes retroactively over a
+ * backlog, it is something that happens once, when the thread is new. So this
+ * reads exactly the inputs `action.yml` declares, no more.
  *
  * `languages` is missing from what this returns, the same way it is missing
  * from translate's `readSettings`: it needs the warrant, and reading the
@@ -171,35 +156,15 @@ interface Settings {
  * object once `resolveAuthority` has answered.
  */
 function readSettings(): Omit<Settings, "languages"> {
-  const apiKey = core.getInput("api-key");
-  // Registered before anything can log it — see `core/inputs.ts`'s identical
-  // line for why a reason quoted back from a provider is the risk.
-  if (apiKey.length > 0) core.setSecret(apiKey);
-
-  const roster = parseModels(core.getInput("models", { required: true }));
-  if (roster.models.length === 0) {
-    throw new Error("models: no entries. Expected at least one model id.");
-  }
-
+  // First, so that `api-key` is registered as a secret before anything this
+  // duty adds on top of it can fail and get quoted into a log.
+  const base = readCore();
   const panel = parseSeats(core.getInput("judge-models"));
   const cheap = parseModels(core.getInput("screen-models"));
 
-  // The same `endpoints`/`api-keys` parsing and cross-check `readShared` does
-  // for every other duty, called directly rather than gained through it —
-  // this function's own doc comment already explains why `respond` builds its
-  // settings by hand instead of going through `readShared`.
-  const endpoints = parseEndpoints(core.getInput("endpoints"));
-  const apiKeys = parseApiKeys(core.getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
-
   return {
-    token: core.getInput("github-token", { required: true }),
+    ...base,
     number: threadNumber(),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: core.getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: core.getBooleanInput("dry-run"),
     warrant: core.getInput("warrant", { required: true }),
     apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
@@ -212,10 +177,6 @@ function readSettings(): Omit<Settings, "languages"> {
     screenModels: cheap.models,
     screenNames: cheap.names,
     about: core.getInput("about"),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", core.getInput("request-timeout")),
-    temperature: parseTemperature(core.getInput("temperature")),
   };
 }
 

@@ -18,14 +18,17 @@ import { context } from "@actions/github";
 import { parseList } from "./list.js";
 import { parseModels, type Names, type RoutedEndpoint } from "./provider.js";
 
-/** What every duty gets, whatever else its own `action.yml` declares. */
-export interface Shared {
+/**
+ * The provider-and-repository half of the shared inputs: everything a duty
+ * needs whether or not it has an opinion about sweeping.
+ *
+ * Split out from {@link Shared} because `respond` answers one thread, the one
+ * that triggered it — `sweep`, `since` and `limit` are inputs it does not
+ * declare at all — and building the rest of this by hand is how a duty drifts
+ * from every other duty's spelling of `api-key` or `endpoints`.
+ */
+export interface Core {
   readonly token: string;
-  /**
-   * The thread to work on, or null in `sweep` — a sweep does not name one
-   * thread, it works the backlog.
-   */
-  readonly number: number | null;
   /** Model ids in preference order. Never empty. */
   readonly models: readonly string[];
   /**
@@ -39,25 +42,6 @@ export interface Shared {
   /** Empty for a keyless provider, which is a supported configuration. */
   readonly apiKey: string;
   readonly dryRun: boolean;
-  /** Whether this run works the backlog instead of the one thread the event named. */
-  readonly sweep: boolean;
-  /**
-   * The oldest thread a sweep will consider, by creation date — never null once
-   * `sweep` narrowed it down, `null` means "no bound".
-   *
-   * Bounds by creation and not by update deliberately: the tracker's own
-   * `since` filter bounds by `updated_at`, which creeps forward the moment this
-   * duty starts labelling or translating a thread, so a filter built on it
-   * would silently exclude what the previous sweep just touched. Creation date
-   * does not move, and it is what "no archaeology on threads before Reeve
-   * adoption" actually means.
-   */
-  readonly since: Date | null;
-  /**
-   * The most threads a sweep will actually process in one run. A skip costs
-   * nothing and does not count against it. Null is no ceiling at all.
-   */
-  readonly limit: number | null;
   /**
    * Extra endpoints beyond the default `base-url`/`api-key` pair, named so a
    * model id can route to one with `model@alias`. Empty for every duty that
@@ -86,6 +70,34 @@ export interface Shared {
   readonly temperature: number | undefined;
 }
 
+/** What every sweeping duty gets, whatever else its own `action.yml` declares. */
+export interface Shared extends Core {
+  /**
+   * The thread to work on, or null in `sweep` — a sweep does not name one
+   * thread, it works the backlog.
+   */
+  readonly number: number | null;
+  /** Whether this run works the backlog instead of the one thread the event named. */
+  readonly sweep: boolean;
+  /**
+   * The oldest thread a sweep will consider, by creation date — never null once
+   * `sweep` narrowed it down, `null` means "no bound".
+   *
+   * Bounds by creation and not by update deliberately: the tracker's own
+   * `since` filter bounds by `updated_at`, which creeps forward the moment this
+   * duty starts labelling or translating a thread, so a filter built on it
+   * would silently exclude what the previous sweep just touched. Creation date
+   * does not move, and it is what "no archaeology on threads before Reeve
+   * adoption" actually means.
+   */
+  readonly since: Date | null;
+  /**
+   * The most threads a sweep will actually process in one run. A skip costs
+   * nothing and does not count against it. Null is no ceiling at all.
+   */
+  readonly limit: number | null;
+}
+
 /** One line of `endpoints`: `alias = url`, optionally followed by `timeout=`. */
 export interface EndpointSpec {
   readonly alias: string;
@@ -100,7 +112,14 @@ export interface ApiKeySpec {
   readonly key: string;
 }
 
-export function readShared(): Shared {
+/**
+ * The inputs every duty declares, sweeping or not.
+ *
+ * `respond` reads exactly this and adds its own on top; every other duty gets
+ * it through {@link readShared}, which adds the three sweep inputs. Neither
+ * one assembles a provider by hand.
+ */
+export function readCore(): Core {
   const apiKey = core.getInput("api-key");
   // Registered before anything can log it. A `reason` from a provider quotes
   // the response body, and a gateway that echoes the request would otherwise
@@ -112,6 +131,32 @@ export function readShared(): Shared {
     throw new Error("models: no entries. Expected at least one model id.");
   }
 
+  const endpoints = parseEndpoints(core.getInput("endpoints"));
+  const apiKeys = parseApiKeys(core.getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+
+  return {
+    token: core.getInput("github-token", { required: true }),
+    models: roster.models,
+    modelNames: roster.names,
+    baseUrl: core.getInput("base-url", { required: true }),
+    apiKey,
+    dryRun: core.getBooleanInput("dry-run"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", core.getInput("request-timeout")),
+    temperature: parseTemperature(core.getInput("temperature")),
+  };
+}
+
+/**
+ * {@link readCore}, plus the three inputs only a sweeping duty declares.
+ *
+ * The `sweep`/`number` conflict is checked first, ahead of any parsing: it is
+ * a workflow that asked for two different runs at once, and no amount of
+ * reading the rest tells anyone which one was meant.
+ */
+export function readShared(): Shared {
   const sweep = core.getBooleanInput("sweep");
   const configuredNumber = core.getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -121,25 +166,12 @@ export function readShared(): Shared {
     );
   }
 
-  const endpoints = parseEndpoints(core.getInput("endpoints"));
-  const apiKeys = parseApiKeys(core.getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
-
   return {
-    token: core.getInput("github-token", { required: true }),
+    ...readCore(),
     number: sweep ? null : threadNumber(),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: core.getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: core.getBooleanInput("dry-run"),
     sweep,
     since: parseSince(core.getInput("since")),
     limit: bounded("limit", core.getInput("limit")),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", core.getInput("request-timeout")),
-    temperature: parseTemperature(core.getInput("temperature")),
   };
 }
 
@@ -233,13 +265,8 @@ export function parseApiKeys(raw: string): readonly ApiKeySpec[] {
  * Every `api-keys` alias has to name an endpoint `endpoints` actually
  * declared — a key with nowhere to route is a typo, and the honest place to
  * catch it is before either list reaches `resolveEndpoints`.
- *
- * Exported rather than kept inline in `readShared`, because `respond` builds
- * its settings by hand instead of through `readShared` — see its `main.ts` —
- * and this check is exactly the part of that assembly this module should not
- * make every duty reimplement.
  */
-export function checkApiKeysDeclared(
+function checkApiKeysDeclared(
   endpoints: readonly EndpointSpec[],
   apiKeys: readonly ApiKeySpec[],
 ): void {

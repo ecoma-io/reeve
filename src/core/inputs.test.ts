@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   bounded,
-  checkApiKeysDeclared,
   counted,
   fraction,
   parseApiKeys,
@@ -11,6 +10,7 @@ import {
   parseSince,
   parseTemperature,
   parseTimeout,
+  readCore,
   readShared,
   resolveEndpoints,
   threadNumber,
@@ -531,22 +531,48 @@ describe("parseApiKeys", () => {
   });
 });
 
-describe("checkApiKeysDeclared", () => {
-  it("passes when every api-keys alias is declared in endpoints", () => {
-    const endpoints = parseEndpoints("fast = https://api.example.com/v1");
-    const apiKeys = parseApiKeys("fast = sk-secret");
+describe("readCore", () => {
+  it("reads everything a duty needs whether or not it sweeps", () => {
+    given(COMPLETE);
 
-    expect(() => {
-      checkApiKeysDeclared(endpoints, apiKeys);
-    }).not.toThrow();
+    // The three sweep inputs are `readShared`'s, not this — a duty that
+    // answers one thread never declares them.
+    expect(readCore()).toEqual({
+      token: "ghs_token",
+      models: ["gpt-4o-mini", "gpt-4o"],
+      modelNames: new Map(),
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-secret",
+      dryRun: false,
+      endpoints: [],
+      apiKeys: [],
+      requestTimeoutMs: 120_000,
+      temperature: undefined,
+    });
+  });
+
+  it("registers `api-key` as a secret before anything can log it", () => {
+    given(COMPLETE);
+
+    readCore();
+
+    expect(vi.mocked(core.setSecret)).toHaveBeenCalledWith("sk-secret");
+  });
+
+  it("passes when every api-keys alias is declared in endpoints", () => {
+    given({
+      ...COMPLETE,
+      endpoints: "fast = https://api.example.com/v1",
+      "api-keys": "fast = sk-secret",
+    });
+
+    expect(readCore().apiKeys).toEqual([{ alias: "fast", key: "sk-secret" }]);
   });
 
   it("refuses an api-keys alias endpoints never declared", () => {
-    const apiKeys = parseApiKeys("fast = sk-secret");
+    given({ ...COMPLETE, "api-keys": "fast = sk-secret" });
 
-    expect(() => {
-      checkApiKeysDeclared([], apiKeys);
-    }).toThrow("api-keys: `fast` is not declared in `endpoints`.");
+    expect(() => readCore()).toThrow("api-keys: `fast` is not declared in `endpoints`.");
   });
 });
 

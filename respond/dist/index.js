@@ -33042,6 +33042,29 @@ function createEffects(api, at) {
 }
 
 // src/core/inputs.ts
+function readCore() {
+  const apiKey = getInput("api-key");
+  if (apiKey.length > 0) setSecret(apiKey);
+  const roster = parseModels(getInput("models", { required: true }));
+  if (roster.models.length === 0) {
+    throw new Error("models: no entries. Expected at least one model id.");
+  }
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+  return {
+    token: getInput("github-token", { required: true }),
+    models: roster.models,
+    modelNames: roster.names,
+    baseUrl: getInput("base-url", { required: true }),
+    apiKey,
+    dryRun: getBooleanInput("dry-run"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
+    temperature: parseTemperature(getInput("temperature"))
+  };
+}
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
   return parseList(raw).map((entry) => {
@@ -35083,25 +35106,12 @@ var DEFAULT_CAPABILITIES = [];
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 var RECALLED = 4;
 function readSettings() {
-  const apiKey = getInput("api-key");
-  if (apiKey.length > 0) setSecret(apiKey);
-  const roster = parseModels(getInput("models", { required: true }));
-  if (roster.models.length === 0) {
-    throw new Error("models: no entries. Expected at least one model id.");
-  }
+  const base = readCore();
   const panel = parseSeats(getInput("judge-models"));
   const cheap = parseModels(getInput("screen-models"));
-  const endpoints = parseEndpoints(getInput("endpoints"));
-  const apiKeys = parseApiKeys(getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
   return {
-    token: getInput("github-token", { required: true }),
+    ...base,
     number: threadNumber(),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: getBooleanInput("dry-run"),
     warrant: getInput("warrant", { required: true }),
     apply: parseApply(getInput("apply", { required: true })),
     judges: panel.seats,
@@ -35113,11 +35123,7 @@ function readSettings() {
     corrections: getInput("corrections", { required: true }),
     screenModels: cheap.models,
     screenNames: cheap.names,
-    about: getInput("about"),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
-    temperature: parseTemperature(getInput("temperature"))
+    about: getInput("about")
   };
 }
 async function walkReplies(api, at, settled) {
