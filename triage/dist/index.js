@@ -27071,9 +27071,6 @@ var require_dist2 = __commonJS({
   }
 });
 
-// src/duties/triage/main.ts
-import { isAbsolute, relative } from "node:path";
-
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 import * as os from "os";
 
@@ -35135,6 +35132,161 @@ async function gateClose(contentsApi, at, path, repo, thread) {
   return { refuse: unreadable.length > 0, found: false, unreadable };
 }
 
+// src/duties/triage/store.ts
+import { relative, isAbsolute } from "node:path";
+var WRITE_ATTEMPTS = 3;
+async function writeCorrection(contentsApi, at, path, correction) {
+  const relativePath = repoRelativePath(path);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await attemptWrite(contentsApi, at, relativePath, correction);
+      return;
+    } catch (error2) {
+      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error2)) throw error2;
+      info(
+        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`
+      );
+    }
+  }
+}
+function findExactLine(existing, correction) {
+  return existing.thread === correction.thread && existing.repo === correction.repo && existing.duty === correction.duty;
+}
+function isProvenShared(existing, correction) {
+  if (existing === null) return true;
+  return existing.repo !== "" && existing.repo !== correction.repo;
+}
+function legacyCandidate(existing, correction) {
+  return existing.repo === "" && existing.thread === correction.thread && existing.duty === correction.duty;
+}
+async function attemptWrite(contentsApi, at, path, correction) {
+  const files = await listCorrectionFiles(contentsApi, at, path);
+  const unreadable = [];
+  let provenShared = false;
+  let candidate = null;
+  for (const file of files) {
+    let read2;
+    try {
+      read2 = await readContentsFile(contentsApi, at, file.path);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${file.path}\` could not be read, so it was skipped rather than failing the whole write \u2014 the search continued through the rest of the store. Split the corrections store into smaller shards.`
+      );
+      unreadable.push(file.path);
+      continue;
+    }
+    if (read2 === null) continue;
+    const lines = read2.text.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      if (line.trim().length === 0) continue;
+      const existing2 = parseCorrection(line);
+      if (isProvenShared(existing2, correction)) provenShared = true;
+      if (existing2 === null) continue;
+      if (findExactLine(existing2, correction)) {
+        const updated = [...lines];
+        updated[index] = formatCorrection(correction);
+        await writeContentsFile(
+          contentsApi,
+          at,
+          file.path,
+          `${updated.join("\n").replace(/\n*$/, "")}
+`,
+          commitMessage(correction),
+          read2.sha
+        );
+        return;
+      }
+      if (legacyCandidate(existing2, correction) && candidate === null) {
+        candidate = { path: file.path, lines, sha: read2.sha, index };
+      }
+    }
+  }
+  if (candidate !== null && !provenShared && unreadable.length === 0) {
+    const lines = [...candidate.lines];
+    lines[candidate.index] = formatCorrection(correction);
+    await writeContentsFile(
+      contentsApi,
+      at,
+      candidate.path,
+      `${lines.join("\n").replace(/\n*$/, "")}
+`,
+      commitMessage(correction),
+      candidate.sha
+    );
+    return;
+  }
+  if (unreadable.length > 0) {
+    throw new Error(
+      `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
+    );
+  }
+  const { shard, existing } = await selectShard(contentsApi, at, path);
+  const text2 = existing === null ? `${formatCorrection(correction)}
+` : `${existing.text.replace(/\n*$/, "")}
+${formatCorrection(correction)}
+`;
+  await writeContentsFile(
+    contentsApi,
+    at,
+    shard,
+    text2,
+    commitMessage(correction),
+    existing?.sha ?? null
+  );
+}
+var SHARD_SOFT_LIMIT_BYTES = 9e5;
+var MAX_SHARD_ATTEMPTS = 500;
+async function selectShard(contentsApi, at, path) {
+  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
+  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
+    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
+    let existing;
+    try {
+      existing = await readContentsFile(contentsApi, at, shard);
+    } catch (error2) {
+      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
+      warning(
+        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the next shard instead. Split the corrections store into smaller shards.`
+      );
+      continue;
+    }
+    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
+      return { shard, existing };
+    }
+  }
+  throw new Error(
+    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
+  );
+}
+function isShaConflict(error2) {
+  const status = error2?.status;
+  if (status === 409) return true;
+  if (status !== 422) return false;
+  const message = error2 instanceof Error ? error2.message : String(error2);
+  return message.toLowerCase().includes("sha");
+}
+function repoRelativePath(path) {
+  if (!isAbsolute(path)) return path;
+  const workspace = process.env.GITHUB_WORKSPACE;
+  if (workspace !== void 0 && workspace.length > 0) {
+    const stripped = relative(workspace, path);
+    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
+  }
+  throw new Error(
+    `\`corrections\` (\`${path}\`) is an absolute path record cannot use \u2014 the Contents API only understands a path relative to the repository root. Use a repo-relative path, or one under \`GITHUB_WORKSPACE\` if the workflow built it from \`\${{ github.workspace }}\`.`
+  );
+}
+function monthShard() {
+  const now = /* @__PURE__ */ new Date();
+  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function commitMessage(correction) {
+  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
+  return `memory: record #${String(correction.thread)} as ${decided}`;
+}
+
 // src/duties/triage/summary.ts
 function summarize(run2) {
   const parts = [
@@ -35307,7 +35459,7 @@ var BRANCH = "reeve/propose";
 var MARKER = markerFor("propose");
 var LABEL_NAME_MAX = 50;
 var LIST_PAGES = 10;
-var WRITE_ATTEMPTS = 3;
+var WRITE_ATTEMPTS2 = 3;
 var SCOPE_PREFIX = /^@[^/]+\//;
 function packageSlug(name) {
   return name.replace(SCOPE_PREFIX, "").toLowerCase();
@@ -35651,7 +35803,7 @@ function renderBody(path, entries, fp) {
   lines.push(MARKER.render(fp));
   return lines.join("\n");
 }
-function isShaConflict(error2) {
+function isShaConflict2(error2) {
   if (typeof error2 !== "object" || error2 === null || !("status" in error2)) return false;
   const status = error2.status;
   if (status === 409) return true;
@@ -35668,7 +35820,7 @@ async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
     warrant.labels.map((label) => label.name),
     entries
   );
-  for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= WRITE_ATTEMPTS2; attempt += 1) {
     const { data } = await api.rest.repos.getContent({
       owner: at.owner,
       repo: at.repo,
@@ -35700,7 +35852,7 @@ async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
       });
       break;
     } catch (error2) {
-      if (isShaConflict(error2) && attempt < WRITE_ATTEMPTS) continue;
+      if (isShaConflict2(error2) && attempt < WRITE_ATTEMPTS2) continue;
       throw error2;
     }
   }
@@ -36875,151 +37027,6 @@ async function recordReversal(api, at, standing, authority2, settings, stages, w
     machineOnly: false,
     unattributable: false
   };
-}
-var WRITE_ATTEMPTS2 = 3;
-async function writeCorrection(contentsApi, at, path, correction) {
-  const relativePath = repoRelativePath(path);
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
-      return;
-    } catch (error2) {
-      if (attempt >= WRITE_ATTEMPTS2 || !isShaConflict2(error2)) throw error2;
-      info(
-        `Recording #${String(correction.thread)} lost a race on the store \u2014 another commit landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS2)}).`
-      );
-    }
-  }
-}
-async function attemptWrite(contentsApi, at, path, correction) {
-  const files = await listCorrectionFiles(contentsApi, at, path);
-  const unreadable = [];
-  let provenShared = false;
-  let legacyCandidate = null;
-  for (const file of files) {
-    let read2;
-    try {
-      read2 = await readContentsFile(contentsApi, at, file.path);
-    } catch (error2) {
-      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
-      warning(
-        `corrections: \`${file.path}\` could not be read, so it was skipped rather than failing the whole write \u2014 the search continued through the rest of the store. Split the corrections store into smaller shards.`
-      );
-      unreadable.push(file.path);
-      continue;
-    }
-    if (read2 === null) continue;
-    const lines = read2.text.split("\n");
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? "";
-      if (line.trim().length === 0) continue;
-      const existing2 = parseCorrection(line);
-      if (existing2 === null) {
-        provenShared = true;
-        continue;
-      }
-      if (existing2.thread === correction.thread && existing2.repo === correction.repo && existing2.duty === correction.duty) {
-        const updated = [...lines];
-        updated[index] = formatCorrection(correction);
-        await writeContentsFile(
-          contentsApi,
-          at,
-          file.path,
-          `${updated.join("\n").replace(/\n*$/, "")}
-`,
-          commitMessage(correction),
-          read2.sha
-        );
-        return;
-      }
-      if (existing2.repo !== "" && existing2.repo !== correction.repo) provenShared = true;
-      if (existing2.repo === "" && existing2.thread === correction.thread && existing2.duty === correction.duty && legacyCandidate === null) {
-        legacyCandidate = { path: file.path, lines, sha: read2.sha, index };
-      }
-    }
-  }
-  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
-    const lines = [...legacyCandidate.lines];
-    lines[legacyCandidate.index] = formatCorrection(correction);
-    await writeContentsFile(
-      contentsApi,
-      at,
-      legacyCandidate.path,
-      `${lines.join("\n").replace(/\n*$/, "")}
-`,
-      commitMessage(correction),
-      legacyCandidate.sha
-    );
-    return;
-  }
-  if (unreadable.length > 0) {
-    throw new Error(
-      `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
-    );
-  }
-  const { shard, existing } = await selectShard(contentsApi, at, path);
-  const text2 = existing === null ? `${formatCorrection(correction)}
-` : `${existing.text.replace(/\n*$/, "")}
-${formatCorrection(correction)}
-`;
-  await writeContentsFile(
-    contentsApi,
-    at,
-    shard,
-    text2,
-    commitMessage(correction),
-    existing?.sha ?? null
-  );
-}
-var SHARD_SOFT_LIMIT_BYTES = 9e5;
-var MAX_SHARD_ATTEMPTS = 500;
-async function selectShard(contentsApi, at, path) {
-  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
-  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
-    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
-    let existing;
-    try {
-      existing = await readContentsFile(contentsApi, at, shard);
-    } catch (error2) {
-      if (!(error2 instanceof UnreadableContentsFile)) throw error2;
-      warning(
-        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the next shard instead. Split the corrections store into smaller shards.`
-      );
-      continue;
-    }
-    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
-      return { shard, existing };
-    }
-  }
-  throw new Error(
-    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft limit. That is almost certainly a runaway write loop rather than a genuinely enormous month, so this stops here rather than trying a shard 501.`
-  );
-}
-function isShaConflict2(error2) {
-  const status = error2?.status;
-  if (status === 409) return true;
-  if (status !== 422) return false;
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return message.toLowerCase().includes("sha");
-}
-function repoRelativePath(path) {
-  if (!isAbsolute(path)) return path;
-  const workspace = process.env.GITHUB_WORKSPACE;
-  if (workspace !== void 0 && workspace.length > 0) {
-    const stripped = relative(workspace, path);
-    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
-  }
-  throw new Error(
-    `\`corrections\` (\`${path}\`) is an absolute path record cannot use \u2014 the Contents API only understands a path relative to the repository root. Use a repo-relative path, or one under \`GITHUB_WORKSPACE\` if the workflow built it from \`\${{ github.workspace }}\`.`
-  );
-}
-function monthShard() {
-  const now = /* @__PURE__ */ new Date();
-  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-function commitMessage(correction) {
-  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
-  return `memory: record #${String(correction.thread)} as ${decided}`;
 }
 async function createMissingLabels(api, at, toCreate) {
   for (const label of toCreate) {

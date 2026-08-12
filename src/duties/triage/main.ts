@@ -52,8 +52,6 @@
  * bundle against a stub API, which is what a runner does — see
  * `main.integration.test.ts`.
  */
-import { isAbsolute, relative } from "node:path";
-
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
@@ -65,14 +63,10 @@ import {
   createRepositoryLabel,
   isBotAuthor,
   isCapacityError,
-  listCorrectionFiles,
   listLabelEvents,
   listOpenThreads,
   listRepositoryLabels,
-  readContentsFile,
   readStanding,
-  writeContentsFile,
-  UnreadableContentsFile,
   type ContentsApi,
   type Effects,
   type Location,
@@ -92,8 +86,6 @@ import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
 import {
   createMemory,
-  formatCorrection,
-  parseCorrection,
   readStore,
   EXCERPT,
   type Correction,
@@ -129,6 +121,7 @@ import {
 } from "../../core/warrant.js";
 
 import { checkReversal, closeMarker, gateClose, removedByAutomation } from "./outcome.js";
+import { repoRelativePath, writeCorrection } from "./store.js";
 import {
   summarize,
   summarizeRecord,
@@ -1667,349 +1660,6 @@ async function recordReversal(
     machineOnly: false,
     unattributable: false,
   };
-}
-
-/**
- * How many times a record write may retry after losing a race on a shard's
- * `sha` — the read-modify-write sequence run again from the top, not just the
- * final write, because a concurrent commit can have changed which shard holds
- * this thread as easily as it changed one shard's contents.
- */
-const WRITE_ATTEMPTS = 3;
-
-/**
- * Commits `correction` to the store at `path` — replacing the line for this
- * thread wherever it already lives, appending a fresh one when it does not.
- *
- * No checkout, no git binary: every shard already committed is read through
- * the Contents API to look for an existing entry for this thread, the same
- * way a maintainer opening the store by hand would look — one file at a time,
- * because there is no index to consult instead. `contents: write` is what
- * this needs on the token, and its absence is left to fail the way any other
- * authentication problem does: loud, and uncaught.
- *
- * Two record runs racing the same shard is the one failure this retries: the
- * Contents API answers a stale `sha` with a conflict, and re-reading before
- * trying again is the whole fix, because the second run's write was computed
- * against a version of the file that no longer exists. Every other failure —
- * a missing scope, a network error, anything that is not that specific
- * conflict — propagates on the first attempt, the same as it always did.
- */
-async function writeCorrection(
-  contentsApi: ContentsApi,
-  at: Location,
-  path: string,
-  correction: Correction,
-): Promise<void> {
-  const relativePath = repoRelativePath(path);
-
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
-      return;
-    } catch (error) {
-      if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error)) throw error;
-      core.info(
-        `Recording #${String(correction.thread)} lost a race on the store — another commit ` +
-          `landed first. Retrying (attempt ${String(attempt + 1)} of ${String(WRITE_ATTEMPTS)}).`,
-      );
-    }
-  }
-}
-
-/**
- * One read-modify-write pass, the unit `writeCorrection` retries whole on a
- * conflict.
- *
- * A shard too large for the Contents API to inline (`UnreadableContentsFile`)
- * does not fail the write outright — it is skipped, warned about by name, and
- * the search continues through the rest of the store, so one oversized shard
- * does not brick every recording from now on. What it does refuse is
- * appending: if the thread's existing entry, if it has one, might be sitting
- * in exactly the shard this run could not read, appending a fresh line
- * elsewhere cannot be told apart from silently duplicating it — so that path
- * throws instead, naming the shard that made the answer unknowable.
- */
-async function attemptWrite(
-  contentsApi: ContentsApi,
-  at: Location,
-  path: string,
-  correction: Correction,
-): Promise<void> {
-  const files = await listCorrectionFiles(contentsApi, at, path);
-  const unreadable: string[] = [];
-
-  // The walk stops the moment a line carrying this exact (repo, thread, duty)
-  // triple turns up: nothing later in the store can change what an explicit
-  // match means, so the shards past it are never read at all — the common
-  // case, a repeat correction on a thread already recorded, costs the reads
-  // it takes to find the line and not one more. Only a write that finds no
-  // explicit match anywhere has, by then, necessarily read the whole store —
-  // which is exactly the knowledge the loose rule below needs, gathered as a
-  // side-effect of the search rather than as an extra pass. And no shard is
-  // retained past its own visit except the single candidate line the loose
-  // rule might still rewrite, so a store of many large shards is never held
-  // in memory whole.
-  //
-  // The loose rule: `repo` as well as `thread`, and now `duty` alongside both
-  // — the dedup key widened twice, once when a store could hold more than one
-  // repository's history and again when a single thread could carry more
-  // than one kind of correction (`Correction.duty`'s own doc comment). A line
-  // written before `repo` existed parses as `repo: ""`, and in a store that
-  // has only ever recorded for today's repo, a stored empty repo can only
-  // mean "written before this field existed" — read as this thread number's
-  // own legacy entry, and rewritten in place with today's repo on it. That is
-  // what lets a single-repo store self-migrate: the first write a thread sees
-  // after the field shipped leaves nothing legacy to match loosely the next
-  // time. `duty` is checked here too, deliberately: a legacy `repo: ""` line
-  // predates `duty` as well and reads as `"triage"` by default, so a reversal
-  // write (`duty: "duplicate"`) never loosely claims a thread's pre-`repo`
-  // standing-label line as though it were the same correction — the two are
-  // not, and only the exact-match branch above, which already compares
-  // `duty`, is allowed to treat two lines as one entry.
-  //
-  // A store that also carries a *different* explicit repo — the whole reason
-  // `repo` exists — cannot make that same assumption: an empty-repo line for
-  // this thread number could belong to that other repository's own history
-  // from before it, too, recorded when both repositories shared this store
-  // and neither had `repo` yet. Matching it loosely there would let today's
-  // repo silently steal another repository's legacy entry whenever their
-  // thread numbers happened to collide. A shard this run could not read
-  // leaves that unknowable the same way a foreign repo would, and so does a
-  // line this run could not parse — garbage proves nothing about whose
-  // history it was, so it counts against the loose match rather than for
-  // it. In every such case the legacy line is left alone and a fresh line
-  // is appended below with `correction.repo` explicit — the widened key's
-  // ordinary semantics, and nothing lost.
-  let provenShared = false;
-  let legacyCandidate: {
-    readonly path: string;
-    readonly lines: string[];
-    readonly sha: string;
-    readonly index: number;
-  } | null = null;
-
-  for (const file of files) {
-    let read: { readonly text: string; readonly sha: string } | null;
-    try {
-      read = await readContentsFile(contentsApi, at, file.path);
-    } catch (error) {
-      if (!(error instanceof UnreadableContentsFile)) throw error;
-      core.warning(
-        `corrections: \`${file.path}\` could not be read, so it was skipped rather than ` +
-          "failing the whole write — the search continued through the rest of the store. " +
-          "Split the corrections store into smaller shards.",
-      );
-      unreadable.push(file.path);
-      continue;
-    }
-    if (read === null) continue;
-    const lines = read.text.split("\n");
-
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? "";
-      if (line.trim().length === 0) continue;
-      const existing = parseCorrection(line);
-      if (existing === null) {
-        provenShared = true;
-        continue;
-      }
-      if (
-        existing.thread === correction.thread &&
-        existing.repo === correction.repo &&
-        existing.duty === correction.duty
-      ) {
-        const updated = [...lines];
-        updated[index] = formatCorrection(correction);
-        await writeContentsFile(
-          contentsApi,
-          at,
-          file.path,
-          `${updated.join("\n").replace(/\n*$/, "")}\n`,
-          commitMessage(correction),
-          read.sha,
-        );
-        return;
-      }
-      if (existing.repo !== "" && existing.repo !== correction.repo) provenShared = true;
-      if (
-        existing.repo === "" &&
-        existing.thread === correction.thread &&
-        existing.duty === correction.duty &&
-        legacyCandidate === null
-      ) {
-        legacyCandidate = { path: file.path, lines, sha: read.sha, index };
-      }
-    }
-  }
-
-  if (legacyCandidate !== null && !provenShared && unreadable.length === 0) {
-    const lines = [...legacyCandidate.lines];
-    lines[legacyCandidate.index] = formatCorrection(correction);
-    await writeContentsFile(
-      contentsApi,
-      at,
-      legacyCandidate.path,
-      `${lines.join("\n").replace(/\n*$/, "")}\n`,
-      commitMessage(correction),
-      legacyCandidate.sha,
-    );
-    return;
-  }
-
-  if (unreadable.length > 0) {
-    throw new Error(
-      `#${String(correction.thread)} was not found in any shard this run could read, and ` +
-        `${unreadable.map((shard) => `\`${shard}\``).join(", ")} could not be read at all. ` +
-        "Appending a fresh entry cannot rule out duplicating one already sitting in the shard " +
-        "this run could not see, so nothing was written — split the corrections store into " +
-        "smaller shards.",
-    );
-  }
-
-  // Not found in any existing shard: append to this month's, the same
-  // sharding a store filled in by hand already uses — small enough that two
-  // maintainers correcting different threads the same week append to the same
-  // file and git resolves it, rather than every correction becoming a
-  // conflict on one file that never rolls over.
-  const { shard, existing } = await selectShard(contentsApi, at, path);
-  const text =
-    existing === null
-      ? `${formatCorrection(correction)}\n`
-      : `${existing.text.replace(/\n*$/, "")}\n${formatCorrection(correction)}\n`;
-  await writeContentsFile(
-    contentsApi,
-    at,
-    shard,
-    text,
-    commitMessage(correction),
-    existing?.sha ?? null,
-  );
-}
-
-/**
- * A soft ceiling on one shard's own size, not a hard one — the Contents API's
- * real limit is the 1 MB `readContentsFile` already treats as unreadable, and
- * this is well under it on purpose, so a shard rolls over while it can still
- * be read and written normally rather than only once it has already crossed
- * into `UnreadableContentsFile` territory.
- */
-const SHARD_SOFT_LIMIT_BYTES = 900_000;
-
-/**
- * How many numbered siblings one calendar month's shard may grow before this
- * gives up — not a real ceiling on how much a project may record, only a
- * bound on the loop below, because a bounded loop is one that cannot hang a
- * run over a store that has gone genuinely, unexpectedly enormous.
- */
-const MAX_SHARD_ATTEMPTS = 500;
-
-/**
- * This month's shard, and whatever is already in it — `monthShard().ndjson`
- * for the first correction of the month, `monthShard().2.ndjson` once that
- * one has grown past `SHARD_SOFT_LIMIT_BYTES`, and so on. Read once per
- * candidate rather than sized off a directory listing, because size is a
- * property of a shard's own content, not of its name.
- *
- * Rolling over by size rather than only by month keeps `writeCorrection`'s
- * read-modify-write pass — and `attemptWrite`'s search before it — working
- * against files small enough for the Contents API to inline, on a project
- * recording enough corrections that one calendar month would otherwise grow
- * past that on its own.
- */
-async function selectShard(
-  contentsApi: ContentsApi,
-  at: Location,
-  path: string,
-): Promise<{
-  readonly shard: string;
-  readonly existing: { readonly text: string; readonly sha: string } | null;
-}> {
-  const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
-
-  for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
-    const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
-    let existing: { readonly text: string; readonly sha: string } | null;
-    try {
-      existing = await readContentsFile(contentsApi, at, shard);
-    } catch (error) {
-      // Unreadable — over the 1 MB the Contents API can inline — is read the
-      // same way `attemptWrite`'s own search treats it: not proof the shard
-      // is full, but not a shard this run can safely append to either, so
-      // the roll-over moves past it exactly as it would past one merely over
-      // the soft limit.
-      if (!(error instanceof UnreadableContentsFile)) throw error;
-      core.warning(
-        `corrections: \`${shard}\` could not be read, so a fresh correction rolls over to the ` +
-          "next shard instead. Split the corrections store into smaller shards.",
-      );
-      continue;
-    }
-    if (existing === null || Buffer.byteLength(existing.text, "utf8") < SHARD_SOFT_LIMIT_BYTES) {
-      return { shard, existing };
-    }
-  }
-
-  throw new Error(
-    `corrections: this month's store has grown past ${String(MAX_SHARD_ATTEMPTS)} shards, ` +
-      `every one of them already at or past the ${String(SHARD_SOFT_LIMIT_BYTES)}-byte soft ` +
-      "limit. That is almost certainly a runaway write loop rather than a genuinely enormous " +
-      "month, so this stops here rather than trying a shard 501.",
-  );
-}
-
-/**
- * Whether `error` is the Contents API's way of saying this write's `sha` is
- * already stale — a 409 always means that, and a 422 means it only when the
- * message names the `sha` field, the same distinction GitHub itself draws
- * between "this ref changed under you" and "this request is simply malformed".
- */
-function isShaConflict(error: unknown): boolean {
-  const status = (error as { status?: unknown } | null)?.status;
-  if (status === 409) return true;
-  if (status !== 422) return false;
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("sha");
-}
-
-/**
- * `path`, guaranteed repo-relative before it reaches the Contents API.
- *
- * Recall reads the store straight off disk, where an absolute path resolves
- * the same as a relative one — but record sends this path to the Contents
- * API, which only understands one relative to the repository root. A
- * workflow built with `${{ github.workspace }}` produces exactly this
- * absolute-but-still-inside-the-checkout shape, so that one case is stripped
- * back to relative rather than refused; any other absolute path names
- * somewhere the API cannot express at all, and is rejected rather than
- * half-handled.
- */
-function repoRelativePath(path: string): string {
-  if (!isAbsolute(path)) return path;
-
-  const workspace = process.env.GITHUB_WORKSPACE;
-  if (workspace !== undefined && workspace.length > 0) {
-    const stripped = relative(workspace, path);
-    if (!isAbsolute(stripped) && !stripped.startsWith("..")) return stripped;
-  }
-
-  throw new Error(
-    `\`corrections\` (\`${path}\`) is an absolute path record cannot use — the Contents API only ` +
-      "understands a path relative to the repository root. Use a repo-relative path, or one " +
-      "under `GITHUB_WORKSPACE` if the workflow built it from `${{ github.workspace }}`.",
-  );
-}
-
-/** This run's shard name — the store rolls over by calendar month. */
-function monthShard(): string {
-  const now = new Date();
-  return `${String(now.getUTCFullYear())}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-/** The commit message a recorded correction lands with. House voice: plain about what changed. */
-function commitMessage(correction: Correction): string {
-  const decided = correction.decided.length > 0 ? correction.decided.join(", ") : "no labels";
-  return `memory: record #${String(correction.thread)} as ${decided}`;
 }
 
 /**
