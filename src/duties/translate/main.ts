@@ -76,16 +76,13 @@ import {
 } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr } from "../../core/marker.js";
-import { chunks, isCodeOnly } from "../../core/markdown.js";
 import {
   createRoutedProvider,
   createWeather,
   parseSeats,
   settleAuth,
-  shown,
   starved,
   type Names,
-  type Provider,
   type Weather,
 } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
@@ -100,8 +97,7 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { translate } from "./draft.js";
-import { judge } from "./judge.js";
+import { translateInto, type Stages } from "./engine.js";
 import { summarize, summarizeSweep, type Looked, type Run, type SweptThread } from "./summary.js";
 import {
   marker,
@@ -129,7 +125,7 @@ const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
  */
 const DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
 
-interface Settings {
+export interface Settings {
   readonly token: string;
   /** The thread to work on, or null in `sweep`. */
   readonly number: number | null;
@@ -259,20 +255,6 @@ function targets(languages: readonly Language[], from: Language | null): readonl
 }
 
 /**
- * One provider per stage, each counting its own requests.
- *
- * Three handles on the same endpoint rather than one, because the meter records
- * a purpose and a stage is the only thing that knows its own. Built once in
- * `run` and passed down, so a stage cannot be metered as another one by being
- * called from the wrong place.
- */
-interface Stages {
-  readonly detect: Provider;
-  readonly draft: Provider;
-  readonly judge: Provider;
-}
-
-/**
  * `chunk-chars`'s own floor.
  *
  * Below this, a chunk stops being a request-sizing decision and starts being
@@ -351,169 +333,6 @@ function budgetExhausted(settings: Settings, meter: Meter, budget: Budget): bool
     settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
   if (exhausted) budget.denied = true;
   return exhausted;
-}
-
-/** One chunk's own draft-and-judge pass — everything a single-chunk body used to get, once. */
-interface ChunkResult {
-  readonly text: string;
-  /** The model that wrote it, already a display name — or null for a chunk no model touched. */
-  readonly model: string | null;
-  readonly contested: boolean;
-  readonly score: number;
-  readonly drafts: number;
-  readonly decidedBy: "score" | "judges";
-  readonly votes: readonly { readonly model: string; readonly pick: string }[];
-}
-
-async function translateChunk(
-  to: Language,
-  settings: Settings,
-  stages: Stages,
-  from: Language | null,
-  source: string,
-  weather: Weather,
-): Promise<ChunkResult | null> {
-  const drafted = await translate({
-    provider: stages.draft,
-    models: settings.models,
-    source,
-    from,
-    to,
-    languages: settings.languages,
-    drafts: settings.drafts,
-    weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-  });
-
-  // Named as the workflow named them, everywhere a person reads them. A
-  // maintainer who called a model `Careful` did so because the id is theirs to
-  // keep, and a warning quoting the id would hand it to the log they masked it
-  // out of.
-  const model = (id: string): string => shown(settings.modelNames, id);
-
-  for (const failure of drafted.failures) {
-    core.warning(`${to.code}: ${model(failure.model)} failed — ${failure.reason}`);
-  }
-  for (const refused of drafted.refused) {
-    core.warning(
-      `${to.code}: ${model(refused.model)} was refused — ${refused.score.reason ?? "unscored"}`,
-    );
-  }
-
-  const verdict = await judge({
-    provider: stages.judge,
-    judges: settings.judges,
-    source,
-    to,
-    attempts: drafted.attempts,
-    weather,
-    ...(settings.temperature === undefined ? {} : { temperature: settings.temperature }),
-  });
-
-  const seat = (id: string): string => shown(settings.judgeNames, id);
-
-  for (const failure of verdict.failures) {
-    core.warning(`${to.code}: judge ${seat(failure.model)} — ${failure.reason}`);
-  }
-
-  if (verdict.winner === null) return null;
-
-  const cast = verdict.votes.map((vote) => ({ model: seat(vote.model), pick: model(vote.pick) }));
-  const votes = cast.map((vote) => `${vote.model}→${vote.pick}`).join(", ");
-  core.info(
-    `${to.code}: ${model(verdict.winner.model)} by ${verdict.decidedBy}` +
-      ` (score ${verdict.winner.score.value.toFixed(3)}${votes.length > 0 ? `, ${votes}` : ""})`,
-  );
-
-  // A contest only when there was one. One draft that no judge voted on won by
-  // being the only candidate, and `Scored 0.91 of 1.00, decided by score` reads
-  // like a field of losers was beaten. Leaving it absent lets the block say the
-  // one true thing — which model wrote this — and stop.
-  const contested = drafted.attempts.length > 1 || verdict.votes.length > 0;
-
-  return {
-    text: verdict.winner.text,
-    model: model(verdict.winner.model),
-    contested,
-    score: verdict.winner.score.value,
-    drafts: drafted.attempts.length,
-    decidedBy: verdict.decidedBy,
-    votes: cast,
-  };
-}
-
-/**
- * A whole language, chunked.
- *
- * `chunks()` never splits a fence, so a chunk that is entirely code — a
- * chunk `isCodeOnly` — is reused verbatim instead of asked for: whatever a
- * model answered would still have to reproduce the code unchanged, so the
- * request is spent on an answer already known. Every other chunk gets its
- * own draft-and-judge pass, one at a time — sequential, not concurrent, so a
- * model this body grounds partway through is already grounded for the chunk
- * after it, the same reason `translateReplies` walks its replies one at a
- * time rather than firing them all at once.
- *
- * **One chunk failing skips the whole language.** A translation missing its
- * middle paragraph because chunk two ran out of models is worse than no
- * translation for this run — the next run tries again in full, rather than
- * this run publishing a body no chunk boundary was ever meant to be visible
- * in.
- */
-async function translateInto(
-  to: Language,
-  settings: Settings,
-  stages: Stages,
-  from: Language | null,
-  source: string,
-  weather: Weather,
-): Promise<Posted | null> {
-  const pieces = chunks(source, settings.chunkChars);
-  const results: ChunkResult[] = [];
-
-  for (const piece of pieces) {
-    if (isCodeOnly(piece)) {
-      results.push({
-        text: piece,
-        model: null,
-        contested: false,
-        score: 1,
-        drafts: 0,
-        decidedBy: "score",
-        votes: [],
-      });
-      continue;
-    }
-
-    const outcome = await translateChunk(to, settings, stages, from, piece, weather);
-    if (outcome === null) return null;
-    results.push(outcome);
-  }
-
-  // Almost always one entry — a body under `chunk-chars` is one chunk and
-  // every chunk of it was won by the same model, which is what makes the
-  // common case read exactly as it always has. A body chunked across more
-  // than one model reports every one of them rather than picking a winner
-  // among winners, and drops the score/decision breakdown: "decided by
-  // judges" is a fact about one contest, and a multi-chunk body ran several.
-  const models = [...new Set(results.flatMap((r) => (r.model === null ? [] : [r.model])))];
-  const single = results.length === 1 ? results[0] : undefined;
-
-  return {
-    to,
-    text: results.map((r) => r.text).join(""),
-    model: models.length > 0 ? models.join(", ") : "—",
-    ...(single?.contested
-      ? {
-          decision: {
-            score: single.score,
-            drafts: single.drafts,
-            decidedBy: single.decidedBy,
-            votes: single.votes,
-          },
-        }
-      : {}),
-  };
 }
 
 /**

@@ -34708,6 +34708,95 @@ ${numbered}`);
   ];
 }
 
+// src/duties/translate/engine.ts
+async function translateChunk(to, settings, stages, from, source, weather) {
+  const drafted = await translate({
+    provider: stages.draft,
+    models: settings.models,
+    source,
+    from,
+    to,
+    languages: settings.languages,
+    drafts: settings.drafts,
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+  });
+  const model = (id) => shown(settings.modelNames, id);
+  for (const failure of drafted.failures) {
+    warning(`${to.code}: ${model(failure.model)} failed \u2014 ${failure.reason}`);
+  }
+  for (const refused2 of drafted.refused) {
+    warning(
+      `${to.code}: ${model(refused2.model)} was refused \u2014 ${refused2.score.reason ?? "unscored"}`
+    );
+  }
+  const verdict = await judge2({
+    provider: stages.judge,
+    judges: settings.judges,
+    source,
+    to,
+    attempts: drafted.attempts,
+    weather,
+    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
+  });
+  const seat = (id) => shown(settings.judgeNames, id);
+  for (const failure of verdict.failures) {
+    warning(`${to.code}: judge ${seat(failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (verdict.winner === null) return null;
+  const cast = verdict.votes.map((vote) => ({ model: seat(vote.model), pick: model(vote.pick) }));
+  const votes = cast.map((vote) => `${vote.model}\u2192${vote.pick}`).join(", ");
+  info(
+    `${to.code}: ${model(verdict.winner.model)} by ${verdict.decidedBy} (score ${verdict.winner.score.value.toFixed(3)}${votes.length > 0 ? `, ${votes}` : ""})`
+  );
+  const contested = drafted.attempts.length > 1 || verdict.votes.length > 0;
+  return {
+    text: verdict.winner.text,
+    model: model(verdict.winner.model),
+    contested,
+    score: verdict.winner.score.value,
+    drafts: drafted.attempts.length,
+    decidedBy: verdict.decidedBy,
+    votes: cast
+  };
+}
+async function translateInto(to, settings, stages, from, source, weather) {
+  const pieces = chunks(source, settings.chunkChars);
+  const results = [];
+  for (const piece of pieces) {
+    if (isCodeOnly(piece)) {
+      results.push({
+        text: piece,
+        model: null,
+        contested: false,
+        score: 1,
+        drafts: 0,
+        decidedBy: "score",
+        votes: []
+      });
+      continue;
+    }
+    const outcome = await translateChunk(to, settings, stages, from, piece, weather);
+    if (outcome === null) return null;
+    results.push(outcome);
+  }
+  const models = [...new Set(results.flatMap((r) => r.model === null ? [] : [r.model]))];
+  const single = results.length === 1 ? results[0] : void 0;
+  return {
+    to,
+    text: results.map((r) => r.text).join(""),
+    model: models.length > 0 ? models.join(", ") : "\u2014",
+    ...single?.contested ? {
+      decision: {
+        score: single.score,
+        drafts: single.drafts,
+        decidedBy: single.decidedBy,
+        votes: single.votes
+      }
+    } : {}
+  };
+}
+
 // src/core/chrome.ts
 var CHROME_LANGUAGES = ["en", "vi", "zh"];
 var CHROME = {
@@ -35131,93 +35220,6 @@ function budgetExhausted(settings, meter, budget) {
   const exhausted2 = settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
   if (exhausted2) budget.denied = true;
   return exhausted2;
-}
-async function translateChunk(to, settings, stages, from, source, weather) {
-  const drafted = await translate({
-    provider: stages.draft,
-    models: settings.models,
-    source,
-    from,
-    to,
-    languages: settings.languages,
-    drafts: settings.drafts,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-  });
-  const model = (id) => shown(settings.modelNames, id);
-  for (const failure of drafted.failures) {
-    warning(`${to.code}: ${model(failure.model)} failed \u2014 ${failure.reason}`);
-  }
-  for (const refused2 of drafted.refused) {
-    warning(
-      `${to.code}: ${model(refused2.model)} was refused \u2014 ${refused2.score.reason ?? "unscored"}`
-    );
-  }
-  const verdict = await judge2({
-    provider: stages.judge,
-    judges: settings.judges,
-    source,
-    to,
-    attempts: drafted.attempts,
-    weather,
-    ...settings.temperature === void 0 ? {} : { temperature: settings.temperature }
-  });
-  const seat = (id) => shown(settings.judgeNames, id);
-  for (const failure of verdict.failures) {
-    warning(`${to.code}: judge ${seat(failure.model)} \u2014 ${failure.reason}`);
-  }
-  if (verdict.winner === null) return null;
-  const cast = verdict.votes.map((vote) => ({ model: seat(vote.model), pick: model(vote.pick) }));
-  const votes = cast.map((vote) => `${vote.model}\u2192${vote.pick}`).join(", ");
-  info(
-    `${to.code}: ${model(verdict.winner.model)} by ${verdict.decidedBy} (score ${verdict.winner.score.value.toFixed(3)}${votes.length > 0 ? `, ${votes}` : ""})`
-  );
-  const contested = drafted.attempts.length > 1 || verdict.votes.length > 0;
-  return {
-    text: verdict.winner.text,
-    model: model(verdict.winner.model),
-    contested,
-    score: verdict.winner.score.value,
-    drafts: drafted.attempts.length,
-    decidedBy: verdict.decidedBy,
-    votes: cast
-  };
-}
-async function translateInto(to, settings, stages, from, source, weather) {
-  const pieces = chunks(source, settings.chunkChars);
-  const results = [];
-  for (const piece of pieces) {
-    if (isCodeOnly(piece)) {
-      results.push({
-        text: piece,
-        model: null,
-        contested: false,
-        score: 1,
-        drafts: 0,
-        decidedBy: "score",
-        votes: []
-      });
-      continue;
-    }
-    const outcome = await translateChunk(to, settings, stages, from, piece, weather);
-    if (outcome === null) return null;
-    results.push(outcome);
-  }
-  const models = [...new Set(results.flatMap((r) => r.model === null ? [] : [r.model]))];
-  const single = results.length === 1 ? results[0] : void 0;
-  return {
-    to,
-    text: results.map((r) => r.text).join(""),
-    model: models.length > 0 ? models.join(", ") : "\u2014",
-    ...single?.contested ? {
-      decision: {
-        score: single.score,
-        drafts: single.drafts,
-        decidedBy: single.decidedBy,
-        votes: single.votes
-      }
-    } : {}
-  };
 }
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
