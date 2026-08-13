@@ -34080,7 +34080,12 @@ function optionalWholeNumber(at, key, raw, min) {
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
-  if (raw === void 0 || raw === null) return { declared: false, granted };
+  if (raw === void 0) return { declared: false, granted };
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
       `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
