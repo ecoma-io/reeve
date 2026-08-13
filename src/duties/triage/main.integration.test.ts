@@ -65,7 +65,14 @@ beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
   // case driving the committed bundle would be driving whatever was committed
   // last rather than the source under review.
-  await promisify(execFile)(process.execPath, [join(ROOT, "tools", "build.mjs")], { cwd: ROOT });
+  //
+  // Only this duty's bundle is rebuilt, and never anyone else's: the
+  // integration tests run in parallel workers, and two of them rebuilding the
+  // same outfile at once could hand a spawned child a half-written bundle to
+  // crash on — esbuild writes an outfile in place rather than atomically.
+  await promisify(execFile)(process.execPath, [join(ROOT, "tools", "build.mjs"), "triage"], {
+    cwd: ROOT,
+  });
 }, 120_000);
 
 // ---------------------------------------------------------------------------
@@ -663,6 +670,10 @@ describe("the action", () => {
   it("reports what it did on every output, so a workflow can branch on it", async () => {
     const run = await runAction(stub);
 
+    // The exit code first, so a child that died before the pipeline ran — the
+    // shape a torn bundle produces — fails here with its code rather than as
+    // an unexplained empty outputs object.
+    expect(run.code).toBe(0);
     expect(run.outputs).toEqual({
       labels: JSON.stringify(["bug"]),
       proposed: JSON.stringify(["bug"]),

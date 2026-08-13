@@ -15,6 +15,14 @@
  * disk and not in the source, and the alternative — a runtime lookup — would
  * put every duty's dependencies into every duty's action.
  *
+ * An optional first argument names the one bundle to build instead of all of
+ * them — `node tools/build.mjs triage`. A duty's integration test calls it
+ * with its own name, so the six of them never write the same `outfile` at the
+ * same time: esbuild writes an outfile in place rather than atomically, and
+ * two parallel test files that both rebuilt every bundle could hand a child
+ * process a half-written bundle to crash on. Each test file building only the
+ * bundle it drives keeps that guarantee and the one this comment ends on.
+ *
  * CI re-runs this and fails if the result differs from what was committed, so a
  * source change that never got rebuilt cannot ship as a stale bundle.
  */
@@ -28,15 +36,23 @@ import { build } from "esbuild";
  * directory beside it.
  */
 const BUNDLES = [
-  { entry: "src/main.ts", outfile: "dist/index.js" },
-  { entry: "src/duties/translate/main.ts", outfile: "translate/dist/index.js" },
-  { entry: "src/duties/triage/main.ts", outfile: "triage/dist/index.js" },
-  { entry: "src/duties/duplicate/main.ts", outfile: "duplicate/dist/index.js" },
-  { entry: "src/duties/respond/main.ts", outfile: "respond/dist/index.js" },
-  { entry: "src/duties/lifecycle/main.ts", outfile: "lifecycle/dist/index.js" },
+  { name: "root", entry: "src/main.ts", outfile: "dist/index.js" },
+  { name: "translate", entry: "src/duties/translate/main.ts", outfile: "translate/dist/index.js" },
+  { name: "triage", entry: "src/duties/triage/main.ts", outfile: "triage/dist/index.js" },
+  { name: "duplicate", entry: "src/duties/duplicate/main.ts", outfile: "duplicate/dist/index.js" },
+  { name: "respond", entry: "src/duties/respond/main.ts", outfile: "respond/dist/index.js" },
+  { name: "lifecycle", entry: "src/duties/lifecycle/main.ts", outfile: "lifecycle/dist/index.js" },
 ];
 
-for (const { entry, outfile } of BUNDLES) {
+const only = process.argv[2];
+const selected = only === undefined ? BUNDLES : BUNDLES.filter(({ name }) => name === only);
+if (only !== undefined && selected.length === 0) {
+  throw new Error(
+    `build: no bundle named '${only}'. Known names: ${BUNDLES.map(({ name }) => name).join(", ")}.`,
+  );
+}
+
+for (const { entry, outfile } of selected) {
   await bundle(entry, outfile);
 }
 
