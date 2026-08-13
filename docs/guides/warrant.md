@@ -236,6 +236,19 @@ a self-amending authority: the file it changes is a pull request like any
 other, reviewed and merged by a person — no capability of Reeve's ever
 merges one. See [the `triage` duty's own page](../reference/duties/triage.md).
 
+**Neither does `open-pr`.** It is the companion to `state-branch`: when
+`state-branch` is set, the duty writes its state files (provenance for
+`harmonise`, corrections for `triage`) to a dedicated branch instead of the
+default branch, and `open-pr` is what opens or updates the draft PR on that
+branch for maintainer review. It needs `pull-requests: write` on the token,
+and must be granted alongside the duty's own write capability — `edit-file`
+for `harmonise`, `record` for `triage` — because `open-pr` only governs the
+PR, not the write that precedes it. When `state-branch` is set but `open-pr`
+is not granted, the duty falls back to writing directly to the default branch
+and says so in a notice — the state file still lands, just without the PR
+wrapping it. See [the `harmonise` duty](../reference/duties/harmonise.md) and
+[the `triage` duty](../reference/duties/triage.md).
+
 **A duty also takes an `apply` input, and the narrower of the two wins.** The
 file and the workflow are both reviewable, they can disagree, and the fail-safe
 direction is the intersection. A workflow can restrict what the file granted; it
@@ -320,7 +333,9 @@ the same thread. It needs `contents: write` on the token, which is why it is
 opt-in rather than a duty default: a project decides to keep a memory at all.
 No checkout happens for this — the commit goes through the Contents API — and
 a token without the scope fails the run the way any other authentication
-problem does, plainly.
+problem does, plainly. When `state-branch` is set and `open-pr` is also
+granted, the corrections are written to that branch and a draft PR is opened
+instead; see [the `open-pr` capability](#capabilities) above.
 
 **`record` also commits a human _reversal_ of Reeve's own action** — not only a
 human's forward decision. Two shapes:

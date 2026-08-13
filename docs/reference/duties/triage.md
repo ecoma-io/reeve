@@ -88,11 +88,14 @@ Grant `contents: write` on the token only if you also grant the `record`
 capability below — recording a correction is a commit through GitHub's
 Contents API, not a checkout. Grant `contents: write` **and**
 `pull-requests: write` if you grant `propose` — opening or updating its one
-pull request needs both.
+pull request needs both. Grant `pull-requests: write` as well if you set
+`state-branch` — opening the draft PR that carries the corrections needs it,
+and `open-pr` must be granted alongside `record` for the branch write to
+take effect.
 
 **Warrant capability:** `label` is granted by default, at level 0, with no
-warrant file at all. Wider effects — `comment`, `close`, `assign`, `record` —
-need `.github/reeve.yml` to name them under `capabilities.triage`, and
+warrant file at all. Wider effects — `comment`, `close`, `assign`, `record`,
+`open-pr` — need `.github/reeve.yml` to name them under `capabilities.triage`, and
 `apply` on the workflow to name them too; the narrower of the two always
 wins. See [the capabilities table](../../guides/warrant.md#capabilities).
 
@@ -109,32 +112,33 @@ a supported configuration), but almost every real provider needs one — see
 Every input `triage/action.yml` declares. This table is the contract; a
 narrower one would only be free to drift from it.
 
-| Input             | Required | Default                     | What it does                                                                                                                                                               |
-| ----------------- | -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`    | no       | `${{ github.token }}`       | Token used to read the thread and apply what the warrant permits.                                                                                                          |
-| `number`          | no       | _(empty)_                   | The issue to triage. Defaults to the thread that triggered the workflow.                                                                                                   |
-| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                         |
-| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                            |
-| `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                      |
-| `screen-models`   | no       | _(empty)_                   | A cheaper roster asked which language a thread is in and whether it is spam or off-topic, before `models` is spent.                                                        |
-| `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. Ignored once the warrant's own `languages:` key is written.                                                                          |
-| `warrant`         | no       | `.github/reeve.yml`         | Where the taxonomy and permissions live. Missing at this default path is not a failure — see [The warrant](../../guides/warrant.md).                                       |
-| `labels`          | no       | _(empty)_                   | Which of the warrant's taxonomy this run may propose, or empty for all of it. A name not in the taxonomy fails red — see below.                                            |
-| `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, `propose`, or `none`. Narrowed by the warrant, never widened past it.              |
-| `confidence`      | no       | `0.75`                      | How sure the verdict has to be before anything is applied, between 0 and 1.                                                                                                |
-| `corrections`     | no       | `.reeve/corrections`        | Directory of `.ndjson` files recording maintainer corrections, shown to the model as examples.                                                                             |
-| `min-body-chars`  | no       | `40`                        | How much authored text is enough to be worth a model, in characters. `0` turns the length screen off.                                                                      |
-| `max-body-chars`  | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
-| `about`           | no       | _(empty)_                   | What this repository is about, in one sentence. Used only by the spam screen. Ignored once the warrant's own `about:` key is written.                                      |
-| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                |
-| `sweep`           | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                 |
-| `since`           | no       | _(empty)_                   | The oldest issue a sweep will consider, bounded by when it was opened.                                                                                                     |
-| `limit`           | no       | `50`                        | The most issues one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                             |
-| `sweep-state`     | no       | `open`                      | Which issues a sweep considers, by tracker state: `open`, `closed`, or `all`. A resource filter, not a mode — see below.                                                   |
-| `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
-| `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
-| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
-| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                               |
+| Input             | Required | Default                     | What it does                                                                                                                                                                                                                                            |
+| ----------------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`    | no       | `${{ github.token }}`       | Token used to read the thread and apply what the warrant permits.                                                                                                                                                                                       |
+| `number`          | no       | _(empty)_                   | The issue to triage. Defaults to the thread that triggered the workflow.                                                                                                                                                                                |
+| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                      |
+| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                         |
+| `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                                                                                   |
+| `screen-models`   | no       | _(empty)_                   | A cheaper roster asked which language a thread is in and whether it is spam or off-topic, before `models` is spent.                                                                                                                                     |
+| `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. Ignored once the warrant's own `languages:` key is written.                                                                                                                                                       |
+| `warrant`         | no       | `.github/reeve.yml`         | Where the taxonomy and permissions live. Missing at this default path is not a failure — see [The warrant](../../guides/warrant.md).                                                                                                                    |
+| `labels`          | no       | _(empty)_                   | Which of the warrant's taxonomy this run may propose, or empty for all of it. A name not in the taxonomy fails red — see below.                                                                                                                         |
+| `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, `propose`, or `none`. Narrowed by the warrant, never widened past it.                                                                                           |
+| `confidence`      | no       | `0.75`                      | How sure the verdict has to be before anything is applied, between 0 and 1.                                                                                                                                                                             |
+| `corrections`     | no       | `.reeve/corrections`        | Directory of `.ndjson` files recording maintainer corrections, shown to the model as examples.                                                                                                                                                          |
+| `min-body-chars`  | no       | `40`                        | How much authored text is enough to be worth a model, in characters. `0` turns the length screen off.                                                                                                                                                   |
+| `max-body-chars`  | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                                                                                                |
+| `about`           | no       | _(empty)_                   | What this repository is about, in one sentence. Used only by the spam screen. Ignored once the warrant's own `about:` key is written.                                                                                                                   |
+| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                             |
+| `sweep`           | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                                                                              |
+| `since`           | no       | _(empty)_                   | The oldest issue a sweep will consider, bounded by when it was opened.                                                                                                                                                                                  |
+| `limit`           | no       | `50`                        | The most issues one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                                                                                                          |
+| `sweep-state`     | no       | `open`                      | Which issues a sweep considers, by tracker state: `open`, `closed`, or `all`. A resource filter, not a mode — see below.                                                                                                                                |
+| `state-branch`    | no       | _(empty)_                   | A branch to write corrections to, instead of the default branch. When set, correction files are committed to this branch and a draft PR is opened for review. `record` and `open-pr` must both be granted. Empty writes directly to the default branch. |
+| `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                         |
+| `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                              |
+| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                        |
+| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                            |
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
@@ -197,7 +201,9 @@ capabilities:
 unlabelled event from a human — never a re-triage, never a bot — commits
 that thread's taxonomy-filtered current labels to the store, replacing any
 earlier entry for the same thread, through GitHub's Contents API with no
-checkout.
+checkout. When `state-branch` is set and `open-pr` is also granted, the
+corrections are written to that branch and a draft PR is opened instead;
+empty `state-branch` writes directly to the default branch, as before.
 
 **`record` also commits a human's _reversal_ of one of Reeve's own past
 actions**, not only a forward decision. Two shapes, both requiring nothing
@@ -313,20 +319,21 @@ corrections store stays its own.
 
 Every output `triage/action.yml` declares.
 
-| Output         | Value                                                                                                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `labels`       | JSON array of the labels that were applied. `[]` is the ordinary answer on a thread nobody could label, never unset.                                                                                                                   |
-| `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                                                                                                     |
-| `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                                                                                                     |
-| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                                                                                                 |
-| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close` — and empty on a run the hard gate refused to close, even though a verdict proposed it.                                      |
-| `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.                                                                                          |
-| `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                                                                                                     |
-| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                   |
-| `processed`    | How many issues a sweep actually processed this run — under bulk migration, how many it recorded. `0` outside `sweep`.                                                                                                                 |
-| `skipped`      | How many issues a sweep found already labelled and left alone — under bulk migration, how many carried no taxonomy label to import. `0` outside `sweep`.                                                                               |
-| `remaining`    | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                                             |
-| `recorded`     | `true` when an eligible event, with `record` granted, wrote this thread's current labels or a reversal of Reeve's own past action to the corrections store — also `true` for a whole bulk-migration sweep. `false` on every other run. |
+| Output         | Value                                                                                                                                                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `labels`       | JSON array of the labels that were applied. `[]` is the ordinary answer on a thread nobody could label, never unset.                                                                                                                    |
+| `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                                                                                                      |
+| `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                                                                                                      |
+| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                                                                                                  |
+| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close` — and empty on a run the hard gate refused to close, even though a verdict proposed it.                                       |
+| `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.                                                                                           |
+| `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                                                                                                      |
+| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                    |
+| `processed`    | How many issues a sweep actually processed this run — under bulk migration, how many it recorded. `0` outside `sweep`.                                                                                                                  |
+| `skipped`      | How many issues a sweep found already labelled and left alone — under bulk migration, how many carried no taxonomy label to import. `0` outside `sweep`.                                                                                |
+| `remaining`    | Candidates this sweep did not reach. `0` outside `sweep`, and `0` when a sweep finished its whole backlog.                                                                                                                              |
+| `recorded`     | `true` when an eligible event, with `record` granted, wrote this thread's current labels or a reversal of Reeve's own past action to the corrections store — also `true` for a whole bulk-migration sweep. `false` on every other run.  |
+| `state-pr`     | The number of the draft PR that carries the correction files, when `state-branch` is set and the run completed successfully. Empty when writing to the default branch, when no corrections were written, or when the run was a dry run. |
 
 **The difference between `proposed` and `labels` is what the guardrails
 stopped.** That is the output to watch while tuning `confidence` or a `not`
