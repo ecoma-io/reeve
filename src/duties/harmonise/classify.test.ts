@@ -1,9 +1,15 @@
 /**
  * Unit tests for the classify module — diff classification parsing.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as core from "@actions/core";
 
 import { parseClassification } from "./classify.js";
+
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  warning: vi.fn(),
+}));
 
 describe("parseClassification", () => {
   it("parses semantic classification", () => {
@@ -53,10 +59,17 @@ describe("parseClassification", () => {
     expect(result.hunks[0]!.description).toBe("Valid entry");
   });
 
-  it("returns empty for empty input", () => {
+  it("returns empty for empty input and emits a warning (D5)", () => {
+    const warningSpy = vi.spyOn(core, "warning");
+
     const result = parseClassification("");
     expect(result.hunks).toHaveLength(0);
     expect(result.hasSemantic).toBe(false);
+    expect(warningSpy).toHaveBeenCalledWith(
+      expect.stringContaining("classifier produced no parseable output"),
+    );
+
+    warningSpy.mockRestore();
   });
 
   it("handles whitespace around entries", () => {

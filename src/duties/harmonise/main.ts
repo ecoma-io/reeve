@@ -13,8 +13,9 @@
  *   4. For each document group with a changed source:
  *      a. Classify the diff (semantic / correction / locale-specific).
  *      b. If semantic changes exist, draft updated translations for stale
- *         locales.
- *      c. Score the drafts deterministically.
+ *         locales — `drafts` times per locale, scored deterministically.
+ *      c. Let the judge panel pick between the admitted drafts, or fall
+ *         back to the best-scored draft when no panel is configured.
  *   5. Open a PR per document group with the updated locale files — unless
  *      the warrant does not grant `edit-file` + `open-pr`, or `apply` is
  *      `none`, in which case every step above still ran and only the write
@@ -37,7 +38,7 @@ import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
 import { bounded, readCore, whole, type ApiKeySpec, type EndpointSpec } from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
-import { createMeter } from "../../core/meter.js";
+import { createMeter, type Meter } from "../../core/meter.js";
 import {
   assembleClient,
   createWeather,
@@ -45,6 +46,7 @@ import {
   settleAuth,
   type Names,
   type Provider,
+  type Weather,
 } from "../../core/provider.js";
 import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import {
@@ -55,12 +57,14 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
+import { budgetExhausted, createBudget, type Budget } from "./budget.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 import { classifyDiff, type ClassificationResult } from "./classify.js";
 import { computeSourceDiff, formatInitialSync } from "./diff.js";
 import { discoverGroups, type DocumentGroup } from "./discover.js";
-import { draftSync, type Draft, type GlossaryEntry } from "./draft.js";
+import { draftSyncs, type Draft, type GlossaryEntry } from "./draft.js";
 import { parsePaths } from "./inputs.js";
+import { judge as judgePanel, type Verdict } from "./judge.js";
 import {
   findOrCreate,
   markStale,
@@ -72,7 +76,6 @@ import {
 } from "./provenance.js";
 import { publishSync, type PublishApi, type SyncResult } from "./publish.js";
 import { publishState, type StateBranchApi } from "../../core/state-branch.js";
-import { scoreDraft } from "./score.js";
 import { summarize, type GroupResult } from "./summary.js";
 
 /** This duty's `languages` default (target locales only). */
@@ -139,6 +142,10 @@ function notGranted(warrant: Warrant): string {
 
 export async function run(): Promise<void> {
   const meter = createMeter();
+  // `denied` is set exactly once, by `budgetExhausted` — see `createBudget`'s
+  // doc comment in `budget.ts` for why one mutable object rather than a
+  // recomputed boolean.
+  const budget = createBudget();
   let weather = createWeather();
   let settings: Settings | null = null;
   let authority: Authority | null = null;
@@ -272,6 +279,16 @@ export async function run(): Promise<void> {
 
     // Process each document group
     for (const group of groups) {
+      // Checked before spending the requests a group is about to cost — so a
+      // budget already at its ceiling does not start a group it cannot finish.
+      if (budgetExhausted(settings, meter, budget)) {
+        core.warning(
+          "`max-requests` was reached, so remaining document groups were not attempted this run. " +
+            "What was already drafted still publishes.",
+        );
+        break;
+      }
+
       const result = await processGroup(
         group,
         state,
@@ -283,6 +300,10 @@ export async function run(): Promise<void> {
         settings,
         client.stages.classify,
         client.stages.draft,
+        client.stages.judge,
+        meter,
+        budget,
+        weather,
       );
       groupResults.push(result);
     }
@@ -350,6 +371,16 @@ export async function run(): Promise<void> {
     if (settings !== null && authority !== null) {
       const rosterStarved = warnIfStarved(settings.models, weather, false);
 
+      // `budget.denied` answers this the same way as `translate` — see
+      // `createBudget`'s doc comment in `budget.ts`.
+      const budgetSpent = budget.denied;
+      if (budgetSpent) {
+        core.warning(
+          "`max-requests` was reached this run. What was already drafted still publishes; " +
+            "anything past the budget was left for a later run.",
+        );
+      }
+
       core.setOutput(
         "classified",
         JSON.stringify(
@@ -381,7 +412,7 @@ export async function run(): Promise<void> {
         ),
       );
       core.setOutput("starved", String(rosterStarved));
-      core.setOutput("budget-exhausted", String(false));
+      core.setOutput("budget-exhausted", String(budgetSpent));
       core.setOutput("state-pr", statePr !== null ? String(statePr) : "");
 
       await writeRunSummary(
@@ -401,7 +432,7 @@ export async function run(): Promise<void> {
 }
 
 /**
- * Processes one document group: classify, draft, score.
+ * Processes one document group: classify, draft, score, judge.
  */
 async function processGroup(
   group: DocumentGroup,
@@ -414,6 +445,10 @@ async function processGroup(
   settings: Settings,
   classifier: Provider,
   drafter: Provider,
+  judger: Provider,
+  meter: Meter,
+  budget: Budget,
+  weather: Weather,
 ): Promise<GroupResult> {
   const sourcePath = group.files.get(sourceLanguage.code.toLowerCase());
   if (sourcePath === undefined) {
@@ -516,9 +551,23 @@ async function processGroup(
     };
   }
 
-  // Draft and score for each stale locale
-  const drafts = new Map<string, Draft>();
+  // Draft and judge for each stale locale
+  const bestDrafts = new Map<string, Draft>();
   for (const locale of doc.stale) {
+    // Checked before spending the requests a locale is about to cost, not
+    // after — so a budget set tight enough to stop mid-group stops before
+    // the request that would have gone over it.
+    if (budgetExhausted(settings, meter, budget)) {
+      const remaining = doc.stale.slice(doc.stale.indexOf(locale));
+      skipped.push(...remaining);
+      core.warning(
+        `harmonise: \`max-requests\` was reached, so ${remaining.map((l) => l).join(", ")} ` +
+          `${remaining.length === 1 ? "was" : "were"} not attempted this run. ` +
+          "What was already drafted still publishes.",
+      );
+      break;
+    }
+
     const targetLang = targetLanguages.find((l) => l.code.toLowerCase() === locale);
     if (targetLang === undefined) {
       skipped.push(locale);
@@ -534,41 +583,54 @@ async function processGroup(
     const targetFile = await readContentsFile(api, at, targetPath);
     const targetContent = targetFile?.text ?? "";
 
-    const glossaryTerms = glossary.map((g) => g.term);
-
-    const draftModel = settings.models[0];
-    if (draftModel === undefined) {
-      skipped.push(locale);
-      continue;
-    }
-
-    const draft = await draftSync(
-      sourceFile.text,
+    // Run the multi-draft loop
+    const result = await draftSyncs({
+      provider: drafter,
+      models: settings.models,
+      sourceContent: sourceFile.text,
       targetContent,
-      classification.hunks.filter((h) => h.classification === "semantic"),
+      semanticHunks: classification.hunks.filter((h) => h.classification === "semantic"),
       sourceLanguage,
-      targetLang,
+      targetLanguage: targetLang,
+      languages: settings.languages,
       glossary,
-      drafter,
-      draftModel,
-    );
+      drafts: settings.drafts,
+      weather,
+    });
 
-    if (draft === null) {
-      core.warning(`harmonise: no draft produced for ${locale} translation of ${group.id}`);
-      skipped.push(locale);
-      continue;
+    for (const failure of result.failures) {
+      core.warning(
+        `harmonise: ${targetLang.code}: model ${failure.model} failed — ${failure.reason}`,
+      );
     }
 
-    const score = scoreDraft(draft.text, targetContent, glossaryTerms);
-    if (score.value === 0 && !score.admissible) {
+    if (result.attempts.length === 0) {
       core.warning(
-        `harmonise: draft for ${locale} translation of ${group.id} refused — ${score.reason ?? "unknown"}`,
+        `harmonise: no admissible draft produced for ${locale} translation of ${group.id}`,
       );
       skipped.push(locale);
       continue;
     }
 
-    drafts.set(locale, { ...draft, score: score.value });
+    // Let the judge panel pick between the admitted drafts — or fall back
+    // to the best-scored draft when no panel is configured (or only one
+    // attempt was admitted).
+    const winner = await pickWinner(
+      result.attempts,
+      targetContent,
+      targetLang,
+      settings.judges,
+      judger,
+      weather,
+    );
+
+    if (winner === null) {
+      core.warning(`harmonise: no winner for ${locale} translation of ${group.id}`);
+      skipped.push(locale);
+      continue;
+    }
+
+    bestDrafts.set(locale, winner);
 
     // Mark as synced in provenance
     // The real SHA will come after the write; we'll update later
@@ -585,11 +647,11 @@ async function processGroup(
       `harmonise: ${synced.length > 0 ? `${String(synced.length)} locale(s) would be synced` : "no locales to sync"} for ${group.id}, ` +
         "but `edit-file` and `open-pr` are not both granted. Nothing written.",
     );
-  } else if (drafts.size > 0) {
+  } else if (bestDrafts.size > 0) {
     // Publish the sync PR
     const syncResult: SyncResult = {
       group,
-      drafts,
+      drafts: bestDrafts,
       conflicts,
     };
 
@@ -609,6 +671,42 @@ async function processGroup(
     conflicts,
     skipped,
   };
+}
+
+/**
+ * Picks the winning draft from the admitted attempts.
+ *
+ * When a judge panel is configured and more than one attempt was admitted,
+ * the panel votes and the verdict decides. Otherwise the best-scored draft
+ * wins — the same fallback `translate` uses.
+ */
+async function pickWinner(
+  attempts: readonly Draft[],
+  targetContent: string,
+  targetLanguage: Language,
+  judges: readonly (readonly string[])[],
+  judger: Provider,
+  weather: Weather,
+): Promise<Draft | null> {
+  // One candidate is already the answer, and none means the work was skipped
+  // before this. Asking which of one is best spends a request on a foregone
+  // conclusion.
+  if (attempts.length === 0) return null;
+  if (attempts.length === 1 || judges.length === 0) {
+    // Best score first — the draft loop already sorted them.
+    return attempts[0] ?? null;
+  }
+
+  const verdict: Verdict<Draft> = await judgePanel({
+    provider: judger,
+    judges,
+    targetContent,
+    to: targetLanguage,
+    attempts,
+    weather,
+  });
+
+  return verdict.winner;
 }
 
 /**

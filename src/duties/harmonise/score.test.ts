@@ -3,7 +3,17 @@
  */
 import { describe, expect, it } from "vitest";
 
+import type { Language } from "../../core/languages.js";
 import { scoreDraft } from "./score.js";
+
+/** A Vietnamese language object for test use. */
+const VI: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
+/** An English language object for test use. */
+const EN: Language = { code: "en", label: "English", scripts: ["Latn"] };
+/** A Chinese language object for test use — lets foreignScript detect Han. */
+const ZH: Language = { code: "zh", label: "中文", scripts: ["Han"] };
+/** All test languages. */
+const LANGUAGES: readonly Language[] = [EN, VI, ZH];
 
 describe("scoreDraft", () => {
   const original = [
@@ -19,28 +29,36 @@ describe("scoreDraft", () => {
   ].join("\n");
 
   it("refuses empty drafts", () => {
-    const score = scoreDraft("", original, []);
+    const score = scoreDraft("", original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(false);
     expect(score.value).toBe(0);
     expect(score.reason).toBe("empty draft");
   });
 
   it("refuses drafts identical to the original", () => {
-    const score = scoreDraft(original, original, []);
+    const score = scoreDraft(original, original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(false);
     expect(score.reason).toBe("unchanged from original");
   });
 
   it("refuses drafts that translate glossary terms", () => {
     const draft = original.replace("Reeve", "Quan trị");
-    const score = scoreDraft(draft, original, ["Reeve"]);
+    const score = scoreDraft(draft, original, ["Reeve"], original, VI, LANGUAGES);
     expect(score.admissible).toBe(false);
     expect(score.reason).toContain("Reeve");
   });
 
+  it("refuses drafts in the wrong script", () => {
+    // A draft full of Han characters for a Vietnamese target
+    const draft = "# 开始使用\n\n本指南帮助您设置 Reeve。";
+    const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
+    expect(score.admissible).toBe(false);
+    expect(score.reason).toContain("script");
+  });
+
   it("admits a draft with minor changes", () => {
     const draft = original.replace("set up Reeve", "thiết lập Reeve");
-    const score = scoreDraft(draft, original, []);
+    const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
     expect(score.value).toBeGreaterThan(0);
   });
@@ -52,7 +70,7 @@ describe("scoreDraft", () => {
       .replace("```", "")
       .replace("set up Reeve", "thiết lập Reeve");
 
-    const score = scoreDraft(draft, original, []);
+    const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
     expect(score.value).toBeLessThan(1);
   });
@@ -62,7 +80,7 @@ describe("scoreDraft", () => {
       .replace("https://reeve.dev", "https://wrong.dev")
       .replace("set up Reeve", "thiết lập Reeve");
 
-    const score = scoreDraft(draft, original, []);
+    const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
     expect(score.value).toBeLessThan(1);
   });
@@ -80,15 +98,30 @@ describe("scoreDraft", () => {
       "Xem [tài liệu](https://reeve.dev) để biết thêm.",
     ].join("\n");
 
-    const score = scoreDraft(draft, original, ["Reeve"]);
+    const score = scoreDraft(draft, original, ["Reeve"], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
     expect(score.value).toBeGreaterThan(0.5);
   });
 
   it("preserves glossary terms that appear in original", () => {
     const draft = original.replace("set up Reeve", "thiết lập Reeve");
-    const score = scoreDraft(draft, original, ["Reeve"]);
+    const score = scoreDraft(draft, original, ["Reeve"], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
     expect(score.value).toBeGreaterThan(0);
+  });
+
+  it("does not refuse a draft whose script matches the target", () => {
+    // Vietnamese uses Latin script — a Latin draft should pass the script check
+    const draft = "# Bắt đầu\n\nHướng dẫn này giúp bạn thiết lập Reeve.";
+    const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
+    expect(score.admissible).toBe(true);
+  });
+
+  it("does not refuse a draft for a script the source already uses", () => {
+    // If the source is English (Latn) and the target is Vietnamese (Latn),
+    // a draft with Latn is fine — it's the target's own script.
+    const draft = original.replace("set up Reeve", "thiết lập Reeve");
+    const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
+    expect(score.admissible).toBe(true);
   });
 });
