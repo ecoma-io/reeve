@@ -290,6 +290,15 @@ inputs:
     required: false
     default: open
 
+  state-branch:
+    description: >-
+      A branch to write corrections to, instead of the default branch.
+      When set, correction files are committed to this branch and a draft pull
+      request is opened for maintainer review. `record` and `open-pr` must both
+      be granted. Empty writes directly to the default branch.
+    required: false
+    default: ""
+
   endpoints:
     description: >-
       Additional `alias = url` endpoints, comma or newline separated, each
@@ -424,6 +433,13 @@ outputs:
       `false` on every other run — including an ordinary verdict, an ordinary
       triaging sweep, and a labelled event where `record` is not granted —
       never unset.
+
+  state-pr:
+    description: >-
+      The number of the draft PR that carries the correction files, when
+      `state-branch` is set and the run completed successfully. Empty when
+      writing to the default branch, when no corrections were written, or when
+      the run was a dry run.
 
 runs:
   using: node24

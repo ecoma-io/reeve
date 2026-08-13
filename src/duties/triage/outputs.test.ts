@@ -73,6 +73,7 @@ function settingsOf(over: Partial<Settings> = {}): Settings {
     dryRun: false,
     modelNames: new Map(),
     screenNames: new Map(),
+    stateBranch: "",
     ...over,
   } as Settings;
 }

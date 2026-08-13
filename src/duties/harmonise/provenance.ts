@@ -41,18 +41,56 @@ export type StateFile = DocumentState[];
  * A missing state file is the cold start — a repository that has never run
  * `harmonise` has no sync status, and every document group is considered
  * stale from scratch.
+ *
+ * When `stateBranch` is given, reads from the default branch first and falls
+ * back to the state branch when the file is not found there. This supports the
+ * cold-start scenario where a PR with the state file has been opened but not
+ * yet merged: the state branch holds the current state, while the default
+ * branch has not caught up yet.
+ *
+ * Returns the parsed state and two SHAs: `sha` from the default branch (or
+ * null if not found there), and `branchSha` from the state branch (or null if
+ * not found there, or if `stateBranch` was not given).
  */
 export async function readState(
   api: ContentsApi,
   at: Pick<Location, "owner" | "repo">,
   path: string,
-): Promise<{ readonly state: StateFile; readonly sha: string | null }> {
+  stateBranch?: string,
+): Promise<{
+  readonly state: StateFile;
+  readonly sha: string | null;
+  readonly branchSha: string | null;
+}> {
+  // Read from the default branch first
   const file = await readContentsFile(api, at, path);
-  if (file === null) return { state: [], sha: null };
+  if (file !== null) {
+    return { state: parseState(file.text, path), sha: file.sha, branchSha: null };
+  }
 
+  // Not on default branch — try the state branch if configured
+  if (stateBranch !== undefined && stateBranch !== "") {
+    const branchFile = await readContentsFile(api, at, path, stateBranch);
+    if (branchFile !== null) {
+      return { state: parseState(branchFile.text, path), sha: null, branchSha: branchFile.sha };
+    }
+  }
+
+  // Not found anywhere — cold start
+  return { state: [], sha: null, branchSha: null };
+}
+
+/**
+ * Parses the JSON text of a state file into a `StateFile`.
+ *
+ * Extracted from `readState` so both read paths (default branch and state
+ * branch) share the same validation, and so `serialiseState` has a pure
+ * inverse for tests.
+ */
+function parseState(text: string, path: string): StateFile {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(file.text);
+    parsed = JSON.parse(text);
   } catch {
     throw new Error(
       `harmonise: \`${path}\` could not be parsed as JSON — the provenance state file is malformed. ` +
@@ -117,19 +155,18 @@ export async function readState(
     });
   }
 
-  return { state, sha: file.sha };
+  return state;
 }
 
 /**
- * Writes the state file back to the repository.
+ * Serialises a `StateFile` to the JSON string written to disk.
+ *
+ * Extracted from `writeState` so the branch-write path in `main.ts` can
+ * serialise state content for `publishState` without going through the
+ * GitHub API — the same pattern `publishSync` follows for locale files,
+ * where `draft.ts` produces text and `publish.ts` writes it.
  */
-export async function writeState(
-  api: ContentsApi,
-  at: Pick<Location, "owner" | "repo">,
-  path: string,
-  state: StateFile,
-  sha: string | null,
-): Promise<void> {
+export function serialiseState(state: StateFile): string {
   const serialised = state.map((doc) => ({
     id: doc.id,
     files: Object.fromEntries(doc.files),
@@ -139,11 +176,28 @@ export async function writeState(
     conflicts: doc.conflicts,
   }));
 
+  return JSON.stringify(serialised, null, 2) + "\n";
+}
+
+/**
+ * Writes the state file back to the repository.
+ *
+ * Uses `serialiseState` for the JSON conversion — the branch-write path in
+ * `main.ts` calls `serialiseState` directly and writes via `publishState`
+ * instead, so both paths produce the same output.
+ */
+export async function writeState(
+  api: ContentsApi,
+  at: Pick<Location, "owner" | "repo">,
+  path: string,
+  state: StateFile,
+  sha: string | null,
+): Promise<void> {
   await writeContentsFile(
     api,
     at,
     path,
-    JSON.stringify(serialised, null, 2) + "\n",
+    serialiseState(state),
     "harmonise: update provenance state",
     sha,
   );

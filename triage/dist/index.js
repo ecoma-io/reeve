@@ -31749,10 +31749,15 @@ function isCapacityError(error2) {
   const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
   return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
 }
-async function listCorrectionFiles(api, at, path) {
+async function listCorrectionFiles(api, at, path, ref) {
   let data;
   try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+    ({ data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path,
+      ...ref !== void 0 ? { ref } : {}
+    }));
   } catch (error2) {
     if (isMissing(error2)) return [];
     throw error2;
@@ -31762,10 +31767,15 @@ async function listCorrectionFiles(api, at, path) {
     (entry) => typeof entry === "object" && entry !== null && typeof entry.name === "string" && entry.name.endsWith(".ndjson")
   ).map((entry) => ({ path: entry.path, sha: entry.sha }));
 }
-async function readContentsFile(api, at, path) {
+async function readContentsFile(api, at, path, ref) {
   let data;
   try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+    ({ data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path,
+      ...ref !== void 0 ? { ref } : {}
+    }));
   } catch (error2) {
     if (isMissing(error2)) return null;
     throw error2;
@@ -31789,14 +31799,15 @@ var UnreadableContentsFile = class extends Error {
     this.path = path;
   }
 };
-async function writeContentsFile(api, at, path, text2, message, sha) {
+async function writeContentsFile(api, at, path, text2, message, sha, branch) {
   await api.rest.repos.createOrUpdateFileContents({
     owner: at.owner,
     repo: at.repo,
     path,
     message,
     content: Buffer.from(text2, "utf8").toString("base64"),
-    ...sha === null ? {} : { sha }
+    ...sha === null ? {} : { sha },
+    ...branch !== void 0 ? { branch } : {}
   });
 }
 function createEffects(api, at) {
@@ -35113,6 +35124,98 @@ ${body}`);
   ];
 }
 
+// src/core/state-branch.ts
+async function ensureBranch(api, at, branchName) {
+  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+  const defaultBranch = repo.default_branch ?? "main";
+  const { data: baseRef } = await api.rest.git.getRef({
+    owner: at.owner,
+    repo: at.repo,
+    ref: `heads/${defaultBranch}`
+  });
+  const baseSha = baseRef.object.sha;
+  let branchExists = true;
+  try {
+    await api.rest.git.getRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `heads/${branchName}`
+    });
+  } catch (error2) {
+    if (isMissing(error2)) {
+      branchExists = false;
+    } else {
+      throw error2;
+    }
+  }
+  if (!branchExists) {
+    await api.rest.git.createRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `refs/heads/${branchName}`,
+      sha: baseSha
+    });
+    info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
+  } else {
+    const { data: prs } = await api.rest.pulls.list({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      head: `${at.owner}:${branchName}`,
+      per_page: 1
+    });
+    if (prs.length === 0) {
+      await api.rest.git.updateRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `heads/${branchName}`,
+        sha: baseSha,
+        force: true
+      });
+      info(`state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`);
+    }
+  }
+  return { defaultBranch, baseSha };
+}
+async function publishStatePr(api, at, branchName, prTitle, prBody, dryRun) {
+  if (dryRun) {
+    info(`dry-run: would open PR on \`${branchName}\``);
+    return null;
+  }
+  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+  const defaultBranch = repo.default_branch ?? "main";
+  const { data: existing } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${branchName}`,
+    per_page: 1
+  });
+  const existingPr = existing[0];
+  if (existingPr !== void 0) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr.number,
+      title: prTitle,
+      body: prBody
+    });
+    info(`state-branch: updated PR #${String(existingPr.number)}`);
+    return { pr: existingPr.number };
+  }
+  const { data: pr } = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title: prTitle,
+    head: branchName,
+    base: defaultBranch,
+    body: prBody,
+    draft: true
+  });
+  info(`state-branch: opened PR #${String(pr.number)}`);
+  return { pr: pr.number };
+}
+
 // src/core/summary.ts
 function authSection(failures) {
   if (failures.length === 0) return "";
@@ -35375,11 +35478,11 @@ async function gateClose(contentsApi, at, path, repo, thread) {
 // src/duties/triage/store.ts
 import { relative, isAbsolute } from "node:path";
 var WRITE_ATTEMPTS = 3;
-async function writeCorrection(contentsApi, at, path, correction) {
+async function writeCorrection(contentsApi, at, path, correction, stateBranch) {
   const relativePath = repoRelativePath(path);
   for (let attempt = 1; ; attempt += 1) {
     try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
+      await attemptWrite(contentsApi, at, relativePath, correction, stateBranch);
       return;
     } catch (error2) {
       if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error2)) throw error2;
@@ -35399,15 +35502,15 @@ function isProvenShared(existing, correction) {
 function legacyCandidate(existing, correction) {
   return existing.repo === "" && existing.thread === correction.thread && existing.duty === correction.duty;
 }
-async function attemptWrite(contentsApi, at, path, correction) {
-  const files = await listCorrectionFiles(contentsApi, at, path);
+async function attemptWrite(contentsApi, at, path, correction, stateBranch) {
+  const files = await listCorrectionFiles(contentsApi, at, path, stateBranch);
   const unreadable = [];
   let provenShared = false;
   let candidate = null;
   for (const file of files) {
     let read2;
     try {
-      read2 = await readContentsFile(contentsApi, at, file.path);
+      read2 = await readContentsFile(contentsApi, at, file.path, stateBranch);
     } catch (error2) {
       if (!(error2 instanceof UnreadableContentsFile)) throw error2;
       warning(
@@ -35434,7 +35537,8 @@ async function attemptWrite(contentsApi, at, path, correction) {
           `${updated.join("\n").replace(/\n*$/, "")}
 `,
           commitMessage(correction),
-          read2.sha
+          read2.sha,
+          stateBranch
         );
         return;
       }
@@ -35453,7 +35557,8 @@ async function attemptWrite(contentsApi, at, path, correction) {
       `${lines.join("\n").replace(/\n*$/, "")}
 `,
       commitMessage(correction),
-      candidate.sha
+      candidate.sha,
+      stateBranch
     );
     return;
   }
@@ -35462,7 +35567,7 @@ async function attemptWrite(contentsApi, at, path, correction) {
       `#${String(correction.thread)} was not found in any shard this run could read, and ${unreadable.map((shard2) => `\`${shard2}\``).join(", ")} could not be read at all. Appending a fresh entry cannot rule out duplicating one already sitting in the shard this run could not see, so nothing was written \u2014 split the corrections store into smaller shards.`
     );
   }
-  const { shard, existing } = await selectShard(contentsApi, at, path);
+  const { shard, existing } = await selectShard(contentsApi, at, path, stateBranch);
   const text2 = existing === null ? `${formatCorrection(correction)}
 ` : `${existing.text.replace(/\n*$/, "")}
 ${formatCorrection(correction)}
@@ -35473,18 +35578,19 @@ ${formatCorrection(correction)}
     shard,
     text2,
     commitMessage(correction),
-    existing?.sha ?? null
+    existing?.sha ?? null,
+    stateBranch
   );
 }
 var SHARD_SOFT_LIMIT_BYTES = 9e5;
 var MAX_SHARD_ATTEMPTS = 500;
-async function selectShard(contentsApi, at, path) {
+async function selectShard(contentsApi, at, path, stateBranch) {
   const base = `${path.replace(/\/+$/, "")}/${monthShard()}`;
   for (let n = 1; n <= MAX_SHARD_ATTEMPTS; n += 1) {
     const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
     let existing;
     try {
-      existing = await readContentsFile(contentsApi, at, shard);
+      existing = await readContentsFile(contentsApi, at, shard, stateBranch);
     } catch (error2) {
       if (!(error2 instanceof UnreadableContentsFile)) throw error2;
       warning(
@@ -35595,7 +35701,7 @@ async function computePivot(warrant, standing, body, code, settings, stages, wea
   info(pivotNote);
   return { pivot: null, pivotNote };
 }
-async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed) {
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed, stateBranch) {
   const warrant = authority2.warrant;
   let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
   if (by === "sweep" && decidedLabels.length > 0) {
@@ -35687,7 +35793,7 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
       `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
   }
   return {
     recorded: true,
@@ -35699,7 +35805,7 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     unattributable: false
   };
 }
-async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf) {
+async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf, stateBranch) {
   const warrant = authority2.warrant;
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
@@ -35744,7 +35850,7 @@ async function recordReversal(api, at, standing, authority2, settings, stages, w
       `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
   }
   return {
     recorded: true,
@@ -36240,7 +36346,7 @@ async function branchFrozen(api, at, headSha) {
     return { frozen: true, errorReason: error2 instanceof Error ? error2.message : String(error2) };
   }
 }
-async function ensureBranch(api, at, base) {
+async function ensureBranch2(api, at, base) {
   try {
     await api.rest.git.getRef({ owner: at.owner, repo: at.repo, ref: `heads/${BRANCH}` });
     return;
@@ -36477,7 +36583,7 @@ async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
 async function defaultBranchAndReady(api, at) {
   const { data } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
   const base = data.default_branch ?? "main";
-  await ensureBranch(api, at, base);
+  await ensureBranch2(api, at, base);
   return base;
 }
 async function defaultBranchAndReset(api, at) {
@@ -36804,6 +36910,19 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   const { permitted } = narrow(grantedCapabilities, settings.apply);
   const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
+  const stateBranch = settings.stateBranch || void 0;
+  let canRecordToBranch = false;
+  if (stateBranch !== void 0) {
+    canRecordToBranch = recording && permitted.includes("open-pr");
+    if (recording && !permitted.includes("open-pr")) {
+      notice(
+        "triage: `state-branch` is set but `open-pr` is not granted. Corrections will be recorded to the default branch instead."
+      );
+    }
+  }
+  if (canRecordToBranch && !settings.dryRun && stateBranch !== void 0) {
+    await ensureBranch(api, context2.repo, stateBranch);
+  }
   if (!authority2.implicit) {
     await resolveMissingLabels(
       api,
@@ -36846,7 +36965,10 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
           // A sweep imports whatever labels stand on a thread; there is no
           // single labelling event to read a before/after delta from, the
           // same reason `by === "sweep"` skips the S1 enrichment entirely.
-          null
+          null,
+          // Write to the state branch when configured and both `record` and
+          // `open-pr` are granted; otherwise fall back to the default branch.
+          canRecordToBranch ? stateBranch : void 0
         );
         if (outcome2.machineOnly || outcome2.unattributable) return null;
         return { number: thread.number, outcome: describeRecordOutcome(outcome2) };
@@ -36939,7 +37061,8 @@ function readSettings() {
     about: getInput("about"),
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
     maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
-    sweepState: parseSweepState(getInput("sweep-state"))
+    sweepState: parseSweepState(getInput("sweep-state")),
+    stateBranch: getInput("state-branch")
   };
 }
 async function run() {
@@ -36950,6 +37073,7 @@ async function run() {
   let recorded = null;
   let bulk = null;
   let proposeOutcome = null;
+  let statePr = null;
   try {
     const base = readSettings();
     const client = assembleClient(base, meter, ["detect", "screen", "triage", "pivot"], [
@@ -36989,6 +37113,19 @@ async function run() {
           const trigger = recordTrigger();
           const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
           const { permitted } = narrow(grantedCapabilities, settings.apply);
+          const stateBranch = settings.stateBranch || void 0;
+          let canRecordToBranch = false;
+          if (stateBranch !== void 0) {
+            canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
+            if (recordGrantedByRun(permitted) && !permitted.includes("open-pr")) {
+              notice(
+                "triage: `state-branch` is set but `open-pr` is not granted. Corrections will be recorded to the default branch instead."
+              );
+            }
+          }
+          if (canRecordToBranch && !settings.dryRun && stateBranch !== void 0) {
+            await ensureBranch(api, context2.repo, stateBranch);
+          }
           if (!authority2.implicit) {
             await resolveMissingLabels(
               api,
@@ -37028,7 +37165,10 @@ async function run() {
                 stages,
                 weather,
                 senderLogin(),
-                check.reversal.duplicateOf
+                check.reversal.duplicateOf,
+                // Write to the state branch when configured and both `record`
+                // and `open-pr` are granted; otherwise fall back to default.
+                canRecordToBranch ? stateBranch : void 0
               );
             } else {
               outcome = await decide(authority2, standing, settings, stages, weather);
@@ -37043,7 +37183,10 @@ async function run() {
               stages,
               weather,
               senderLogin(),
-              labelChange()
+              labelChange(),
+              // Write to the state branch when configured and both `record`
+              // and `open-pr` are granted; otherwise fall back to default.
+              canRecordToBranch ? stateBranch : void 0
             );
           } else {
             outcome = await decide(authority2, standing, settings, stages, weather);
@@ -37064,12 +37207,55 @@ async function run() {
         single = { number, outcome, done };
       }
     }
+    const branchForPr = settings.stateBranch || void 0;
+    if (branchForPr !== void 0 && !settings.dryRun) {
+      const prPermitted = narrow(
+        authority2.warrant.granted("triage", DEFAULT_CAPABILITIES),
+        settings.apply
+      ).permitted.includes("open-pr");
+      const correctionsRecorded = settings.sweep ? bulk !== null && bulk.recording && bulk.results.length > 0 : recorded !== null;
+      if (prPermitted && correctionsRecorded) {
+        try {
+          const threadRef = settings.sweep ? "a bulk migration sweep" : `#${String(recorded.number)}`;
+          const prBody = `## triage corrections
+
+Recorded corrections during ${threadRef}.
+
+`;
+          const prTitle = "triage: corrections";
+          const result = await publishStatePr(
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- TrackerApi & ContentsApi does not structurally satisfy StateBranchApi (missing git, pulls)
+            api,
+            context2.repo,
+            branchForPr,
+            prTitle,
+            prBody,
+            false
+          );
+          if (result !== null) {
+            statePr = result.pr;
+            info(
+              `triage: corrections written to \`${branchForPr}\`, PR #${String(result.pr)}`
+            );
+          }
+        } catch (error2) {
+          if (isCapacityError(error2)) {
+            warning(
+              "triage: could not open state-branch PR \u2014 capacity error. Corrections were written to the branch but no PR was opened."
+            );
+          } else {
+            throw error2;
+          }
+        }
+      }
+    }
     settleAuth(weather);
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
     if (settings !== null) {
       const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
+      setOutput("state-pr", statePr !== null ? String(statePr) : "");
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);
         await writeRunSummary(

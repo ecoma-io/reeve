@@ -66,10 +66,12 @@ import {
   markStale,
   markSynced,
   readState,
+  serialiseState,
   writeState,
   type DocumentState,
 } from "./provenance.js";
 import { publishSync, type PublishApi, type SyncResult } from "./publish.js";
+import { publishState, type StateBranchApi } from "../../core/state-branch.js";
 import { scoreDraft } from "./score.js";
 import { summarize, type GroupResult } from "./summary.js";
 
@@ -91,6 +93,7 @@ export interface Settings {
   readonly judgeNames: Names;
   readonly drafts: number;
   readonly state: string;
+  readonly stateBranch: string;
   readonly glossary: string;
   readonly paths: readonly string[];
   readonly dryRun: boolean;
@@ -115,6 +118,7 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
     state: core.getInput("state", { required: true }),
+    stateBranch: core.getInput("state-branch"),
     glossary: core.getInput("glossary", { required: true }),
     paths: parsePaths(core.getInput("paths")),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
@@ -139,6 +143,7 @@ export async function run(): Promise<void> {
   let settings: Settings | null = null;
   let authority: Authority | null = null;
   const groupResults: GroupResult[] = [];
+  let statePr: number | null = null;
 
   try {
     const base = readSettings();
@@ -255,7 +260,12 @@ export async function run(): Promise<void> {
     }
 
     // Read provenance state
-    const { state, sha: stateSha } = await readState(api, context.repo, settings.state);
+    const { state, sha: stateSha } = await readState(
+      api,
+      context.repo,
+      settings.state,
+      settings.stateBranch || undefined,
+    );
 
     // Load glossary
     const glossary = await loadGlossary(api, context.repo, settings.glossary);
@@ -280,7 +290,48 @@ export async function run(): Promise<void> {
     // Write updated state
     if (!settings.dryRun) {
       try {
-        await writeState(api, context.repo, settings.state, state, stateSha);
+        if (settings.stateBranch !== "") {
+          // Branch-write path: write state file to the state branch via publishState
+          const canWriteBranch =
+            settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");
+
+          if (!canWriteBranch) {
+            core.notice(
+              "harmonise: `state-branch` is set but `edit-file` and `open-pr` are not both granted. " +
+                "Provenance state will not be written to the branch.",
+            );
+          } else {
+            const stateContent = serialiseState(state);
+            const stateFiles = [
+              {
+                path: settings.state,
+                content: stateContent,
+                message: "harmonise: update provenance state",
+              },
+            ];
+
+            const stateBranchApi = api as unknown as StateBranchApi;
+            const result = await publishState(
+              stateBranchApi,
+              context.repo,
+              settings.stateBranch,
+              stateFiles,
+              "harmonise: provenance state",
+              "## harmonise provenance state\n\nUpdated provenance state file.",
+              false,
+            );
+
+            if (result !== null) {
+              statePr = result.pr;
+              core.info(
+                `harmonise: state written to \`${settings.stateBranch}\`, PR #${String(result.pr)}`,
+              );
+            }
+          }
+        } else {
+          // Default-branch write path: write state directly
+          await writeState(api, context.repo, settings.state, state, stateSha);
+        }
       } catch (error) {
         if (isCapacityError(error)) {
           core.warning(
@@ -331,6 +382,7 @@ export async function run(): Promise<void> {
       );
       core.setOutput("starved", String(rosterStarved));
       core.setOutput("budget-exhausted", String(false));
+      core.setOutput("state-pr", statePr !== null ? String(statePr) : "");
 
       await writeRunSummary(
         summarize({

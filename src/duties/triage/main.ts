@@ -120,6 +120,7 @@ import {
 import { recallCorrections } from "../../core/recall.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
+import { ensureBranch, publishStatePr, type StateBranchApi } from "../../core/state-branch.js";
 import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import {
   newAccumulator as newCoreAccumulator,
@@ -286,6 +287,29 @@ async function runSweep(
   const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
 
+  // When state-branch is set, open-pr must also be granted — the branch-write
+  // path opens a draft PR, and recording without it would commit corrections
+  // to a branch that nobody is asked to review. The gate is on top of
+  // `record` (already checked above as `recording`): both `record` and
+  // `open-pr` must be in `permitted` for a branch-write to go ahead.
+  const stateBranch = settings.stateBranch || undefined;
+  let canRecordToBranch = false;
+  if (stateBranch !== undefined) {
+    canRecordToBranch = recording && permitted.includes("open-pr");
+    if (recording && !permitted.includes("open-pr")) {
+      core.notice(
+        "triage: `state-branch` is set but `open-pr` is not granted. " +
+          "Corrections will be recorded to the default branch instead.",
+      );
+    }
+  }
+
+  // Ensure the state branch exists before any recording writes to it — the
+  // Contents API's `branch` parameter fails if the ref does not exist.
+  if (canRecordToBranch && !settings.dryRun && stateBranch !== undefined) {
+    await ensureBranch(api as unknown as StateBranchApi, context.repo, stateBranch);
+  }
+
   if (!authority.implicit) {
     // `settings.taxonomy`, not the warrant's whole one: a sweep scoped to one
     // area's `labels` subset is checked only against its own area, so a label
@@ -346,6 +370,9 @@ async function runSweep(
           // single labelling event to read a before/after delta from, the
           // same reason `by === "sweep"` skips the S1 enrichment entirely.
           null,
+          // Write to the state branch when configured and both `record` and
+          // `open-pr` are granted; otherwise fall back to the default branch.
+          canRecordToBranch ? stateBranch : undefined,
         );
         // The self-training guard's own skip — machine-applied labels, or a
         // label history too long for this run to attribute — counted the same
@@ -509,6 +536,7 @@ function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
     minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
     sweepState: parseSweepState(core.getInput("sweep-state")),
+    stateBranch: core.getInput("state-branch"),
   };
 }
 
@@ -529,6 +557,7 @@ export async function run(): Promise<void> {
   let recorded: { readonly number: number; readonly outcome: RecordOutcome } | null = null;
   let bulk: SweepAccumulator | null = null;
   let proposeOutcome: ProposeReport | null = null;
+  let statePr: number | null = null;
 
   try {
     const base = readSettings();
@@ -610,6 +639,29 @@ export async function run(): Promise<void> {
           const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
           const { permitted } = narrow(grantedCapabilities, settings.apply);
 
+          // When state-branch is set, open-pr must also be granted — the
+          // branch-write path opens a draft PR, and recording without it would
+          // commit corrections to a branch that nobody is asked to review.
+          const stateBranch = settings.stateBranch || undefined;
+          let canRecordToBranch = false;
+          if (stateBranch !== undefined) {
+            canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
+            if (recordGrantedByRun(permitted) && !permitted.includes("open-pr")) {
+              core.notice(
+                "triage: `state-branch` is set but `open-pr` is not granted. " +
+                  "Corrections will be recorded to the default branch instead.",
+              );
+            }
+          }
+
+          // Ensure the state branch exists before any recording writes to it —
+          // the Contents API's `branch` parameter fails if the ref does not
+          // exist.
+          if (canRecordToBranch && !settings.dryRun && stateBranch !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- TrackerApi & ContentsApi does not structurally satisfy StateBranchApi (missing git, pulls)
+            await ensureBranch(api as unknown as StateBranchApi, context.repo, stateBranch);
+          }
+
           if (!authority.implicit) {
             // Against the repository's own labels, so a taxonomy naming one
             // that was renamed fails as the configuration problem it is, rather
@@ -682,6 +734,9 @@ export async function run(): Promise<void> {
                 weather,
                 senderLogin(),
                 check.reversal.duplicateOf,
+                // Write to the state branch when configured and both `record`
+                // and `open-pr` are granted; otherwise fall back to default.
+                canRecordToBranch ? stateBranch : undefined,
               );
             } else {
               outcome = await decide(authority, standing, settings, stages, weather);
@@ -697,6 +752,9 @@ export async function run(): Promise<void> {
               weather,
               senderLogin(),
               labelChange(),
+              // Write to the state branch when configured and both `record`
+              // and `open-pr` are granted; otherwise fall back to default.
+              canRecordToBranch ? stateBranch : undefined,
             );
           } else {
             outcome = await decide(authority, standing, settings, stages, weather);
@@ -721,6 +779,64 @@ export async function run(): Promise<void> {
       }
     }
 
+    // Open or update the state-branch PR, now that all corrections have been
+    // written to it. The PR wraps the branch's commits for maintainer review;
+    // without it, corrections sit on the branch with nobody asked to merge.
+    // This only fires when corrections were actually written to the branch —
+    // the `open-pr` gate in `runSweep`/single-thread already ensured that
+    // corrections land on the default branch when `open-pr` is not granted,
+    // so there is nothing on the state branch to open a PR for.
+    const branchForPr = settings.stateBranch || undefined;
+    if (branchForPr !== undefined && !settings.dryRun) {
+      // Re-check whether `open-pr` was permitted — the gate that decided
+      // whether corrections went to the branch in the first place. When it
+      // was not, corrections went to the default branch and there is no
+      // branch PR to open.
+      const prPermitted = narrow(
+        authority.warrant.granted("triage", DEFAULT_CAPABILITIES),
+        settings.apply,
+      ).permitted.includes("open-pr");
+
+      const correctionsRecorded = settings.sweep
+        ? bulk !== null && bulk.recording && bulk.results.length > 0
+        : recorded !== null;
+
+      if (prPermitted && correctionsRecorded) {
+        try {
+          const threadRef = settings.sweep
+            ? "a bulk migration sweep"
+            : `#${String((recorded as { readonly number: number }).number)}`;
+          const prBody =
+            "## triage corrections\n\n" + `Recorded corrections during ${threadRef}.\n\n`;
+          const prTitle = "triage: corrections";
+          const result = await publishStatePr(
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- TrackerApi & ContentsApi does not structurally satisfy StateBranchApi (missing git, pulls)
+            api as unknown as StateBranchApi,
+            context.repo,
+            branchForPr,
+            prTitle,
+            prBody,
+            false,
+          );
+          if (result !== null) {
+            statePr = result.pr;
+            core.info(
+              `triage: corrections written to \`${branchForPr}\`, PR #${String(result.pr)}`,
+            );
+          }
+        } catch (error) {
+          if (isCapacityError(error)) {
+            core.warning(
+              "triage: could not open state-branch PR — capacity error. " +
+                "Corrections were written to the branch but no PR was opened.",
+            );
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+
     // Deferred half of the multi-endpoint amendment to D12: a single-endpoint
     // run never reaches this with anything to say — `reckon` already threw
     // the moment its one endpoint answered unauthenticated. Only fires once
@@ -733,6 +849,7 @@ export async function run(): Promise<void> {
     // request was made, and a page saying so would be a page about a typo.
     if (settings !== null) {
       const rosterStarved = warnIfStarved(settings.models, weather, settings.sweep);
+      core.setOutput("state-pr", statePr !== null ? String(statePr) : "");
 
       if (settings.sweep && bulk !== null) {
         reportSweep(bulk, rosterStarved);

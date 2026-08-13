@@ -269,6 +269,7 @@ export async function recordCorrection(
   weather: Weather,
   by: string,
   changed: { readonly label: string; readonly action: "labeled" | "unlabeled" } | null,
+  stateBranch?: string,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
 
@@ -403,7 +404,7 @@ export async function recordCorrection(
         `${pivot !== null ? ", with a pivot rendering" : ""} — dry run, nothing committed.`,
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
   }
 
   return {
@@ -446,6 +447,7 @@ export async function recordReversal(
   weather: Weather,
   by: string,
   duplicateOf: number,
+  stateBranch?: string,
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
 
@@ -503,7 +505,7 @@ export async function recordReversal(
         `duplicate of #${String(duplicateOf)} — dry run, nothing committed.`,
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction);
+    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
   }
 
   return {
