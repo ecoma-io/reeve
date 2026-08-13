@@ -185,7 +185,7 @@ inputs:
     required: false
     default: ""
 
-  corrections:
+  corrections-dir:
     description: >-
       A directory of `.ndjson` files recording decisions a maintainer made
       after a run. The nearest few are shown to the model as examples of how

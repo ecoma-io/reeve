@@ -292,7 +292,7 @@ async function runSweep(
   // to a branch that nobody is asked to review. The gate is on top of
   // `record` (already checked above as `recording`): both `record` and
   // `open-pr` must be in `permitted` for a branch-write to go ahead.
-  const stateBranch = settings.stateBranch || undefined;
+  const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : undefined;
   let canRecordToBranch = false;
   if (stateBranch !== undefined) {
     canRecordToBranch = recording && permitted.includes("open-pr");
@@ -392,7 +392,7 @@ async function runSweep(
             outcome,
             api,
             at,
-            settings.corrections,
+            settings.correctionsDir,
           );
       return { number: thread.number, outcome: describeOutcome(outcome, done) };
     },
@@ -531,7 +531,7 @@ function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
     warrant: core.getInput("warrant", { required: true }),
     apply: parseApply(core.getInput("apply", { required: true })),
     confidence: fraction("confidence", core.getInput("confidence")),
-    corrections: core.getInput("corrections", { required: true }),
+    correctionsDir: core.getInput("corrections-dir", { required: true }),
     about: core.getInput("about"),
     minBodyChars: counted("min-body-chars", core.getInput("min-body-chars")),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
@@ -642,7 +642,7 @@ export async function run(): Promise<void> {
           // When state-branch is set, open-pr must also be granted — the
           // branch-write path opens a draft PR, and recording without it would
           // commit corrections to a branch that nobody is asked to review.
-          const stateBranch = settings.stateBranch || undefined;
+          const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : undefined;
           let canRecordToBranch = false;
           if (stateBranch !== undefined) {
             canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
@@ -773,7 +773,7 @@ export async function run(): Promise<void> {
               outcome,
               api,
               at,
-              settings.corrections,
+              settings.correctionsDir,
             );
         single = { number, outcome, done };
       }
@@ -786,7 +786,7 @@ export async function run(): Promise<void> {
     // the `open-pr` gate in `runSweep`/single-thread already ensured that
     // corrections land on the default branch when `open-pr` is not granted,
     // so there is nothing on the state branch to open a PR for.
-    const branchForPr = settings.stateBranch || undefined;
+    const branchForPr = settings.stateBranch !== "" ? settings.stateBranch : undefined;
     if (branchForPr !== undefined && !settings.dryRun) {
       // Re-check whether `open-pr` was permitted — the gate that decided
       // whether corrections went to the branch in the first place. When it
@@ -971,7 +971,7 @@ async function decide(
 
   const memory = await recallCorrections({
     count: warrant.memory?.recall ?? RECALLED,
-    path: settings.corrections,
+    path: settings.correctionsDir,
     title: standing.title,
     body,
     language: threadLanguage,
@@ -999,7 +999,7 @@ async function decide(
   if (memory.read) {
     core.info(
       `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) ` +
-        `from \`${settings.corrections}\`` +
+        `from \`${settings.correctionsDir}\`` +
         (pivotRecalled > 0
           ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.`
           : "."),

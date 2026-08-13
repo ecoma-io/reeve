@@ -569,7 +569,7 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     warrant,
     apply: "label",
     confidence: "0.75",
-    corrections,
+    "corrections-dir": corrections,
     "min-body-chars": "40",
     "max-body-chars": "6000",
     about: "",
@@ -934,7 +934,7 @@ describe("the action", () => {
     // suite.
     const closed = await runAction(stub, {
       apply: "label, close",
-      corrections: ".reeve/corrections",
+      "corrections-dir": ".reeve/corrections",
     });
 
     expect(closed.code).toBe(0);
@@ -1316,7 +1316,7 @@ describe("labels", () => {
 
         const run = await runAction(
           stub,
-          { labels: "docs", apply: "label, record", corrections: CORRECTIONS },
+          { labels: "docs", apply: "label, record", "corrections-dir": CORRECTIONS },
           { GITHUB_EVENT_PATH: event },
         );
 
@@ -1350,7 +1350,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1379,7 +1379,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1430,7 +1430,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1474,7 +1474,7 @@ describe("record", () => {
 
       const run = await runAction(
         stub,
-        { apply: "label, record", corrections: CORRECTIONS },
+        { apply: "label, record", "corrections-dir": CORRECTIONS },
         { GITHUB_EVENT_PATH: event },
       );
 
@@ -1533,7 +1533,7 @@ describe("record", () => {
 
       const run = await runAction(
         stub,
-        { apply: "label, record", corrections: CORRECTIONS },
+        { apply: "label, record", "corrections-dir": CORRECTIONS },
         { GITHUB_EVENT_PATH: event },
       );
 
@@ -1590,7 +1590,7 @@ describe("record", () => {
 
       const run = await runAction(
         stub,
-        { apply: "label, record", corrections: CORRECTIONS },
+        { apply: "label, record", "corrections-dir": CORRECTIONS },
         { GITHUB_EVENT_PATH: event },
       );
 
@@ -1641,7 +1641,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1673,7 +1673,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1701,7 +1701,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1725,7 +1725,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1749,7 +1749,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1781,7 +1781,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1816,7 +1816,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1843,7 +1843,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1862,7 +1862,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1889,7 +1889,11 @@ describe("record", () => {
     // and the workflow leaves `apply` at its default of `label` alone — the
     // exact configuration a maintainer following the docs but forgetting the
     // second half would end up with.
-    const run = await runAction(stub, { corrections: CORRECTIONS }, { GITHUB_EVENT_PATH: event });
+    const run = await runAction(
+      stub,
+      { "corrections-dir": CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
 
     expect(run.code).toBe(0);
     expect(run.outputs.recorded).toBe("false");
@@ -1909,7 +1913,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1928,7 +1932,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1952,7 +1956,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1968,7 +1972,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: `${workspace}/${CORRECTIONS}` },
+      { apply: "label, record", "corrections-dir": `${workspace}/${CORRECTIONS}` },
       { GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: workspace },
     );
 
@@ -1986,7 +1990,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: "/etc/reeve/corrections" },
+      { apply: "label, record", "corrections-dir": "/etc/reeve/corrections" },
       { GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: "/home/runner/work/reeve/reeve" },
     );
 
@@ -2004,7 +2008,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2030,7 +2034,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2047,7 +2051,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS, "dry-run": "true" },
+      { apply: "label, record", "corrections-dir": CORRECTIONS, "dry-run": "true" },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2068,7 +2072,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: path },
     );
 
@@ -2088,7 +2092,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_NAME: "issue_comment", GITHUB_EVENT_PATH: event },
     );
 
@@ -2117,7 +2121,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2164,7 +2168,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2194,7 +2198,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2217,7 +2221,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2247,7 +2251,10 @@ describe("record", () => {
       verdict({ labels: ["bug"], duplicate_of: 7, confidence: 0.95, rationale: "Same issue." }),
     );
 
-    const run = await runAction(stub, { apply: "label, record, close", corrections: CORRECTIONS });
+    const run = await runAction(stub, {
+      apply: "label, record, close",
+      "corrections-dir": CORRECTIONS,
+    });
 
     expect(run.code).toBe(0);
     // The gate refused the close — it cannot prove the reversal does not exist
@@ -2270,7 +2277,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", corrections: CORRECTIONS },
+      { apply: "label, record", "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2727,7 +2734,7 @@ describe("the sweep", () => {
 
         const run = await runAction(
           stub,
-          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+          sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
         );
 
         expect(run.code).toBe(0);
@@ -2769,7 +2776,7 @@ describe("the sweep", () => {
 
       const run = await runAction(
         stub,
-        sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+        sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
       );
 
       expect(run.code).toBe(0);
@@ -2807,7 +2814,7 @@ describe("the sweep", () => {
 
         const run = await runAction(
           stub,
-          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+          sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
         );
 
         expect(run.code).toBe(0);
@@ -2841,7 +2848,7 @@ describe("the sweep", () => {
 
         const run = await runAction(
           stub,
-          sweepInputs({ apply: "label, record", corrections: CORRECTIONS }),
+          sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
         );
 
         expect(run.code).toBe(0);
@@ -2869,7 +2876,7 @@ describe("the sweep", () => {
         await writeFile(warrantPath, RECORDING_WARRANT);
         stub.issues = [candidate(901, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
 
-        const run = await runAction(stub, sweepInputs({ corrections: CORRECTIONS }));
+        const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
 
         expect(run.code).toBe(0);
         expect(run.outputs.recorded).toBe("false");

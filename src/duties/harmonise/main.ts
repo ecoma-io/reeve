@@ -102,9 +102,9 @@ export interface Settings {
   readonly judges: readonly (readonly string[])[];
   readonly judgeNames: Names;
   readonly drafts: number;
-  readonly state: string;
+  readonly provenanceDir: string;
   readonly stateBranch: string;
-  readonly glossary: string;
+  readonly glossaryDir: string;
   readonly paths: readonly string[];
   readonly dryRun: boolean;
   readonly maxRequests: number | null;
@@ -128,9 +128,9 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
-    state: core.getInput("state", { required: true }),
+    provenanceDir: core.getInput("provenance-dir", { required: true }),
     stateBranch: core.getInput("state-branch"),
-    glossary: core.getInput("glossary", { required: true }),
+    glossaryDir: core.getInput("glossary-dir", { required: true }),
     paths: parsePaths(core.getInput("paths")),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     chunkChars: counted("chunk-chars", core.getInput("chunk-chars")),
@@ -276,15 +276,16 @@ export async function run(): Promise<void> {
     }
 
     // Read provenance state
+    const provenancePath = `${settings.provenanceDir}/state.json`;
     const { state, sha: stateSha } = await readState(
       api,
       context.repo,
-      settings.state,
-      settings.stateBranch || undefined,
+      provenancePath,
+      settings.stateBranch !== "" ? settings.stateBranch : undefined,
     );
 
     // Load glossary
-    const glossary = await loadGlossary(api, context.repo, settings.glossary);
+    const glossary = await loadGlossary(api, context.repo, settings.glossaryDir);
 
     // Process each document group
     for (const group of groups) {
@@ -334,7 +335,7 @@ export async function run(): Promise<void> {
             const stateContent = serialiseState(state);
             const stateFiles = [
               {
-                path: settings.state,
+                path: provenancePath,
                 content: stateContent,
                 message: "harmonise: update provenance state",
               },
@@ -360,7 +361,7 @@ export async function run(): Promise<void> {
           }
         } else {
           // Default-branch write path: write state directly
-          await writeState(api, context.repo, settings.state, state, stateSha);
+          await writeState(api, context.repo, provenancePath, state, stateSha);
         }
       } catch (error) {
         if (isCapacityError(error)) {
@@ -780,7 +781,7 @@ async function listMarkdownFiles(
 }
 
 /**
- * Loads the glossary from `.reeve/glossary.yml`.
+ * Loads the glossary from the `glossary-dir` input.
  *
  * Returns empty when the file does not exist — a missing glossary is not an
  * error, it just means there are no project-specific terms to protect.

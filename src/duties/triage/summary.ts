@@ -110,7 +110,7 @@ export interface RecordRun {
   readonly pivot: boolean;
   /** Why a pivot rendering was not produced, when one was attempted and was not. */
   readonly pivotNote: string | null;
-  readonly corrections: string;
+  readonly correctionsDir: string;
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly screenNames: Names;
@@ -129,7 +129,7 @@ export function summarizeRecord(run: RecordRun): string {
     `Thread #${String(run.thread)}${run.dryRun ? " — **dry run**, nothing was committed" : ""}.`,
     "",
     run.recorded
-      ? `${run.dryRun ? "Would have recorded" : "Recorded"} to \`${run.corrections}\` as ` +
+      ? `${run.dryRun ? "Would have recorded" : "Recorded"} to \`${run.correctionsDir}\` as ` +
         (run.decided.length > 0
           ? run.decided.map((name) => `\`${name}\``).join(", ")
           : "no labels") +

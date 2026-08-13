@@ -256,7 +256,7 @@ function settingsOf(over: Partial<Settings> = {}): Settings {
     taxonomy: [labelOf({ name: "bug" }), labelOf({ name: "docs" })],
     apply: ["label", "record"],
     confidence: 0.75,
-    corrections: "corrections",
+    correctionsDir: "corrections",
     about: "",
     minBodyChars: 0,
     maxBodyChars: null,
@@ -1052,7 +1052,7 @@ describe("recordReversal", () => {
   it("passes stateBranch to writeCorrection", async () => {
     const { api, writes } = apiOf();
     const standing = standingOf({ labels: ["bug"] });
-    const branch = "reeve/state";
+    const branch = "reeve/corrections";
 
     await recordReversal(
       api,
@@ -1076,7 +1076,7 @@ describe("recordCorrection with stateBranch", () => {
   it("passes stateBranch to writeCorrection", async () => {
     const { api, writes } = apiOf();
     const standing = standingOf({ labels: ["bug"] });
-    const branch = "reeve/state";
+    const branch = "reeve/corrections";
 
     await recordCorrection(
       api,

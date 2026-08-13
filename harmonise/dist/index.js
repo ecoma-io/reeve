@@ -34597,9 +34597,9 @@ function readSettings() {
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", getInput("drafts")),
-    state: getInput("state", { required: true }),
+    provenanceDir: getInput("provenance-dir", { required: true }),
     stateBranch: getInput("state-branch"),
-    glossary: getInput("glossary", { required: true }),
+    glossaryDir: getInput("glossary-dir", { required: true }),
     paths: parsePaths(getInput("paths")),
     maxRequests: bounded("max-requests", getInput("max-requests")),
     chunkChars: counted("chunk-chars", getInput("chunk-chars"))
@@ -34697,13 +34697,14 @@ async function run() {
       settleAuth(weather);
       return;
     }
+    const provenancePath = `${settings.provenanceDir}/state.json`;
     const { state, sha: stateSha } = await readState(
       api,
       context2.repo,
-      settings.state,
-      settings.stateBranch || void 0
+      provenancePath,
+      settings.stateBranch !== "" ? settings.stateBranch : void 0
     );
-    const glossary = await loadGlossary(api, context2.repo, settings.glossary);
+    const glossary = await loadGlossary(api, context2.repo, settings.glossaryDir);
     for (const group of groups) {
       if (budgetExhausted(settings, meter, budget)) {
         warning(
@@ -34741,7 +34742,7 @@ async function run() {
             const stateContent = serialiseState(state);
             const stateFiles = [
               {
-                path: settings.state,
+                path: provenancePath,
                 content: stateContent,
                 message: "harmonise: update provenance state"
               }
@@ -34764,7 +34765,7 @@ async function run() {
             }
           }
         } else {
-          await writeState(api, context2.repo, settings.state, state, stateSha);
+          await writeState(api, context2.repo, provenancePath, state, stateSha);
         }
       } catch (error2) {
         if (isCapacityError(error2)) {

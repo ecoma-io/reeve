@@ -117,29 +117,29 @@ a supported configuration), but almost every real provider needs one — see
 
 Every input `harmonise/action.yml` declares.
 
-| Input             | Required | Default                       | What it does                                                                                                                                                                                                                                                 |
-| ----------------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `github-token`    | no       | `${{ github.token }}`         | Token used to read and write repository files and pull requests.                                                                                                                                                                                             |
-| `base-url`        | no       | `https://api.openai.com/v1`   | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                           |
-| `api-key`         | no       | _(empty)_                     | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                              |
-| `models`          | **yes**  | —                             | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                                                                                        |
-| `source-language` | no       | `en`                          | The locale code of the source language — the language the unsuffixed documentation files are written in. A deliberate organisational decision, not an incidental preference.                                                                                 |
-| `languages`       | no       | `vi, zh`                      | The target locale codes the documentation is translated into. The source language must NOT appear here — it is a separate input. Ignored once the warrant's own `languages:` key is written.                                                                 |
-| `warrant`         | no       | `.github/reeve.yml`           | Where `edit-file` and `open-pr` are granted. Missing at this default path is not a failure.                                                                                                                                                                  |
-| `apply`           | no       | `none`                        | What this run may do: `edit-file, open-pr`, or `none` to decide and report without touching the repository. The narrower of this and the warrant file wins.                                                                                                  |
-| `drafts`          | no       | `1`                           | Attempts per stale locale, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                                                                                               |
-| `judge-models`    | no       | _(empty)_                     | A panel asked which draft reads best. Seats, not a fallback list — see [`translate`](translate.md#configuration) for the full grammar.                                                                                                                       |
-| `state`           | no       | `.reeve/harmonise-state.json` | Where provenance state lives — per-document sync status and source revision tracking.                                                                                                                                                                        |
-| `state-branch`    | no       | _(empty)_                     | A branch to write provenance state to, instead of the default branch. When set, the state file is committed to this branch and a draft PR is opened for review. `edit-file` and `open-pr` must both be granted. Empty writes directly to the default branch. |
-| `glossary`        | no       | `.reeve/glossary.yml`         | A glossary of project-specific terms that translations must respect. Overrides = bug.                                                                                                                                                                        |
-| `paths`           | no       | _(empty)_                     | Doc paths to scan for locale variants. Empty scans the whole repository. Comma or newline separated.                                                                                                                                                         |
-| `dry-run`         | no       | `false`                       | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                  |
-| `max-requests`    | no       | `none`                        | How many provider requests — classification, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                                                                      |
-| `endpoints`       | no       | _(empty)_                     | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                              |
-| `api-keys`        | no       | _(empty)_                     | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                   |
-| `request-timeout` | no       | `120s`                        | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                             |
-| `chunk-chars`     | no       | `0`                           | Maximum character budget per drafting request. When above zero, source and target are split into chunks at Markdown boundaries and each chunk is drafted independently. Zero sends the whole document in one request.                                        |
-| `temperature`     | no       | _(empty)_                     | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                 |
+| Input             | Required | Default                     | What it does                                                                                                                                                                                                                                                 |
+| ----------------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `github-token`    | no       | `${{ github.token }}`       | Token used to read and write repository files and pull requests.                                                                                                                                                                                             |
+| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                           |
+| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                              |
+| `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                                                                                        |
+| `source-language` | no       | `en`                        | The locale code of the source language — the language the unsuffixed documentation files are written in. A deliberate organisational decision, not an incidental preference.                                                                                 |
+| `languages`       | no       | `vi, zh`                    | The target locale codes the documentation is translated into. The source language must NOT appear here — it is a separate input. Ignored once the warrant's own `languages:` key is written.                                                                 |
+| `warrant`         | no       | `.github/reeve.yml`         | Where `edit-file` and `open-pr` are granted. Missing at this default path is not a failure.                                                                                                                                                                  |
+| `apply`           | no       | `none`                      | What this run may do: `edit-file, open-pr`, or `none` to decide and report without touching the repository. The narrower of this and the warrant file wins.                                                                                                  |
+| `drafts`          | no       | `1`                         | Attempts per stale locale, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                                                                                               |
+| `judge-models`    | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see [`translate`](translate.md#configuration) for the full grammar.                                                                                                                       |
+| `provenance-dir`  | no       | `.reeve/provenance`         | Directory for provenance state — per-document sync status and source revision tracking. The state file lives at `${provenance-dir}/state.json`.                                                                                                              |
+| `state-branch`    | no       | `reeve/provenance`          | A branch to write provenance state to, instead of the default branch. When set, the state file is committed to this branch and a draft PR is opened for review. `edit-file` and `open-pr` must both be granted. Empty writes directly to the default branch. |
+| `glossary-dir`    | no       | `.reeve/glossary.yml`       | A glossary of project-specific terms that translations must respect. Overrides = bug.                                                                                                                                                                        |
+| `paths`           | no       | _(empty)_                   | Doc paths to scan for locale variants. Empty scans the whole repository. Comma or newline separated.                                                                                                                                                         |
+| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                  |
+| `max-requests`    | no       | `none`                      | How many provider requests — classification, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                                                                      |
+| `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                              |
+| `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                   |
+| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                             |
+| `chunk-chars`     | no       | `0`                         | Maximum character budget per drafting request. When above zero, source and target are split into chunks at Markdown boundaries and each chunk is drafted independently. Zero sends the whole document in one request.                                        |
+| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                 |
 
 **`source-language` names the authoritative locale.** The unsuffixed files —
 like `docs/getting-started.md` — are written in this language. Unlike
@@ -154,8 +154,8 @@ list — it is a separate `source-language` input. The list says which
 translations belong to the same document group; it says nothing about what
 language a contributor may write in.
 
-**`state` tracks provenance.** `.reeve/harmonise-state.json` records the
-source revision and per-locale sync status for each document group. When a
+**`provenance-dir` tracks provenance.** `.reeve/provenance/state.json` records
+the source revision and per-locale sync status for each document group. When a
 source file's SHA changes from the recorded revision, target locales are
 marked stale. If a target locale has been edited by a human since the last
 sync, the run reports a conflict — it does not overwrite. Delete the state
@@ -166,10 +166,10 @@ both `edit-file` and `open-pr` are granted, the state file is committed to
 this branch and a draft PR is opened for maintainer review, instead of
 writing directly to the default branch. When `open-pr` is not granted, the
 state file still lands on the default branch and a notice says so — the write
-is not lost, only the PR wrapping it. Empty writes directly to the default
-branch, which is the existing behaviour.
+is not lost, only the PR wrapping it. Set `state-branch: ""` to write
+directly to the default branch.
 
-**`glossary` enforces project terms.** `.reeve/glossary.yml` lists terms
+**`glossary-dir` enforces project terms.** `.reeve/glossary.yml` lists terms
 that must not be translated — proper nouns, technical jargon, brand names.
 A draft that replaces a glossary term is a bug, not a creative choice. The
 file is read before every translation, not cached between runs.
@@ -304,7 +304,7 @@ spend more for a better sync; both default to the cheapest setting. See
   sanitiser is needed.
 - **Human edits are inviolable.** A target locale edited by a human since
   the last sync is reported as a conflict, never overwritten. This is D3.
-- **Provenance is a file in the repository.** `.reeve/harmonise-state.json`
+- **Provenance is a file in the repository.** `.reeve/provenance/state.json`
   is the source of truth for sync status. Tampering with it is a
   configuration issue, not a security boundary — the file is committed
   alongside the docs it tracks.
@@ -313,9 +313,9 @@ spend more for a better sync; both default to the cheapest setting. See
   pattern are never modified, regardless of what a model suggests.
 - **No direct commits to the default branch for sync PRs.** Every sync lands
   in a pull request on a `reeve/harmonise/` branch. Human review is required
-  before merge. Provenance state is written to the default branch by default,
-  but setting `state-branch` moves it to a dedicated branch with its own draft
-  PR instead.
+  before merge. Provenance state is written to a dedicated branch (`reeve/provenance`
+  by default) with its own draft PR; set `state-branch: ""` to write directly
+  to the default branch instead.
 - **What it will never do:** overwrite a human edit; translate a file that is
   not a locale variant; merge its own PR. See
   [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).

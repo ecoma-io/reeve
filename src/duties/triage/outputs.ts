@@ -186,7 +186,7 @@ export function recordPage(
     decided: outcome.decided,
     pivot: outcome.pivot,
     pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
+    correctionsDir: settings.correctionsDir,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames,

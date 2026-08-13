@@ -296,7 +296,7 @@ function recordRun(over: Partial<RecordRun> = {}): RecordRun {
     decided: ["bug"],
     pivot: false,
     pivotNote: null,
-    corrections: ".reeve/corrections",
+    correctionsDir: ".reeve/corrections",
     spent: [],
     modelNames: new Map(),
     screenNames: new Map(),

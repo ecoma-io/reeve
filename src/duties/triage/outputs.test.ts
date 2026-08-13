@@ -69,7 +69,7 @@ function settingsOf(over: Partial<Settings> = {}): Settings {
   return {
     warrant: ".github/reeve.yml",
     confidence: 0.75,
-    corrections: "corrections/",
+    correctionsDir: "corrections/",
     dryRun: false,
     modelNames: new Map(),
     screenNames: new Map(),
@@ -292,7 +292,7 @@ describe("page", () => {
 
 describe("recordPage", () => {
   it("passes the record outcome through to `summarizeRecord`, field for field", () => {
-    const settings = settingsOf({ corrections: "corrections/custom.jsonl" });
+    const settings = settingsOf({ correctionsDir: "corrections/custom.jsonl" });
     const outcome = recordOutcomeOf({ pivot: true, pivotNote: "rendered" });
 
     const result = recordPage(settings, 9, outcome, []);
@@ -307,7 +307,7 @@ describe("recordPage", () => {
         decided: outcome.decided,
         pivot: true,
         pivotNote: "rendered",
-        corrections: "corrections/custom.jsonl",
+        correctionsDir: "corrections/custom.jsonl",
         spent: [],
         modelNames: settings.modelNames,
         screenNames: settings.screenNames,
