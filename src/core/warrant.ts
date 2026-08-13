@@ -1371,7 +1371,14 @@ interface Capabilities {
  */
 function readCapabilities(path: string, raw: unknown): Capabilities {
   const granted = new Map<string, readonly Capability[]>();
-  if (raw === undefined || raw === null) return { declared: false, granted };
+  if (raw === undefined) return { declared: false, granted };
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. ` +
+        "Use `[none]` to grant nothing, write the mapping, or remove the key " +
+        "to keep every duty's own default.",
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
       `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, ` +

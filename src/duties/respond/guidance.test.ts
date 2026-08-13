@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { readGuidance } from "./guidance.js";
-
 async function fileWith(contents: string, name = "guidance.md"): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "reeve-guidance-"));
   const path = join(root, name);
@@ -31,5 +30,13 @@ describe("readGuidance", () => {
   it("treats an empty file the same as an absent one", async () => {
     const path = await fileWith("");
     expect(await readGuidance(path)).toBeNull();
+  });
+
+  it("treats a directory where a file was expected the same as an absent one", async () => {
+    // The module's own doctrine: "a directory where a file was expected, a
+    // permissions error" is also `null` — a checkout this duty cannot repair
+    // must not fail the run over a file a maintainer can live without.
+    const root = await mkdtemp(join(tmpdir(), "reeve-guidance-dir-"));
+    expect(await readGuidance(root)).toBeNull();
   });
 });

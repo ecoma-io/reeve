@@ -189,7 +189,7 @@ export async function checkReversal(
   const attribution = await attributedClose(api, at);
   if (attribution === null) return { reversal: null, authorReopen: false };
 
-  if (reopener !== "" && reopener === standing.author.login) {
+  if (reopener !== "" && reopener.toLowerCase() === standing.author.login.toLowerCase()) {
     return { reversal: null, authorReopen: true };
   }
 

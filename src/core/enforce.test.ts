@@ -276,6 +276,21 @@ labels:
         { what: "security", why: "`.github/reeve.yml` does not name it" },
       ]);
     });
+
+    it("refuses a confidence that is not a number, because the floor gate has to hold for every value", () => {
+      // `NaN < 0.75` and `Infinity < 0.75` are both false, so a comparison
+      // alone would let a non-finite confidence through the very gate it is
+      // supposed to stand at — a verdict that stopped being a number is not
+      // more certain for having stopped.
+      expect(decide(["bug"], [], WARRANT, Number.NaN, 0.75).applied).toEqual([]);
+      expect(decide(["bug"], [], WARRANT, Number.NaN, 0.75).refused[0]?.why).toContain(
+        "is under the floor",
+      );
+      expect(decide(["bug"], [], WARRANT, Number.POSITIVE_INFINITY, 0.75).applied).toEqual([]);
+      expect(
+        decide(["bug"], [], WARRANT, Number.POSITIVE_INFINITY, 0.75).refused[0]?.why,
+      ).toContain("is under the floor");
+    });
   });
 });
 

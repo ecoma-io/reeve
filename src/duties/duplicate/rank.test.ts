@@ -52,6 +52,15 @@ describe("rank", () => {
     expect(withBlank).toEqual(withoutBlank);
   });
 
+  it("ignores a whitespace-only query the same way it ignores a blank one", () => {
+    // The blank-query rule is about a query with nothing to match, and a
+    // string of spaces is the same nothing after the trim that decides it.
+    const withSpaces = rank(["   ", "Safari login button broken"], CANDIDATES, 5);
+    const withoutSpaces = rank(["Safari login button broken"], CANDIDATES, 5);
+
+    expect(withSpaces).toEqual(withoutSpaces);
+  });
+
   it("merges two queries by keeping each candidate's best score across them", () => {
     // The first query only speaks to candidate 2, the second only to
     // candidates 1 and 3 — a merge has to carry all three through, each at
@@ -87,6 +96,19 @@ describe("rank", () => {
     const ranked = rank(["x"], CANDIDATES, 5, tied);
 
     expect(ranked.map((entry) => entry.candidate.number)).toEqual([3, 2, 1]);
+  });
+
+  it("keeps the tie-break when the tie falls exactly on the limit's last slot", () => {
+    // The cut is deterministic, and "which duplicate is *the* duplicate to
+    // show" is the decision a tie has to settle rather than the corpus's
+    // insertion order doing it silently. All three candidates score the same
+    // against the query, so the two slots go to the newer threads — never to
+    // whichever happened to sit earlier in the corpus.
+    const tied: Similarity = (_query, documents) => documents.map(() => 1);
+
+    const ranked = rank(["x"], CANDIDATES, 2, tied);
+
+    expect(ranked.map((entry) => entry.candidate.number)).toEqual([3, 2]);
   });
 
   it("defaults to the real BM25 similarity when none is given", () => {

@@ -341,6 +341,17 @@ describe("capabilities", () => {
     expect(warrant(source).unnamed("triage")).toBe(true);
     expect(warrant(source).granted("triage", ["label"])).toEqual([]);
   });
+
+  it("refuses a bare `capabilities:` key, which is a half-finished edit rather than a decision", () => {
+    // YAML reads a key with nothing under it as `null`, and every sibling key
+    // refuses that same shape — `languages:`, `memory:`, `lifecycle:`,
+    // `pivot:`. Reading it as "no block at all" would silently keep the
+    // widest default while the maintainer believed they had started writing
+    // a restriction.
+    expect(() => warrant("version: 1\ncapabilities:\n")).toThrow(
+      /writes `capabilities:` with nothing under it/,
+    );
+  });
 });
 
 describe("languages", () => {
@@ -973,6 +984,51 @@ describe("readLifecycle", () => {
       "  exempt:\n" +
       "    labels: [pinned]\n";
     expect(() => warrant(source)).toThrow(/close must be the/);
+  });
+
+  it("reads `close: not_planned` as the same decision as `close: true`", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: reminder\n" +
+      "      when: needs-info\n" +
+      "      steps:\n" +
+      "        - close: not_planned\n" +
+      "          after: 14d\n" +
+      "  exempt:\n" +
+      "    labels: [pinned]\n";
+    expect(warrant(source).lifecycle?.tracks[0]?.steps[0]?.close).toBe(true);
+  });
+
+  it("refuses `close: completed` by name, because nothing Reeve closes was completed by it closing", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: reminder\n" +
+      "      when: needs-info\n" +
+      "      steps:\n" +
+      "        - close: completed\n" +
+      "          after: 14d\n" +
+      "  exempt:\n" +
+      "    labels: [pinned]\n";
+    expect(() => warrant(source)).toThrow(/closes only as `not_planned`/);
+  });
+
+  it("refuses a `close:` that is none of the accepted spellings", () => {
+    const source =
+      "version: 1\n" +
+      "lifecycle:\n" +
+      "  tracks:\n" +
+      "    - name: reminder\n" +
+      "      when: needs-info\n" +
+      "      steps:\n" +
+      "        - close: someday\n" +
+      "          after: 14d\n" +
+      "  exempt:\n" +
+      "    labels: [pinned]\n";
+    expect(() => warrant(source)).toThrow(/expected true or false/);
   });
 
   it("refuses a step carrying none of `label`, `say`, `close`", () => {

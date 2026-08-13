@@ -34092,7 +34092,12 @@ function optionalWholeNumber(at, key, raw, min) {
 }
 function readCapabilities(path, raw) {
   const granted = /* @__PURE__ */ new Map();
-  if (raw === void 0 || raw === null) return { declared: false, granted };
+  if (raw === void 0) return { declared: false, granted };
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+    );
+  }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
       `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
@@ -34267,7 +34272,7 @@ function enforceLabels(path, taxonomy, proposed, onThread, confidence, floor) {
       continue;
     }
     const labelFloor = entry.confidence ?? floor;
-    if (confidence < labelFloor) {
+    if (!Number.isFinite(confidence) || confidence < labelFloor) {
       refused.push({
         what: name,
         why: entry.confidence === null ? `confidence ${confidence.toFixed(2)} is under the floor of ${labelFloor.toFixed(2)}` : `confidence ${confidence.toFixed(2)} is under \`${name}\`'s own floor of ${labelFloor.toFixed(2)}`
@@ -35050,7 +35055,7 @@ function strip(body) {
   return { scaffolded, authored: kept.join("\n").trim() };
 }
 var LINK = /https?:\/\/\S/;
-var ERROR = /(^|\n)\s*(at\s+\S+\(|Traceback \(most recent call last\)|File "[^"]+", line \d)|\b([A-Z][A-Za-z0-9_.]*)?(Error|Exception|Panic|Fatal|Segmentation fault)\b|\bexit(ed with)? (code|status) [1-9]/;
+var ERROR = /(^|\n)\s*(at\s+\S+\(|Traceback \(most recent call last\)|File "[^"]+", line \d)|\b([A-Za-z][A-Za-z0-9_.]*)?(Error|Exception|Panic|Fatal|Segmentation fault)\b|\bexit(ed with)? (code|status) [1-9]/i;
 function evidenced(body) {
   if (LINK.test(body) || ERROR.test(body)) return true;
   return segments(body).some((segment) => segment.kind !== "prose");
@@ -35322,7 +35327,7 @@ async function isTrustedReopener(api, at, username) {
 async function checkReversal(api, at, standing, reopener) {
   const attribution = await attributedClose(api, at);
   if (attribution === null) return { reversal: null, authorReopen: false };
-  if (reopener !== "" && reopener === standing.author.login) {
+  if (reopener !== "" && reopener.toLowerCase() === standing.author.login.toLowerCase()) {
     return { reversal: null, authorReopen: true };
   }
   const trusted = await isTrustedReopener(api, at, reopener);

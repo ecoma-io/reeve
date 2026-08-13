@@ -344,6 +344,38 @@ describe("evaluateTrack", () => {
     expect(result.toUnstale).toEqual([]);
   });
 
+  it("the clock-hand exception: never un-stales a label a *different* bot applied last — the bot a project migrated away from", () => {
+    // `clock.ts`'s own doctrine names this case: un-staling retracts only a
+    // labelling this run's own actor is the most recent author of. A label
+    // some other automation applied is as foreign as a human's — the whole
+    // point of the attribution gate is that only one actor is this duty.
+    const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
+    const staleApplication = new Date(T0.getTime() + DAY);
+    const reset = new Date(staleApplication.getTime() + DAY);
+    const f = facts({
+      createdAt: T0,
+      labels: ["stale"],
+      // A different bot entirely — `[bot]` suffix and all — applied last.
+      events: [
+        event({
+          event: "labeled",
+          label: "stale",
+          login: "stale-hunter[bot]",
+          isBot: true,
+          createdAt: staleApplication,
+        }),
+      ],
+      comments: [comment({ login: "alice", createdAt: reset })],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(reset.getTime() + 1),
+    );
+    expect(result.toUnstale).toEqual([]);
+  });
+
   it("the clock-hand exception: never un-stales a label with no matching event in the fetched history — ambiguous attribution is left alone", () => {
     const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
     const reset = new Date(T0.getTime() + 2 * DAY);
@@ -395,6 +427,21 @@ describe("closeBlocked", () => {
       events: [
         event({ event: "closed", isBot: true, createdAt: T0 }),
         event({ event: "reopened", isBot: true, createdAt: new Date(T0.getTime() + DAY) }),
+      ],
+    });
+    expect(closeBlocked(f)).toBe(false);
+  });
+
+  it("is not blocked by a reopen at the exact same timestamp as the close", () => {
+    // GitHub timestamps carry second precision, so a close and a reopen in
+    // the same second really happen. There is no order to know — `closeBlocked`
+    // refuses to guess one, and a same-instant reopen does not block. The
+    // human's own words on the thread are still the guard; only the event
+    // order this check cannot see is left alone.
+    const f = facts({
+      events: [
+        event({ event: "closed", isBot: true, createdAt: T0 }),
+        event({ event: "reopened", isBot: false, createdAt: T0 }),
       ],
     });
     expect(closeBlocked(f)).toBe(false);

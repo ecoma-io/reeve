@@ -140,6 +140,27 @@ describe("renderSweepPage", () => {
     );
     expect(page).not.toContain("no translation for");
   });
+
+  it("says the sweep stopped early when GitHub's capacity ran out mid-sweep", () => {
+    // The honesty promise: a run that could not finish must say so in the
+    // summary, never read as a completed sweep — everything above the line
+    // was done, the rest is still there for the next run.
+    const page = renderSweepPage(
+      ".github/reeve.yml",
+      false,
+      [{ number: 1, outcome: outcome(), done: NOTHING_DONE }],
+      null,
+      true,
+    );
+    expect(page).toContain("**Stopped early**");
+    expect(page).toContain("ran out mid-sweep");
+  });
+
+  it("names every step due but withheld, pluralised", () => {
+    const done: DoneSummary = { ...NOTHING_DONE, dueNotGranted: 2 };
+    const row = renderRow(5, outcome(), done);
+    expect(row[1]).toContain("2 steps due but withheld");
+  });
 });
 
 describe("renderThreadPage", () => {

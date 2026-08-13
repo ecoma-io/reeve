@@ -195,7 +195,12 @@ export function enforceLabels(
     }
 
     const labelFloor = entry.confidence ?? floor;
-    if (confidence < labelFloor) {
+    // The floor is a gate, so it has to hold against a confidence that is not
+    // a number this comparison can lose against: `NaN` and `Infinity` both
+    // compare false against every finite floor, and a verdict carrying either
+    // is not a verdict carrying certainty — it is a verdict that stopped
+    // being a number somewhere above this stage.
+    if (!Number.isFinite(confidence) || confidence < labelFloor) {
       refused.push({
         what: name,
         why:

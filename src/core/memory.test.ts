@@ -494,6 +494,35 @@ describe("parseCorrection", () => {
   it("treats an empty note as no note", () => {
     expect(parseCorrection('{"thread":7,"decided":["bug"],"note":"  "}')?.note).toBeNull();
   });
+
+  it("defaults a wrong-typed context field rather than refusing the whole line", () => {
+    // The asymmetry is deliberate and documented in `parseCorrection`: the
+    // thread and the decision are what a correction is, and `outcome` is the
+    // one field held to the strict enum — every other field is context that
+    // defaults when it is the wrong type, so a corrupted context field still
+    // leaves the decision itself readable. A future "fix" that refused these
+    // lines would change which examples reach a prompt.
+    const parsed = parseCorrection(
+      '{"thread":7,"decided":["bug"],"duty":7,"repo":9,"at":12,"by":true,"note":42,"proposed":"bug"}',
+    );
+
+    expect(parsed).toEqual({
+      repo: "",
+      thread: 7,
+      duty: "triage",
+      at: "",
+      title: "",
+      excerpt: "",
+      language: null,
+      proposed: [],
+      decided: ["bug"],
+      by: "",
+      note: null,
+      outcome: null,
+      duplicateOf: null,
+      pivot: null,
+    });
+  });
 });
 
 describe("readStore", () => {
