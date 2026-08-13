@@ -7,14 +7,17 @@
  * incorporating the semantic changes.
  *
  * Checks:
+ * - Language: draft is in the target language (script check)
  * - Code fidelity: fenced blocks and inline spans carried across unchanged
  * - Link fidelity: URLs unchanged
  * - Structure: heading and list structure preserved
  * - Length: prose length falls within plausible range
  * - Glossary: glossary terms respected
  */
+import { containsScript } from "../../core/script.js";
 import { segments } from "../../core/markdown.js";
 import { measured, refused, type Score, type Check } from "../../core/score.js";
+import type { Language } from "../../core/languages.js";
 
 /**
  * Scores a draft against the original target content.
@@ -26,6 +29,9 @@ export function scoreDraft(
   draft: string,
   original: string,
   glossaryTerms: readonly string[],
+  source: string,
+  targetLanguage: Language,
+  languages: readonly Language[],
 ): Score {
   // --- Refusal checks (binary, provably wrong) ---
   if (draft.trim().length === 0) return refused("empty draft");
@@ -34,6 +40,12 @@ export function scoreDraft(
     if (original.includes(term) && !draft.includes(term)) {
       return refused(`glossary term \`${term}\` was translated`);
     }
+  }
+
+  // Language verification: a draft in the wrong script is refused.
+  const script = foreignScript(source, draft, targetLanguage, languages);
+  if (script !== null) {
+    return refused(`draft contains \`${script}\` script not in source or target language`);
   }
 
   // --- Measurements (weighted mean, 0-1) ---
@@ -46,6 +58,36 @@ export function scoreDraft(
   ];
 
   return measured(checks);
+}
+
+/**
+ * Whether the draft has leaked into a script neither the target language nor
+ * the source uses — a script from some other language in this workflow's
+ * configuration.
+ *
+ * The same logic as `translate/score.ts`'s `foreignScript`: a script the
+ * source already used is not a leak (the target is supposed to carry it). A
+ * script the target's own language uses is not a leak (it is the expected
+ * outcome). Anything else is a draft that wrote in the wrong language.
+ */
+function foreignScript(
+  source: string,
+  draft: string,
+  to: Language,
+  languages: readonly Language[],
+): string | null {
+  for (const language of languages) {
+    for (const script of language.scripts) {
+      // The target's own scripts are exempted per character rather than skipped
+      // by name, so a workflow that spelled the same script `Latn` here and
+      // `Latin` there still gets one answer. `containsScript` explains why that
+      // works.
+      if (!containsScript(draft, script, to.scripts)) continue;
+      if (containsScript(source, script, to.scripts)) continue;
+      return script;
+    }
+  }
+  return null;
 }
 
 // --- Individual checks ---

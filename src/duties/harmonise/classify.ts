@@ -13,6 +13,7 @@
  * change, and code enforces the result: only `semantic` changes are
  * translated and applied to other locales.
  */
+import * as core from "@actions/core";
 import type { Provider } from "../../core/provider.js";
 
 /** The three classification outcomes. */
@@ -161,7 +162,11 @@ export function parseClassification(raw: string): ClassificationResult {
   // If the model produced no parseable output, fail loud (D5)
   if (hunks.length === 0) {
     // No classification = no propagation. This is a safe default but we
-    // should warn — it likely means the model didn't understand the prompt.
+    // warn — it likely means the model didn't understand the prompt.
+    core.warning(
+      "harmonise: classifier produced no parseable output — the model may not have " +
+        "understood the prompt. No changes will be propagated.",
+    );
     return { hunks: [], hasSemantic: false };
   }
 
