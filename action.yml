@@ -11,7 +11,7 @@
 # it does, which is also what someone searching the Marketplace actually types.
 name: Reeve - multilingual repository upkeep
 description: Triage, translation and upkeep in any language, with any OpenAI-compatible model, within an authority you wrote down.
-author: Ecoma
+author: ecoma.io
 
 branding:
   icon: check-square
