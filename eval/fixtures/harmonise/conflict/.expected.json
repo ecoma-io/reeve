@@ -1,0 +1,11 @@
+{
+  "scenario": "conflict",
+  "description": "EN source gained a new '## Configuration' section. VI file also has this section but with human edits ('Đây là phần được chỉnh sửa bởi con người'). The human edit in the target locale since last sync must be reported, not overwritten.",
+  "source-diff": "New '## Configuration' section added to EN source.",
+  "target-state": "VI file already has a '## Cấu hình' section with human-authored content that differs from what would be produced by translation.",
+  "expected": {
+    "classification": "conflict",
+    "should-propagate": false,
+    "action": "Report conflict. Do NOT overwrite the human edit in the VI file. The PR should note the conflict."
+  }
+}

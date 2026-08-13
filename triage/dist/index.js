@@ -33042,6 +33042,7 @@ function findClosingRun(text2, from, runLength) {
 
 // src/core/meter.ts
 var STAGE = {
+  classify: "Classification",
   detect: "Detection",
   draft: "Drafting",
   judge: "Judging",
@@ -33520,7 +33521,9 @@ var CAPABILITIES = [
   "close",
   "assign",
   "record",
-  "propose"
+  "propose",
+  "edit-file",
+  "open-pr"
 ];
 var VERSION7 = 1;
 var DEFAULT_PROPOSE_WORKSPACE = {

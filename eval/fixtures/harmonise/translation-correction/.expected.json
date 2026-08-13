@@ -1,0 +1,11 @@
+{
+  "scenario": "translation-correction",
+  "description": "VI file had 'Bản cài đặt' (wrong translation of 'Installation'). Fixed to 'Cài đặt'. EN source unchanged. This is a translation correction — should NOT propagate to EN.",
+  "source-diff": "No change to EN source.",
+  "target-diff": "VI heading '## Bản cài đặt' changed to '## Cài đặt'. This fixes a bad translation, not a semantic change.",
+  "expected": {
+    "classification": "correction",
+    "should-propagate": false,
+    "action": "No propagation. The VI fix is local to the VI file."
+  }
+}

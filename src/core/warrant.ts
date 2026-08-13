@@ -52,7 +52,8 @@ import { listRepositoryLabels } from "./forge.js";
 import { findLanguage, parseLanguages, type Language } from "./languages.js";
 
 /**
- * What a duty may do to a thread. The closed set; a name outside it is refused.
+ * What a duty may do to a thread or a repository. The closed set; a name
+ * outside it is refused.
  *
  * `record` is unlike the rest of this set. Every other capability changes the
  * thread a run is deciding about; `record` changes a file in the repository
@@ -61,9 +62,24 @@ import { findLanguage, parseLanguages, type Language } from "./languages.js";
  * cannot be implied by an implicit warrant: writing to the store is a
  * project's decision to keep a memory at all, and only an explicit
  * `capabilities:` block can make it.
+ *
+ * `edit-file` and `open-pr` are qualitatively different again. They give a
+ * duty the ability to write repository files and open pull requests — changes
+ * that land in the commit history, not in a thread body. No duty defaults
+ * these: a maintainer who wants `harmonise` to open sync PRs writes the
+ * capabilities explicitly, because committing files is too much authority to
+ * hand out at level 0.
  */
 export type Capability =
-  "label" | "edit-body" | "comment" | "close" | "assign" | "record" | "propose";
+  | "label"
+  | "edit-body"
+  | "comment"
+  | "close"
+  | "assign"
+  | "record"
+  | "propose"
+  | "edit-file"
+  | "open-pr";
 
 export const CAPABILITIES: readonly Capability[] = [
   "label",
@@ -73,6 +89,8 @@ export const CAPABILITIES: readonly Capability[] = [
   "assign",
   "record",
   "propose",
+  "edit-file",
+  "open-pr",
 ];
 
 /** The only version this reader understands. */

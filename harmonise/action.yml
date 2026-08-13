@@ -1,0 +1,239 @@
+# The `harmonise` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/harmonise@v0.1`.
+name: Reeve - harmonise
+description: Keep multilingual documentation files synchronised across locales — classify the diff, propagate only shared semantic changes, and open a pull request.
+author: ecoma.io
+
+branding:
+  icon: file
+  color: blue
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read and write repository files and pull requests.
+      `GITHUB_TOKEN` is enough, and it is what gives the run recursion
+      prevention: a PR this duty opens does not start another run.
+    required: false
+    default: ${{ github.token }}
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. The order is
+      preference and not last resort: the first one that answers is used, and a
+      model that fails is never asked again in the same run.
+
+      `id = Name` gives a model a display name, and everything a person reads —
+      the published block, every warning — shows the name instead of the id.
+    required: true
+
+  source-language:
+    description: >-
+      The locale code of the source language — the language the unsuffixed
+      documentation files are written in. `en`, `zh-Hans`, or any code matching
+      the `languages` grammar. This is the authoritative locale that all other
+      translations are synchronised against.
+
+      Unlike `translate` (where the pivot language is implicit as the first in
+      the list because contributors may write PRs and issues in any language),
+      `harmonise` works on committed documentation files whose source language
+      is a deliberate organisational decision — it must be named explicitly.
+
+      Ignored once `warrant`'s own `source-language:` key is written.
+    required: false
+    default: en
+
+  languages:
+    description: >-
+      The target locale codes this repository's documentation set is translated
+      into, comma or newline separated. `vi`, or `vi:Tiếng Việt`, or
+      `zh-Hans:简体中文:Hans` — the code alone is enough when the code is enough.
+
+      These are the locale-suffixed files (e.g. `docs/guide.vi.md`). The source
+      language is NOT included here — it is a separate input, because the source
+      language of committed documentation is a deliberate organisational choice,
+      not an incidental contributor preference.
+
+      Ignored once `warrant`'s own `languages:` key is written — the file is
+      the whole answer from there, and the run says once which of the two it
+      read.
+    required: false
+    default: vi, zh
+
+  warrant:
+    description: >-
+      Where the permissions live. `edit-file` and `open-pr` are this duty's
+      capabilities, and they are NOT granted by default — unlike `translate`'s
+      `edit-body`, committing files and opening PRs is too much authority for
+      zero-config. Once a `capabilities:` block is written in this file, the
+      enumeration is total: leaving `harmonise` out of it grants this duty
+      nothing, and the run says so rather than guessing.
+
+      Missing at this default path, there is no failure: the duty classifies
+      and reports without touching the repository, exactly as if `apply` were
+      `none`. Point this at a path of your own instead, and a file missing
+      there fails the run red, because naming a file that is not there is a
+      configuration mistake rather than an absence.
+    required: false
+    default: .github/reeve.yml
+
+  apply:
+    description: >-
+      What this run may do: `edit-file, open-pr`, or `none` for a run that
+      classifies, drafts and scores but never commits or opens a PR. The
+      narrower of this and the warrant file wins, always — the same double-gate
+      every other duty applies, with the same shape: classification and
+      drafting all run and spend whatever they were going to spend regardless
+      of this input, and only the write at the end is gated. `none` is a good
+      way to watch what a run would have changed before it is allowed to.
+    required: false
+    default: none
+
+  drafts:
+    description: >-
+      How many sync translations to ask for per stale locale. Every answer is
+      scored deterministically and the best is published. The quality lever
+      that costs calls instead of money.
+    required: false
+    default: "1"
+
+  judge-models:
+    description: >-
+      A panel of models asked which draft reads best. Comma or newline
+      separates seats and every seat is asked — this is a panel, not a fallback
+      list — and the deterministic score breaks every tie. Within one seat, `|`
+      names models to fall back through: `a | b, c` is two votes, and `b` is
+      asked only when `a` could not deliver the first seat's vote. Empty means
+      no panel, which is the default and a perfectly good setting.
+    required: false
+    default: ""
+
+  state:
+    description: >-
+      Where provenance state lives — per-document sync status and source
+      revision tracking. Delete this file to force a full re-sync.
+    required: false
+    default: .reeve/harmonise-state.json
+
+  glossary:
+    description: >-
+      A glossary of project-specific terms that translations must respect.
+      Overrides = bug. Missing is not an error — it means there are no
+      protected terms.
+    required: false
+    default: .reeve/glossary.yml
+
+  paths:
+    description: >-
+      Doc paths to scan for locale variants, comma or newline separated. Empty
+      scans the whole repository.
+    required: false
+    default: ""
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and change nothing. The
+      classification and the PR that would have been opened are printed to
+      the log.
+    required: false
+    default: "false"
+
+  max-requests:
+    description: >-
+      How many provider requests — classification, drafting and judging
+      combined — one run may spend before it stops asking for more, or `none`
+      for no bound. Every request made counts against this, whatever it
+      answered. Checked at every clean-cut boundary — before each document
+      group, before each stale locale — never mid-locale. `none`, the default,
+      never trips it.
+    required: false
+    default: none
+
+  endpoints:
+    description: >-
+      Additional `alias = url` endpoints, comma or newline separated, each
+      with an optional `timeout=<duration>` after the url. A model id routes
+      to one of these with `model@alias`. Same grammar as every other duty.
+    required: false
+    default: ""
+
+  api-keys:
+    description: >-
+      One `alias = key` per line, supplying the key for each `endpoints`
+      alias that needs one. Every alias named here must also be declared in
+      `endpoints`. Each key is registered as a secret before any entry is
+      validated.
+    required: false
+    default: ""
+
+  request-timeout:
+    description: >-
+      How long one request is allowed to run before it counts as a timeout —
+      weather, not a failure — expressed as a whole number of seconds or
+      minutes. A bare number is refused rather than assumed to be seconds.
+    required: false
+    default: 120s
+
+  temperature:
+    description: >-
+      Sampling temperature, between 0 and 2. Empty is the default and omits
+      the field from every request outright. Refused outside its range.
+    required: false
+    default: ""
+
+outputs:
+  classified:
+    description: >-
+      JSON array of document group IDs that were classified this run.
+
+  synced:
+    description: >-
+      JSON array of document group IDs whose stale locales were synced this
+      run — a PR was opened or updated.
+
+  conflicts:
+    description: >-
+      JSON array of objects with `group` (document group ID) and `locales`
+      (array of locale codes) where a human edit in a target locale blocked
+      propagation.
+
+  skipped:
+    description: >-
+      JSON array of document group IDs where no propagation was needed —
+      already in sync, or all changes were corrections or locale-specific.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a 429,
+      a 5xx, a timeout, or a network failure, on every one of them. Weather,
+      never a failure by itself.
+
+  budget-exhausted:
+    description: >-
+      `true` when this run's own `max-requests` ceiling genuinely turned work
+      away. Never `true` when `max-requests` is `none`, the default.
+
+runs:
+  using: node24
+  main: dist/index.js

@@ -1,0 +1,9 @@
+{
+  "scenario": "locale-specific-adaptation",
+  "description": "VI file has a locale-specific section 'Lưu ý cho người dùng Việt Nam' with a Vietnamese-specific pnpm link. EN source has no such section. This should NOT propagate to EN.",
+  "expected": {
+    "classification": "locale-specific",
+    "should-propagate": false,
+    "action": "No propagation. The VI-specific section is local to the VI file."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "scenario": "idempotency",
+  "description": "EN and VI files are already in sync. No changes since last run. Running again should produce no action.",
+  "expected": {
+    "classification": "none",
+    "should-propagate": false,
+    "action": "No action. No model call, no PR."
+  }
+}

@@ -38,6 +38,7 @@ export default {
         "duplicate",
         "respond",
         "lifecycle",
+        "harmonise",
 
         // Everything else.
         "eval", // evaluation sets and the harness over them

@@ -33,7 +33,8 @@ import type { Completion, Message, Provider, Usage } from "./provider.js";
  * expensive one over what got through. One number covering both would hide
  * exactly the ratio a maintainer tunes.
  */
-export type Purpose = "detect" | "draft" | "judge" | "screen" | "triage" | "pivot" | "duplicate";
+export type Purpose =
+  "classify" | "detect" | "draft" | "judge" | "screen" | "triage" | "pivot" | "duplicate";
 
 /**
  * The stage names a reader of the documentation already knows.
@@ -44,6 +45,7 @@ export type Purpose = "detect" | "draft" | "judge" | "screen" | "triage" | "pivo
  * the same row. A duty spending nothing on a purpose simply has no row for it.
  */
 export const STAGE: Record<Purpose, string> = {
+  classify: "Classification",
   detect: "Detection",
   draft: "Drafting",
   judge: "Judging",
