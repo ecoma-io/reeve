@@ -373,6 +373,26 @@ describe("checkReversal", () => {
     ).resolves.toEqual({ reversal: null, authorReopen: true });
   });
 
+  it("still treats the author's reopen as theirs when the casing differs", async () => {
+    // GitHub logins are case-insensitive: `Reporter` and `reporter` are the
+    // same account. Compared as written, a differently-cased reopen would
+    // fall through to the trusted-account branch and be recorded as a
+    // *maintainer* reversal — the exact opposite of the fact.
+    const api = combinedOf(
+      [{ id: 1, body: closeMarker.render(7), user: { login: "reeve[bot]", type: "Bot" } }],
+      { permission: "admin" },
+    );
+
+    await expect(
+      checkReversal(
+        api,
+        AT,
+        standingOf({ author: { login: "reporter", isBot: false } }),
+        "Reporter",
+      ),
+    ).resolves.toEqual({ reversal: null, authorReopen: true });
+  });
+
   it("does not record a reversal from an untrusted reopener", async () => {
     const api = combinedOf(
       [{ id: 1, body: closeMarker.render(7), user: { login: "reeve[bot]", type: "Bot" } }],

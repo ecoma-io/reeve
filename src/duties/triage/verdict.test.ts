@@ -149,6 +149,13 @@ describe("parseVerdict", () => {
     expect(verdict?.confidence).toBe(0.1);
   });
 
+  it("refuses a fenced answer whose payload is a single line — the fence left nothing inside it", () => {
+    // The single-fence indulgence strips the first and last lines of the
+    // fence's text; a payload that is one line becomes nothing at all, and
+    // nothing at all is refused exactly like any other unreadable answer.
+    expect(parseVerdict("```json\n{}\n```")).toBeNull();
+  });
+
   it("refuses an answer carrying prose beside the JSON", () => {
     // Which is what an answer carrying prose beside the JSON is: a model that
     // did something other than what it was asked. Scanning for the first `{`
@@ -174,6 +181,15 @@ describe("parseVerdict", () => {
     expect(parseVerdict('{"labels": [], "confidence": 75}')).toBeNull();
     expect(parseVerdict('{"labels": [], "confidence": -0.1}')).toBeNull();
     expect(parseVerdict('{"labels": []}')).toBeNull();
+  });
+
+  it("accepts a confidence of exactly zero — the bottom of the range is still a number in it", () => {
+    // `0` is refused nowhere: `>= 0` admits it and `-0.1` is refused for
+    // falling below it. The boundary matters because a verdict that says
+    // "no confidence" is still a verdict worth applying the floor to.
+    const verdict = parseVerdict('{"labels": ["bug"], "confidence": 0}');
+
+    expect(verdict?.confidence).toBe(0);
   });
 
   it("refuses a duplicate that is not an issue number", () => {
