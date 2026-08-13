@@ -202,6 +202,19 @@ inputs:
     required: false
     default: 120s
 
+  chunk-chars:
+    description: >-
+      Maximum character budget per drafting request. When set above zero, the
+      source and target documents are split into aligned chunks at Markdown
+      boundaries (never mid-fence), and each chunk is drafted independently
+      before reassembly. Zero, the default, sends the whole document in one
+      request — the right choice when the document fits the model's context.
+      Chunk boundaries follow `core/markdown.ts`, which already powers the
+      translate duty's chunking, so fences and inline code spans are never
+      split.
+    required: false
+    default: "0"
+
   temperature:
     description: >-
       Sampling temperature, between 0 and 2. Empty is the default and omits

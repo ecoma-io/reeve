@@ -16,6 +16,7 @@
 import * as core from "@actions/core";
 
 import type { Language } from "../../core/languages.js";
+import { chunks, isCodeOnly } from "../../core/markdown.js";
 import type { Completion, Failure, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
@@ -74,6 +75,12 @@ export interface DraftSyncRequest {
   readonly drafts: number;
   /** This run's memory of capacity failures. */
   readonly weather?: Weather;
+  /**
+   * Maximum character budget per drafting request. Zero sends the whole
+   * document; a positive value splits source and target into aligned chunks
+   * at Markdown boundaries and drafts each chunk independently.
+   */
+  readonly chunkChars: number;
 }
 
 /**
@@ -98,7 +105,47 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     glossary,
     drafts,
     weather,
+    chunkChars,
   } = request;
+
+  if (chunkChars > 0 && (sourceContent.length > chunkChars || targetContent.length > chunkChars)) {
+    return draftChunked(request);
+  }
+
+  return draftWhole({
+    provider,
+    models,
+    sourceContent,
+    targetContent,
+    semanticHunks,
+    sourceLanguage,
+    targetLanguage,
+    languages,
+    glossary,
+    drafts,
+    ...(weather !== undefined ? { weather } : {}),
+  });
+}
+
+/**
+ * Drafts the whole document in one request — the original behaviour and the
+ * default when `chunkChars` is zero or the document fits the budget.
+ */
+async function draftWhole(params: DraftWholeParams): Promise<DraftResult> {
+  const {
+    provider,
+    models,
+    sourceContent,
+    targetContent,
+    semanticHunks,
+    sourceLanguage,
+    targetLanguage,
+    languages,
+    glossary,
+    drafts,
+    weather,
+  } = params;
+
   const messages = buildMessages(
     sourceContent,
     targetContent,
@@ -108,16 +155,189 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     glossary,
   );
 
+  return draftLoop({
+    provider,
+    models,
+    messages,
+    targetContent,
+    sourceContent,
+    targetLanguage,
+    languages,
+    glossaryTerms: glossary.map((g) => g.term),
+    drafts,
+    ...(weather !== undefined ? { weather } : {}),
+  });
+}
+
+/** Parameters for `draftWhole` — a subset of `DraftSyncRequest`. */
+interface DraftWholeParams {
+  readonly provider: Provider;
+  readonly models: readonly string[];
+  readonly sourceContent: string;
+  readonly targetContent: string;
+  readonly semanticHunks: readonly ClassifiedHunk[];
+  readonly sourceLanguage: Language;
+  readonly targetLanguage: Language;
+  readonly languages: readonly Language[];
+  readonly glossary: readonly GlossaryEntry[];
+  readonly drafts: number;
+  readonly weather?: Weather;
+}
+
+/**
+ * Splits source and target into aligned chunks at Markdown boundaries and
+ * drafts each chunk independently, then reassembles the results.
+ *
+ * Code-only chunks are passed through verbatim — no model request is spent on
+ * text that cannot change. Each prose chunk is drafted with its own prompt
+ * that provides the chunk's source and target, the full list of semantic
+ * hunks, and the glossary. Scoring applies to the full reassembled draft.
+ */
+async function draftChunked(request: DraftSyncRequest): Promise<DraftResult> {
+  const {
+    provider,
+    models,
+    sourceContent,
+    targetContent,
+    semanticHunks,
+    sourceLanguage,
+    targetLanguage,
+    languages,
+    glossary,
+    drafts,
+    weather,
+    chunkChars,
+  } = request;
+
+  const sourceChunks = chunks(sourceContent, chunkChars);
+  const targetChunks = chunks(targetContent, chunkChars);
+
+  // Aligned drafting: pair source and target chunks by index. When one document
+  // has more chunks than the other (structural divergence), the extra chunks
+  // are drafted alone with source or target empty respectively.
+  const count = Math.max(sourceChunks.length, targetChunks.length);
+
+  // Seeded from `weather`, so a model an earlier chunk already grounded for
+  // capacity is treated as exhausted from chunk zero.
+  const exhausted = new Set<string>(weather?.starved ?? []);
+  const chunkDrafts: string[] = [];
+  const failures: Failure[] = [];
+
+  for (let i = 0; i < count; i += 1) {
+    const sourceChunk = sourceChunks[i] ?? "";
+    const targetChunk = targetChunks[i] ?? "";
+
+    // Code-only chunks are passed through verbatim — no model request needed.
+    if (isCodeOnly(sourceChunk) && isCodeOnly(targetChunk)) {
+      // Prefer the target's code block (it is the locale's version).
+      chunkDrafts.push(targetChunk.length > 0 ? targetChunk : sourceChunk);
+      continue;
+    }
+
+    const messages = buildMessages(
+      sourceChunk,
+      targetChunk,
+      semanticHunks,
+      sourceLanguage,
+      targetLanguage,
+      glossary,
+    );
+
+    // Try each draft for this chunk, rotating through models.
+    let chunkText: string | null = null;
+    for (let draft = 0; draft < drafts; draft += 1) {
+      const order = remaining(models, draft, exhausted);
+      if (order.length === 0) break;
+
+      const rotation = await rotateModels(
+        order,
+        (model) => answer(provider, model, messages),
+        weather,
+      );
+      for (const failure of rotation.failures) {
+        exhausted.add(failure.model);
+        failures.push(failure);
+      }
+      if (!rotation.success) break;
+
+      const text = rotation.success.content;
+      if (text.trim().length === 0) {
+        core.warning(
+          `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count)}: model returned empty content`,
+        );
+        continue;
+      }
+
+      chunkText = sanitize(text);
+      break;
+    }
+
+    if (chunkText !== null) {
+      chunkDrafts.push(chunkText);
+    } else {
+      // Fallback: keep the original target chunk when drafting fails.
+      core.warning(
+        `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count)}: no draft produced — keeping original`,
+      );
+      chunkDrafts.push(targetChunk);
+    }
+  }
+
+  const reassembled = chunkDrafts.join("");
+
+  // Score the full reassembled draft against the full original target.
+  const measured = scoreDraft(
+    reassembled,
+    targetContent,
+    glossary.map((g) => g.term),
+    sourceContent,
+    targetLanguage,
+    languages,
+  );
+
+  const attempt: Draft = {
+    // Report the first non-exhausted model as the producer, since chunks may
+    // have come from different models.
+    model: models.find((m) => !exhausted.has(m)) ?? models[0] ?? "unknown",
+    text: reassembled,
+    score: measured,
+  };
+
+  if (measured.admissible) {
+    return { attempts: [attempt], refused: [], failures };
+  }
+
+  core.warning(
+    `harmonise: ${targetLanguage.code}: chunked draft refused — ${measured.reason ?? "unknown"}`,
+  );
+  return { attempts: [], refused: [attempt], failures };
+}
+
+/**
+ * The inner draft loop: rotates through models, scores each result, and
+ * collects admitted and refused attempts.
+ */
+async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
+  const {
+    provider,
+    models,
+    messages,
+    targetContent,
+    sourceContent,
+    targetLanguage,
+    languages,
+    glossaryTerms,
+    drafts,
+    weather,
+  } = params;
+
   const attempts: Draft[] = [];
   const refused: Draft[] = [];
   const failures: Failure[] = [];
-  // Seeded from `weather`, so a model an earlier group already grounded for
-  // capacity is treated as exhausted from draft zero.
   const exhausted = new Set<string>(weather?.starved ?? []);
 
   for (let draft = 0; draft < drafts; draft += 1) {
     const order = remaining(models, draft, exhausted);
-    // Every model has failed. Asking for the next draft would be asking nobody.
     if (order.length === 0) break;
 
     const rotation = await rotateModels(
@@ -138,13 +358,10 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     }
 
     const sanitized = sanitize(draftText);
-    // Scored against the target content as the baseline — the goal is to
-    // verify that the draft preserves the target's structure while
-    // incorporating the semantic changes.
     const measured = scoreDraft(
       sanitized,
       targetContent,
-      glossary.map((g) => g.term),
+      glossaryTerms,
       sourceContent,
       targetLanguage,
       languages,
@@ -171,6 +388,19 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     refused,
     failures,
   };
+}
+
+interface DraftLoopParams {
+  readonly provider: Provider;
+  readonly models: readonly string[];
+  readonly messages: readonly { role: "system" | "user"; content: string }[];
+  readonly targetContent: string;
+  readonly sourceContent: string;
+  readonly targetLanguage: Language;
+  readonly languages: readonly Language[];
+  readonly glossaryTerms: readonly string[];
+  readonly drafts: number;
+  readonly weather?: Weather;
 }
 
 /**
