@@ -146,7 +146,7 @@ const LINK = /https?:\/\/\S/;
  * thread is worth reading properly.
  */
 const ERROR =
-  /(^|\n)\s*(at\s+\S+\(|Traceback \(most recent call last\)|File "[^"]+", line \d)|\b([A-Z][A-Za-z0-9_.]*)?(Error|Exception|Panic|Fatal|Segmentation fault)\b|\bexit(ed with)? (code|status) [1-9]/;
+  /(^|\n)\s*(at\s+\S+\(|Traceback \(most recent call last\)|File "[^"]+", line \d)|\b([A-Za-z][A-Za-z0-9_.]*)?(Error|Exception|Panic|Fatal|Segmentation fault)\b|\bexit(ed with)? (code|status) [1-9]/i;
 
 /**
  * Whether the body carries something worth reading regardless of its length.

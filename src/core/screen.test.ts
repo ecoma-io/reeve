@@ -123,6 +123,18 @@ describe("too little to reach a verdict", () => {
     expect(screened("Fails", evidence)).toBeNull();
   });
 
+  it("lets a short thread through when the failure words are lowercase, as most runtimes write them", () => {
+    // Go writes `panic:`, Node writes `Error:` — and every runtime writes the
+    // word lowercase at least as often as a Java class name capitalizes it.
+    // The regex is case-insensitive on purpose: a miss here is a genuine
+    // report screened out, which is the fail-closed direction this stage
+    // exists to avoid.
+    expect(screened("Fails", "panic: runtime error: index out of range")).toBeNull();
+    expect(screened("Fails", "fatal error: unreachable, exit status 1")).toBeNull();
+    expect(screened("Fails", "error: ENOENT: no such file or directory")).toBeNull();
+    expect(screened("Fails", "exit code 137")).toBeNull();
+  });
+
   it("is turned off entirely by a minimum of zero", () => {
     // The right setting for a tracker whose reports are routinely terse. The
     // consumer decides, because a screen that drops genuine reports is much
