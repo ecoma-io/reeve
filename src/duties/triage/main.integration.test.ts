@@ -167,6 +167,27 @@ interface State {
    * reaches a short page to stop on.
    */
   truncatedLabelHistory: Set<number>;
+  /**
+   * Comments on the thread, keyed by issue number. `attributedClose` reads
+   * these to find a bot-authored close-marker — the two-part check that says
+   * a close was Reeve's own. Empty for every case that does not set it, which
+   * answers every issue's comments as "none", so no close attribution is found.
+   */
+  replies: Record<number, { body: string; bot: boolean; login: string }[]>;
+  /**
+   * What `isTrustedReopener` reads — keyed by username, returning the
+   * permission level the stub should answer. A username absent from here
+   * answers the default `"read"`, which `isTrustedReopener` treats as
+   * untrusted (only `"write"` and `"admin"` count).
+   */
+  collaboratorPermissions: Record<string, string>;
+  /**
+   * The thread author's login, returned in the `user` field of the GET issue
+   * response. `checkReversal` compares this against the reopener's login to
+   * detect an author reopen (which is never recorded, only surfaced).
+   * Defaults to `"reporter"`.
+   */
+  issueAuthor: string;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -215,6 +236,9 @@ async function startStub(): Promise<Stub> {
     contentsConflictsRemaining: 0,
     labelEvents: {},
     truncatedLabelHistory: new Set(),
+    replies: {},
+    collaboratorPermissions: {},
+    issueAuthor: "reporter",
   };
 
   const server = createServer((request, response) => {
@@ -258,6 +282,7 @@ async function route(
       // to read a name out of before any guardrail can compare one.
       labels: stub.labels.map((name) => ({ name })),
       state: stub.effects.closed ? "closed" : "open",
+      user: { login: stub.issueAuthor, type: "User" },
     });
     return;
   }
@@ -305,6 +330,39 @@ async function route(
           }))
         : [],
     );
+    return;
+  }
+
+  // The thread's comments — `attributedClose` reads them to find a bot-authored
+  // close-marker, the two-part check that says "this close was Reeve's own".
+  // Paged the way GitHub pages them, but every case here fits on page one.
+  const comments = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path);
+  if (method === "GET" && comments) {
+    const number = Number(comments[1]);
+    const forThread = stub.replies[number] ?? [];
+    const page = Number(query.get("page") ?? "1");
+    send(
+      response,
+      200,
+      page === 1
+        ? forThread.map((reply, index) => ({
+            id: index + 1,
+            body: reply.body,
+            user: { login: reply.login, type: reply.bot ? "Bot" : "User" },
+          }))
+        : [],
+    );
+    return;
+  }
+
+  // `isTrustedReopener` reads this to decide whether a reopener has standing.
+  // A username absent from the stub's map answers the default `"read"`, which
+  // the real code treats as untrusted.
+  const collaborator = /^\/repos\/[^/]+\/[^/]+\/collaborators\/([^/]+)\/permission$/.exec(path);
+  if (method === "GET" && collaborator) {
+    const username = decodeURIComponent(collaborator[1] ?? "");
+    const permission = stub.collaboratorPermissions[username] ?? "read";
+    send(response, 200, { permission });
     return;
   }
 
@@ -632,6 +690,20 @@ async function labelEvent(
 ): Promise<string> {
   const path = join(scratch, "event.json");
   await writeFile(path, JSON.stringify({ action, sender }));
+  return path;
+}
+
+/**
+ * A `reopened` event payload, the same shape `recordTrigger()` reads. The
+ * reopener's login is what `checkReversal` compares against the thread's
+ * author (author reopen is surfaced but never recorded) and the collaborator
+ * permission endpoint (only `write`/`admin` have standing).
+ */
+async function reopenEvent(
+  sender: { login: string; type?: string } = { login: "maintainer", type: "User" },
+): Promise<string> {
+  const path = join(scratch, "event.json");
+  await writeFile(path, JSON.stringify({ action: "reopened", sender }));
   return path;
 }
 
@@ -2023,6 +2095,197 @@ describe("record", () => {
     expect(run.outputs.recorded).toBe("false");
     expect(stub.contentsWrites).toEqual([]);
   });
+
+  // S3 reversal: a human reopens a thread Reeve closed as a duplicate.
+  it("records a reopened event as a reversal when the close was Reeve's own and the reopener is trusted", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // A bot-authored close-marker comment — `attributedClose` finds this and
+    // returns the `duplicateOf` it names. The two-part check (bot + marker)
+    // is what makes the attribution trustworthy.
+    stub.replies[42] = [
+      {
+        body: "Closing as a duplicate of #7.\n<!-- reeve:triage:closed duplicate-of=7 -->",
+        bot: true,
+        login: "reeve-triage[bot]",
+      },
+    ];
+    // The reopener has `write` permission — trusted, so `checkReversal`
+    // records the reversal rather than refusing it.
+    Object.assign(stub.collaboratorPermissions, { maintainer: "write" });
+    const event = await reopenEvent({ login: "maintainer", type: "User" });
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    const shard = stub.contentsFiles.get(shardPath());
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as {
+      thread: number;
+      duty: string;
+      outcome: string | null;
+      duplicateOf: number | null;
+      by: string;
+    };
+    // Written under `duty: "duplicate"` — its own dedup slot, separate from
+    // whatever `recordCorrection` might have written for this thread's labels.
+    expect(written).toMatchObject({
+      thread: 42,
+      duty: "duplicate",
+      outcome: "overruled",
+      duplicateOf: 7,
+      by: "maintainer",
+    });
+    expect(run.summary).toContain("## Reeve · triage — record");
+  });
+
+  it("surfaces an author reopen in the summary but never records it", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.replies[42] = [
+      {
+        body: "Closing as a duplicate of #7.\n<!-- reeve:triage:closed duplicate-of=7 -->",
+        bot: true,
+        login: "reeve-triage[bot]",
+      },
+    ];
+    // The reopener IS the thread's author — `checkReversal` refuses to record
+    // this as a reversal, because an author disagreeing is not the same as a
+    // maintainer disagreeing. The close was Reeve's own, and the author's
+    // reopen is evidence of disagreement, but not evidence a *maintainer*
+    // disagrees.
+    stub.issueAuthor = "reporter";
+    Object.assign(stub.collaboratorPermissions, { reporter: "write" });
+    const event = await reopenEvent({ login: "reporter", type: "User" });
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    // The author reopen is surfaced in the log, not silently swallowed — a
+    // maintainer who agrees can still act on it (by relabelling, which IS
+    // recorded).
+    expect(run.log).toContain("#42 was reopened by the thread's own author");
+    expect(run.log).toContain("not recorded as a reversal");
+  });
+
+  it("does not record a reversal when the reopener lacks standing, and falls through to an ordinary verdict", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.replies[42] = [
+      {
+        body: "Closing as a duplicate of #7.\n<!-- reeve:triage:closed duplicate-of=7 -->",
+        bot: true,
+        login: "reeve-triage[bot]",
+      },
+    ];
+    // The reopener has only `read` permission — not trusted. An untrusted
+    // reopener is the same case `isTrustedReopener` fails closed on.
+    Object.assign(stub.collaboratorPermissions, { stranger: "read" });
+    const event = await reopenEvent({ login: "stranger", type: "User" });
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    // Fell through to the ordinary verdict pipeline — the reopen was not a
+    // recordable reversal, but it is still a thread worth triaging.
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
+  it("does not record a reversal when the close was not Reeve's own, and falls through to an ordinary verdict", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    // No bot-authored close-marker comment on this thread — `attributedClose`
+    // returns null, meaning the close was not Reeve's own, so there is nothing
+    // to reverse.
+    stub.replies[42] = [];
+    Object.assign(stub.collaboratorPermissions, { maintainer: "write" });
+    const event = await reopenEvent({ login: "maintainer", type: "User" });
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("false");
+    expect(stub.contentsWrites).toEqual([]);
+    // Fell through to the ordinary verdict pipeline.
+    expect(stub.effects.applied).toEqual(["bug"]);
+  });
+
+  // gateClose independence: the hard gate holds even when recall is zero.
+  it("gateClose holds on an unreadable shard even when recall is zero", async () => {
+    await writeFile(
+      warrantPath,
+      RECORDING_WARRANT.replace(
+        "triage: [label, record]",
+        "triage: [label, record, close]",
+      ).replace("capabilities:", "memory:\n  recall: 0\n\ncapabilities:"),
+    );
+    // An unreadable shard in the corrections store — `gateClose` reads
+    // through the Contents API, not through recall's filesystem-backed store,
+    // so this shard is visible to the gate even when `recall: 0` prevents the
+    // recall system from reading anything at all.
+    const oversizedPath = `${CORRECTIONS}/2026-01.ndjson`;
+    stub.contentsFiles.set(oversizedPath, { content: "", sha: "sha-big", oversized: true });
+    stub.answer = triaging(
+      verdict({ labels: ["bug"], duplicate_of: 7, confidence: 0.95, rationale: "Same issue." }),
+    );
+
+    const run = await runAction(stub, { apply: "label, record, close", corrections: CORRECTIONS });
+
+    expect(run.code).toBe(0);
+    // The gate refused the close — it cannot prove the reversal does not exist
+    // when it could not read the shard.
+    expect(stub.effects.closed).toBe(false);
+    expect(run.log).toContain("could not be read");
+    expect(run.log).toContain("refused rather than risk");
+  });
+
+  // Incomplete label event history: the `removedByAutomation` enrichment is
+  // forgone, not guessed.
+  it("incomplete label event history writes the correction without outcome overruled", async () => {
+    await writeFile(warrantPath, RECORDING_WARRANT);
+    stub.labels = ["bug"];
+    // A thread whose label history is longer than one run reads — the guard
+    // cannot determine whether the `bug` label was applied by a bot or a human,
+    // so it answers "not automation" (fail-closed) rather than "unknown".
+    stub.truncatedLabelHistory = new Set([42]);
+    const event = await labelEvent("unlabeled", { login: "ana", type: "User" });
+
+    const run = await runAction(
+      stub,
+      { apply: "label, record", corrections: CORRECTIONS },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.recorded).toBe("true");
+    const shard = stub.contentsFiles.get(shardPath());
+    expect(shard).toBeDefined();
+    const written = JSON.parse(shard?.content.trim() ?? "") as {
+      thread: number;
+      outcome: string | null;
+    };
+    // `outcome` is `null` — the incomplete history meant `removedByAutomation`
+    // returned `false` (no enrichment), so the correction was written as an
+    // ordinary S2 record rather than an S1 overruled one.
+    expect(written.outcome).toBeNull();
+  });
 });
 
 describe("cross-language recall", () => {
@@ -2109,6 +2372,30 @@ describe("cross-language recall", () => {
       expect(after.outputs.labels).not.toBe(before.outputs.labels);
     },
   );
+
+  it("a recorded correction is delivered to the model on a subsequent run on the same thread", async () => {
+    // Record a correction: a maintainer relabelled from `bug` to `docs`.
+    await remember({
+      decided: ["docs"],
+      note: "Documented behaviour: the toggle setting is intentionally not persisted.",
+    });
+
+    // The provider stub captures every request the run sends, including the
+    // verdict prompt. A correction in the store means the recall section must
+    // appear in that prompt — the governance pipeline delivered it.
+    stub.answer = triaging(verdict());
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    // The verdict prompt (the one that asks for JSON, not the screen) must
+    // contain the recall section. We do not assert the model changes its
+    // verdict — model behavior is out of scope. We assert the governance
+    // pipeline delivers the correction to the prompt.
+    const verdictAsk = stub.asked.find((ask) => !ask.system.includes("worth a maintainer's"));
+    expect(verdictAsk?.user).toContain("Documented behaviour");
+    expect(verdictAsk?.user).toContain("DECIDED:");
+  });
 });
 
 describe("the action contract", () => {

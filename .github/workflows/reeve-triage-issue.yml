@@ -17,13 +17,22 @@ name: Issue triage
 # key and cannot mask model ids it was never told are sensitive.
 
 on:
-  # `opened` only, and deliberately not `edited`. A label is a decision a
-  # maintainer can already see and change on the thread; re-deciding it every
-  # time an author fixes a typo would spend a request to reach the same answer,
-  # and on the run where it reached a different one it would look like the
-  # taxonomy had changed its mind for no visible reason.
+  # `opened` only was the original trigger, and deliberately not `edited`. A
+  # label is a decision a maintainer can already see and change on the thread;
+  # re-deciding it every time an author fixes a typo would spend a request to
+  # reach the same answer, and on the run where it reached a different one it
+  # would look like the taxonomy had changed its mind for no visible reason.
+  #
+  # `labeled`, `unlabeled`, and `reopened` are added for `record`: these are
+  # the three `issues` actions `recordTrigger()` fires on, and they come from
+  # humans only — bot-authored label changes and reopens are filtered at
+  # runtime by `isBotAuthor()`. A `labeled` or `unlabeled` event records a
+  # human's label change as a correction (S1); a `reopened` event records a
+  # maintainer's reversal of a Reeve duplicate-close (S3). All three fall
+  # through to an ordinary verdict when `record` is not granted, when the
+  # sender is a bot, or when the event does not meet the recording conditions.
   issues:
-    types: [opened]
+    types: [opened, labeled, unlabeled, reopened]
   workflow_dispatch:
     inputs:
       number:
@@ -35,7 +44,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -61,13 +70,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - if: env.MODELS == ''
+      - if: >-
+          env.MODELS == '' &&
+          github.event.action != 'labeled' &&
+          github.event.action != 'unlabeled' &&
+          github.event.action != 'reopened'
         run: echo "::notice::No provider is configured for this repository, so nothing was triaged."
 
-      # Ids only, and one per line: an entry is `id=Name`, and masking the name
-      # would leave a run report full of `***` with no way to tell one model
-      # from another — which is the opposite of what naming them is for.
-      - if: env.MODELS != ''
+      # `record` is governance, not intelligence: label corrections and reopen
+      # reversals can be recorded without a model. The duty may use the roster
+      # to render a cross-language pivot when one exists, but starvation only
+      # omits that enrichment — it never prevents the correction itself from
+      # being stored. Ordinary triage still needs a provider.
+      - if: >-
+          env.MODELS != '' ||
+          github.event.action == 'labeled' ||
+          github.event.action == 'unlabeled' ||
+          github.event.action == 'reopened'
         name: Keep the provider out of the log
         env:
           SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
@@ -79,9 +98,14 @@ jobs:
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
 
-      - if: env.MODELS != ''
+      - if: >-
+          env.MODELS != '' ||
+          github.event.action == 'labeled' ||
+          github.event.action == 'unlabeled' ||
+          github.event.action == 'reopened'
         uses: ./triage
         with:
+          apply: "label, record"
           number: ${{ github.event.issue.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           # Empty when the endpoint is keyless, which is a supported

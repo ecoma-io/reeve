@@ -35293,7 +35293,12 @@ function taxonomyNames(settings) {
 // src/duties/triage/outcome.ts
 var closeMarker = closeMarkerFor("triage");
 async function removedByAutomation(api, at, label) {
-  const history = await listLabelEvents(api, at);
+  let history;
+  try {
+    history = await listLabelEvents(api, at);
+  } catch {
+    return false;
+  }
   if (!history.complete) return false;
   let byBot = false;
   for (const event of history.events) {
@@ -35302,7 +35307,12 @@ async function removedByAutomation(api, at, label) {
   return byBot;
 }
 async function attributedClose(api, at) {
-  const { replies } = await listReplies(api, at, { order: "newest" });
+  let replies;
+  try {
+    ({ replies } = await listReplies(api, at, { order: "newest" }));
+  } catch {
+    return null;
+  }
   for (let index = replies.length - 1; index >= 0; index -= 1) {
     const reply = replies[index];
     if (!reply?.isBot) continue;
