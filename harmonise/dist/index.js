@@ -33780,13 +33780,15 @@ function summarize(run2) {
   if (run2.results.length === 0) {
     lines.push("\n_No document groups need synchronisation._");
   } else {
-    const rows = run2.results.map((r) => [
-      r.group.id,
-      r.classification,
-      r.synced.length > 0 ? r.synced.join(", ") : "\u2014",
-      r.conflicts.length > 0 ? r.conflicts.join(", ") : "\u2014",
-      r.skipped.length > 0 ? r.skipped.join(", ") : "\u2014"
-    ]);
+    const rows = run2.results.map(
+      (r) => [
+        r.group.id,
+        r.classification,
+        r.synced.length > 0 ? r.synced.join(", ") : "\u2014",
+        r.conflicts.length > 0 ? r.conflicts.join(", ") : "\u2014",
+        r.skipped.length > 0 ? r.skipped.join(", ") : "\u2014"
+      ]
+    );
     lines.push("");
     lines.push(table(["Group", "Classification", "Synced", "Conflicts", "Skipped"], rows));
   }
@@ -33885,7 +33887,9 @@ async function run() {
       return;
     }
     if (sourceLanguage === null) {
-      setFailed("harmonise: source language could not be resolved \u2014 this is a configuration error.");
+      setFailed(
+        "harmonise: source language could not be resolved \u2014 this is a configuration error."
+      );
       settleAuth(weather);
       return;
     }
@@ -33923,7 +33927,9 @@ async function run() {
         await writeState(api, context2.repo, settings.state, state, stateSha);
       } catch (error2) {
         if (isCapacityError(error2)) {
-          warning("harmonise: could not write provenance state \u2014 capacity error. State may be stale.");
+          warning(
+            "harmonise: could not write provenance state \u2014 capacity error. State may be stale."
+          );
         } else {
           throw error2;
         }
@@ -33935,10 +33941,30 @@ async function run() {
   } finally {
     if (settings !== null && authority !== null) {
       const rosterStarved = warnIfStarved(settings.models, weather, false);
-      setOutput("classified", JSON.stringify(groupResults.filter((r) => r.classification !== "none").map((r) => r.group.id)));
-      setOutput("synced", JSON.stringify(groupResults.filter((r) => r.synced.length > 0).map((r) => r.group.id)));
-      setOutput("conflicts", JSON.stringify(groupResults.filter((r) => r.conflicts.length > 0).map((r) => ({ group: r.group.id, locales: r.conflicts }))));
-      setOutput("skipped", JSON.stringify(groupResults.filter((r) => r.classification === "none" || r.classification !== "semantic" && r.synced.length === 0).map((r) => r.group.id)));
+      setOutput(
+        "classified",
+        JSON.stringify(
+          groupResults.filter((r) => r.classification !== "none").map((r) => r.group.id)
+        )
+      );
+      setOutput(
+        "synced",
+        JSON.stringify(groupResults.filter((r) => r.synced.length > 0).map((r) => r.group.id))
+      );
+      setOutput(
+        "conflicts",
+        JSON.stringify(
+          groupResults.filter((r) => r.conflicts.length > 0).map((r) => ({ group: r.group.id, locales: r.conflicts }))
+        )
+      );
+      setOutput(
+        "skipped",
+        JSON.stringify(
+          groupResults.filter(
+            (r) => r.classification === "none" || r.classification !== "semantic" && r.synced.length === 0
+          ).map((r) => r.group.id)
+        )
+      );
       setOutput("starved", String(rosterStarved));
       setOutput("budget-exhausted", String(false));
       await writeRunSummary(
@@ -33980,7 +34006,10 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
   const conflicts = [...doc.conflicts];
   const synced = [];
   const skipped = [];
-  const diffDescription = computeDiff(sourceFile.text, doc.sourceRevision === "" ? null : doc.sourceRevision);
+  const diffDescription = computeDiff(
+    sourceFile.text,
+    doc.sourceRevision === "" ? null : doc.sourceRevision
+  );
   let classification;
   if (doc.stale.length > 0) {
     const firstStaleLocale = doc.stale[0];
@@ -34137,14 +34166,14 @@ async function loadGlossary(api, at, path) {
     const entries = [];
     for (const [term, value] of Object.entries(record)) {
       if (typeof term === "string" && term.length > 0) {
-        entries.push(
-          typeof value === "string" ? { term, note: value } : { term }
-        );
+        entries.push(typeof value === "string" ? { term, note: value } : { term });
       }
     }
     return entries;
   } catch {
-    warning(`harmonise: glossary file \`${path}\` could not be parsed \u2014 continuing without glossary.`);
+    warning(
+      `harmonise: glossary file \`${path}\` could not be parsed \u2014 continuing without glossary.`
+    );
     return [];
   }
 }
