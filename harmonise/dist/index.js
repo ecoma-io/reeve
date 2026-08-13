@@ -24158,7 +24158,7 @@ var require_resolve_block_scalar = __commonJS({
       if (!header)
         return { value: "", type: null, comment: "", range: [start, start, start] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
-      const lines = scalar.source ? splitLines(scalar.source) : [];
+      const lines = scalar.source ? splitLines2(scalar.source) : [];
       let chompStart = lines.length;
       for (let i = lines.length - 1; i >= 0; --i) {
         const content = lines[i][1];
@@ -24316,7 +24316,7 @@ var require_resolve_block_scalar = __commonJS({
       }
       return { mode, indent, chomp, comment, length };
     }
-    function splitLines(source) {
+    function splitLines2(source) {
       const split2 = source.split(/\n( *)/);
       const first = split2[0];
       const m = first.match(/^( *)/);
@@ -33554,6 +33554,82 @@ function defangReferences(prose) {
   });
 }
 
+// src/duties/harmonise/ignore.ts
+var PLACEHOLDER = "<!-- reeve-keep-section -->";
+var SANITIZED_PLACEHOLDER = /<!-- ------------------ -->\n?/g;
+var IGNORE_NEXT_LINE = /^\s*<!--\s*reeve:ignore-next-line\s*-->\s*$/;
+var IGNORE_START = /^\s*<!--\s*reeve:ignore-start\s*-->\s*$/;
+var IGNORE_END = /^\s*<!--\s*reeve:ignore-end\s*-->\s*$/;
+function extract(content) {
+  const spans = [];
+  const lines = splitLines(content);
+  const output = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = stripTerminator(lines[i] ?? "");
+    if (IGNORE_NEXT_LINE.test(line)) {
+      const markerLine = i;
+      i += 1;
+      while (i < lines.length && stripTerminator(lines[i] ?? "").trim().length === 0) {
+        output.push(lines[i] ?? "");
+        i += 1;
+      }
+      const ignoredLine = i < lines.length ? i : -1;
+      if (ignoredLine >= 0) {
+        i += 1;
+      }
+      spans.push({
+        content: lines.slice(markerLine, markerLine + 1).join("") + (ignoredLine >= 0 ? lines[ignoredLine] ?? "" : "")
+      });
+      output.push(PLACEHOLDER + "\n");
+      continue;
+    }
+    if (IGNORE_START.test(line)) {
+      const start = i;
+      i += 1;
+      while (i < lines.length) {
+        if (IGNORE_END.test(stripTerminator(lines[i] ?? ""))) {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      spans.push({ content: lines.slice(start, i).join("") });
+      output.push(PLACEHOLDER + "\n");
+      continue;
+    }
+    output.push(lines[i] ?? "");
+    i += 1;
+  }
+  return { content: output.join(""), spans };
+}
+function reinsert(draft, spans) {
+  if (spans.length === 0) return draft;
+  const matches = [...draft.matchAll(SANITIZED_PLACEHOLDER)];
+  if (matches.length !== spans.length) {
+    warning(
+      `harmonise: ignore placeholder count mismatch (${String(matches.length)} in draft vs ${String(spans.length)} expected) \u2014 ignored sections may not be preserved`
+    );
+    return draft;
+  }
+  let result = draft;
+  for (let i = matches.length - 1; i >= 0; i -= 1) {
+    const match = matches[i];
+    const span = spans[i];
+    if (match == null || span == null) continue;
+    result = result.slice(0, match.index) + span.content + result.slice(match.index + match[0].length);
+  }
+  return result;
+}
+function splitLines(text2) {
+  const raw = text2.split("\n");
+  return raw.map((line, index) => index < raw.length - 1 ? `${line}
+` : line);
+}
+function stripTerminator(line) {
+  return line.replace(/\r?\n$/, "");
+}
+
 // src/core/score.ts
 function refused(reason) {
   return { value: 0, admissible: false, reason, checks: [] };
@@ -33679,22 +33755,31 @@ async function draftSyncs(request2) {
     glossary,
     drafts,
     weather,
-    chunkChars
+    chunkChars,
+    ignore
   } = request2;
-  if (chunkChars > 0 && (sourceContent.length > chunkChars || targetContent.length > chunkChars)) {
-    return draftChunked(request2);
+  const { content: maskedSource } = ignore ? extract(sourceContent) : { content: sourceContent, spans: [] };
+  const { content: maskedTarget, spans: targetSpans } = ignore ? extract(targetContent) : { content: targetContent, spans: [] };
+  if (chunkChars > 0 && (maskedSource.length > chunkChars || maskedTarget.length > chunkChars)) {
+    return draftChunked({
+      ...request2,
+      sourceContent: maskedSource,
+      targetContent: maskedTarget,
+      targetSpans
+    });
   }
   return draftWhole({
     provider,
     models,
-    sourceContent,
-    targetContent,
+    sourceContent: maskedSource,
+    targetContent: maskedTarget,
     semanticHunks,
     sourceLanguage,
     targetLanguage,
     languages,
     glossary,
     drafts,
+    targetSpans,
     ...weather !== void 0 ? { weather } : {}
   });
 }
@@ -33710,7 +33795,8 @@ async function draftWhole(params) {
     languages,
     glossary,
     drafts,
-    weather
+    weather,
+    targetSpans
   } = params;
   const messages = buildMessages(
     sourceContent,
@@ -33730,6 +33816,7 @@ async function draftWhole(params) {
     languages,
     glossaryTerms: glossary.map((g) => g.term),
     drafts,
+    targetSpans,
     ...weather !== void 0 ? { weather } : {}
   });
 }
@@ -33746,7 +33833,8 @@ async function draftChunked(request2) {
     glossary,
     drafts,
     weather,
-    chunkChars
+    chunkChars,
+    targetSpans
   } = request2;
   const sourceChunks = chunks(sourceContent, chunkChars);
   const targetChunks = chunks(targetContent, chunkChars);
@@ -33803,8 +33891,9 @@ async function draftChunked(request2) {
     }
   }
   const reassembled = chunkDrafts.join("");
+  const reinserted = reinsert(reassembled, targetSpans);
   const measured2 = scoreDraft(
-    reassembled,
+    reinserted,
     targetContent,
     glossary.map((g) => g.term),
     sourceContent,
@@ -33815,7 +33904,7 @@ async function draftChunked(request2) {
     // Report the first non-exhausted model as the producer, since chunks may
     // have come from different models.
     model: models.find((m) => !exhausted2.has(m)) ?? models[0] ?? "unknown",
-    text: reassembled,
+    text: reinserted,
     score: measured2
   };
   if (measured2.admissible) {
@@ -33837,7 +33926,8 @@ async function draftLoop(params) {
     languages,
     glossaryTerms,
     drafts,
-    weather
+    weather,
+    targetSpans
   } = params;
   const attempts = [];
   const refused2 = [];
@@ -33862,8 +33952,9 @@ async function draftLoop(params) {
       continue;
     }
     const sanitized = sanitize(draftText);
+    const reinserted = reinsert(sanitized, targetSpans);
     const measured2 = scoreDraft(
-      sanitized,
+      reinserted,
       targetContent,
       glossaryTerms,
       sourceContent,
@@ -33872,7 +33963,7 @@ async function draftLoop(params) {
     );
     const attempt = {
       model: rotation.success.model,
-      text: sanitized,
+      text: reinserted,
       score: measured2
     };
     if (measured2.admissible) {
@@ -33924,7 +34015,8 @@ Rules:
 5. Respect the glossary \u2014 glossary terms must NOT be translated.
 6. Output the COMPLETE updated target file, not just the changed sections.
 7. Do NOT add content that exists only in the source as locale-specific.
-8. If a semantic change replaces a heading, update the corresponding heading in the target.`;
+8. If a semantic change replaces a heading, update the corresponding heading in the target.
+9. HTML comments of the form \`<!-- reeve-keep-section -->\` mark sections that must be reproduced exactly as they appear in the target. Do not modify, translate, or remove them.`;
 function buildMessages(sourceContent, targetContent, semanticHunks, sourceLanguage, targetLanguage, glossary) {
   const glossarySection = formatGlossary(glossary);
   const changes = semanticHunks.map((h) => `- ${h.description}`).join("\n");
@@ -34602,7 +34694,8 @@ function readSettings() {
     glossaryDir: getInput("glossary-dir", { required: true }),
     paths: parsePaths(getInput("paths")),
     maxRequests: bounded("max-requests", getInput("max-requests")),
-    chunkChars: counted("chunk-chars", getInput("chunk-chars"))
+    chunkChars: counted("chunk-chars", getInput("chunk-chars")),
+    ignore: getInput("ignore") !== "false"
   };
 }
 function notGranted(warrant) {
@@ -34956,7 +35049,8 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       glossary,
       drafts: settings.drafts,
       weather,
-      chunkChars: settings.chunkChars
+      chunkChars: settings.chunkChars,
+      ignore: settings.ignore
     });
     for (const failure of result.failures) {
       warning(

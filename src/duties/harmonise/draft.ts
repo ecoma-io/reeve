@@ -23,6 +23,7 @@ import { sanitize } from "../../core/sanitize.js";
 import type { Score } from "../../core/score.js";
 
 import type { ClassifiedHunk } from "./classify.js";
+import { extract, reinsert, type IgnoreSpan } from "./ignore.js";
 import { scoreDraft } from "./score.js";
 
 /** The purpose name for meter tracking. */
@@ -81,6 +82,8 @@ export interface DraftSyncRequest {
    * at Markdown boundaries and drafts each chunk independently.
    */
   readonly chunkChars: number;
+  /** Whether to honour `<!-- reeve:ignore-* -->` markers. */
+  readonly ignore: boolean;
 }
 
 /**
@@ -106,23 +109,40 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     drafts,
     weather,
     chunkChars,
+    ignore,
   } = request;
 
-  if (chunkChars > 0 && (sourceContent.length > chunkChars || targetContent.length > chunkChars)) {
-    return draftChunked(request);
+  // Extract ignore markers from source and target. The model sees
+  // placeholder comments where ignored blocks were, and the original
+  // target content is reinserted after sanitize runs.
+  const { content: maskedSource } = ignore
+    ? extract(sourceContent)
+    : { content: sourceContent, spans: [] };
+  const { content: maskedTarget, spans: targetSpans } = ignore
+    ? extract(targetContent)
+    : { content: targetContent, spans: [] as IgnoreSpan[] };
+
+  if (chunkChars > 0 && (maskedSource.length > chunkChars || maskedTarget.length > chunkChars)) {
+    return draftChunked({
+      ...request,
+      sourceContent: maskedSource,
+      targetContent: maskedTarget,
+      targetSpans,
+    });
   }
 
   return draftWhole({
     provider,
     models,
-    sourceContent,
-    targetContent,
+    sourceContent: maskedSource,
+    targetContent: maskedTarget,
     semanticHunks,
     sourceLanguage,
     targetLanguage,
     languages,
     glossary,
     drafts,
+    targetSpans,
     ...(weather !== undefined ? { weather } : {}),
   });
 }
@@ -144,6 +164,7 @@ async function draftWhole(params: DraftWholeParams): Promise<DraftResult> {
     glossary,
     drafts,
     weather,
+    targetSpans,
   } = params;
 
   const messages = buildMessages(
@@ -165,6 +186,7 @@ async function draftWhole(params: DraftWholeParams): Promise<DraftResult> {
     languages,
     glossaryTerms: glossary.map((g) => g.term),
     drafts,
+    targetSpans,
     ...(weather !== undefined ? { weather } : {}),
   });
 }
@@ -181,6 +203,7 @@ interface DraftWholeParams {
   readonly languages: readonly Language[];
   readonly glossary: readonly GlossaryEntry[];
   readonly drafts: number;
+  readonly targetSpans: readonly IgnoreSpan[];
   readonly weather?: Weather;
 }
 
@@ -193,7 +216,9 @@ interface DraftWholeParams {
  * that provides the chunk's source and target, the full list of semantic
  * hunks, and the glossary. Scoring applies to the full reassembled draft.
  */
-async function draftChunked(request: DraftSyncRequest): Promise<DraftResult> {
+async function draftChunked(
+  request: DraftSyncRequest & { targetSpans: readonly IgnoreSpan[] },
+): Promise<DraftResult> {
   const {
     provider,
     models,
@@ -207,6 +232,7 @@ async function draftChunked(request: DraftSyncRequest): Promise<DraftResult> {
     drafts,
     weather,
     chunkChars,
+    targetSpans,
   } = request;
 
   const sourceChunks = chunks(sourceContent, chunkChars);
@@ -285,9 +311,12 @@ async function draftChunked(request: DraftSyncRequest): Promise<DraftResult> {
 
   const reassembled = chunkDrafts.join("");
 
+  // Reinsert ignored blocks (replaced by placeholders before chunking).
+  const reinserted = reinsert(reassembled, targetSpans);
+
   // Score the full reassembled draft against the full original target.
   const measured = scoreDraft(
-    reassembled,
+    reinserted,
     targetContent,
     glossary.map((g) => g.term),
     sourceContent,
@@ -299,7 +328,7 @@ async function draftChunked(request: DraftSyncRequest): Promise<DraftResult> {
     // Report the first non-exhausted model as the producer, since chunks may
     // have come from different models.
     model: models.find((m) => !exhausted.has(m)) ?? models[0] ?? "unknown",
-    text: reassembled,
+    text: reinserted,
     score: measured,
   };
 
@@ -329,6 +358,7 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
     glossaryTerms,
     drafts,
     weather,
+    targetSpans,
   } = params;
 
   const attempts: Draft[] = [];
@@ -358,8 +388,10 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
     }
 
     const sanitized = sanitize(draftText);
+    // Reinsert ignored blocks (replaced by placeholders before the model call).
+    const reinserted = reinsert(sanitized, targetSpans);
     const measured = scoreDraft(
-      sanitized,
+      reinserted,
       targetContent,
       glossaryTerms,
       sourceContent,
@@ -369,7 +401,7 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
 
     const attempt: Draft = {
       model: rotation.success.model,
-      text: sanitized,
+      text: reinserted,
       score: measured,
     };
 
@@ -400,6 +432,7 @@ interface DraftLoopParams {
   readonly languages: readonly Language[];
   readonly glossaryTerms: readonly string[];
   readonly drafts: number;
+  readonly targetSpans: readonly IgnoreSpan[];
   readonly weather?: Weather;
 }
 
@@ -465,7 +498,8 @@ Rules:
 5. Respect the glossary — glossary terms must NOT be translated.
 6. Output the COMPLETE updated target file, not just the changed sections.
 7. Do NOT add content that exists only in the source as locale-specific.
-8. If a semantic change replaces a heading, update the corresponding heading in the target.`;
+8. If a semantic change replaces a heading, update the corresponding heading in the target.
+9. HTML comments of the form \`<!-- reeve-keep-section -->\` mark sections that must be reproduced exactly as they appear in the target. Do not modify, translate, or remove them.`;
 
 function buildMessages(
   sourceContent: string,

@@ -115,6 +115,7 @@ export interface Settings {
   readonly requestTimeoutMs: number;
   readonly temperature: number | undefined;
   readonly chunkChars: number;
+  readonly ignore: boolean;
 }
 
 function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permitted"> {
@@ -134,6 +135,7 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     paths: parsePaths(core.getInput("paths")),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     chunkChars: counted("chunk-chars", core.getInput("chunk-chars")),
+    ignore: core.getInput("ignore") !== "false",
   };
 }
 
@@ -623,6 +625,7 @@ async function processGroup(
       drafts: settings.drafts,
       weather,
       chunkChars: settings.chunkChars,
+      ignore: settings.ignore,
     });
 
     for (const failure of result.failures) {
