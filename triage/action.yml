@@ -7,7 +7,7 @@
 # A workflow names this directory: `uses: ecoma-io/reeve/triage@v0.1`.
 name: Reeve - triage
 description: Label an issue from your own taxonomy, in your own words, checked in code against a warrant file that says what the run is allowed to do.
-author: Ecoma
+author: ecoma.io
 
 branding:
   icon: tag
