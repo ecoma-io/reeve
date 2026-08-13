@@ -824,6 +824,29 @@ export interface ContentsApi {
   };
 }
 
+/**
+ * The part of an Octokit client that can read a Git blob by its SHA.
+ *
+ * Separate from `ContentsApi` because the two read different things through
+ * different endpoints: `ContentsApi` reads a file at a path (on the default
+ * branch), while `BlobApi` reads a blob by its SHA (regardless of branch or
+ * path). A duty holding only `ContentsApi` cannot resolve a historical SHA
+ * to content, and a reviewer can see that from the type.
+ *
+ * Used by `harmonise` to resolve a stored `sourceRevision` (a blob SHA from
+ * the provenance state) to the actual file content at that revision — the
+ * content the diff/classification pipeline compares against the current file.
+ */
+export interface BlobApi {
+  readonly rest: {
+    readonly git: {
+      getBlob(params: { owner: string; repo: string; file_sha: string }): Promise<{
+        data: { content?: string; encoding?: string; sha: string; size: number | null };
+      }>;
+    };
+  };
+}
+
 /** One `.ndjson` shard, as the directory listing named it. */
 export interface CorrectionFile {
   readonly path: string;
@@ -941,6 +964,59 @@ export async function readContentsFile(
   }
 
   throw new UnreadableContentsFile(path);
+}
+
+/**
+ * Reads a Git blob by its SHA and returns its decoded text content.
+ *
+ * `null` means the blob does not exist (404) — the SHA may no longer be
+ * reachable after a force push or history rewrite. A caller that needs the
+ * historical content to compute a diff must treat `null` as "cannot resolve
+ * the previous state" rather than as "the previous state was empty".
+ *
+ * Throws for any other failure — a network error, a permissions issue, or a
+ * blob the API returned but could not decode. This is the same posture as
+ * `readContentsFile`: fail loudly rather than fabricate a result.
+ */
+export async function readBlob(
+  api: BlobApi,
+  at: Pick<Location, "owner" | "repo">,
+  sha: string,
+): Promise<string | null> {
+  let data: { content?: string; encoding?: string; sha: string; size: number | null };
+  try {
+    ({ data } = await api.rest.git.getBlob({ owner: at.owner, repo: at.repo, file_sha: sha }));
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+
+  if (typeof data.content === "string" && data.encoding === "base64") {
+    return Buffer.from(data.content, "base64").toString("utf8");
+  }
+
+  throw new UnreadableBlob(sha);
+}
+
+/**
+ * A blob the Git Blobs API answered but `readBlob` could not decode as text.
+ *
+ * A blob over the 1 MB the API can inline may arrive without base64 content,
+ * just like `UnreadableContentsFile` for the Contents API. This is the same
+ * distinction: present but undecodable is a failure, not "not there".
+ */
+export class UnreadableBlob extends Error {
+  /** The blob SHA, repeated so a catcher can name it without re-parsing. */
+  readonly sha: string;
+
+  constructor(sha: string) {
+    super(
+      `\`${sha.slice(0, 8)}\` could not be read as text — the Git Blobs API answered without ` +
+        "base64 content, which is what it sends for a blob over the size that endpoint can inline.",
+    );
+    this.name = "UnreadableBlob";
+    this.sha = sha;
+  }
 }
 
 /**

@@ -31625,6 +31625,30 @@ async function readContentsFile(api, at, path) {
   }
   throw new UnreadableContentsFile(path);
 }
+async function readBlob(api, at, sha) {
+  let data;
+  try {
+    ({ data } = await api.rest.git.getBlob({ owner: at.owner, repo: at.repo, file_sha: sha }));
+  } catch (error2) {
+    if (isMissing(error2)) return null;
+    throw error2;
+  }
+  if (typeof data.content === "string" && data.encoding === "base64") {
+    return Buffer.from(data.content, "base64").toString("utf8");
+  }
+  throw new UnreadableBlob(sha);
+}
+var UnreadableBlob = class extends Error {
+  /** The blob SHA, repeated so a catcher can name it without re-parsing. */
+  sha;
+  constructor(sha) {
+    super(
+      `\`${sha.slice(0, 8)}\` could not be read as text \u2014 the Git Blobs API answered without base64 content, which is what it sends for a blob over the size that endpoint can inline.`
+    );
+    this.name = "UnreadableBlob";
+    this.sha = sha;
+  }
+};
 var UnreadableContentsFile = class extends Error {
   /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
   path;
@@ -33172,6 +33196,54 @@ function parseClassification(raw) {
   };
 }
 
+// src/duties/harmonise/diff.ts
+function computeSourceDiff(previousContent, currentContent) {
+  const oldLines = previousContent.split("\n");
+  const newLines = currentContent.split("\n");
+  const m = oldLines.length;
+  const n = newLines.length;
+  const width = n + 1;
+  const table2 = new Array((m + 1) * width).fill(0);
+  for (let i2 = 1; i2 <= m; i2++) {
+    for (let j2 = 1; j2 <= n; j2++) {
+      if (oldLines[i2 - 1] === newLines[j2 - 1]) {
+        table2[i2 * width + j2] = (table2[(i2 - 1) * width + (j2 - 1)] ?? 0) + 1;
+      } else {
+        const fromAbove = table2[(i2 - 1) * width + j2] ?? 0;
+        const fromLeft = table2[i2 * width + (j2 - 1)] ?? 0;
+        table2[i2 * width + j2] = fromLeft > fromAbove ? fromLeft : fromAbove;
+      }
+    }
+  }
+  const result = [];
+  let i = m;
+  let j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      i--;
+      j--;
+    } else {
+      const fromAbove = i > 0 ? table2[(i - 1) * width + j] ?? 0 : -1;
+      const fromLeft = j > 0 ? table2[i * width + (j - 1)] ?? 0 : -1;
+      if (j > 0 && fromLeft >= fromAbove) {
+        const line = newLines[j - 1] ?? "";
+        result.unshift(`+ ${line}`);
+        j--;
+      } else {
+        const line = oldLines[i - 1] ?? "";
+        result.unshift(`- ${line}`);
+        i--;
+      }
+    }
+  }
+  return result.join("\n");
+}
+function formatInitialSync(content) {
+  return `This is the initial sync. The source document is:
+
+${content}`;
+}
+
 // src/duties/harmonise/discover.ts
 var LOCALE_SUFFIX = /^(.+)\.([a-z]{2,3}(?:-[A-Z][a-zA-Z]+)?)\.md$/;
 function discoverGroups(paths, sourceLanguage, targetLanguages, pathsFilter) {
@@ -34006,10 +34078,26 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
   const conflicts = [...doc.conflicts];
   const synced = [];
   const skipped = [];
-  const diffDescription = computeDiff(
-    sourceFile.text,
-    doc.sourceRevision === "" ? null : doc.sourceRevision
-  );
+  let diffDescription;
+  if (doc.sourceRevision === "") {
+    diffDescription = formatInitialSync(sourceFile.text);
+  } else {
+    const previousContent = await readBlob(api, at, doc.sourceRevision);
+    if (previousContent === null) {
+      warning(
+        `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} for ${group.id} \u2014 skipping. The blob SHA may no longer be reachable.`
+      );
+      return {
+        group,
+        classification: "none",
+        hunks: [],
+        synced: [],
+        conflicts,
+        skipped: doc.stale
+      };
+    }
+    diffDescription = computeSourceDiff(previousContent, sourceFile.text);
+  }
   let classification;
   if (doc.stale.length > 0) {
     const firstStaleLocale = doc.stale[0];
@@ -34144,16 +34232,6 @@ async function listMarkdownFiles(api, at) {
     }
   }
   return files;
-}
-function computeDiff(currentContent, previousRevision) {
-  if (previousRevision === null) {
-    return `This is the initial sync. The source document is:
-
-${currentContent}`;
-  }
-  return `The source document has changed since revision ${previousRevision.slice(0, 8)}. Current content:
-
-${currentContent}`;
 }
 async function loadGlossary(api, at, path) {
   const file = await readContentsFile(api, at, path);
