@@ -1,0 +1,11 @@
+{
+  "docs/getting-started": {
+    "sourceRevision": "abc123def456",
+    "locales": {
+      "vi": {
+        "syncedSha": "vi789ghi012",
+        "status": "synced"
+      }
+    }
+  }
+}

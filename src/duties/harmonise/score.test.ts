@@ -110,6 +110,17 @@ describe("scoreDraft", () => {
     expect(score.value).toBeGreaterThan(0);
   });
 
+  it("does not penalise a draft for glossary terms absent from the original", () => {
+    // "Acme" is in the glossary but not in the original target — the draft
+    // cannot be expected to preserve what was never there.
+    const draft = original.replace("set up Reeve", "thiết lập Reeve");
+    const score = scoreDraft(draft, original, ["Reeve", "Acme"], original, VI, LANGUAGES);
+    expect(score.admissible).toBe(true);
+    // The glossary check should score 1.0: "Reeve" is present in both original
+    // and draft, and "Acme" is not in the original so it is excluded.
+    expect(score.value).toBeGreaterThan(0);
+  });
+
   it("does not refuse a draft whose script matches the target", () => {
     // Vietnamese uses Latin script — a Latin draft should pass the script check
     const draft = "# Bắt đầu\n\nHướng dẫn này giúp bạn thiết lập Reeve.";

@@ -30,6 +30,6 @@
   // Everything that is type-checked, which is everything. A file outside this
   // list is a file `pnpm typecheck` silently skips, so adding a top-level
   // script means adding it here in the same commit.
-  "include": ["src/**/*", "tools/**/*", "*.config.ts", "*.config.mts"],
+  "include": ["src/**/*", "tools/**/*", "eval/**/*", "*.config.ts", "*.config.mts"],
   "exclude": ["node_modules", "**/dist"]
 }

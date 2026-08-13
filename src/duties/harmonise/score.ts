@@ -168,16 +168,19 @@ function lengthCheck(draft: string, original: string): number {
   return Math.max(0, 2 - ratio); // Degrades linearly from 2x
 }
 
-/** Glossary terms preserved in the draft. */
-function glossaryCheck(draft: string, _original: string, glossaryTerms: readonly string[]): number {
+/** Glossary terms preserved in the draft. Only terms present in the original are scored. */
+function glossaryCheck(draft: string, original: string, glossaryTerms: readonly string[]): number {
   if (glossaryTerms.length === 0) return 1;
 
+  const relevant = glossaryTerms.filter((term) => original.includes(term));
+  if (relevant.length === 0) return 1; // No terms in original — nothing to check
+
   let preserved = 0;
-  for (const term of glossaryTerms) {
+  for (const term of relevant) {
     if (draft.includes(term)) preserved++;
   }
 
-  return preserved / glossaryTerms.length;
+  return preserved / relevant.length;
 }
 
 /** Approximate prose character count (excluding code segments). */

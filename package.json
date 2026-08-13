@@ -47,7 +47,8 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "build": "node tools/build.mjs",
-    "try": "node tools/try.mjs"
+    "try": "node tools/try.mjs",
+    "eval": "node --experimental-strip-types eval/runner.ts"
   },
   "dependencies": {
     "@actions/core": "^3.0.1",

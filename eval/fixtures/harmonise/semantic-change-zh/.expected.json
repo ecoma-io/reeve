@@ -1,0 +1,11 @@
+{
+  "scenario": "cross-script-semantic-change",
+  "description": "EN source gains a new '## Verify the setup' section. ZH file uses Han script (cross-script from EN's Latn). Tests that harmonise can propagate a semantic change across different writing systems — the classifier and drafter must handle the script boundary correctly.",
+  "source-diff": "A new section '## Verify the setup' with one paragraph was added to the end of the EN document.",
+  "expected": {
+    "classification": "semantic",
+    "should-propagate": true,
+    "propagation-target": "zh",
+    "action": "The new section should be translated into Chinese (Han script) and appended to the ZH document. The draft must use Han script, not Latin."
+  }
+}

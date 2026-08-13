@@ -71,10 +71,11 @@ jobs:
           apply: edit-file, open-pr
 ```
 
-That opens a pull request for each document group whose source locale
+That opens a **draft** pull request for each document group whose source locale
 changed, updating only the locale variants that are stale. No source change,
 no PR. A human edit in a target locale since the last sync is reported as a
-conflict, not overwritten.
+conflict, not overwritten. The PR must be marked "ready for review" before it
+can be merged — this is deliberate: a sync should never merge unreviewed.
 
 ## Required permissions
 
@@ -265,9 +266,16 @@ and stops before spending a single model request.
 
 `dry-run: true` runs the whole pipeline, writes every output, and changes
 nothing. The classification, the drafts, and the PR that would have been
-opened are all printed to the log instead. See
-[Rehearsing a run](../../guides/dry-run.md) for the pattern every duty in
-Reeve shares.
+opened are all printed to the log instead.
+
+**Dry-run still spends model requests.** Classification and drafting run
+normally — only the write (file commits and PR creation) is withheld. A
+dry-run on a large document set costs the same in provider calls as a real
+run. Use `apply: none` at the warrant level if you want to prevent model
+calls entirely.
+
+See [Rehearsing a run](../../guides/dry-run.md) for the pattern every duty
+in Reeve shares.
 
 ## Cost
 

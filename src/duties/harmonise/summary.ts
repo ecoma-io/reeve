@@ -36,6 +36,38 @@ export interface Run {
   readonly modelNames: Names;
 }
 
+/**
+ * Renders the classification column with a per-hunk breakdown when there are
+ * multiple hunks or mixed classifications.
+ *
+ * A single-semantic-hunk group still shows `semantic` (no parenthetical).
+ * A group with 3 semantic + 1 correction shows `semantic (3), correction (1)`.
+ * A group with no hunks shows the group-level classification as-is.
+ */
+function hunkBreakdown(
+  hunks: readonly ClassifiedHunk[],
+  fallback: GroupResult["classification"],
+): string {
+  if (hunks.length === 0) return fallback;
+
+  const counts = new Map<string, number>();
+  for (const hunk of hunks) {
+    counts.set(hunk.classification, (counts.get(hunk.classification) ?? 0) + 1);
+  }
+
+  // Single classification, single hunk — no breakdown needed
+  if (counts.size === 1 && hunks.length === 1) {
+    const only = hunks[0];
+    return only !== undefined ? only.classification : fallback;
+  }
+
+  // Multiple classifications or multiple hunks — show breakdown
+  const parts = [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([cls, count]) => (count > 1 ? `${cls} (${String(count)})` : cls));
+  return parts.join(", ");
+}
+
 export function summarize(run: Run): string {
   const lines: string[] = [];
 
@@ -51,7 +83,7 @@ export function summarize(run: Run): string {
       (r) =>
         [
           r.group.id,
-          r.classification,
+          hunkBreakdown(r.hunks, r.classification),
           r.synced.length > 0 ? r.synced.join(", ") : "—",
           r.conflicts.length > 0 ? r.conflicts.join(", ") : "—",
           r.skipped.length > 0 ? r.skipped.join(", ") : "—",
