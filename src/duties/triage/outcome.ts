@@ -60,20 +60,28 @@ export const closeMarker = closeMarkerFor("triage");
  * first being removed, so the most recent application is the only one still
  * standing at the moment this event happened.
  *
- * **An incomplete history answers `false`, not "unknown".** `record` already
- * writes an ordinary (non-`overruled`) correction for every human relabel —
- * this function only decides whether to *enrich* that write with `outcome:
- * "overruled"`, and a history this run could not fully read is not evidence
- * either way. Forgoing the enrichment costs nothing an ordinary S2 record
- * would not already have; guessing at it from a partial read could teach a
- * false reversal.
+ * **An incomplete or unreadable history answers `false`, not "unknown".**
+ * `record` already writes an ordinary (non-`overruled`) correction for every
+ * human relabel — this function only decides whether to *enrich* that write
+ * with `outcome: "overruled"`, and a history this run could not fully read is
+ * not evidence either way. Forgoing the enrichment costs nothing an ordinary
+ * S2 record would not already have; guessing at it from a partial read could
+ * teach a false reversal.
  */
 export async function removedByAutomation(
   api: TrackerApi,
   at: Location,
   label: string,
 ): Promise<boolean> {
-  const history = await listLabelEvents(api, at);
+  let history: {
+    readonly events: readonly { action: string; label: string; isBot: boolean }[];
+    readonly complete: boolean;
+  };
+  try {
+    history = await listLabelEvents(api, at);
+  } catch {
+    return false;
+  }
   if (!history.complete) return false;
 
   let byBot = false;
@@ -102,12 +110,23 @@ export interface CloseAttribution {
  * keeps, because a thread can carry more than one close-and-reopen cycle in
  * its history and the marker that matters is the one for the close this
  * reopen just reversed — the most recent one, not the first one found.
+ *
+ * **Fails closed on any error, including a network failure reading replies.**
+ * An unreadable comment section is not evidence that the close was Reeve's
+ * own — returning `null` lets the reopen fall through to an ordinary verdict,
+ * which is the safe direction: no reversal is recorded, and the thread is
+ * still triaged.
  */
 export async function attributedClose(
   api: GitHubApi,
   at: Location,
 ): Promise<CloseAttribution | null> {
-  const { replies } = await listReplies(api, at, { order: "newest" });
+  let replies: readonly { isBot: boolean; body: string }[];
+  try {
+    ({ replies } = await listReplies(api, at, { order: "newest" }));
+  } catch {
+    return null;
+  }
 
   for (let index = replies.length - 1; index >= 0; index -= 1) {
     const reply = replies[index];

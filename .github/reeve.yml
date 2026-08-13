@@ -22,11 +22,24 @@ version: 1
 # decides, some weeks of backlog from now, whether posting is switched on.
 # `assign` and `close` stay off entirely, which is the advice the docs give
 # and it would be strange to take our own advice second.
+#
+# `record` is the exception: triage records a human's label change or a
+# maintainer's reopen as a correction, committed to `.reeve/corrections/` in
+# this repository. The write goes through the Contents API, which is why the
+# workflow needs `contents: write` in addition to `issues: write` — `record`
+# writes to the repository, not to the thread.
+#
+# `lifecycle` runs on a schedule, not on an event, and grants `label, comment`
+# but not `close`. The `close` step in the lifecycle policy is present for
+# forward-compatibility but is skipped until `close` is added here. The
+# workflow starts in `dry-run: true` so a maintainer can observe what the
+# policy would do before allowing it to act.
 capabilities:
-  triage: [label]
+  triage: [label, record]
   translate: [edit-body]
   duplicate: [comment]
   respond: [comment]
+  lifecycle: [label, comment]
 
 labels:
   - name: bug
@@ -91,3 +104,44 @@ labels:
       A thread that is merely short, or written in a language the maintainers do
       not read. Both are real reports, and one of them is exactly what this
       project exists to make readable.
+
+  - name: stale
+    create: true
+    description: >-
+      This issue has had no activity for six months. It is not closed — a
+      maintainer can remove the label to reset the clock, or let it stand.
+    not: >-
+      An issue that is merely quiet. The lifecycle duty applies this label only
+      after the inactivity window configured in the `lifecycle:` policy, and
+      removes it the moment any activity resumes.
+
+memory:
+  recall: 4
+
+# The lifecycle policy that runs on this repository. An inactivity track with
+# a generous six-month window, because this project's backlog is small and
+# genuine issues should not be hurried. The `close` step is present for
+# forward-compatibility but will be skipped until `close` is added to the
+# lifecycle capabilities — a step whose capability is withheld by either half
+# of the double-gate is skipped whole, never partially applied.
+#
+# `exempt.labels` names `bug` and `enhancement` because those are maintainer
+# decisions, and a stale clock does not overrule a classification. The warrant
+# parser requires at least one exempt label before a `close` step may be
+# configured, which is exactly the right constraint: permanent escape hatches
+# must exist before closing may be configured at all.
+lifecycle:
+  threads: issues
+  tracks:
+    - name: stale
+      steps:
+        - say: >
+            This issue has had no activity for six months and has been marked
+            stale. A maintainer can remove the label to reset the clock, or
+            let it stand — a stale issue is not a closed one.
+          label: stale
+          after: 180d
+        - close: true
+          after: 14d
+  exempt:
+    labels: [bug, enhancement]

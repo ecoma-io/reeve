@@ -80,11 +80,11 @@ Five duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
 [`duplicate`](reference/duties/duplicate.md),
 [`respond`](reference/duties/respond.md), and
-[`lifecycle`](reference/duties/lifecycle.md) — and the first four are
-dogfooded on this repository today: `triage` and `translate` acting on real
+[`lifecycle`](reference/duties/lifecycle.md) — and all five are
+dogfooded on this repository: `triage` and `translate` acting on real
 threads, `duplicate` and `respond` in report-only mode, writing verdicts to
-job summaries and touching nothing. `lifecycle` is the newest of the five and
-does not yet have a workflow of its own here.
+job summaries and touching nothing, `lifecycle` observing in dry-run.
+See [Self-dogfood](guides/dogfood.md) for how the feedback loop works.
 
 ## Full index
 
@@ -102,6 +102,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`guides/cost.md`](guides/cost.md)                                         | how-to                   | Control and predict what a run costs.                                             |
 | [`guides/troubleshooting.md`](guides/troubleshooting.md)                   | how-to                   | Diagnose a run that didn't do what you expected.                                  |
 | [`guides/dry-run.md`](guides/dry-run.md)                                   | how-to                   | Rehearse a run with nothing written.                                              |
+| [`guides/dogfood.md`](guides/dogfood.md)                                   | how-to                   | How Reeve runs on itself, and how the feedback loop works.                        |
 | [`guides/doctor.md`](guides/doctor.md)                                     | how-to                   | Check a warrant against a repository before anything runs for real.               |
 | [`concepts/authority-model.md`](concepts/authority-model.md)               | concept                  | Explain capabilities, the warrant, and the ladder as one coherent model.          |
 | [`concepts/language-layer.md`](concepts/language-layer.md)                 | concept                  | Explain the three language roles and how detection reasons about them.            |
