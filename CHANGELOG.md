@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/ecoma-io/reeve/compare/v0.2.1...v0.3.0) (2026-08-13)
+
+
+### Features
+
+* **chrome:** localize chrome and add read-only doctor mode ([#34](https://github.com/ecoma-io/reeve/issues/34)) ([3aadab4](https://github.com/ecoma-io/reeve/commit/3aadab49eaef88f86219ebdda7056a9c48036347))
+* **lifecycle:** add the lifecycle duty, atlas core module, and triage's propose capability ([#32](https://github.com/ecoma-io/reeve/issues/32)) ([ba81131](https://github.com/ecoma-io/reeve/commit/ba81131001a3ed5b2b5e3af4ae914c900b20fd41))
+* **memory:** learn from reversals and gate re-closes against them ([#31](https://github.com/ecoma-io/reeve/issues/31)) ([5f109bf](https://github.com/ecoma-io/reeve/commit/5f109bf04ad04773cdc0b69dabb9410b7e8ae4f5))
+* **provider:** multi-endpoint rosters, chunked translation, honest sweep paging ([db73109](https://github.com/ecoma-io/reeve/commit/db731092df3827fc72bd9ac663d756cfefd202a5))
+* **warrant:** close out P2/P3 review findings across warrant, memory, translate and triage ([#29](https://github.com/ecoma-io/reeve/issues/29)) ([0f31cc6](https://github.com/ecoma-io/reeve/commit/0f31cc6892f4af66783aff4e12852d2363aa9896))
+
+
+### Bug Fixes
+
+* **action:** shorten marketplace description under 125 characters ([#39](https://github.com/ecoma-io/reeve/issues/39)) ([86718c8](https://github.com/ecoma-io/reeve/commit/86718c8177b339f015e51a04c0d04ac5840fe6fb))
+* **ci:** rebuild only the bundle each integration test drives ([#38](https://github.com/ecoma-io/reeve/issues/38)) ([867b0b8](https://github.com/ecoma-io/reeve/commit/867b0b870c0ad0a24fe6ed3d7877901c3ada266e))
+
 ## [0.2.1](https://github.com/ecoma-io/reeve/compare/v0.2.0...v0.2.1) (2026-08-11)
 
 
