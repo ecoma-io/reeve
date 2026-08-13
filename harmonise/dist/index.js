@@ -31609,10 +31609,15 @@ function isCapacityError(error2) {
   const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
   return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
 }
-async function readContentsFile(api, at, path) {
+async function readContentsFile(api, at, path, ref) {
   let data;
   try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+    ({ data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path,
+      ...ref !== void 0 ? { ref } : {}
+    }));
   } catch (error2) {
     if (isMissing(error2)) return null;
     throw error2;
@@ -31660,14 +31665,15 @@ var UnreadableContentsFile = class extends Error {
     this.path = path;
   }
 };
-async function writeContentsFile(api, at, path, text2, message, sha) {
+async function writeContentsFile(api, at, path, text2, message, sha, branch) {
   await api.rest.repos.createOrUpdateFileContents({
     owner: at.owner,
     repo: at.repo,
     path,
     message,
     content: Buffer.from(text2, "utf8").toString("base64"),
-    ...sha === null ? {} : { sha }
+    ...sha === null ? {} : { sha },
+    ...branch !== void 0 ? { branch } : {}
   });
 }
 
@@ -33359,12 +33365,23 @@ function parsePaths(raw) {
 }
 
 // src/duties/harmonise/provenance.ts
-async function readState(api, at, path) {
+async function readState(api, at, path, stateBranch) {
   const file = await readContentsFile(api, at, path);
-  if (file === null) return { state: [], sha: null };
+  if (file !== null) {
+    return { state: parseState(file.text, path), sha: file.sha, branchSha: null };
+  }
+  if (stateBranch !== void 0 && stateBranch !== "") {
+    const branchFile = await readContentsFile(api, at, path, stateBranch);
+    if (branchFile !== null) {
+      return { state: parseState(branchFile.text, path), sha: null, branchSha: branchFile.sha };
+    }
+  }
+  return { state: [], sha: null, branchSha: null };
+}
+function parseState(text2, path) {
   let parsed;
   try {
-    parsed = JSON.parse(file.text);
+    parsed = JSON.parse(text2);
   } catch {
     throw new Error(
       `harmonise: \`${path}\` could not be parsed as JSON \u2014 the provenance state file is malformed. Delete it to force a full re-sync, or fix the syntax.`
@@ -33416,9 +33433,9 @@ async function readState(api, at, path) {
       conflicts
     });
   }
-  return { state, sha: file.sha };
+  return state;
 }
-async function writeState(api, at, path, state, sha) {
+function serialiseState(state) {
   const serialised = state.map((doc) => ({
     id: doc.id,
     files: Object.fromEntries(doc.files),
@@ -33427,11 +33444,14 @@ async function writeState(api, at, path, state, sha) {
     stale: doc.stale,
     conflicts: doc.conflicts
   }));
+  return JSON.stringify(serialised, null, 2) + "\n";
+}
+async function writeState(api, at, path, state, sha) {
   await writeContentsFile(
     api,
     at,
     path,
-    JSON.stringify(serialised, null, 2) + "\n",
+    serialiseState(state),
     "harmonise: update provenance state",
     sha
   );
@@ -33631,6 +33651,126 @@ ${updated}` + conflictSection + `
 ---
 
 ${MARKER.render(fp)}`;
+}
+
+// src/core/state-branch.ts
+async function ensureBranch(api, at, branchName) {
+  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+  const defaultBranch = repo.default_branch ?? "main";
+  const { data: baseRef } = await api.rest.git.getRef({
+    owner: at.owner,
+    repo: at.repo,
+    ref: `heads/${defaultBranch}`
+  });
+  const baseSha = baseRef.object.sha;
+  let branchExists = true;
+  try {
+    await api.rest.git.getRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `heads/${branchName}`
+    });
+  } catch (error2) {
+    if (isMissing(error2)) {
+      branchExists = false;
+    } else {
+      throw error2;
+    }
+  }
+  if (!branchExists) {
+    await api.rest.git.createRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `refs/heads/${branchName}`,
+      sha: baseSha
+    });
+    info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
+  } else {
+    const { data: prs } = await api.rest.pulls.list({
+      owner: at.owner,
+      repo: at.repo,
+      state: "open",
+      head: `${at.owner}:${branchName}`,
+      per_page: 1
+    });
+    if (prs.length === 0) {
+      await api.rest.git.updateRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `heads/${branchName}`,
+        sha: baseSha,
+        force: true
+      });
+      info(`state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`);
+    }
+  }
+  return { defaultBranch, baseSha };
+}
+async function publishState(api, at, branchName, files, prTitle, prBody, dryRun) {
+  if (files.length === 0) return null;
+  if (dryRun) {
+    info(
+      `dry-run: would write ${String(files.length)} file(s) to \`${branchName}\` and open PR`
+    );
+    return null;
+  }
+  const { defaultBranch } = await ensureBranch(api, at, branchName);
+  for (const file of files) {
+    let fileSha;
+    try {
+      const { data } = await api.rest.repos.getContent({
+        owner: at.owner,
+        repo: at.repo,
+        path: file.path,
+        ref: branchName
+      });
+      if (!Array.isArray(data) && typeof data.sha === "string") {
+        fileSha = data.sha;
+      }
+    } catch (error2) {
+      if (!isMissing(error2)) throw error2;
+    }
+    await api.rest.repos.createOrUpdateFileContents({
+      owner: at.owner,
+      repo: at.repo,
+      path: file.path,
+      message: file.message,
+      content: Buffer.from(file.content, "utf8").toString("base64"),
+      branch: branchName,
+      ...fileSha !== void 0 ? { sha: fileSha } : {}
+    });
+    info(`state-branch: wrote ${file.path} on \`${branchName}\``);
+  }
+  const { data: existing } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${branchName}`,
+    per_page: 1
+  });
+  const existingPr = existing[0];
+  if (existingPr !== void 0) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr.number,
+      title: prTitle,
+      body: prBody
+    });
+    info(`state-branch: updated PR #${String(existingPr.number)}`);
+    return { pr: existingPr.number };
+  }
+  const { data: pr } = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title: prTitle,
+    head: branchName,
+    base: defaultBranch,
+    body: prBody,
+    draft: true
+  });
+  info(`state-branch: opened PR #${String(pr.number)}`);
+  return { pr: pr.number };
 }
 
 // src/core/markdown.ts
@@ -33882,6 +34022,7 @@ function readSettings() {
     judgeNames: panel.names,
     drafts: whole("drafts", getInput("drafts")),
     state: getInput("state", { required: true }),
+    stateBranch: getInput("state-branch"),
     glossary: getInput("glossary", { required: true }),
     paths: parsePaths(getInput("paths")),
     maxRequests: bounded("max-requests", getInput("max-requests"))
@@ -33896,6 +34037,7 @@ async function run() {
   let settings = null;
   let authority = null;
   const groupResults = [];
+  let statePr = null;
   try {
     const base = readSettings();
     const client = assembleClient(base, meter, ["classify", "draft", "judge"], [
@@ -33977,7 +34119,12 @@ async function run() {
       settleAuth(weather);
       return;
     }
-    const { state, sha: stateSha } = await readState(api, context2.repo, settings.state);
+    const { state, sha: stateSha } = await readState(
+      api,
+      context2.repo,
+      settings.state,
+      settings.stateBranch || void 0
+    );
     const glossary = await loadGlossary(api, context2.repo, settings.glossary);
     for (const group of groups) {
       const result = await processGroup(
@@ -33996,7 +34143,41 @@ async function run() {
     }
     if (!settings.dryRun) {
       try {
-        await writeState(api, context2.repo, settings.state, state, stateSha);
+        if (settings.stateBranch !== "") {
+          const canWriteBranch = settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");
+          if (!canWriteBranch) {
+            notice(
+              "harmonise: `state-branch` is set but `edit-file` and `open-pr` are not both granted. Provenance state will not be written to the branch."
+            );
+          } else {
+            const stateContent = serialiseState(state);
+            const stateFiles = [
+              {
+                path: settings.state,
+                content: stateContent,
+                message: "harmonise: update provenance state"
+              }
+            ];
+            const stateBranchApi = api;
+            const result = await publishState(
+              stateBranchApi,
+              context2.repo,
+              settings.stateBranch,
+              stateFiles,
+              "harmonise: provenance state",
+              "## harmonise provenance state\n\nUpdated provenance state file.",
+              false
+            );
+            if (result !== null) {
+              statePr = result.pr;
+              info(
+                `harmonise: state written to \`${settings.stateBranch}\`, PR #${String(result.pr)}`
+              );
+            }
+          }
+        } else {
+          await writeState(api, context2.repo, settings.state, state, stateSha);
+        }
       } catch (error2) {
         if (isCapacityError(error2)) {
           warning(
@@ -34039,6 +34220,7 @@ async function run() {
       );
       setOutput("starved", String(rosterStarved));
       setOutput("budget-exhausted", String(false));
+      setOutput("state-pr", statePr !== null ? String(statePr) : "");
       await writeRunSummary(
         summarize({
           dryRun: settings.dryRun,
