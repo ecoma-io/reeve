@@ -33,6 +33,7 @@ function settingsWith(maxRequests: number | null): Settings {
     apiKeys: [],
     requestTimeoutMs: 120_000,
     temperature: undefined,
+    chunkChars: 0,
   };
 }
 

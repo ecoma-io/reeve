@@ -36,7 +36,14 @@ import { context, getOctokit } from "@actions/github";
 
 import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
-import { bounded, readCore, whole, type ApiKeySpec, type EndpointSpec } from "../../core/inputs.js";
+import {
+  bounded,
+  counted,
+  readCore,
+  whole,
+  type ApiKeySpec,
+  type EndpointSpec,
+} from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
 import { createMeter, type Meter } from "../../core/meter.js";
 import {
@@ -107,6 +114,7 @@ export interface Settings {
   readonly apiKeys: readonly ApiKeySpec[];
   readonly requestTimeoutMs: number;
   readonly temperature: number | undefined;
+  readonly chunkChars: number;
 }
 
 function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permitted"> {
@@ -125,6 +133,7 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     glossary: core.getInput("glossary", { required: true }),
     paths: parsePaths(core.getInput("paths")),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
+    chunkChars: counted("chunk-chars", core.getInput("chunk-chars")),
   };
 }
 
@@ -612,6 +621,7 @@ async function processGroup(
       glossary,
       drafts: settings.drafts,
       weather,
+      chunkChars: settings.chunkChars,
     });
 
     for (const failure of result.failures) {

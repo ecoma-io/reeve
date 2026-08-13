@@ -9538,26 +9538,26 @@ var require_readable = __commonJS({
       while (consume2.stream.read() != null) {
       }
     }
-    function chunksDecode(chunks, length) {
-      if (chunks.length === 0 || length === 0) {
+    function chunksDecode(chunks2, length) {
+      if (chunks2.length === 0 || length === 0) {
         return "";
       }
-      const buffer = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, length);
+      const buffer = chunks2.length === 1 ? chunks2[0] : Buffer.concat(chunks2, length);
       const bufferLength = buffer.length;
       const start = bufferLength > 2 && buffer[0] === 239 && buffer[1] === 187 && buffer[2] === 191 ? 3 : 0;
       return buffer.utf8Slice(start, bufferLength);
     }
-    function chunksConcat(chunks, length) {
-      if (chunks.length === 0 || length === 0) {
+    function chunksConcat(chunks2, length) {
+      if (chunks2.length === 0 || length === 0) {
         return new Uint8Array(0);
       }
-      if (chunks.length === 1) {
-        return new Uint8Array(chunks[0]);
+      if (chunks2.length === 1) {
+        return new Uint8Array(chunks2[0]);
       }
       const buffer = new Uint8Array(Buffer.allocUnsafeSlow(length).buffer);
       let offset = 0;
-      for (let i = 0; i < chunks.length; ++i) {
-        const chunk = chunks[i];
+      for (let i = 0; i < chunks2.length; ++i) {
+        const chunk = chunks2[i];
         buffer.set(chunk, offset);
         offset += chunk.length;
       }
@@ -9617,20 +9617,20 @@ var require_util3 = __commonJS({
     var CHUNK_LIMIT = 128 * 1024;
     async function getResolveErrorBodyCallback({ callback, body, contentType, statusCode, statusMessage, headers }) {
       assert(body);
-      let chunks = [];
+      let chunks2 = [];
       let length = 0;
       try {
         for await (const chunk of body) {
-          chunks.push(chunk);
+          chunks2.push(chunk);
           length += chunk.length;
           if (length > CHUNK_LIMIT) {
-            chunks = [];
+            chunks2 = [];
             length = 0;
             break;
           }
         }
       } catch {
-        chunks = [];
+        chunks2 = [];
         length = 0;
       }
       const message = `Response status code ${statusCode}${statusMessage ? `: ${statusMessage}` : ""}`;
@@ -9643,9 +9643,9 @@ var require_util3 = __commonJS({
       let payload;
       try {
         if (isContentTypeApplicationJson(contentType)) {
-          payload = JSON.parse(chunksDecode(chunks, length));
+          payload = JSON.parse(chunksDecode(chunks2, length));
         } else if (isContentTypeText(contentType)) {
-          payload = chunksDecode(chunks, length);
+          payload = chunksDecode(chunks2, length);
         }
       } catch {
       } finally {
@@ -19081,12 +19081,12 @@ var require_lib = __commonJS({
       readBodyBuffer() {
         return __awaiter3(this, void 0, void 0, function* () {
           return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
-            const chunks = [];
+            const chunks2 = [];
             this.message.on("data", (chunk) => {
-              chunks.push(chunk);
+              chunks2.push(chunk);
             });
             this.message.on("end", () => {
-              resolve(Buffer.concat(chunks));
+              resolve(Buffer.concat(chunks2));
             });
           }));
         });
@@ -28195,7 +28195,7 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
   if (isRootPrimitive || isRootNativeRawJSON) {
     return originalStringify(rootProcessed);
   }
-  const chunks = [];
+  const chunks2 = [];
   let level = 0;
   const stack = [
     {
@@ -28212,18 +28212,18 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
   while (stack.length > 0) {
     const node = stack[stack.length - 1];
     if (node.index === 0) {
-      chunks.push(node.isArray ? "[" : "{");
+      chunks2.push(node.isArray ? "[" : "{");
       level++;
     }
     let isDone = false;
     if (node.isArray) {
       if (node.index < node.val.length) {
-        if (!node.first) chunks.push(",");
-        if (space) chunks.push("\n" + space.repeat(level));
+        if (!node.first) chunks2.push(",");
+        if (space) chunks2.push("\n" + space.repeat(level));
         const childRaw = node.val[node.index];
         const childVal = prepareVal(node.val, String(node.index), childRaw);
         if (isUnstringifiable(childVal)) {
-          chunks.push("null");
+          chunks2.push("null");
           node.first = false;
           node.index++;
         } else {
@@ -28246,7 +28246,7 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
             node.first = false;
             node.index++;
           } else {
-            chunks.push(originalStringify(childVal));
+            chunks2.push(originalStringify(childVal));
             node.first = false;
             node.index++;
           }
@@ -28262,11 +28262,11 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
         const childRaw = node.val[k];
         const childVal = prepareVal(node.val, k, childRaw);
         if (isUnstringifiable(childVal)) continue;
-        if (!node.first) chunks.push(",");
+        if (!node.first) chunks2.push(",");
         if (space) {
-          chunks.push("\n" + space.repeat(level) + originalStringify(k) + ": ");
+          chunks2.push("\n" + space.repeat(level) + originalStringify(k) + ": ");
         } else {
-          chunks.push(originalStringify(k) + ":");
+          chunks2.push(originalStringify(k) + ":");
         }
         const isComplexObject = childVal !== null && typeof childVal === "object";
         const isNativeRaw = isRawJSON(childVal);
@@ -28287,7 +28287,7 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
           node.first = false;
           break;
         } else {
-          chunks.push(originalStringify(childVal));
+          chunks2.push(originalStringify(childVal));
           node.first = false;
         }
       }
@@ -28298,13 +28298,13 @@ var stringifyIteratively = (rootValue, replacer, spaceParam) => {
     }
     if (isDone) {
       level--;
-      if (!node.first && space) chunks.push("\n" + space.repeat(level));
-      chunks.push(node.isArray ? "]" : "}");
+      if (!node.first && space) chunks2.push("\n" + space.repeat(level));
+      chunks2.push(node.isArray ? "]" : "}");
       visited.delete(node.val);
       stack.pop();
     }
   }
-  return chunks.join("");
+  return chunks2.join("");
 };
 var JSONStringify = (value, replacer, space) => {
   try {
@@ -33032,6 +33032,13 @@ function whole(name, raw) {
   }
   return value;
 }
+function counted(name, raw) {
+  const value = Number(raw);
+  if (raw.trim().length === 0 || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${name}: expected a whole number of 0 or more, got \`${raw}\`.`);
+  }
+  return value;
+}
 function bounded(name, raw) {
   const trimmed = raw.trim();
   if (trimmed.toLowerCase() === "none") return null;
@@ -33361,6 +33368,42 @@ function segments(markdown) {
   }
   return out;
 }
+function chunks(markdown, maxChars) {
+  if (!Number.isInteger(maxChars) || maxChars < 1) {
+    throw new Error(`chunks: maxChars must be a positive integer, not ${String(maxChars)}`);
+  }
+  const out = [];
+  let current = "";
+  const take = (piece) => {
+    if (current.length > 0 && current.length + piece.length > maxChars) {
+      out.push(current);
+      current = "";
+    }
+    current += piece;
+  };
+  for (const segment of segments(markdown)) {
+    if (segment.kind !== "prose" || segment.text.length <= maxChars) {
+      take(segment.text);
+      continue;
+    }
+    for (const line of terminatedLines(segment.text)) {
+      if (line.length <= maxChars) {
+        take(line);
+        continue;
+      }
+      for (let at = 0; at < line.length; at += maxChars) {
+        take(line.slice(at, at + maxChars));
+      }
+    }
+  }
+  if (current.length > 0) out.push(current);
+  return out.length > 0 ? out : [markdown];
+}
+function isCodeOnly(chunk) {
+  return segments(chunk).every(
+    (segment) => segment.kind !== "prose" || segment.text.trim().length === 0
+  );
+}
 function mapProse(markdown, rewrite) {
   return segments(markdown).map((segment) => segment.kind === "prose" ? rewrite(segment.text) : segment.text).join("");
 }
@@ -33635,8 +33678,40 @@ async function draftSyncs(request2) {
     languages,
     glossary,
     drafts,
-    weather
+    weather,
+    chunkChars
   } = request2;
+  if (chunkChars > 0 && (sourceContent.length > chunkChars || targetContent.length > chunkChars)) {
+    return draftChunked(request2);
+  }
+  return draftWhole({
+    provider,
+    models,
+    sourceContent,
+    targetContent,
+    semanticHunks,
+    sourceLanguage,
+    targetLanguage,
+    languages,
+    glossary,
+    drafts,
+    ...weather !== void 0 ? { weather } : {}
+  });
+}
+async function draftWhole(params) {
+  const {
+    provider,
+    models,
+    sourceContent,
+    targetContent,
+    semanticHunks,
+    sourceLanguage,
+    targetLanguage,
+    languages,
+    glossary,
+    drafts,
+    weather
+  } = params;
   const messages = buildMessages(
     sourceContent,
     targetContent,
@@ -33645,6 +33720,125 @@ async function draftSyncs(request2) {
     targetLanguage,
     glossary
   );
+  return draftLoop({
+    provider,
+    models,
+    messages,
+    targetContent,
+    sourceContent,
+    targetLanguage,
+    languages,
+    glossaryTerms: glossary.map((g) => g.term),
+    drafts,
+    ...weather !== void 0 ? { weather } : {}
+  });
+}
+async function draftChunked(request2) {
+  const {
+    provider,
+    models,
+    sourceContent,
+    targetContent,
+    semanticHunks,
+    sourceLanguage,
+    targetLanguage,
+    languages,
+    glossary,
+    drafts,
+    weather,
+    chunkChars
+  } = request2;
+  const sourceChunks = chunks(sourceContent, chunkChars);
+  const targetChunks = chunks(targetContent, chunkChars);
+  const count2 = Math.max(sourceChunks.length, targetChunks.length);
+  const exhausted2 = new Set(weather?.starved ?? []);
+  const chunkDrafts = [];
+  const failures = [];
+  for (let i = 0; i < count2; i += 1) {
+    const sourceChunk = sourceChunks[i] ?? "";
+    const targetChunk = targetChunks[i] ?? "";
+    if (isCodeOnly(sourceChunk) && isCodeOnly(targetChunk)) {
+      chunkDrafts.push(targetChunk.length > 0 ? targetChunk : sourceChunk);
+      continue;
+    }
+    const messages = buildMessages(
+      sourceChunk,
+      targetChunk,
+      semanticHunks,
+      sourceLanguage,
+      targetLanguage,
+      glossary
+    );
+    let chunkText = null;
+    for (let draft = 0; draft < drafts; draft += 1) {
+      const order = remaining(models, draft, exhausted2);
+      if (order.length === 0) break;
+      const rotation = await rotateModels(
+        order,
+        (model) => answer(provider, model, messages),
+        weather
+      );
+      for (const failure of rotation.failures) {
+        exhausted2.add(failure.model);
+        failures.push(failure);
+      }
+      if (!rotation.success) break;
+      const text2 = rotation.success.content;
+      if (text2.trim().length === 0) {
+        warning(
+          `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count2)}: model returned empty content`
+        );
+        continue;
+      }
+      chunkText = sanitize(text2);
+      break;
+    }
+    if (chunkText !== null) {
+      chunkDrafts.push(chunkText);
+    } else {
+      warning(
+        `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count2)}: no draft produced \u2014 keeping original`
+      );
+      chunkDrafts.push(targetChunk);
+    }
+  }
+  const reassembled = chunkDrafts.join("");
+  const measured2 = scoreDraft(
+    reassembled,
+    targetContent,
+    glossary.map((g) => g.term),
+    sourceContent,
+    targetLanguage,
+    languages
+  );
+  const attempt = {
+    // Report the first non-exhausted model as the producer, since chunks may
+    // have come from different models.
+    model: models.find((m) => !exhausted2.has(m)) ?? models[0] ?? "unknown",
+    text: reassembled,
+    score: measured2
+  };
+  if (measured2.admissible) {
+    return { attempts: [attempt], refused: [], failures };
+  }
+  warning(
+    `harmonise: ${targetLanguage.code}: chunked draft refused \u2014 ${measured2.reason ?? "unknown"}`
+  );
+  return { attempts: [], refused: [attempt], failures };
+}
+async function draftLoop(params) {
+  const {
+    provider,
+    models,
+    messages,
+    targetContent,
+    sourceContent,
+    targetLanguage,
+    languages,
+    glossaryTerms,
+    drafts,
+    weather
+  } = params;
   const attempts = [];
   const refused2 = [];
   const failures = [];
@@ -33671,7 +33865,7 @@ async function draftSyncs(request2) {
     const measured2 = scoreDraft(
       sanitized,
       targetContent,
-      glossary.map((g) => g.term),
+      glossaryTerms,
       sourceContent,
       targetLanguage,
       languages
@@ -33836,10 +34030,10 @@ async function fill(provider, order, shown2, ballot2, weather) {
       failures.push(weatherFailure(model));
       continue;
     }
-    const counted = read(await provider.complete(model, ballot2(shown2)), shown2);
-    if (counted.ok) return { vote: { model, candidate: counted.candidate }, failures };
-    reckon(counted, weather);
-    failures.push(counted);
+    const counted2 = read(await provider.complete(model, ballot2(shown2)), shown2);
+    if (counted2.ok) return { vote: { model, candidate: counted2.candidate }, failures };
+    reckon(counted2, weather);
+    failures.push(counted2);
   }
   return { vote: null, failures };
 }
@@ -34407,7 +34601,8 @@ function readSettings() {
     stateBranch: getInput("state-branch"),
     glossary: getInput("glossary", { required: true }),
     paths: parsePaths(getInput("paths")),
-    maxRequests: bounded("max-requests", getInput("max-requests"))
+    maxRequests: bounded("max-requests", getInput("max-requests")),
+    chunkChars: counted("chunk-chars", getInput("chunk-chars"))
   };
 }
 function notGranted(warrant) {
@@ -34759,7 +34954,8 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       languages: settings.languages,
       glossary,
       drafts: settings.drafts,
-      weather
+      weather,
+      chunkChars: settings.chunkChars
     });
     for (const failure of result.failures) {
       warning(

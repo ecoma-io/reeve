@@ -138,6 +138,7 @@ Every input `harmonise/action.yml` declares.
 | `endpoints`       | no       | _(empty)_                     | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                              |
 | `api-keys`        | no       | _(empty)_                     | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                   |
 | `request-timeout` | no       | `120s`                        | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                             |
+| `chunk-chars`     | no       | `0`                           | Maximum character budget per drafting request. When above zero, source and target are split into chunks at Markdown boundaries and each chunk is drafted independently. Zero sends the whole document in one request.                                        |
 | `temperature`     | no       | _(empty)_                     | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                 |
 
 **`source-language` names the authoritative locale.** The unsuffixed files —
@@ -189,6 +190,15 @@ running dry. Every request made counts against it, whatever it answered.
 Checked at every clean-cut boundary — before each document group, before
 each stale locale — never partway through a locale already being synced.
 `none`, the default, never trips it.
+
+**`chunk-chars` splits large documents at Markdown boundaries.** When set
+above zero, source and target documents that exceed the budget are split
+into chunks — fences and code spans are never split across a boundary — and
+each chunk is drafted independently. Code-only chunks are passed through
+verbatim without spending a model request. The reassembled draft is scored
+against the full original target, not per-chunk. Zero, the default, sends
+the whole document in one request — the right choice when the document fits
+the model's context window.
 
 ## Diff classification
 

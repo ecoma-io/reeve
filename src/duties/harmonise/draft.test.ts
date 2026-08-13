@@ -59,6 +59,7 @@ describe("draftSyncs", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
@@ -77,6 +78,7 @@ describe("draftSyncs", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
@@ -102,6 +104,7 @@ describe("draftSyncs", () => {
       languages: CONFIGURED,
       glossary: [{ term: "Reeve" }],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
@@ -122,6 +125,7 @@ describe("draftSyncs", () => {
       languages: CONFIGURED,
       glossary: [{ term: "Reeve" }],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -142,6 +146,7 @@ describe("draftSyncs", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -162,9 +167,213 @@ describe("draftSyncs", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
     expect(result.refused[0]?.score.reason).toContain("script");
+  });
+});
+
+describe("draftSyncs chunking", () => {
+  it("falls back to whole-doc drafting when chunkChars is 0", async () => {
+    const faithful = TARGET + "\n\n## Khắc phục sự cố\n\nLỗi thường gặp.";
+
+    const result = await draftSyncs({
+      provider: scripted({ "model-a": faithful }),
+      models: ["model-a"],
+      sourceContent: SOURCE,
+      targetContent: TARGET,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 0,
+    });
+
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.score.admissible).toBe(true);
+  });
+
+  it("falls back to whole-doc drafting when document fits the budget", async () => {
+    const faithful = TARGET + "\n\n## Khắc phục sự cố\n\nLỗi thường gặp.";
+
+    const result = await draftSyncs({
+      provider: scripted({ "model-a": faithful }),
+      models: ["model-a"],
+      sourceContent: SOURCE,
+      targetContent: TARGET,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      // Budget larger than either document — no chunking needed.
+      chunkChars: 10_000,
+    });
+
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.score.admissible).toBe(true);
+  });
+
+  it("splits and reassembles a document that exceeds the budget", async () => {
+    // A source with two sections separated by a blank line, and a matching
+    // target. With a small chunk budget, each section becomes a chunk.
+    const longSource = [
+      "# Getting Started",
+      "",
+      "This guide helps you set up Reeve.",
+      "",
+      "## Configuration",
+      "",
+      "Configure Reeve in your workflow.",
+    ].join("\n");
+
+    const longTarget = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "## Cấu hình",
+      "",
+      "Cấu hình Reeve trong quy trình của bạn.",
+    ].join("\n");
+
+    const updatedTarget = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "## Cấu hình",
+      "",
+      "Cấu hình Reeve trong quy trình của bạn.",
+      "",
+      "## Khắc phục sự cố",
+      "",
+      "Lỗi thường gặp và cách giải quyết.",
+    ].join("\n");
+
+    const result = await draftSyncs({
+      provider: scripted({ "model-a": updatedTarget }),
+      models: ["model-a"],
+      sourceContent: longSource,
+      targetContent: longTarget,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      // Small budget to force chunking.
+      chunkChars: 50,
+    });
+
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.score.admissible).toBe(true);
+    expect(result.attempts[0]?.text).toContain("Khắc phục sự cố");
+    // Glossary term "Reeve" preserved
+    expect(result.attempts[0]?.text).toContain("Reeve");
+  });
+
+  it("passes code-only chunks through verbatim without model calls", async () => {
+    // A document where one chunk is a code fence — the model should only be
+    // called for the prose chunk, and the code chunk preserved as-is.
+    const sourceWithCode = [
+      "# Getting Started",
+      "",
+      "This guide helps you set up Reeve.",
+      "",
+      "```bash",
+      "npm install reeve",
+      "```",
+    ].join("\n");
+
+    const targetWithCode = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "```bash",
+      "npm install reeve",
+      "```",
+    ].join("\n");
+
+    const updatedTarget = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "```bash",
+      "npm install reeve",
+      "```",
+      "",
+      "## Khắc phục sự cố",
+      "",
+      "Lỗi thường gặp.",
+    ].join("\n");
+
+    const result = await draftSyncs({
+      provider: scripted({ "model-a": updatedTarget }),
+      models: ["model-a"],
+      sourceContent: sourceWithCode,
+      targetContent: targetWithCode,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 50,
+    });
+
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.score.admissible).toBe(true);
+    // Code block preserved byte-for-byte.
+    expect(result.attempts[0]?.text).toContain("```bash\nnpm install reeve\n```");
+  });
+
+  it("keeps the original target chunk when all models fail for a chunk", async () => {
+    const longSource = [
+      "# Getting Started",
+      "",
+      "This guide helps you set up Reeve.",
+      "",
+      "## Configuration",
+      "",
+      "Configure Reeve in your workflow.",
+    ].join("\n");
+
+    const longTarget = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "## Cấu hình",
+      "",
+      "Cấu hình Reeve trong quy trình của bạn.",
+    ].join("\n");
+
+    // All models fail — every chunk falls back to the original target.
+    const result = await draftSyncs({
+      provider: scripted({}),
+      models: ["model-a"],
+      sourceContent: longSource,
+      targetContent: longTarget,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 50,
+    });
+
+    // Reassembled from original target chunks — identical, so refused.
+    expect(result.attempts).toEqual([]);
+    expect(result.refused).toHaveLength(1);
+    expect(result.refused[0]?.score.reason).toBe("unchanged from original");
   });
 });

@@ -99,6 +99,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     const [best] = result.attempts;
@@ -121,6 +122,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
@@ -140,6 +142,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [{ term: "Reeve" }],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
@@ -160,6 +163,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 2,
+      chunkChars: 0,
     });
 
     expect(result.attempts.map((attempt) => attempt.model)).toEqual(["model-b", "model-a"]);
@@ -183,6 +187,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts.map((attempt) => attempt.model)).toEqual(["model-b"]);
@@ -208,6 +213,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 2,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
@@ -231,6 +237,7 @@ describe("drafting a harmonisation", () => {
       languages: CONFIGURED,
       glossary: [],
       drafts: 1,
+      chunkChars: 0,
     });
 
     expect(result.attempts).toEqual([]);
