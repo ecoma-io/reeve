@@ -11,6 +11,9 @@
         "should-propagate": false
       }
     ],
-    "action": "Only the '### API rate limits' section should be translated and appended to VI. The '### Vietnamese locale' section should NOT propagate."
+    "action": "Only the '### API rate limits' section should be translated and appended to VI. The '### Vietnamese locale' section should NOT propagate.",
+    "propagation-content": {
+      "vi": "### Giới hạn tốc độ API\n\nNếu bạn thấy `429 Too Many Requests`, hãy giảm `max-requests` hoặc sử dụng nhà cung cấp trả phí."
+    }
   }
 }

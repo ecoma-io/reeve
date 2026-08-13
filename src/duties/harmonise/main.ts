@@ -526,14 +526,30 @@ async function processGroup(
       return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: [] };
     }
 
-    classification = await classifyDiff(
-      diffDescription,
-      firstStaleFile?.text ?? "",
-      sourceLanguage.code,
-      firstStaleLocale,
-      classifier,
-      primaryModel,
-    );
+    // A classification failure is a run that cannot decide what to propagate.
+    // The doctrine says "a locale that fails does not fail the run" — skip the
+    // group and continue, rather than crashing the whole document group.
+    try {
+      classification = await classifyDiff(
+        diffDescription,
+        firstStaleFile?.text ?? "",
+        sourceLanguage.code,
+        firstStaleLocale,
+        classifier,
+        primaryModel,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      core.warning(`harmonise: classification failed for ${group.id} — ${message}`);
+      return {
+        group,
+        classification: "none",
+        hunks: [],
+        synced: [],
+        conflicts,
+        skipped: doc.stale,
+      };
+    }
   } else {
     classification = { hunks: [], hasSemantic: false };
   }

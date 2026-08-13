@@ -85,6 +85,18 @@ export interface PublishApi {
 
 const MARKER = markerFor("harmonise");
 
+/**
+ * Sanitises a document group ID for use as a git branch name segment.
+ *
+ * Git branch names cannot contain spaces, `~`, `^`, `:`, or start with `-`.
+ * Replace any character not in `[a-zA-Z0-9._-]` with `-`, and ensure the
+ * result does not start with `-`.
+ */
+export function sanitizeBranchSegment(id: string): string {
+  const safe = id.replace(/\//g, "-").replace(/[^a-zA-Z0-9._-]/g, "-");
+  return safe.startsWith("-") ? `branch${safe}` : safe;
+}
+
 /** One document group's sync result, ready for publishing. */
 export interface SyncResult {
   readonly group: DocumentGroup;
@@ -119,7 +131,7 @@ export async function publishSync(
   });
   const baseSha = baseRef.object.sha;
 
-  const branchName = `reeve/harmonise/${result.group.id.replace(/\//g, "-")}`;
+  const branchName = `reeve/harmonise/${sanitizeBranchSegment(result.group.id)}`;
 
   if (dryRun) {
     core.info(
@@ -232,8 +244,12 @@ export async function publishSync(
 
 /**
  * Builds the PR body with a marker for idempotency.
+ *
+ * Exported for testing — the PR body is a rendering function whose output
+ * matters to a maintainer reading the PR, and whose structure must stay
+ * in sync with the marker system.
  */
-function buildPrBody(result: SyncResult): string {
+export function buildPrBody(result: SyncResult): string {
   const updated = [...result.drafts.keys()]
     .map((locale) => `- \`${locale}\`: translation updated`)
     .join("\n");

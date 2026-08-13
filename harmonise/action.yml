@@ -59,8 +59,6 @@ inputs:
       the list because contributors may write PRs and issues in any language),
       `harmonise` works on committed documentation files whose source language
       is a deliberate organisational decision — it must be named explicitly.
-
-      Ignored once `warrant`'s own `source-language:` key is written.
     required: false
     default: en
 

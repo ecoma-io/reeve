@@ -33608,13 +33608,15 @@ function lengthCheck(draft, original) {
   if (ratio < 0.5) return ratio;
   return Math.max(0, 2 - ratio);
 }
-function glossaryCheck(draft, _original, glossaryTerms) {
+function glossaryCheck(draft, original, glossaryTerms) {
   if (glossaryTerms.length === 0) return 1;
+  const relevant = glossaryTerms.filter((term) => original.includes(term));
+  if (relevant.length === 0) return 1;
   let preserved = 0;
-  for (const term of glossaryTerms) {
+  for (const term of relevant) {
     if (draft.includes(term)) preserved++;
   }
-  return preserved / glossaryTerms.length;
+  return preserved / relevant.length;
 }
 function proseLength(markdown) {
   return segments(markdown).filter((s) => s.kind === "prose").reduce((sum, s) => sum + s.text.length, 0);
@@ -34103,6 +34105,10 @@ var PROPOSE_MARKER = markerFor("propose");
 
 // src/duties/harmonise/publish.ts
 var MARKER = markerFor("harmonise");
+function sanitizeBranchSegment(id) {
+  const safe = id.replace(/\//g, "-").replace(/[^a-zA-Z0-9._-]/g, "-");
+  return safe.startsWith("-") ? `branch${safe}` : safe;
+}
 async function publishSync(api, at, result, dryRun) {
   if (result.drafts.size === 0) return null;
   const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
@@ -34113,7 +34119,7 @@ async function publishSync(api, at, result, dryRun) {
     ref: `heads/${baseBranch}`
   });
   const baseSha = baseRef.object.sha;
-  const branchName = `reeve/harmonise/${result.group.id.replace(/\//g, "-")}`;
+  const branchName = `reeve/harmonise/${sanitizeBranchSegment(result.group.id)}`;
   if (dryRun) {
     info(
       `dry-run: would create/update branch \`${branchName}\` and open PR for ${result.group.id} with ${String(result.drafts.size)} locale update(s)`
@@ -34346,6 +34352,19 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
 }
 
 // src/duties/harmonise/summary.ts
+function hunkBreakdown(hunks, fallback) {
+  if (hunks.length === 0) return fallback;
+  const counts = /* @__PURE__ */ new Map();
+  for (const hunk of hunks) {
+    counts.set(hunk.classification, (counts.get(hunk.classification) ?? 0) + 1);
+  }
+  if (counts.size === 1 && hunks.length === 1) {
+    const only = hunks[0];
+    return only !== void 0 ? only.classification : fallback;
+  }
+  const parts = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([cls, count2]) => count2 > 1 ? `${cls} (${String(count2)})` : cls);
+  return parts.join(", ");
+}
 function summarize(run2) {
   const lines = [];
   lines.push("## Reeve \xB7 harmonise");
@@ -34358,7 +34377,7 @@ function summarize(run2) {
     const rows = run2.results.map(
       (r) => [
         r.group.id,
-        r.classification,
+        hunkBreakdown(r.hunks, r.classification),
         r.synced.length > 0 ? r.synced.join(", ") : "\u2014",
         r.conflicts.length > 0 ? r.conflicts.join(", ") : "\u2014",
         r.skipped.length > 0 ? r.skipped.join(", ") : "\u2014"
@@ -34672,14 +34691,27 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     if (primaryModel === void 0) {
       return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: [] };
     }
-    classification = await classifyDiff(
-      diffDescription,
-      firstStaleFile?.text ?? "",
-      sourceLanguage.code,
-      firstStaleLocale,
-      classifier,
-      primaryModel
-    );
+    try {
+      classification = await classifyDiff(
+        diffDescription,
+        firstStaleFile?.text ?? "",
+        sourceLanguage.code,
+        firstStaleLocale,
+        classifier,
+        primaryModel
+      );
+    } catch (error2) {
+      const message = error2 instanceof Error ? error2.message : String(error2);
+      warning(`harmonise: classification failed for ${group.id} \u2014 ${message}`);
+      return {
+        group,
+        classification: "none",
+        hunks: [],
+        synced: [],
+        conflicts,
+        skipped: doc.stale
+      };
+    }
   } else {
     classification = { hunks: [], hasSemantic: false };
   }

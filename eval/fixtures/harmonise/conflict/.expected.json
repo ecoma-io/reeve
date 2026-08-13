@@ -4,8 +4,10 @@
   "source-diff": "New '## Configuration' section added to EN source.",
   "target-state": "VI file already has a '## Cấu hình' section with human-authored content that differs from what would be produced by translation.",
   "expected": {
-    "classification": "conflict",
+    "classification": "semantic",
+    "conflict-detected": true,
+    "conflict-locales": ["vi"],
     "should-propagate": false,
-    "action": "Report conflict. Do NOT overwrite the human edit in the VI file. The PR should note the conflict."
+    "action": "Model classifies the new section as 'semantic', but provenance detects a human edit in the VI locale since last sync. Report conflict — do NOT overwrite the human edit. The PR should note the conflict."
   }
 }
