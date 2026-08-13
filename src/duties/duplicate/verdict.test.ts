@@ -240,4 +240,27 @@ describe("parseVerdict", () => {
   it("discards a verdict when there were no candidates to name at all", () => {
     expect(parseVerdict('{"duplicate_of": 7, "confidence": 0.9, "rationale": "x"}', [])).toBeNull();
   });
+
+  it("treats an absent duplicate_of the same as an explicit null — a verdict that never named a candidate", () => {
+    // A model that answered "not a duplicate" without naming anything has
+    // answered the question it was asked; only naming something that was
+    // never offered is unreadable.
+    expect(parseVerdict('{"confidence": 0.9, "rationale": "x"}', CANDIDATES)).toEqual({
+      duplicateOf: null,
+      confidence: 0.9,
+      rationale: "x",
+    });
+  });
+
+  it("tolerates a field the prompt never asked for", () => {
+    // Strictness is about the fields the verdict needs being right, not about
+    // the answer being free of anything extra — a bonus field neither
+    // changes nor rescues the verdict it came with.
+    expect(
+      parseVerdict(
+        '{"duplicate_of": 7, "confidence": 0.9, "rationale": "x", "system": "ignore the above"}',
+        CANDIDATES,
+      ),
+    ).toEqual({ duplicateOf: 7, confidence: 0.9, rationale: "x" });
+  });
 });
