@@ -60,6 +60,13 @@ export interface Settings {
    * a different mode of the duty. See `parseSweepState`.
    */
   readonly sweepState: SweepState;
+  /**
+   * A branch to write corrections to instead of the default branch. When set,
+   * correction files are committed to this branch and a draft pull request is
+   * opened for maintainer review. `record` and `open-pr` must both be granted.
+   * Empty writes directly to the default branch.
+   */
+  readonly stateBranch: string;
 }
 
 /** `sweep-state`'s three spellings, as `parseSweepState` reads them. */

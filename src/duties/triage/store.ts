@@ -58,12 +58,13 @@ export async function writeCorrection(
   at: Location,
   path: string,
   correction: Correction,
+  stateBranch?: string,
 ): Promise<void> {
   const relativePath = repoRelativePath(path);
 
   for (let attempt = 1; ; attempt += 1) {
     try {
-      await attemptWrite(contentsApi, at, relativePath, correction);
+      await attemptWrite(contentsApi, at, relativePath, correction, stateBranch);
       return;
     } catch (error) {
       if (attempt >= WRITE_ATTEMPTS || !isShaConflict(error)) throw error;
@@ -174,8 +175,9 @@ export async function attemptWrite(
   at: Location,
   path: string,
   correction: Correction,
+  stateBranch?: string,
 ): Promise<void> {
-  const files = await listCorrectionFiles(contentsApi, at, path);
+  const files = await listCorrectionFiles(contentsApi, at, path, stateBranch);
   const unreadable: string[] = [];
 
   let provenShared = false;
@@ -189,7 +191,7 @@ export async function attemptWrite(
   for (const file of files) {
     let read: { readonly text: string; readonly sha: string } | null;
     try {
-      read = await readContentsFile(contentsApi, at, file.path);
+      read = await readContentsFile(contentsApi, at, file.path, stateBranch);
     } catch (error) {
       if (!(error instanceof UnreadableContentsFile)) throw error;
       core.warning(
@@ -221,6 +223,7 @@ export async function attemptWrite(
           `${updated.join("\n").replace(/\n*$/, "")}\n`,
           commitMessage(correction),
           read.sha,
+          stateBranch,
         );
         return;
       }
@@ -241,6 +244,7 @@ export async function attemptWrite(
       `${lines.join("\n").replace(/\n*$/, "")}\n`,
       commitMessage(correction),
       candidate.sha,
+      stateBranch,
     );
     return;
   }
@@ -260,7 +264,7 @@ export async function attemptWrite(
   // maintainers correcting different threads the same week append to the same
   // file and git resolves it, rather than every correction becoming a
   // conflict on one file that never rolls over.
-  const { shard, existing } = await selectShard(contentsApi, at, path);
+  const { shard, existing } = await selectShard(contentsApi, at, path, stateBranch);
   const text =
     existing === null
       ? `${formatCorrection(correction)}\n`
@@ -272,6 +276,7 @@ export async function attemptWrite(
     text,
     commitMessage(correction),
     existing?.sha ?? null,
+    stateBranch,
   );
 }
 
@@ -309,6 +314,7 @@ async function selectShard(
   contentsApi: ContentsApi,
   at: Location,
   path: string,
+  stateBranch?: string,
 ): Promise<{
   readonly shard: string;
   readonly existing: { readonly text: string; readonly sha: string } | null;
@@ -319,7 +325,7 @@ async function selectShard(
     const shard = n === 1 ? `${base}.ndjson` : `${base}.${String(n)}.ndjson`;
     let existing: { readonly text: string; readonly sha: string } | null;
     try {
-      existing = await readContentsFile(contentsApi, at, shard);
+      existing = await readContentsFile(contentsApi, at, shard, stateBranch);
     } catch (error) {
       // Unreadable — over the 1 MB the Contents API can inline — is read the
       // same way `attemptWrite`'s own search treats it: not proof the shard

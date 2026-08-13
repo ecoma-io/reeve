@@ -271,6 +271,7 @@ function settingsOf(over: Partial<Settings> = {}): Settings {
     requestTimeoutMs: 120_000,
     temperature: undefined,
     sweepState: "open",
+    stateBranch: "",
     ...over,
   };
 }
@@ -326,6 +327,7 @@ function notFoundError(): { status: number } & Error {
 interface Write {
   readonly path: string;
   readonly content: string;
+  readonly branch: string | undefined;
 }
 
 /** One page of `listEvents`, shaped the way `listLabelEvents` reads it. */
@@ -416,10 +418,14 @@ function apiOf(
           }
           return Promise.reject(notFoundError());
         },
-        createOrUpdateFileContents: (params: { path: string; content: string }) => {
+        createOrUpdateFileContents: (params: {
+          path: string;
+          content: string;
+          branch?: string;
+        }) => {
           const content = Buffer.from(params.content, "base64").toString("utf8");
           state.set(params.path, content);
-          writes.push({ path: params.path, content });
+          writes.push({ path: params.path, content, branch: params.branch });
           return Promise.resolve(undefined);
         },
       },
@@ -1041,5 +1047,71 @@ describe("recordReversal", () => {
 
     expect(outcome.recorded).toBe(true);
     expect(writes).toHaveLength(0);
+  });
+
+  it("passes stateBranch to writeCorrection", async () => {
+    const { api, writes } = apiOf();
+    const standing = standingOf({ labels: ["bug"] });
+    const branch = "reeve/state";
+
+    await recordReversal(
+      api,
+      AT,
+      standing,
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      7,
+      branch,
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.branch).toBe(branch);
+  });
+});
+
+describe("recordCorrection with stateBranch", () => {
+  it("passes stateBranch to writeCorrection", async () => {
+    const { api, writes } = apiOf();
+    const standing = standingOf({ labels: ["bug"] });
+    const branch = "reeve/state";
+
+    await recordCorrection(
+      api,
+      AT,
+      standing,
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+      branch,
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.branch).toBe(branch);
+  });
+
+  it("does not pass a branch when stateBranch is omitted", async () => {
+    const { api, writes } = apiOf();
+    const standing = standingOf({ labels: ["bug"] });
+
+    await recordCorrection(
+      api,
+      AT,
+      standing,
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+    );
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.branch).toBeUndefined();
   });
 });

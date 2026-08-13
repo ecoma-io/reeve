@@ -759,6 +759,7 @@ describe("the action", () => {
       skipped: "0",
       remaining: "0",
       recorded: "false",
+      "state-pr": "",
     });
   });
 

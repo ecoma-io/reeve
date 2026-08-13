@@ -55,6 +55,13 @@ interface Write {
   readonly path: string;
   readonly content: string;
   readonly sha: string | undefined;
+  readonly branch: string | undefined;
+}
+
+/** One `getContent` read recorded. */
+interface Read {
+  readonly path: string;
+  readonly ref: string | undefined;
 }
 
 /**
@@ -69,15 +76,18 @@ interface Write {
 function contentsOf(
   files: Record<string, string | null>,
   options: { readonly conflictOnce?: string } = {},
-): { readonly api: ContentsApi; readonly writes: Write[] } {
+): { readonly api: ContentsApi; readonly writes: Write[]; readonly reads: Read[] } {
   const state = new Map(Object.entries(files));
   const writes: Write[] = [];
+  const reads: Read[] = [];
   let conflicted = false;
 
   const api: ContentsApi = {
     rest: {
       repos: {
-        getContent: ({ path }: { path: string }) => {
+        getContent: (params: { path: string; ref?: string }) => {
+          const { path, ref } = params;
+          reads.push({ path, ref });
           if (state.has(path)) {
             const content = state.get(path) ?? null;
             if (content === null) {
@@ -106,21 +116,26 @@ function contentsOf(
           }
           return Promise.reject(notFoundError());
         },
-        createOrUpdateFileContents: (params: { path: string; content: string; sha?: string }) => {
+        createOrUpdateFileContents: (params: {
+          path: string;
+          content: string;
+          sha?: string;
+          branch?: string;
+        }) => {
           if (options.conflictOnce === params.path && !conflicted) {
             conflicted = true;
             return Promise.reject(Object.assign(new Error("sha conflict"), { status: 409 }));
           }
           const content = Buffer.from(params.content, "base64").toString("utf8");
           state.set(params.path, content);
-          writes.push({ path: params.path, content, sha: params.sha });
+          writes.push({ path: params.path, content, sha: params.sha, branch: params.branch });
           return Promise.resolve(undefined);
         },
       },
     },
   };
 
-  return { api, writes };
+  return { api, writes, reads };
 }
 
 describe("repoRelativePath", () => {
@@ -543,5 +558,82 @@ describe("writeCorrection", () => {
       "Recording #42 lost a race on the store — another commit landed first. Retrying " +
         "(attempt 3 of 3).",
     );
+  });
+});
+
+describe("attemptWrite with stateBranch", () => {
+  it("passes ref to listCorrectionFiles and readContentsFile when stateBranch is set", async () => {
+    const { api, writes, reads } = contentsOf({});
+    const branch = "reeve/state";
+
+    await attemptWrite(api, AT, "corrections", correctionOf(), branch);
+
+    // Every read should carry ref: "reeve/state"
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) {
+      expect(read.ref).toBe(branch);
+    }
+    // Every write should carry branch: "reeve/state"
+    expect(writes.length).toBeGreaterThan(0);
+    for (const write of writes) {
+      expect(write.branch).toBe(branch);
+    }
+  });
+
+  it("omits ref and branch when stateBranch is not set", async () => {
+    const { api, writes, reads } = contentsOf({});
+
+    await attemptWrite(api, AT, "corrections", correctionOf());
+
+    // No ref should have been passed on reads
+    for (const read of reads) {
+      expect(read.ref).toBeUndefined();
+    }
+    // No branch should have been passed on writes
+    for (const write of writes) {
+      expect(write.branch).toBeUndefined();
+    }
+  });
+
+  it("passes branch through writeCorrection", async () => {
+    const { api, writes, reads } = contentsOf({});
+    const branch = "reeve/state";
+
+    await writeCorrection(api, AT, "corrections", correctionOf(), branch);
+
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) {
+      expect(read.ref).toBe(branch);
+    }
+    expect(writes.length).toBeGreaterThan(0);
+    for (const write of writes) {
+      expect(write.branch).toBe(branch);
+    }
+  });
+
+  it("rewrites an exact match in place on the state branch", async () => {
+    const existing = formatCorrection(correctionOf({ decided: ["question"] }));
+    const { api, writes } = contentsOf({ "corrections/2025-01.ndjson": `${existing}\n` });
+    const branch = "reeve/state";
+
+    const updated = correctionOf({ decided: ["bug"] });
+    await attemptWrite(api, AT, "corrections", updated, branch);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.branch).toBe(branch);
+    expect(writes[0]?.content.trim()).toBe(formatCorrection(updated));
+  });
+
+  it("appends to a shard on the state branch", async () => {
+    const other = formatCorrection(correctionOf({ thread: 7, decided: ["docs"] }));
+    const shard = `corrections/${monthShard()}.ndjson`;
+    const { api, writes } = contentsOf({ [shard]: `${other}\n` });
+    const branch = "reeve/state";
+
+    await attemptWrite(api, AT, "corrections", correctionOf(), branch);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.branch).toBe(branch);
+    expect(writes[0]?.sha).toBe(`sha-${shard}`);
   });
 });

@@ -811,7 +811,12 @@ export interface Effects {
 export interface ContentsApi {
   readonly rest: {
     readonly repos: {
-      getContent(params: { owner: string; repo: string; path: string }): Promise<{ data: unknown }>;
+      getContent(params: {
+        owner: string;
+        repo: string;
+        path: string;
+        ref?: string;
+      }): Promise<{ data: unknown }>;
       createOrUpdateFileContents(params: {
         owner: string;
         repo: string;
@@ -819,6 +824,7 @@ export interface ContentsApi {
         message: string;
         content: string;
         sha?: string;
+        branch?: string;
       }): Promise<unknown>;
     };
   };
@@ -894,10 +900,16 @@ export async function listCorrectionFiles(
   api: ContentsApi,
   at: Pick<Location, "owner" | "repo">,
   path: string,
+  ref?: string,
 ): Promise<readonly CorrectionFile[]> {
   let data: unknown;
   try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+    ({ data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path,
+      ...(ref !== undefined ? { ref } : {}),
+    }));
   } catch (error) {
     if (isMissing(error)) return [];
     throw error;
@@ -943,10 +955,16 @@ export async function readContentsFile(
   api: ContentsApi,
   at: Pick<Location, "owner" | "repo">,
   path: string,
+  ref?: string,
 ): Promise<{ readonly text: string; readonly sha: string } | null> {
   let data: unknown;
   try {
-    ({ data } = await api.rest.repos.getContent({ owner: at.owner, repo: at.repo, path }));
+    ({ data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path,
+      ...(ref !== undefined ? { ref } : {}),
+    }));
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -1063,6 +1081,7 @@ export async function writeContentsFile(
   text: string,
   message: string,
   sha: string | null,
+  branch?: string,
 ): Promise<void> {
   await api.rest.repos.createOrUpdateFileContents({
     owner: at.owner,
@@ -1071,6 +1090,7 @@ export async function writeContentsFile(
     message,
     content: Buffer.from(text, "utf8").toString("base64"),
     ...(sha === null ? {} : { sha }),
+    ...(branch !== undefined ? { branch } : {}),
   });
 }
 

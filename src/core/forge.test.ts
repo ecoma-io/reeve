@@ -955,6 +955,33 @@ describe("listCorrectionFiles", () => {
 
     await expect(listCorrectionFiles(api, AT, ".reeve/corrections")).rejects.toThrow("Forbidden");
   });
+
+  it("passes `ref` through to `getContent` when given", async () => {
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: [{ name: "2026-08.ndjson", path: ".reeve/corrections/2026-08.ndjson", sha: "a" }],
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    const files = await listCorrectionFiles(api, AT, ".reeve/corrections", "reeve/state");
+    expect(files).toEqual([{ path: ".reeve/corrections/2026-08.ndjson", sha: "a" }]);
+    expect(getContent).toHaveBeenCalledWith({
+      owner: AT.owner,
+      repo: AT.repo,
+      path: ".reeve/corrections",
+      ref: "reeve/state",
+    });
+  });
+
+  it("omits `ref` from the `getContent` call when not given", async () => {
+    const getContent = vi.fn((_params: Record<string, unknown>) => Promise.resolve({ data: [] }));
+    const { api } = contentsOf(getContent);
+
+    await listCorrectionFiles(api, AT, ".reeve/corrections");
+    const call = getContent.mock.calls[0]?.[0];
+    expect(call).not.toHaveProperty("ref");
+  });
 });
 
 describe("readContentsFile", () => {
@@ -1031,6 +1058,51 @@ describe("readContentsFile", () => {
       path: "shard.ndjson",
     });
   });
+
+  it("passes `ref` through to `getContent` when given", async () => {
+    const text = '{"thread":7}\n';
+    const getContent = vi.fn(() =>
+      Promise.resolve({
+        data: {
+          content: Buffer.from(text, "utf8").toString("base64"),
+          encoding: "base64",
+          sha: "abc",
+        },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await expect(
+      readContentsFile(api, AT, ".reeve/harmonise-state.json", "reeve/state"),
+    ).resolves.toEqual({
+      text,
+      sha: "abc",
+    });
+    expect(getContent).toHaveBeenCalledWith({
+      owner: AT.owner,
+      repo: AT.repo,
+      path: ".reeve/harmonise-state.json",
+      ref: "reeve/state",
+    });
+  });
+
+  it("omits `ref` from the `getContent` call when not given", async () => {
+    const text = '{"thread":7}\n';
+    const getContent = vi.fn((_params: Record<string, unknown>) =>
+      Promise.resolve({
+        data: {
+          content: Buffer.from(text, "utf8").toString("base64"),
+          encoding: "base64",
+          sha: "abc",
+        },
+      }),
+    );
+    const { api } = contentsOf(getContent);
+
+    await readContentsFile(api, AT, ".reeve/corrections/2026-08.ndjson");
+    const call = getContent.mock.calls[0]?.[0];
+    expect(call).not.toHaveProperty("ref");
+  });
 });
 
 describe("writeContentsFile", () => {
@@ -1090,5 +1162,43 @@ describe("writeContentsFile", () => {
         null,
       ),
     ).rejects.toThrow("Resource not accessible by integration");
+  });
+
+  it("passes `branch` through to `createOrUpdateFileContents` when given", async () => {
+    const { api, createOrUpdateFileContents } = contentsOf(vi.fn(notFound));
+
+    await writeContentsFile(
+      api,
+      AT,
+      ".reeve/harmonise-state.json",
+      '{"id":"docs/guide"}\n',
+      "harmonise: update provenance state",
+      "abc",
+      "reeve/state",
+    );
+    expect(createOrUpdateFileContents).toHaveBeenCalledWith({
+      owner: AT.owner,
+      repo: AT.repo,
+      path: ".reeve/harmonise-state.json",
+      message: "harmonise: update provenance state",
+      content: Buffer.from('{"id":"docs/guide"}\n', "utf8").toString("base64"),
+      sha: "abc",
+      branch: "reeve/state",
+    });
+  });
+
+  it("omits `branch` from the `createOrUpdateFileContents` call when not given", async () => {
+    const { api, createOrUpdateFileContents } = contentsOf(vi.fn(notFound));
+
+    await writeContentsFile(
+      api,
+      AT,
+      ".reeve/corrections/2026-08.ndjson",
+      "line\n",
+      "memory: record #7",
+      null,
+    );
+    const call = createOrUpdateFileContents.mock.calls[0]?.[0];
+    expect(call).not.toHaveProperty("branch");
   });
 });
