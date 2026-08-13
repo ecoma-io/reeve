@@ -123,19 +123,19 @@ describe("renderSweepPage", () => {
       ".github/reeve.yml",
       false,
       [
-        { number: 1, outcome: outcome({ language: "fr" }), done },
-        { number: 2, outcome: outcome({ language: "fr" }), done },
+        { number: 1, outcome: outcome({ language: "la" }), done },
+        { number: 2, outcome: outcome({ language: "la" }), done },
       ],
       null,
     );
-    expect(page.match(/`fr`/g)).toHaveLength(1);
+    expect(page.match(/`la`/g)).toHaveLength(1);
   });
 
   it("says nothing about a chrome fallback when no thread in the sweep actually commented", () => {
     const page = renderSweepPage(
       ".github/reeve.yml",
       false,
-      [{ number: 1, outcome: outcome({ language: "fr" }), done: NOTHING_DONE }],
+      [{ number: 1, outcome: outcome({ language: "la" }), done: NOTHING_DONE }],
       null,
     );
     expect(page).not.toContain("no translation for");
@@ -216,12 +216,12 @@ describe("renderThreadPage", () => {
       ".github/reeve.yml",
       false,
       42,
-      outcome({ language: "fr" }),
+      outcome({ language: "la" }),
       COMMENTED,
     );
-    expect(page).toContain("`fr`");
+    expect(page).toContain("`la`");
     expect(page).toContain("no translation for");
-    expect(page.match(/`fr`/g)).toHaveLength(1);
+    expect(page.match(/`la`/g)).toHaveLength(1);
   });
 
   it("says nothing about a chrome fallback when nothing was actually commented", () => {
@@ -229,7 +229,7 @@ describe("renderThreadPage", () => {
       ".github/reeve.yml",
       false,
       42,
-      outcome({ language: "fr" }),
+      outcome({ language: "la" }),
       NOTHING_DONE,
     );
     expect(page).not.toContain("no translation for");
@@ -240,7 +240,7 @@ describe("renderThreadPage", () => {
       ".github/reeve.yml",
       true,
       42,
-      outcome({ language: "fr" }),
+      outcome({ language: "la" }),
       COMMENTED,
     );
     expect(page).not.toContain("no translation for");

@@ -92,16 +92,16 @@ describe("summarize", () => {
   });
 
   it("notes a chrome fallback once for a proposal in a language chrome has no row for", () => {
-    const page = summarize(run({ duplicateOf: 12, languageCode: "fr" }));
+    const page = summarize(run({ duplicateOf: 12, languageCode: "la" }));
 
-    expect(page).toContain("`fr`");
+    expect(page).toContain("`la`");
     expect(page).toContain("no translation for");
-    expect(page.match(/`fr`/g)).toHaveLength(1);
+    expect(page.match(/`la`/g)).toHaveLength(1);
   });
 
   it("says nothing about a chrome fallback when `comment` is not permitted — nothing was posted", () => {
     const page = summarize(
-      run({ duplicateOf: 12, languageCode: "fr", posted: null, done: { commented: false } }),
+      run({ duplicateOf: 12, languageCode: "la", posted: null, done: { commented: false } }),
     );
     expect(page).not.toContain("no translation for");
   });
@@ -111,7 +111,7 @@ describe("summarize", () => {
       run({
         dryRun: true,
         duplicateOf: 12,
-        languageCode: "fr",
+        languageCode: "la",
         posted: "posted",
         done: { commented: false },
       }),

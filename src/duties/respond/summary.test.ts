@@ -106,14 +106,14 @@ describe("the run summary", () => {
 
   it("notes a chrome fallback once for a draft in a language chrome has no row for", () => {
     const summary = subject({
-      responded: responded({ language: "Français", languageCode: "fr" }),
+      responded: responded({ language: "Latina", languageCode: "la" }),
       confidence: 0.9,
       published: true,
     });
 
-    expect(summary).toContain("`fr`");
+    expect(summary).toContain("`la`");
     expect(summary).toContain("no translation for");
-    expect(summary.match(/`fr`/g)).toHaveLength(1);
+    expect(summary.match(/`la`/g)).toHaveLength(1);
   });
 
   it("says nothing about a chrome fallback when no draft survived to carry any chrome", () => {
@@ -123,7 +123,7 @@ describe("the run summary", () => {
 
   it("says nothing about a chrome fallback for a draft withheld below the floor", () => {
     const summary = subject({
-      responded: responded({ language: "Français", languageCode: "fr" }),
+      responded: responded({ language: "Latina", languageCode: "la" }),
       confidence: 0.4,
       floor: 0.75,
       published: false,
