@@ -187,7 +187,7 @@ inputs:
     required: false
     default: "0.75"
 
-  corrections:
+  corrections-dir:
     description: >-
       A directory of `.ndjson` files recording labels a maintainer changed after
       a run. The nearest few are shown to the model as examples of decisions this
@@ -297,7 +297,7 @@ inputs:
       request is opened for maintainer review. `record` and `open-pr` must both
       be granted. Empty writes directly to the default branch.
     required: false
-    default: ""
+    default: "reeve/corrections"
 
   endpoints:
     description: >-

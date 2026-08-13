@@ -127,12 +127,13 @@ inputs:
     required: false
     default: ""
 
-  state:
+  provenance-dir:
     description: >-
-      Where provenance state lives — per-document sync status and source
-      revision tracking. Delete this file to force a full re-sync.
+      Directory where provenance state lives — per-document sync status and
+      source revision tracking. The state file is written to
+      `${provenance-dir}/state.json`. Delete this file to force a full re-sync.
     required: false
-    default: .reeve/harmonise-state.json
+    default: .reeve/provenance
 
   state-branch:
     description: >-
@@ -141,9 +142,9 @@ inputs:
       request is opened for maintainer review. `edit-file` and `open-pr` must
       both be granted. Empty writes directly to the default branch.
     required: false
-    default: ""
+    default: "reeve/provenance"
 
-  glossary:
+  glossary-dir:
     description: >-
       A glossary of project-specific terms that translations must respect.
       Overrides = bug. Missing is not an error — it means there are no

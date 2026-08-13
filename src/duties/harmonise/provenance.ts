@@ -1,7 +1,7 @@
 /**
  * Provenance tracking for the `harmonise` duty.
  *
- * State file at `.reeve/harmonise-state.json` tracks per-document sync
+ * State file at `${provenance-dir}/state.json` tracks per-document sync
  * status: which source revision was last synced, and which locale variants
  * are up to date or stale.
  *

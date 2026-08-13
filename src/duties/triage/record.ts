@@ -404,7 +404,7 @@ export async function recordCorrection(
         `${pivot !== null ? ", with a pivot rendering" : ""} — dry run, nothing committed.`,
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
+    await writeCorrection(api, at, settings.correctionsDir, correction, stateBranch);
   }
 
   return {
@@ -505,7 +505,7 @@ export async function recordReversal(
         `duplicate of #${String(duplicateOf)} — dry run, nothing committed.`,
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
+    await writeCorrection(api, at, settings.correctionsDir, correction, stateBranch);
   }
 
   return {

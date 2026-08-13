@@ -39,7 +39,7 @@ export interface Settings {
   readonly taxonomy: readonly Label[];
   readonly apply: readonly Capability[];
   readonly confidence: number;
-  readonly corrections: string;
+  readonly correctionsDir: string;
   readonly about: string;
   readonly minBodyChars: number;
   /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */

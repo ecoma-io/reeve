@@ -14,7 +14,7 @@ import {
 } from "./provenance.js";
 
 const AT = { owner: "ecoma-io", repo: "reeve" };
-const STATE_PATH = ".reeve/harmonise-state.json";
+const STATE_PATH = ".reeve/provenance/state.json";
 
 /** The shape GitHub answers a 404 with — the one status `isMissing` treats as "not there yet". */
 function notFound(): Promise<never> {
@@ -252,14 +252,14 @@ describe("readState", () => {
       { id: "docs/api", sourceRevision: "def", files: {}, synced: {}, stale: [], conflicts: [] },
     ]);
     const getContent = vi.fn((params: Record<string, unknown>) => {
-      if (params.ref === "reeve/state") {
+      if (params.ref === "reeve/provenance") {
         return Promise.resolve(encode(branchText, "branch-sha-456"));
       }
       return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
     });
     const api = contentsOf(getContent);
 
-    const result = await readState(api, AT, STATE_PATH, "reeve/state");
+    const result = await readState(api, AT, STATE_PATH, "reeve/provenance");
 
     expect(result.sha).toBeNull();
     expect(result.branchSha).toBe("branch-sha-456");
@@ -282,7 +282,7 @@ describe("readState", () => {
       { id: "docs/branch", sourceRevision: "def", files: {}, synced: {}, stale: [], conflicts: [] },
     ]);
     const getContent = vi.fn((params: Record<string, unknown>) => {
-      if (params.ref === "reeve/state") {
+      if (params.ref === "reeve/provenance") {
         return Promise.resolve(encode(branchText, "branch-sha"));
       }
       // Default branch — no ref param
@@ -290,7 +290,7 @@ describe("readState", () => {
     });
     const api = contentsOf(getContent);
 
-    const result = await readState(api, AT, STATE_PATH, "reeve/state");
+    const result = await readState(api, AT, STATE_PATH, "reeve/provenance");
 
     expect(result.sha).toBe("default-sha");
     expect(result.branchSha).toBeNull();
@@ -326,7 +326,7 @@ describe("readState", () => {
     const getContent = vi.fn(notFound);
     const api = contentsOf(getContent);
 
-    const result = await readState(api, AT, STATE_PATH, "reeve/state");
+    const result = await readState(api, AT, STATE_PATH, "reeve/provenance");
 
     expect(result.state).toEqual([]);
     expect(result.sha).toBeNull();

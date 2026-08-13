@@ -330,7 +330,7 @@ function baseInputs(
     apply: "comment",
     confidence: "0.75",
     guidance,
-    corrections,
+    "corrections-dir": corrections,
     "max-body-chars": "6000",
     "dry-run": "false",
     "screen-models": "",

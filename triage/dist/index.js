@@ -35793,7 +35793,7 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
       `Would record #${String(at.number)} as ` + (decidedLabels.length > 0 ? decidedLabels.join(", ") : "no labels") + `${pivot !== null ? ", with a pivot rendering" : ""} \u2014 dry run, nothing committed.`
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
+    await writeCorrection(api, at, settings.correctionsDir, correction, stateBranch);
   }
   return {
     recorded: true,
@@ -35850,7 +35850,7 @@ async function recordReversal(api, at, standing, authority2, settings, stages, w
       `Would record #${String(at.number)}'s reopen as reversing a close that named it a duplicate of #${String(duplicateOf)} \u2014 dry run, nothing committed.`
     );
   } else {
-    await writeCorrection(api, at, settings.corrections, correction, stateBranch);
+    await writeCorrection(api, at, settings.correctionsDir, correction, stateBranch);
   }
   return {
     recorded: true,
@@ -35892,7 +35892,7 @@ function summarizeRecord(run2) {
     "",
     `Thread #${String(run2.thread)}${run2.dryRun ? " \u2014 **dry run**, nothing was committed" : ""}.`,
     "",
-    run2.recorded ? `${run2.dryRun ? "Would have recorded" : "Recorded"} to \`${run2.corrections}\` as ` + (run2.decided.length > 0 ? run2.decided.map((name) => `\`${name}\``).join(", ") : "no labels") + `${run2.language !== null ? `, in ${run2.language}` : ", in an unidentified language"}.` : "Nothing was recorded."
+    run2.recorded ? `${run2.dryRun ? "Would have recorded" : "Recorded"} to \`${run2.correctionsDir}\` as ` + (run2.decided.length > 0 ? run2.decided.map((name) => `\`${name}\``).join(", ") : "no labels") + `${run2.language !== null ? `, in ${run2.language}` : ", in an unidentified language"}.` : "Nothing was recorded."
   ];
   if (run2.pivot) {
     parts.push(
@@ -36133,7 +36133,7 @@ function recordPage(settings, thread, outcome, spent) {
     decided: outcome.decided,
     pivot: outcome.pivot,
     pivotNote: outcome.pivotNote,
-    corrections: settings.corrections,
+    correctionsDir: settings.correctionsDir,
     spent,
     modelNames: settings.modelNames,
     screenNames: settings.screenNames
@@ -36910,7 +36910,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   const { permitted } = narrow(grantedCapabilities, settings.apply);
   const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
-  const stateBranch = settings.stateBranch || void 0;
+  const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : void 0;
   let canRecordToBranch = false;
   if (stateBranch !== void 0) {
     canRecordToBranch = recording && permitted.includes("open-pr");
@@ -36980,7 +36980,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
         outcome,
         api,
         at,
-        settings.corrections
+        settings.correctionsDir
       );
       return { number: thread.number, outcome: describeOutcome(outcome, done) };
     }
@@ -37057,7 +37057,7 @@ function readSettings() {
     warrant: getInput("warrant", { required: true }),
     apply: parseApply(getInput("apply", { required: true })),
     confidence: fraction("confidence", getInput("confidence")),
-    corrections: getInput("corrections", { required: true }),
+    correctionsDir: getInput("corrections-dir", { required: true }),
     about: getInput("about"),
     minBodyChars: counted("min-body-chars", getInput("min-body-chars")),
     maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
@@ -37113,7 +37113,7 @@ async function run() {
           const trigger = recordTrigger();
           const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
           const { permitted } = narrow(grantedCapabilities, settings.apply);
-          const stateBranch = settings.stateBranch || void 0;
+          const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : void 0;
           let canRecordToBranch = false;
           if (stateBranch !== void 0) {
             canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
@@ -37202,12 +37202,12 @@ async function run() {
           outcome,
           api,
           at,
-          settings.corrections
+          settings.correctionsDir
         );
         single = { number, outcome, done };
       }
     }
-    const branchForPr = settings.stateBranch || void 0;
+    const branchForPr = settings.stateBranch !== "" ? settings.stateBranch : void 0;
     if (branchForPr !== void 0 && !settings.dryRun) {
       const prPermitted = narrow(
         authority2.warrant.granted("triage", DEFAULT_CAPABILITIES),
@@ -37349,7 +37349,7 @@ async function decide(authority2, standing, settings, stages, weather) {
   const pivotLanguage = pivotOrNone(warrant, settings.languages);
   const memory = await recallCorrections({
     count: warrant.memory?.recall ?? RECALLED,
-    path: settings.corrections,
+    path: settings.correctionsDir,
     title: standing.title,
     body,
     language: threadLanguage,
@@ -37371,7 +37371,7 @@ async function decide(authority2, standing, settings, stages, weather) {
   const pivotRecalled = memory.crossLanguage;
   if (memory.read) {
     info(
-      `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) from \`${settings.corrections}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
+      `Recalled ${String(recalled.length)} of ${String(memorySize)} correction(s) from \`${settings.correctionsDir}\`` + (pivotRecalled > 0 ? `, ${String(pivotRecalled)} of them recorded in a language other than the thread's.` : ".")
     );
   }
   const triaged = await triage({

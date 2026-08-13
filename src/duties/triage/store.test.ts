@@ -564,16 +564,16 @@ describe("writeCorrection", () => {
 describe("attemptWrite with stateBranch", () => {
   it("passes ref to listCorrectionFiles and readContentsFile when stateBranch is set", async () => {
     const { api, writes, reads } = contentsOf({});
-    const branch = "reeve/state";
+    const branch = "reeve/corrections";
 
     await attemptWrite(api, AT, "corrections", correctionOf(), branch);
 
-    // Every read should carry ref: "reeve/state"
+    // Every read should carry ref: "reeve/corrections"
     expect(reads.length).toBeGreaterThan(0);
     for (const read of reads) {
       expect(read.ref).toBe(branch);
     }
-    // Every write should carry branch: "reeve/state"
+    // Every write should carry branch: "reeve/corrections"
     expect(writes.length).toBeGreaterThan(0);
     for (const write of writes) {
       expect(write.branch).toBe(branch);
@@ -597,7 +597,7 @@ describe("attemptWrite with stateBranch", () => {
 
   it("passes branch through writeCorrection", async () => {
     const { api, writes, reads } = contentsOf({});
-    const branch = "reeve/state";
+    const branch = "reeve/corrections";
 
     await writeCorrection(api, AT, "corrections", correctionOf(), branch);
 
@@ -614,7 +614,7 @@ describe("attemptWrite with stateBranch", () => {
   it("rewrites an exact match in place on the state branch", async () => {
     const existing = formatCorrection(correctionOf({ decided: ["question"] }));
     const { api, writes } = contentsOf({ "corrections/2025-01.ndjson": `${existing}\n` });
-    const branch = "reeve/state";
+    const branch = "reeve/corrections";
 
     const updated = correctionOf({ decided: ["bug"] });
     await attemptWrite(api, AT, "corrections", updated, branch);
@@ -628,7 +628,7 @@ describe("attemptWrite with stateBranch", () => {
     const other = formatCorrection(correctionOf({ thread: 7, decided: ["docs"] }));
     const shard = `corrections/${monthShard()}.ndjson`;
     const { api, writes } = contentsOf({ [shard]: `${other}\n` });
-    const branch = "reeve/state";
+    const branch = "reeve/corrections";
 
     await attemptWrite(api, AT, "corrections", correctionOf(), branch);
 

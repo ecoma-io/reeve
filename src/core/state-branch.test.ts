@@ -36,7 +36,7 @@ describe("ensureBranch", () => {
       if (name === defaultBranch) {
         return Promise.resolve({ data: { object: { sha: "base-sha" } } });
       }
-      if (branchExists && name === "reeve/state") {
+      if (branchExists && name === "reeve/provenance") {
         return Promise.resolve({ data: { object: { sha: "branch-sha" } } });
       }
       return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
@@ -67,13 +67,13 @@ describe("ensureBranch", () => {
   it("creates the branch when it does not exist yet", async () => {
     const { api, createRef, updateRef } = apiOf({ branchExists: false });
 
-    const result = await ensureBranch(api, AT, "reeve/state");
+    const result = await ensureBranch(api, AT, "reeve/provenance");
 
     expect(result).toEqual({ defaultBranch: "main", baseSha: "base-sha" });
     expect(createRef).toHaveBeenCalledWith({
       owner: AT.owner,
       repo: AT.repo,
-      ref: "refs/heads/reeve/state",
+      ref: "refs/heads/reeve/provenance",
       sha: "base-sha",
     });
     expect(updateRef).not.toHaveBeenCalled();
@@ -85,20 +85,20 @@ describe("ensureBranch", () => {
       openPrs: [],
     });
 
-    const result = await ensureBranch(api, AT, "reeve/state");
+    const result = await ensureBranch(api, AT, "reeve/provenance");
 
     expect(result).toEqual({ defaultBranch: "main", baseSha: "base-sha" });
     expect(pullsList).toHaveBeenCalledWith({
       owner: AT.owner,
       repo: AT.repo,
       state: "open",
-      head: "ecoma-io:reeve/state",
+      head: "ecoma-io:reeve/provenance",
       per_page: 1,
     });
     expect(updateRef).toHaveBeenCalledWith({
       owner: AT.owner,
       repo: AT.repo,
-      ref: "heads/reeve/state",
+      ref: "heads/reeve/provenance",
       sha: "base-sha",
       force: true,
     });
@@ -111,7 +111,7 @@ describe("ensureBranch", () => {
       openPrs: [{ number: 42 }],
     });
 
-    const result = await ensureBranch(api, AT, "reeve/state");
+    const result = await ensureBranch(api, AT, "reeve/provenance");
 
     expect(result).toEqual({ defaultBranch: "main", baseSha: "base-sha" });
     expect(updateRef).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe("ensureBranch", () => {
   it("uses the repository's configured default branch name", async () => {
     const { api, gitGetRef } = apiOf({ defaultBranch: "develop" });
 
-    await ensureBranch(api, AT, "reeve/state");
+    await ensureBranch(api, AT, "reeve/provenance");
 
     expect(gitGetRef).toHaveBeenCalledWith({
       owner: AT.owner,
@@ -154,7 +154,7 @@ describe("ensureBranch", () => {
       },
     };
 
-    const result = await ensureBranch(api, AT, "reeve/state");
+    const result = await ensureBranch(api, AT, "reeve/provenance");
     expect(result.defaultBranch).toBe("main");
   });
 
@@ -177,7 +177,7 @@ describe("ensureBranch", () => {
 
     // The first getRef call (for the default branch) will also 403 — but that
     // is the one that should propagate, not the branch-existence check.
-    await expect(ensureBranch(api, AT, "reeve/state")).rejects.toThrow("Forbidden");
+    await expect(ensureBranch(api, AT, "reeve/provenance")).rejects.toThrow("Forbidden");
   });
 });
 
@@ -210,7 +210,7 @@ describe("publishState", () => {
     updateRefCalls: { readonly ref: string; readonly sha: string; readonly force: boolean }[];
   }
 
-  const BRANCH = "reeve/state";
+  const BRANCH = "reeve/provenance";
 
   function makeApi(opts: {
     readonly defaultBranch?: string;
@@ -345,7 +345,11 @@ describe("publishState", () => {
   it("creates the branch, writes files, and opens a draft PR when the branch is new", async () => {
     const { api, recorder } = makeApi({ branchExists: false });
     const files = [
-      { path: ".reeve/state.json", content: '{"id":"docs/guide"}', message: "update provenance" },
+      {
+        path: ".reeve/provenance/state.json",
+        content: '{"id":"docs/guide"}',
+        message: "update provenance",
+      },
     ];
 
     const result = await publishState(api, AT, BRANCH, files, "harmonise: state", "PR body", false);
@@ -354,7 +358,7 @@ describe("publishState", () => {
     expect(recorder.createdRef).toBe(true);
     expect(recorder.writes).toHaveLength(1);
     expect(recorder.writes[0]).toEqual({
-      path: ".reeve/state.json",
+      path: ".reeve/provenance/state.json",
       content: '{"id":"docs/guide"}',
       branch: BRANCH,
     });
@@ -371,10 +375,14 @@ describe("publishState", () => {
   });
 
   it("sends the file's SHA when the file already exists on the branch", async () => {
-    const fileShas = new Map([[".reeve/state.json", "existing-sha"]]);
+    const fileShas = new Map([[".reeve/provenance/state.json", "existing-sha"]]);
     const { api, recorder } = makeApi({ branchExists: true, fileShas, openPrs: [{ number: 7 }] });
     const files = [
-      { path: ".reeve/state.json", content: '{"id":"docs/guide"}', message: "update provenance" },
+      {
+        path: ".reeve/provenance/state.json",
+        content: '{"id":"docs/guide"}',
+        message: "update provenance",
+      },
     ];
 
     await publishState(api, AT, BRANCH, files, "title", "body", false);
@@ -472,7 +480,7 @@ describe("publishState", () => {
 // ---------------------------------------------------------------------------
 
 describe("publishStatePr", () => {
-  const BRANCH = "reeve/state";
+  const BRANCH = "reeve/provenance";
 
   /**
    * A minimal fake for the PR-only path — `publishStatePr` does not write

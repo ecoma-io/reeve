@@ -964,13 +964,13 @@ describe("listCorrectionFiles", () => {
     );
     const { api } = contentsOf(getContent);
 
-    const files = await listCorrectionFiles(api, AT, ".reeve/corrections", "reeve/state");
+    const files = await listCorrectionFiles(api, AT, ".reeve/corrections", "reeve/corrections");
     expect(files).toEqual([{ path: ".reeve/corrections/2026-08.ndjson", sha: "a" }]);
     expect(getContent).toHaveBeenCalledWith({
       owner: AT.owner,
       repo: AT.repo,
       path: ".reeve/corrections",
-      ref: "reeve/state",
+      ref: "reeve/corrections",
     });
   });
 
@@ -1073,7 +1073,7 @@ describe("readContentsFile", () => {
     const { api } = contentsOf(getContent);
 
     await expect(
-      readContentsFile(api, AT, ".reeve/harmonise-state.json", "reeve/state"),
+      readContentsFile(api, AT, ".reeve/provenance/state.json", "reeve/corrections"),
     ).resolves.toEqual({
       text,
       sha: "abc",
@@ -1081,8 +1081,8 @@ describe("readContentsFile", () => {
     expect(getContent).toHaveBeenCalledWith({
       owner: AT.owner,
       repo: AT.repo,
-      path: ".reeve/harmonise-state.json",
-      ref: "reeve/state",
+      path: ".reeve/provenance/state.json",
+      ref: "reeve/corrections",
     });
   });
 
@@ -1170,20 +1170,20 @@ describe("writeContentsFile", () => {
     await writeContentsFile(
       api,
       AT,
-      ".reeve/harmonise-state.json",
+      ".reeve/provenance/state.json",
       '{"id":"docs/guide"}\n',
       "harmonise: update provenance state",
       "abc",
-      "reeve/state",
+      "reeve/corrections",
     );
     expect(createOrUpdateFileContents).toHaveBeenCalledWith({
       owner: AT.owner,
       repo: AT.repo,
-      path: ".reeve/harmonise-state.json",
+      path: ".reeve/provenance/state.json",
       message: "harmonise: update provenance state",
       content: Buffer.from('{"id":"docs/guide"}\n', "utf8").toString("base64"),
       sha: "abc",
-      branch: "reeve/state",
+      branch: "reeve/corrections",
     });
   });
 

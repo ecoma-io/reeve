@@ -443,7 +443,7 @@ async function answer(
   return completion;
 }
 
-/** A glossary entry read from `.reeve/glossary.yml`. */
+/** A glossary entry read from the `glossary-dir` input. */
 export interface GlossaryEntry {
   readonly term: string;
   readonly note?: string;

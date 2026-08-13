@@ -35552,7 +35552,7 @@ function readSettings() {
     confidence: fraction("confidence", getInput("confidence")),
     guidance: getInput("guidance"),
     maxBodyChars: bounded("max-body-chars", getInput("max-body-chars")),
-    corrections: getInput("corrections", { required: true }),
+    correctionsDir: getInput("corrections-dir", { required: true }),
     screenModels: cheap.models,
     screenNames: cheap.names,
     about: getInput("about")
@@ -35668,7 +35668,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const pivotLanguage = pivotOrNone(warrant, settings.languages);
   const memory = await recallCorrections({
     count: warrant.memory?.recall ?? RECALLED,
-    path: settings.corrections,
+    path: settings.correctionsDir,
     title: standing.title,
     body,
     language,
@@ -35684,7 +35684,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const recalled = memory.corrections;
   if (memory.read) {
     info(
-      `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`
+      `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.correctionsDir}\`.`
     );
   }
   const guidance = await readGuidance(settings.guidance);

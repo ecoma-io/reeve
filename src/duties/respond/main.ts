@@ -135,7 +135,7 @@ interface Settings extends Core {
   readonly guidance: string;
   /** `null` is no bound at all — see `bounded`'s doc comment for the sentinel rule. */
   readonly maxBodyChars: number | null;
-  readonly corrections: string;
+  readonly correctionsDir: string;
   /** The cheap roster asked whether a thread is spam or off-topic. Empty turns the check off. */
   readonly screenModels: readonly string[];
   readonly screenNames: Names;
@@ -176,7 +176,7 @@ function readSettings(): Omit<Settings, "languages"> {
     confidence: fraction("confidence", core.getInput("confidence")),
     guidance: core.getInput("guidance"),
     maxBodyChars: bounded("max-body-chars", core.getInput("max-body-chars")),
-    corrections: core.getInput("corrections", { required: true }),
+    correctionsDir: core.getInput("corrections-dir", { required: true }),
     screenModels: cheap.models,
     screenNames: cheap.names,
     about: core.getInput("about"),
@@ -401,7 +401,7 @@ async function decide(
   const pivotLanguage = pivotOrNone(warrant, settings.languages);
   const memory = await recallCorrections({
     count: warrant.memory?.recall ?? RECALLED,
-    path: settings.corrections,
+    path: settings.correctionsDir,
     title: standing.title,
     body,
     language,
@@ -421,7 +421,7 @@ async function decide(
 
   if (memory.read) {
     core.info(
-      `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.corrections}\`.`,
+      `Recalled ${String(recalled.length)} of ${String(memory.size)} correction(s) from \`${settings.correctionsDir}\`.`,
     );
   }
 
