@@ -31,18 +31,40 @@ describe("chrome — completeness", () => {
     }
   });
 
-  it("carries exactly the three languages this file commits rows for", () => {
-    // Pins the language set itself — adding a fourth language is a real
+  it("carries exactly the languages this file commits rows for", () => {
+    // Pins the language set itself — adding a language is a real
     // change to this file and should show up as a diff to this assertion,
     // not slip in silently.
-    expect(CHROME_LANGUAGES).toEqual(["en", "vi", "zh"]);
+    expect(CHROME_LANGUAGES).toEqual([
+      "en",
+      "ar",
+      "cs",
+      "de",
+      "es",
+      "fr",
+      "hi",
+      "id",
+      "it",
+      "ja",
+      "ko",
+      "nl",
+      "pl",
+      "pt",
+      "ru",
+      "sv",
+      "th",
+      "tr",
+      "uk",
+      "vi",
+      "zh",
+    ]);
   });
 });
 
 describe("chrome — fallback", () => {
   it("falls back to English for a code with no row", () => {
     for (const key of KEYS) {
-      expect(chrome(key, "fr", ALL_PARAMS)).toBe(chrome(key, "en", ALL_PARAMS));
+      expect(chrome(key, "la", ALL_PARAMS)).toBe(chrome(key, "en", ALL_PARAMS));
     }
   });
 
@@ -52,17 +74,21 @@ describe("chrome — fallback", () => {
     }
   });
 
-  it("reports chromeSupports(vi) and chromeSupports(zh) true, chromeSupports(fr) false", () => {
+  it("reports chromeSupports true for supported languages and false for unsupported", () => {
     expect(chromeSupports("vi")).toBe(true);
     expect(chromeSupports("zh")).toBe(true);
-    expect(chromeSupports("fr")).toBe(false);
+    expect(chromeSupports("fr")).toBe(true);
+    expect(chromeSupports("ja")).toBe(true);
+    expect(chromeSupports("la")).toBe(false);
     expect(chromeSupports(null)).toBe(false);
   });
 
-  it("renders a distinct string for vi and for zh than for en, for every key with translatable words", () => {
+  it("renders a distinct string from English for every non-English language, for every key with translatable words", () => {
     for (const key of KEYS) {
-      expect(chrome(key, "vi", ALL_PARAMS)).not.toBe(chrome(key, "en", ALL_PARAMS));
-      expect(chrome(key, "zh", ALL_PARAMS)).not.toBe(chrome(key, "en", ALL_PARAMS));
+      for (const language of CHROME_LANGUAGES) {
+        if (language === "en") continue;
+        expect(chrome(key, language, ALL_PARAMS)).not.toBe(chrome(key, "en", ALL_PARAMS));
+      }
     }
   });
 });
@@ -100,18 +126,21 @@ describe("chromeFallbackNote", () => {
   });
 
   it("names one unsupported code once, even seen twice", () => {
-    const note = chromeFallbackNote(["fr", "en", "fr"]);
-    expect(note).toContain("`fr`");
-    expect(note?.match(/`fr`/g)).toHaveLength(1);
+    const note = chromeFallbackNote(["la", "en", "la"]);
+    expect(note).toContain("`la`");
+    expect(note?.match(/`la`/g)).toHaveLength(1);
   });
 
   it("names every distinct unsupported code, sorted, in one sentence", () => {
-    const note = chromeFallbackNote(["ja", "de"]);
-    expect(note).toContain("`de`, `ja`");
+    const note = chromeFallbackNote(["la", "eo"]);
+    expect(note).toContain("`eo`, `la`");
   });
 
   it("says which languages this table does carry", () => {
-    expect(chromeFallbackNote(["fr"])).toContain("Chrome covers: en, vi, zh.");
+    const note = chromeFallbackNote(["la"]);
+    expect(note).toContain(
+      "Chrome covers: en, ar, cs, de, es, fr, hi, id, it, ja, ko, nl, pl, pt, ru, sv, th, tr, uk, vi, zh.",
+    );
   });
 });
 
@@ -129,7 +158,7 @@ describe("chromeLines", () => {
   });
 
   it("collapses unsupported languages into a single English line, not one per unsupported code", () => {
-    const lines = chromeLines("translateBoundary", ["fr", "de", "ja"]);
+    const lines = chromeLines("translateBoundary", ["la", "eo", "eu"]);
     expect(lines).toEqual([chrome("translateBoundary", "en")]);
   });
 

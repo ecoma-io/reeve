@@ -419,7 +419,7 @@ describe("postOrReplace", () => {
   it("falls back to English chrome for a language code with no row, deterministically", async () => {
     const { api, comments } = stubOf([]);
 
-    await postOrReplace(api, AT, proposal({ language: "fr", rationale: "" }), "fp1");
+    await postOrReplace(api, AT, proposal({ language: "la", rationale: "" }), "fp1");
 
     expect(comments[0]?.body).toContain("Possible duplicate of #7.");
     expect(comments[0]?.body).toContain("Proposed by a model, not decided by a maintainer");

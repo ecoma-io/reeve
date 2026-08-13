@@ -8,7 +8,7 @@ import { summarize, summarizeSweep, type Looked, type Run, type SweepRun } from 
 
 const ENGLISH: Language = { code: "en", label: "English", scripts: ["Latin"] };
 const VIETNAMESE: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latin"] };
-const FRENCH: Language = { code: "fr", label: "Français", scripts: ["Latin"] };
+const LATIN: Language = { code: "la", label: "Latina", scripts: ["Latin"] };
 
 function posted(overrides: Partial<Posted> = {}): Posted {
   return { to: ENGLISH, text: "Hello", model: "House model", ...overrides };
@@ -80,10 +80,10 @@ describe("the run summary", () => {
   });
 
   it("notes a chrome fallback once for a posted language chrome has no row for", () => {
-    const summary = subject({ looked: [looked({ posted: [posted({ to: FRENCH })] })] });
-    expect(summary).toContain("`fr`");
+    const summary = subject({ looked: [looked({ posted: [posted({ to: LATIN })] })] });
+    expect(summary).toContain("`la`");
     expect(summary).toContain("no translation for");
-    expect(summary.match(/`fr`/g)).toHaveLength(1);
+    expect(summary.match(/`la`/g)).toHaveLength(1);
   });
 
   it("reports the score, the drafts and the votes of a contested translation", () => {

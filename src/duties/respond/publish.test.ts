@@ -132,9 +132,9 @@ describe("publication", () => {
   });
 
   it("falls back to English chrome for a language code chrome has no row for", () => {
-    const rendered = body({ language: "Français", languageCode: "fr" });
+    const rendered = body({ language: "Latina", languageCode: "la" });
     expect(rendered).toContain("This reply was drafted by");
-    expect(rendered).toContain("The thread was written in Français.");
+    expect(rendered).toContain("The thread was written in Latina.");
   });
 
   it("falls back to English chrome when languageCode is null even if language has a label", () => {
