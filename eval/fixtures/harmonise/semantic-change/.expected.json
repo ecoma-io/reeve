@@ -1,0 +1,11 @@
+{
+  "scenario": "shared-semantic-change",
+  "description": "New section 'Verify the setup' added to EN source. This is a shared semantic change that should propagate to VI.",
+  "source-diff": "A new section '## Verify the setup' with one paragraph was added to the end of the EN document.",
+  "expected": {
+    "classification": "semantic",
+    "should-propagate": true,
+    "propagation-target": "vi",
+    "action": "The new section should be translated and appended to the VI document."
+  }
+}

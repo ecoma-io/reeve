@@ -1,0 +1,16 @@
+{
+  "scenario": "mixed-diff",
+  "description": "EN source has two additions: 1) '### API rate limits' (shared semantic change — should propagate), 2) '### Vietnamese locale' with a locale-specific link (locale-specific adaptation — should NOT propagate). Tests the classifier's ability to separate diff types within one source change.",
+  "source-diff": "Two sections added to EN: '### API rate limits' (semantic) and '### Vietnamese locale' (locale-specific link).",
+  "expected": {
+    "classifications": [
+      { "section": "### API rate limits", "classification": "semantic", "should-propagate": true },
+      {
+        "section": "### Vietnamese locale",
+        "classification": "locale-specific",
+        "should-propagate": false
+      }
+    ],
+    "action": "Only the '### API rate limits' section should be translated and appended to VI. The '### Vietnamese locale' section should NOT propagate."
+  }
+}

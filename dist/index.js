@@ -31749,7 +31749,9 @@ var CAPABILITIES = [
   "close",
   "assign",
   "record",
-  "propose"
+  "propose",
+  "edit-file",
+  "open-pr"
 ];
 var VERSION7 = 1;
 var DEFAULT_PROPOSE_WORKSPACE = {
@@ -32423,7 +32425,8 @@ var DUTIES = [
   "triage",
   "duplicate",
   "respond",
-  "lifecycle"
+  "lifecycle",
+  "harmonise"
 ];
 var PLANNED = [];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";

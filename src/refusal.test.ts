@@ -94,7 +94,7 @@ describe("refusal", () => {
 describe("the duty lists", () => {
   it("covers every duty the documentation gives a contract to", () => {
     expect([...DUTIES, ...PLANNED].sort()).toEqual(
-      ["triage", "translate", "duplicate", "respond", "lifecycle"].sort(),
+      ["triage", "translate", "duplicate", "respond", "lifecycle", "harmonise"].sort(),
     );
   });
 
