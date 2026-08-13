@@ -81,7 +81,28 @@ export function extract(content: string): ExtractResult {
         output.push(lines[i] ?? "");
         i += 1;
       }
-      // Collect the next non-blank line as the ignored line (if any)
+      // Skip other marker lines — they should be processed on their own, not
+      // consumed as the ignored line of this marker. This prevents two adjacent
+      // ignore-next-line markers from swallowing each other, and prevents
+      // ignore-next-line from consuming an ignore-start marker.
+      if (i < lines.length) {
+        const candidate = stripTerminator(lines[i] ?? "");
+        if (
+          IGNORE_NEXT_LINE.test(candidate) ||
+          IGNORE_START.test(candidate) ||
+          IGNORE_END.test(candidate)
+        ) {
+          // No non-marker line to ignore — the marker itself is still extracted
+          // (as an empty-effect span), and the other marker is left for its own
+          // processing.
+          spans.push({
+            content: lines.slice(markerLine, markerLine + 1).join(""),
+          });
+          output.push(PLACEHOLDER + "\n");
+          continue;
+        }
+      }
+      // Collect the next non-blank, non-marker line as the ignored line (if any)
       const ignoredLine = i < lines.length ? i : -1;
       if (ignoredLine >= 0) {
         i += 1;

@@ -3,6 +3,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { sanitize } from "../../core/sanitize.js";
+
 import { extract, reinsert, _PLACEHOLDER, _SANITIZED_PLACEHOLDER } from "./ignore.js";
 
 describe("extract", () => {
@@ -44,6 +46,29 @@ describe("extract", () => {
       expect(result.spans).toHaveLength(1);
       expect(result.spans[0]?.content).toBe("<!-- reeve:ignore-next-line -->\nfirst line\n");
       expect(result.content).toBe(`${_PLACEHOLDER}\nrest\n`);
+    });
+
+    it("does not let adjacent markers consume each other", () => {
+      const content = "a\n<!-- reeve:ignore-next-line -->\n<!-- reeve:ignore-next-line -->\nb\nc\n";
+      const result = extract(content);
+
+      expect(result.spans).toHaveLength(2);
+      expect(result.spans[0]?.content).toBe("<!-- reeve:ignore-next-line -->\n");
+      expect(result.spans[1]?.content).toBe("<!-- reeve:ignore-next-line -->\nb\n");
+      expect(result.content).toBe(`a\n${_PLACEHOLDER}\n${_PLACEHOLDER}\nc\n`);
+    });
+
+    it("does not consume an ignore-start marker as the next line", () => {
+      const content =
+        "a\n<!-- reeve:ignore-next-line -->\n<!-- reeve:ignore-start -->\nprotected\n<!-- reeve:ignore-end -->\nb\n";
+      const result = extract(content);
+
+      expect(result.spans).toHaveLength(2);
+      expect(result.spans[0]?.content).toBe("<!-- reeve:ignore-next-line -->\n");
+      expect(result.spans[1]?.content).toBe(
+        "<!-- reeve:ignore-start -->\nprotected\n<!-- reeve:ignore-end -->\n",
+      );
+      expect(result.content).toBe(`a\n${_PLACEHOLDER}\n${_PLACEHOLDER}\nb\n`);
     });
   });
 
@@ -247,5 +272,169 @@ describe("placeholder format", () => {
     expect("<!-- ---- -->").not.toMatch(_SANITIZED_PLACEHOLDER);
     expect("<!-- ------------------- -->").not.toMatch(_SANITIZED_PLACEHOLDER);
     expect("<!-- --------------------- -->").not.toMatch(_SANITIZED_PLACEHOLDER);
+  });
+
+  it("SANITIZED_PLACEHOLDER does not match near-miss dash counts", () => {
+    // 17 dashes — too few
+    expect("<!-- ----------------- -->").not.toMatch(_SANITIZED_PLACEHOLDER);
+    // 19 dashes — too many
+    expect("<!-- ------------------- -->").not.toMatch(_SANITIZED_PLACEHOLDER);
+  });
+
+  it("SANITIZED_PLACEHOLDER does not match extra spaces around dashes", () => {
+    // Two leading spaces instead of one
+    expect("<!--  ------------------ -->").not.toMatch(_SANITIZED_PLACEHOLDER);
+    // Two trailing spaces instead of one
+    expect("<!-- ------------------  -->").not.toMatch(_SANITIZED_PLACEHOLDER);
+  });
+});
+
+describe("round-trip: extract → sanitize → reinsert", () => {
+  it("preserves original target content through the full pipeline", () => {
+    const target = "line before\n<!-- reeve:ignore-next-line -->\nignored line\nline after\n";
+    const { content: masked, spans } = extract(target);
+
+    // Simulate what the model would do: return the masked content unchanged
+    const modelOutput = masked;
+    const sanitized = sanitize(modelOutput);
+    const result = reinsert(sanitized, spans);
+
+    expect(result).toBe(target);
+  });
+
+  it("preserves an ignore-start/end block through the full pipeline", () => {
+    const target =
+      "before\n<!-- reeve:ignore-start -->\nprotected\ncontent\n<!-- reeve:ignore-end -->\nafter\n";
+    const { content: masked, spans } = extract(target);
+
+    const modelOutput = masked;
+    const sanitized = sanitize(modelOutput);
+    const result = reinsert(sanitized, spans);
+
+    expect(result).toBe(target);
+  });
+
+  it("preserves multiple ignored blocks through the full pipeline", () => {
+    const target =
+      "a\n<!-- reeve:ignore-next-line -->\nb\nc\n<!-- reeve:ignore-start -->\nd\n<!-- reeve:ignore-end -->\ne\n";
+    const { content: masked, spans } = extract(target);
+
+    const modelOutput = masked;
+    const sanitized = sanitize(modelOutput);
+    const result = reinsert(sanitized, spans);
+
+    expect(result).toBe(target);
+  });
+
+  it("preserves content with adjacent ignore-next-line markers through the pipeline", () => {
+    const target = "a\n<!-- reeve:ignore-next-line -->\n<!-- reeve:ignore-next-line -->\nb\nc\n";
+    const { content: masked, spans } = extract(target);
+
+    const modelOutput = masked;
+    const sanitized = sanitize(modelOutput);
+    const result = reinsert(sanitized, spans);
+
+    expect(result).toBe(target);
+  });
+
+  it("handles a document with no trailing newline through the pipeline", () => {
+    const target = "<!-- reeve:ignore-next-line -->\nignored";
+    const { content: masked, spans } = extract(target);
+
+    const modelOutput = masked;
+    const sanitized = sanitize(modelOutput);
+    const result = reinsert(sanitized, spans);
+
+    expect(result).toBe(target);
+  });
+});
+
+describe("extract identity property", () => {
+  it("returns content unchanged when no markers are present", () => {
+    const content = "just regular text\nno markers here\n";
+    const result = extract(content);
+
+    expect(result.content).toBe(content);
+    expect(result.spans).toHaveLength(0);
+  });
+
+  it("returns content unchanged with unrelated HTML comments", () => {
+    const content = "text\n<!-- some other comment -->\nmore text\n";
+    const result = extract(content);
+
+    expect(result.content).toBe(content);
+    expect(result.spans).toHaveLength(0);
+  });
+
+  it("returns content unchanged with an orphaned ignore-end", () => {
+    const content = "before\n<!-- reeve:ignore-end -->\nafter\n";
+    const result = extract(content);
+
+    expect(result.content).toBe(content);
+    expect(result.spans).toHaveLength(0);
+  });
+});
+
+describe("reinsert call-order contract", () => {
+  it("returns the draft unchanged when called with a pre-sanitize placeholder", () => {
+    // reinsert() must only be called AFTER sanitize(); calling it with the
+    // raw placeholder `<!-- reeve-keep-section -->` should produce 0 matches
+    // and return the draft unchanged.
+    const spans = [{ content: "<!-- reeve:ignore-next-line -->\nkept line\n" }];
+    const draft = `before\n<!-- reeve-keep-section -->\nafter\n`;
+
+    const result = reinsert(draft, spans);
+
+    // No sanitized placeholders in draft, so it is returned as-is
+    expect(result).toBe(draft);
+  });
+});
+
+describe("reinsert with natural placeholder collision", () => {
+  it("returns draft unchanged when a pre-existing dashed comment matches the pattern", () => {
+    // If the draft already contains a comment that happens to look like the
+    // sanitized placeholder, and there are no spans, it should be preserved.
+    const draft = "before\n<!-- ------------------ -->\nafter\n";
+    expect(reinsert(draft, [])).toBe(draft);
+  });
+
+  it("returns draft unchanged when placeholder count exceeds span count due to collision", () => {
+    // Two dashed comments in the draft but only one span — count mismatch,
+    // so the draft is returned unchanged and a warning is logged.
+    const spans = [{ content: "<!-- reeve:ignore-next-line -->\nkept line\n" }];
+    const draft = `before\n<!-- ------------------ -->\nmiddle\n<!-- ------------------ -->\nafter\n`;
+
+    const result = reinsert(draft, spans);
+
+    expect(result).toBe(draft);
+  });
+});
+
+describe("nested ignore-start/end", () => {
+  it("treats a second ignore-start inside a block as literal text", () => {
+    const content =
+      "a\n<!-- reeve:ignore-start -->\ninner <!-- reeve:ignore-start --> text\n<!-- reeve:ignore-end -->\nb\n";
+    const result = extract(content);
+
+    // One span: from the first ignore-start to the first ignore-end
+    expect(result.spans).toHaveLength(1);
+    expect(result.spans[0]?.content).toBe(
+      "<!-- reeve:ignore-start -->\ninner <!-- reeve:ignore-start --> text\n<!-- reeve:ignore-end -->\n",
+    );
+    expect(result.content).toBe(`a\n${_PLACEHOLDER}\nb\n`);
+  });
+
+  it("treats a second ignore-end as literal text when not inside a block", () => {
+    const content =
+      "a\n<!-- reeve:ignore-start -->\ninner text\n<!-- reeve:ignore-end -->\n<!-- reeve:ignore-end -->\nb\n";
+    const result = extract(content);
+
+    // One span: from ignore-start to the FIRST ignore-end
+    expect(result.spans).toHaveLength(1);
+    expect(result.spans[0]?.content).toBe(
+      "<!-- reeve:ignore-start -->\ninner text\n<!-- reeve:ignore-end -->\n",
+    );
+    // The orphaned second ignore-end is literal
+    expect(result.content).toBe(`a\n${_PLACEHOLDER}\n<!-- reeve:ignore-end -->\nb\n`);
   });
 });
