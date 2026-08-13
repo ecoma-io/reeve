@@ -34,7 +34,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { narrowWarned, parseApply } from "../../core/enforce.js";
-import { isCapacityError, type Location, readContentsFile } from "../../core/forge.js";
+import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
 import { bounded, readCore, whole, type ApiKeySpec, type EndpointSpec } from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
 import { createMeter } from "../../core/meter.js";
@@ -57,6 +57,7 @@ import {
 
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 import { classifyDiff, type ClassificationResult } from "./classify.js";
+import { computeSourceDiff, formatInitialSync } from "./diff.js";
 import { discoverGroups, type DocumentGroup } from "./discover.js";
 import { draftSync, type Draft, type GlossaryEntry } from "./draft.js";
 import { parsePaths } from "./inputs.js";
@@ -396,12 +397,30 @@ async function processGroup(
   const synced: string[] = [];
   const skipped: string[] = [];
 
-  // Compute the diff: compare current source to what's in provenance
-  // On first run (sourceRevision is empty), everything is considered new
-  const diffDescription = computeDiff(
-    sourceFile.text,
-    doc.sourceRevision === "" ? null : doc.sourceRevision,
-  );
+  // Compute the diff: resolve the historical source content from the
+  // stored sourceRevision blob SHA, then diff it against the current content.
+  // On first run (sourceRevision is empty), everything is considered new.
+  let diffDescription: string;
+  if (doc.sourceRevision === "") {
+    diffDescription = formatInitialSync(sourceFile.text);
+  } else {
+    const previousContent = await readBlob(api, at, doc.sourceRevision);
+    if (previousContent === null) {
+      core.warning(
+        `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} ` +
+          `for ${group.id} — skipping. The blob SHA may no longer be reachable.`,
+      );
+      return {
+        group,
+        classification: "none",
+        hunks: [],
+        synced: [],
+        conflicts,
+        skipped: doc.stale,
+      };
+    }
+    diffDescription = computeSourceDiff(previousContent, sourceFile.text);
+  }
 
   // Classify the diff
   let classification: ClassificationResult;
@@ -582,23 +601,6 @@ async function listMarkdownFiles(
   }
 
   return files;
-}
-
-/**
- * Computes a human-readable diff description from the source content.
- *
- * On first run (no previous revision), describes the entire document as new.
- * On subsequent runs, we compare the current content against what we know
- * from the provenance. Since we don't store the previous content, we use
- * a simplified approach: describe the overall document structure and note
- * that it has changed.
- */
-function computeDiff(currentContent: string, previousRevision: string | null): string {
-  if (previousRevision === null) {
-    return `This is the initial sync. The source document is:\n\n${currentContent}`;
-  }
-
-  return `The source document has changed since revision ${previousRevision.slice(0, 8)}. Current content:\n\n${currentContent}`;
 }
 
 /**
