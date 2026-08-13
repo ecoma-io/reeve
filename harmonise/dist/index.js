@@ -34087,7 +34087,14 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       warning(
         `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} for ${group.id} \u2014 skipping. The blob SHA may no longer be reachable.`
       );
-      return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: doc.stale };
+      return {
+        group,
+        classification: "none",
+        hunks: [],
+        synced: [],
+        conflicts,
+        skipped: doc.stale
+      };
     }
     diffDescription = computeSourceDiff(previousContent, sourceFile.text);
   }
