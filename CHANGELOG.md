@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/ecoma-io/reeve/compare/v0.3.0...v0.4.0) (2026-08-13)
+
+
+### Features
+
+* **chrome:** add 18 languages to chrome table ([#45](https://github.com/ecoma-io/reeve/issues/45)) ([ebf6a8a](https://github.com/ecoma-io/reeve/commit/ebf6a8aee8fbda6d0fc044635f367b8e2521bc71))
+* complete self-dogfood and feedback loop (Phase 1 + Phase 2) ([#42](https://github.com/ecoma-io/reeve/issues/42)) ([673cf43](https://github.com/ecoma-io/reeve/commit/673cf439b9ec783f227be3627e458c5f0abddc28))
+* **harmonise:** implement the harmonise duty ([#44](https://github.com/ecoma-io/reeve/issues/44)) ([f359740](https://github.com/ecoma-io/reeve/commit/f359740adbf1bdfb2d3c59f63caad8c5b6c804d0))
+
 ## [0.3.0](https://github.com/ecoma-io/reeve/compare/v0.2.1...v0.3.0) (2026-08-13)
 
 
