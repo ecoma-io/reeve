@@ -40,7 +40,9 @@ export function createNpmDatasource(): Datasource {
  */
 async function resolve(packageName: string): Promise<ResolutionResult> {
   // Build the registry URL — scoped packages need URL-encoded slashes
-  const encodedName = packageName.startsWith("@") ? packageName.replace("/", "%2F") : packageName;
+  const encodedName = packageName.startsWith("@")
+    ? packageName.replaceAll("/", "%2F")
+    : packageName;
   const url = `${NPM_REGISTRY}/${encodedName}`;
 
   let response: Response;
