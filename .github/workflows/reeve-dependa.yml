@@ -21,8 +21,13 @@ on:
     - cron: "17 3 * * 3"
   workflow_dispatch: {}
 
+concurrency:
+  group: reeve-dependa
+  cancel-in-progress: false
+
 # `dependa` needs `contents: write` to commit manifest edits, and
 # `pull-requests: write` to open or update dependency update pull requests.
+# These are the minimum for the active mode (apply: edit-file, open-pr).
 permissions:
   contents: write
   pull-requests: write

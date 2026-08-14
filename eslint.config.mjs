@@ -17,6 +17,10 @@ export default tseslint.config(
       // bundle per duty, so the pattern has to match at every depth: the root
       // listing's `dist/`, and `translate/dist/` beside its `action.yml`.
       "**/dist/**",
+      // Dogfood CLI tools outside src/ are not in the tsconfig project, so
+      // eslint cannot resolve their types. The canonical conformance code
+      // lives in src/duties/dependa/conformance/ which IS linted.
+      "dogfood/**",
     ],
   },
 
