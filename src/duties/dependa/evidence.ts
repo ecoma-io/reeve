@@ -158,6 +158,10 @@ export function encloseEvidence(evidence: readonly Evidence[]): Enclosed | null 
  * Unlike `encloseEvidence` (which fences for a model), this renders for a
  * human reading a pull request. Each piece of evidence is a collapsible
  * section with its source URL and content.
+ *
+ * Evidence content is sanitised for PR publication: HTML tags are escaped
+ * to prevent injection, and Markdown links are defanged so they render as
+ * plain text rather than clickable links from untrusted sources.
  */
 export function renderForPr(evidence: readonly Evidence[]): string {
   if (evidence.length === 0) return "";
@@ -165,16 +169,39 @@ export function renderForPr(evidence: readonly Evidence[]): string {
   const sections = evidence.map((e) => {
     const label = e.kind.replace(/-/g, " ");
     const attribution = e.deterministic ? "" : " *(model-derived)*";
+    const safeSource = escapeMarkdown(e.source);
     if (e.content.length === 0) {
-      return `- **${label}**: [${e.source}](${e.source})${attribution}`;
+      return `- **${label}**: ${safeSource}${attribution}`;
     }
     return (
-      `<details><summary><strong>${label}</strong>: ${e.source}${attribution}</summary>\n\n` +
-      `${e.content}\n\n</details>`
+      `<details><summary><strong>${label}</strong>: ${safeSource}${attribution}</summary>\n\n` +
+      `${escapeMarkdown(e.content)}\n\n</details>`
     );
   });
 
   return `### Evidence\n\n${sections.join("\n\n")}`;
+}
+
+/**
+ * Escape text for safe inclusion in a Markdown PR body.
+ *
+ * Strips HTML tags and defangs Markdown links from untrusted content so
+ * they cannot be used for injection or phishing. Intentionally conservative:
+ * evidence is rendered as plain text within a details block, so losing
+ * formatting is acceptable — safety is not.
+ */
+export function escapeMarkdown(text: string): string {
+  return (
+    text
+      // Defang Markdown images: ![alt](url) → alt (url)
+      .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)")
+      // Defang Markdown links: [text](url) → text (url)
+      .replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)")
+      // Escape angle brackets first — prevents both complete (<script>)
+      // and incomplete (<script) HTML element injection
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+  );
 }
 
 /** Sanitise evidence text — defang references and empty HTML comments. */

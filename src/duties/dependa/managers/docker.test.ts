@@ -55,17 +55,42 @@ describe("docker parse", () => {
     expect(result.dependencies[0]?.dev).toBe(false);
   });
 
-  it("treats all-digit tag as part of image name (known limitation)", () => {
-    // node:20 — "20" is all digits, so parseImageRef treats it as a port
-    // and the whole "node:20" becomes the image name with no tag.
+  it("parses all-digit tag correctly (tag colon after last slash)", () => {
+    // node:20 — "20" is a tag because the colon is after the last slash
     const content = "FROM node:20\n";
     const result = manager.parse("Dockerfile", content, null);
     expect(result.dependencies).toHaveLength(1);
-    // In the current implementation, the colon is not treated as a tag separator
-    // because "20" matches the all-digit port heuristic.
-    expect(result.dependencies[0]?.name).toBe("node:20");
-    expect(result.dependencies[0]?.constraint).toBeNull();
+    expect(result.dependencies[0]?.name).toBe("node");
+    expect(result.dependencies[0]?.constraint).toBe("20");
+    expect(result.dependencies[0]?.currentVersion).toBe("20");
+  });
+
+  it("parses registry-qualified image with numeric tag", () => {
+    // ghcr.io/owner/image:20 — colon after last slash is a tag separator
+    const content = "FROM ghcr.io/owner/image:20\n";
+    const result = manager.parse("Dockerfile", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("ghcr.io/owner/image");
+    expect(result.dependencies[0]?.constraint).toBe("20");
+    expect(result.dependencies[0]?.currentVersion).toBe("20");
+  });
+
+  it("treats colon before last slash as registry port", () => {
+    // localhost:5000/myimage:tag — first colon is port, second is tag
+    const content = "FROM localhost:5000/myimage:latest\n";
+    const result = manager.parse("Dockerfile", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("localhost:5000/myimage");
+    expect(result.dependencies[0]?.constraint).toBe("latest");
     expect(result.dependencies[0]?.currentVersion).toBe("latest");
+  });
+
+  it("parses registry-qualified image with non-numeric tag", () => {
+    const content = "FROM ghcr.io/owner/image:v1.2.3\n";
+    const result = manager.parse("Dockerfile", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("ghcr.io/owner/image");
+    expect(result.dependencies[0]?.constraint).toBe("v1.2.3");
   });
 
   it("parses FROM with a non-numeric tag", () => {
@@ -278,5 +303,88 @@ describe("docker applyUpdate", () => {
 
     expect(result).toContain("RUN npm install");
     expect(result).toContain('CMD ["node"]');
+  });
+
+  it("does not corrupt multi-stage Dockerfiles with substring tag matching", () => {
+    // node:20 should NOT match node:20-slim
+    const content = "FROM node:20 AS builder\nFROM node:20-slim AS runtime\n";
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "docker",
+        name: "node",
+        constraint: "20",
+        currentVersion: "20",
+        manifestPath: "Dockerfile",
+        dev: false,
+        manager: "docker",
+      },
+      currentVersion: "20",
+      targetVersion: "22",
+      updateType: "major",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("FROM node:22 AS builder");
+    // The -slim variant must NOT be changed
+    expect(result).toContain("FROM node:20-slim AS runtime");
+    expect(result).not.toContain("node:22-slim");
+  });
+
+  it("does not corrupt when updating a variant tag", () => {
+    // Updating node:20-slim should NOT affect node:20
+    const content = "FROM node:20 AS builder\nFROM node:20-slim AS runtime\n";
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "docker",
+        name: "node",
+        constraint: "20-slim",
+        currentVersion: "20-slim",
+        manifestPath: "Dockerfile",
+        dev: false,
+        manager: "docker",
+      },
+      currentVersion: "20-slim",
+      targetVersion: "22-slim",
+      updateType: "major",
+    });
+
+    expect(result).not.toBeNull();
+    // The base image must NOT be changed
+    expect(result).toContain("FROM node:20 AS builder");
+    expect(result).toContain("FROM node:22-slim AS runtime");
+  });
+});
+
+// ── parse: no-tag FROM line ─────────────────────────────────────────────
+
+describe("docker parse: no-tag FROM line", () => {
+  it("sets constraint to 'latest' when no tag is specified", () => {
+    const content = "FROM node\n";
+    const result = manager.parse("Dockerfile", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    // When no tag is specified, both constraint and currentVersion should be "latest"
+    // (not constraint=null, which would break pin detection and semver classification)
+    expect(result.dependencies[0]?.constraint).toBe("latest");
+    expect(result.dependencies[0]?.currentVersion).toBe("latest");
+  });
+});
+
+// ── matchManifest ─────────────────────────────────────────────────────────
+
+describe("matchManifest", () => {
+  it("matches Dockerfile paths", () => {
+    expect(manager.matchManifest!("Dockerfile")).toBe(true);
+    expect(manager.matchManifest!("Dockerfile.prod")).toBe(true);
+    expect(manager.matchManifest!("dir/Dockerfile")).toBe(true);
+  });
+
+  it("rejects non-Dockerfile paths", () => {
+    expect(manager.matchManifest!("main.go")).toBe(false);
+    expect(manager.matchManifest!("package.json")).toBe(false);
+    expect(manager.matchManifest!("Makefile")).toBe(false);
   });
 });

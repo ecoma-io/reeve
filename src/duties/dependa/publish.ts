@@ -18,7 +18,7 @@ import * as core from "@actions/core";
 import { isMissing, type Location } from "../../core/forge.js";
 import { fingerprint, markerFor } from "../../core/marker.js";
 import type { ProposalGroup, UpdateProposal } from "./model.js";
-import { renderForPr } from "./evidence.js";
+import { renderForPr, escapeMarkdown } from "./evidence.js";
 
 /** The GitHub calls `dependa` publish needs. */
 export interface PublishApi {
@@ -39,6 +39,13 @@ export interface PublishApi {
         sha?: string;
         branch?: string;
       }): Promise<unknown>;
+      listCommits(params: { owner: string; repo: string; sha: string; per_page: number }): Promise<{
+        data: readonly {
+          readonly sha: string;
+          readonly author?: { readonly login?: string } | null;
+          readonly committer?: { readonly login?: string } | null;
+        }[];
+      }>;
     };
     readonly git: {
       getRef(params: {
@@ -51,6 +58,13 @@ export interface PublishApi {
         repo: string;
         ref: string;
         sha: string;
+      }): Promise<unknown>;
+      updateRef(params: {
+        owner: string;
+        repo: string;
+        ref: string;
+        sha: string;
+        force?: boolean;
       }): Promise<unknown>;
     };
     readonly pulls: {
@@ -65,6 +79,7 @@ export interface PublishApi {
           readonly number: number;
           readonly body?: string | null;
           readonly head: { readonly sha: string };
+          readonly merged: boolean;
         }[];
       }>;
       create(params: {
@@ -97,10 +112,14 @@ const MARKER = markerFor("dependa");
  * result does not start with `-`.
  */
 export function sanitizeBranchSegment(id: string): string {
-  // Git branch names allow: alphanumerics, `.`, `_`, `-`, `@` (but not `@{`).
+  // Git branch names allow: alphanumerics, `.`, `_`, `-` (but not `@{`).
   // Replace `/` with `-` (branch names cannot contain `/` in a segment),
+  // strip `@` entirely (it can form `@{` which git interprets as reflog),
   // then strip anything not in the allowed set.
-  const safe = id.replace(/\//g, "-").replace(/[^a-zA-Z0-9._@-]/g, "-");
+  const safe = id
+    .replace(/\//g, "-")
+    .replace(/@/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "-");
   return safe.startsWith("-") ? `branch${safe}` : safe;
 }
 
@@ -151,7 +170,23 @@ export async function publishGroup(
     return { pr: null, outcome: "draft" };
   }
 
-  // Ensure the branch exists
+  // D3: Check for a closed-unmerged PR on this branch — never reopen.
+  const { data: closedPrs } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "closed",
+    head: `${at.owner}:${branchName}`,
+    per_page: 5,
+  });
+  const closedUnmerged = closedPrs.find((pr) => !pr.merged);
+  if (closedUnmerged !== undefined) {
+    core.info(
+      `dependa: PR #${String(closedUnmerged.number)} for \`${branchName}\` was closed without merge — D3: refusing to recreate.`,
+    );
+    return { pr: null, outcome: "refused" };
+  }
+
+  // Ensure the branch exists (or reset it to the base SHA)
   let branchExists = true;
   try {
     await api.rest.git.getRef({
@@ -174,14 +209,74 @@ export async function publishGroup(
       ref: `refs/heads/${branchName}`,
       sha: baseSha,
     });
+  } else {
+    // D3: Before force-resetting the branch, check whether it contains commits
+    // not authored by the bot. A human maintainer may have pushed edits to the
+    // branch to test or refine the proposed update — those commits are
+    // inviolable and must not be overwritten.
+    try {
+      const { data: commits } = await api.rest.repos.listCommits({
+        owner: at.owner,
+        repo: at.repo,
+        sha: branchName,
+        per_page: 10,
+      });
+      const botAuthors = new Set([
+        "github-actions[bot]",
+        "github-actions",
+        "dependabot[bot]",
+        "reeve[bot]",
+      ]);
+      const hasHumanCommit = commits.some((c) => {
+        const login = c.author?.login ?? c.committer?.login;
+        return login !== undefined && !botAuthors.has(login);
+      });
+      if (hasHumanCommit) {
+        core.info(
+          `dependa: branch \`${branchName}\` contains human-authored commits — D3: refusing to force-reset.`,
+        );
+        return { pr: null, outcome: "refused" };
+      }
+    } catch (error) {
+      if (!isMissing(error)) {
+        core.warning(
+          `dependa: could not check commits on \`${branchName}\` — ${error instanceof Error ? error.message : String(error)}. Proceeding with reset.`,
+        );
+      }
+      // If we can't check commits (e.g. API error), we still proceed with the
+      // reset rather than blocking the run entirely. The D3 check is best-effort.
+    }
+
+    // Reset the branch to the current base SHA — equivalent to rebasing.
+    // This ensures the branch always reflects the latest default branch
+    // and avoids conflicts from stale base.
+    await api.rest.git.updateRef({
+      owner: at.owner,
+      repo: at.repo,
+      ref: `heads/${branchName}`,
+      sha: baseSha,
+      force: true,
+    });
   }
 
-  // Write each file edit from each proposal to the branch
-  // Deduplicate by path — if two proposals edit the same file, merge them
-  const editsByPath = new Map<string, { content: string; message: string }>();
+  // Write each file edit from each proposal to the branch.
+  // Multiple proposals may edit the same manifest — their edits were composed
+  // sequentially in main.ts (each proposal's applyUpdate received the result
+  // of the previous proposal's mutation), so the last edit for a given path
+  // is the cumulative result of all proposals. Commit messages are joined so
+  // the commit reflects every dependency update in the file.
+  const editsByPath = new Map<string, { content: string; messages: string[] }>();
   for (const proposal of group.proposals) {
     for (const edit of proposal.edits) {
-      editsByPath.set(edit.path, { content: edit.content, message: edit.message });
+      const existing = editsByPath.get(edit.path);
+      if (existing !== undefined) {
+        // Last content wins (it was composed on top of the previous),
+        // but accumulate all commit messages
+        existing.content = edit.content;
+        existing.messages.push(edit.message);
+      } else {
+        editsByPath.set(edit.path, { content: edit.content, messages: [edit.message] });
+      }
     }
   }
 
@@ -203,15 +298,15 @@ export async function publishGroup(
       // File does not exist yet — that's fine, we'll create it
     }
 
-    await api.rest.repos.createOrUpdateFileContents({
-      owner: at.owner,
-      repo: at.repo,
-      path: filePath,
-      message: edit.message,
-      content: Buffer.from(edit.content, "utf8").toString("base64"),
-      branch: branchName,
-      ...(fileSha !== undefined ? { sha: fileSha } : {}),
-    });
+    await writeWithRetry(
+      api,
+      at,
+      filePath,
+      edit.messages.join("; "),
+      edit.content,
+      branchName,
+      fileSha,
+    );
 
     core.info(`dependa: wrote ${filePath} on \`${branchName}\``);
   }
@@ -269,7 +364,7 @@ export async function publishGroup(
 
 /** Build a stable key for a proposal's fingerprint contribution. */
 function summaryKey(proposal: UpdateProposal): string {
-  return `${proposal.dependency.name}@${proposal.targetVersion}`;
+  return `${proposal.dependency.name}@${proposal.currentVersion}->${proposal.targetVersion}`;
 }
 
 /**
@@ -300,7 +395,16 @@ export function buildPrBody(group: ProposalGroup): string {
       p.securityAdvisory !== null
         ? ` — 🛡️ ${p.securityAdvisory.id} (${p.securityAdvisory.severity})`
         : "";
-    return `| ${typeEmoji} \`${p.dependency.name}\` | \`${p.currentVersion}\` | \`${p.targetVersion}\` | \`${p.updateType}\`${devTag}${security} |`;
+    // Risk interpretation: render the model's assessment when available.
+    // The model's summary is untrusted content — escape it for Markdown safety
+    // to prevent injection of links, images, or table-breaking characters.
+    const riskCell =
+      p.risk.interpretation !== null
+        ? `${p.risk.interpretation.riskLevel} — ${escapeMarkdown(p.risk.interpretation.summary)} *(model)*`
+        : p.risk.facts.isSecurity
+          ? "security"
+          : p.risk.facts.updateType;
+    return `| ${typeEmoji} \`${p.dependency.name}\` | \`${p.currentVersion}\` | \`${p.targetVersion}\` | \`${p.updateType}\`${devTag}${security} | ${riskCell} |`;
   });
 
   const evidenceSection = group.proposals
@@ -314,8 +418,8 @@ export function buildPrBody(group: ProposalGroup): string {
 
   return (
     `## dependa update\n\n` +
-    `| Dependency | From | To | Type |` +
-    `\n|---|---|---|---|` +
+    `| Dependency | From | To | Type | Risk |` +
+    `\n|---|---|---|---|---|` +
     `\n${rows.join("\n")}` +
     (evidenceRendered.length > 0 ? `\n\n${evidenceRendered}` : "") +
     `\n\n---\n\n${MARKER.render(fp)}`
@@ -342,4 +446,82 @@ function updateTypeEmoji(type: string): string {
     default:
       return "📦";
   }
+}
+
+/**
+ * Write a file with a single retry on 409 Conflict.
+ *
+ * The GitHub Contents API returns 409 when the SHA we send is stale —
+ * another commit landed on the branch between our read and our write.
+ * Retrying once (re-reading the SHA) handles the race condition.
+ *
+ * On the second failure, the error propagates — two consecutive conflicts
+ * suggests a deeper problem, not a transient race.
+ */
+async function writeWithRetry(
+  api: PublishApi,
+  at: Pick<Location, "owner" | "repo">,
+  filePath: string,
+  message: string,
+  content: string,
+  branchName: string,
+  fileSha: string | undefined,
+): Promise<void> {
+  const base64 = Buffer.from(content, "utf8").toString("base64");
+
+  try {
+    await api.rest.repos.createOrUpdateFileContents({
+      owner: at.owner,
+      repo: at.repo,
+      path: filePath,
+      message,
+      content: base64,
+      branch: branchName,
+      ...(fileSha !== undefined ? { sha: fileSha } : {}),
+    });
+    return;
+  } catch (error) {
+    if (!isConflict(error)) throw error;
+    // 409: SHA is stale — re-read and retry once
+    core.info(`dependa: 409 on ${filePath} — re-reading SHA and retrying`);
+  }
+
+  // Re-read the file's SHA
+  let newSha: string | undefined;
+  try {
+    const { data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path: filePath,
+      ref: branchName,
+    });
+    if (!Array.isArray(data) && typeof data.sha === "string") {
+      newSha = data.sha;
+    }
+  } catch (error) {
+    if (!isMissing(error)) throw error;
+    // File was deleted between retries — create without SHA
+  }
+
+  await api.rest.repos.createOrUpdateFileContents({
+    owner: at.owner,
+    repo: at.repo,
+    path: filePath,
+    message,
+    content: base64,
+    branch: branchName,
+    ...(newSha !== undefined ? { sha: newSha } : {}),
+  });
+}
+
+/**
+ * Check whether an error is a 409 Conflict from the GitHub API.
+ */
+function isConflict(error: unknown): boolean {
+  if (error instanceof Error) {
+    // Octokit wraps HTTP status in error.status
+    const status = (error as unknown as Record<string, unknown>).status;
+    if (typeof status === "number" && status === 409) return true;
+  }
+  return false;
 }

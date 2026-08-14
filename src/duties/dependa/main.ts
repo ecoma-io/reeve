@@ -33,23 +33,45 @@ import { context, getOctokit } from "@actions/github";
 import { narrowWarned } from "../../core/enforce.js";
 import { isCapacityError, type Location, readContentsFile } from "../../core/forge.js";
 import { createMeter } from "../../core/meter.js";
-import { assembleClient, createWeather, settleAuth } from "../../core/provider.js";
+import { assembleClient, createWeather, rotateModels, settleAuth } from "../../core/provider.js";
 import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
 import { openAuthority, type Authority, type Warrant } from "../../core/warrant.js";
 
 import { budgetExhausted, createBudget } from "./budget.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-import { readSettings, type Settings } from "./inputs.js";
-import type { GroupResult, ProposalGroup, Refusal, UpdateProposal } from "./model.js";
-import { discoverAll, ManagerRegistry } from "./managers/registry.js";
-import type { Manager } from "./managers/types.js";
+import { createCratesDatasource } from "./datasources/crates.js";
+import { createDockerRegistryDatasource } from "./datasources/docker-registry.js";
+import { createGithubTagsDatasource } from "./datasources/github-tags.js";
+import { createGoProxyDatasource } from "./datasources/go-proxy.js";
+import { createNpmDatasource } from "./datasources/npm.js";
 import { DatasourceRegistry } from "./datasources/registry.js";
+import { queryAdvisories } from "./datasources/security-advisory.js";
 import type { Datasource } from "./datasources/types.js";
+import { gather as gatherEvidence, encloseEvidence } from "./evidence.js";
+import { readSettings, type Settings } from "./inputs.js";
+import type {
+  FileEdit,
+  GroupResult,
+  ProposalGroup,
+  Refusal,
+  ScheduleConfig,
+  SecurityAdvisory,
+  UpdateProposal,
+  UpdateType,
+} from "./model.js";
+import { createCargoManager } from "./managers/cargo.js";
+import { createDockerManager } from "./managers/docker.js";
+import { createGithubActionsManager } from "./managers/github-actions.js";
+import { createGoManager } from "./managers/go.js";
+import { createNpmManager } from "./managers/npm.js";
+import { discoverAll, ManagerRegistry } from "./managers/registry.js";
+import type { Manager, ManagerId } from "./managers/types.js";
 import { resolvePolicy, evaluate, group as groupProposals } from "./policy.js";
 import { publishGroup, type PublishApi } from "./publish.js";
-import { factsOnly } from "./risk.js";
-import { classify, highestSatisfying } from "./semver.js";
+import { factsOnly, interpretationPrompt, parseInterpretation } from "./risk.js";
+import { classify, candidateVersions, isSha, parse, satisfies } from "./semver.js";
 import { summarize, renderSummary } from "./summary.js";
+import { validateEdits, validationRefusals } from "./validation.js";
 
 export async function run(): Promise<void> {
   const meter = createMeter();
@@ -94,11 +116,22 @@ export async function run(): Promise<void> {
       return;
     }
 
+    // 1b. SCHEDULE — enforce the policy's schedule, if any.
+    // Checked before any network calls (except the API call to read the last run).
+    if (policy.schedule !== null) {
+      const shouldRun = checkSchedule(policy.schedule, api, context.repo);
+      if (!(await shouldRun)) {
+        core.info("dependa: schedule indicates this run should be skipped.");
+        settleAuth(weather);
+        return;
+      }
+    }
+
     // 2. DISCOVER — scan repository file tree
     const managers = createManagerRegistry();
     const datasources = createDatasourceRegistry(base.token);
 
-    const allFiles = await listRepositoryFiles(api, context.repo);
+    const allFiles = await listRepositoryFiles(api, context.repo, base.paths);
     const activations = managers.select(allFiles);
 
     if (activations.length === 0) {
@@ -107,22 +140,57 @@ export async function run(): Promise<void> {
       return;
     }
 
+    // Cache manifest content so applyUpdate can re-use it later
+    const manifestContentCache = new Map<string, string>();
+    // Track discovered manifest paths — only these are valid edit targets
+    const discoveredManifestPaths = new Set<string>();
+    // Track accumulated edits per manifest so multiple proposals to the same
+    // file compose sequentially instead of each mutating the original independently.
+    const accumulatedEdits = new Map<string, string>();
+
     const readFile = async (path: string): Promise<string | null> => {
+      const cached = manifestContentCache.get(path);
+      if (cached !== undefined) return cached;
       try {
         const contents = await readContentsFile(api, context.repo, path);
-        return contents?.text ?? null;
+        const text = contents?.text ?? null;
+        if (text !== null) manifestContentCache.set(path, text);
+        return text;
       } catch {
         return null;
       }
     };
 
     const managerResults = await discoverAll(activations, readFile);
-    const allDependencies = managerResults.flatMap((r) => r.dependencies);
+    let allDependencies = managerResults.flatMap((r) => r.dependencies);
+
+    // Populate the set of discovered manifest paths — only these are valid
+    // edit targets. The edit-path allowlist prevents proposals from writing
+    // to arbitrary files that were never discovered as dependency manifests.
+    for (const activation of activations) {
+      for (const manifestPath of activation.manifests) {
+        discoveredManifestPaths.add(manifestPath);
+      }
+    }
 
     if (allDependencies.length === 0) {
       core.info("dependa: no dependencies found in any manifest.");
       settleAuth(weather);
       return;
+    }
+
+    // Narrow by policy ecosystems — when the policy specifies ecosystems,
+    // only those ecosystems are processed. An empty list means all.
+    if (policy.ecosystems.length > 0) {
+      const allowed = new Set(policy.ecosystems);
+      const before = allDependencies.length;
+      allDependencies = allDependencies.filter((d) => allowed.has(d.ecosystem));
+      const removed = before - allDependencies.length;
+      if (removed > 0) {
+        core.info(
+          `dependa: policy narrows ecosystems to [${policy.ecosystems.join(", ")}] — ${String(removed)} dependencies filtered out.`,
+        );
+      }
     }
 
     core.info(
@@ -152,7 +220,13 @@ export async function run(): Promise<void> {
           core.warning(`dependa: datasource for \`${dep.name}\` had a capacity error — skipping.`);
           continue;
         }
-        throw error;
+        // D12: non-capacity errors from datasources are transient weather,
+        // not authority failures. Log and continue — one broken package should
+        // not fail the entire run.
+        core.warning(
+          `dependa: datasource error for \`${dep.name}\` on ${dep.ecosystem}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
       }
 
       if (result.status !== "available") {
@@ -171,64 +245,187 @@ export async function run(): Promise<void> {
       }
 
       // 4. CLASSIFY — deterministic semver comparison
-      const targetVersion = highestSatisfying(
-        result.releases.map((r) => r.version),
-        dep.constraint,
-      );
+      // Use candidateVersions to discover both within-constraint and
+      // latest-available (major) updates, producing up to two proposals.
+      const versions = result.releases.map((r) => r.version);
+      const candidates = candidateVersions(versions, dep.constraint);
 
-      if (targetVersion === null || targetVersion === dep.currentVersion) {
-        // No newer version that satisfies the constraint, or already on latest
-        continue;
-      }
-
-      // Determine if this is a security update
-      const isSecurity = result.releases.some((r) => r.version === targetVersion && r.deprecated);
-
-      const updateType = classify(dep.currentVersion, targetVersion, isSecurity);
-      if (updateType === null) {
-        core.info(
-          `dependa: could not classify update for \`${dep.name}\` from ${dep.currentVersion} to ${targetVersion}`,
+      // 5a. SECURITY — query advisory database once per dependency.
+      // Security classification comes from explicit evidence only — never
+      // from heuristics like the `deprecated` flag on an npm version.
+      // A failed advisory query degrades gracefully (no security evidence) per D12.
+      let advisories: readonly SecurityAdvisory[] = [];
+      try {
+        advisories = await queryAdvisories(base.token, dep.ecosystem, dep.name);
+      } catch (error) {
+        core.warning(
+          `dependa: could not query advisories for \`${dep.name}\` — ${error instanceof Error ? error.message : String(error)}`,
         );
-        continue;
       }
+      const securityAdvisory = findRelevantAdvisory(advisories, dep.currentVersion);
 
-      // Check policy: is this update type allowed?
-      if (!policy.allowedTypes.includes(updateType)) {
-        continue;
-      }
+      for (const targetVersion of candidates) {
+        if (targetVersion === dep.currentVersion) continue;
 
-      // 5. EVIDENCE — gather releases between current and target
-      const relevantReleases = result.releases;
+        // Determine update type with pin/digest awareness
+        const isSecurity = securityAdvisory !== null;
+        let updateType: UpdateType | null;
 
-      // Build the proposal with deterministic risk facts
-      const proposal: UpdateProposal = {
-        dependency: dep,
-        currentVersion: dep.currentVersion,
-        targetVersion,
-        updateType,
-        releases: relevantReleases,
-        securityAdvisory: null, // TODO: integrate with GitHub Advisory DB
-        risk: factsOnly({
+        // Digest update: current version is a SHA, target is a different SHA
+        if (isSha(dep.currentVersion) && isSha(targetVersion)) {
+          updateType = "digest";
+        } else if (
+          // Pin: constraint was floating (* / latest / null) and we're setting
+          // an explicit version — the update is a pin, not a semver bump.
+          (dep.constraint === null || dep.constraint === "*" || dep.constraint === "latest") &&
+          dep.currentVersion === "" &&
+          !isSecurity
+        ) {
+          updateType = "pin";
+        } else {
+          updateType = classify(dep.currentVersion, targetVersion, isSecurity);
+        }
+
+        if (updateType === null) {
+          core.info(
+            `dependa: could not classify update for \`${dep.name}\` from ${dep.currentVersion} to ${targetVersion}`,
+          );
+          continue;
+        }
+
+        // Check policy: is this update type allowed?
+        if (!policy.allowedTypes.includes(updateType)) {
+          continue;
+        }
+
+        // 5. EVIDENCE — gather releases between current and target
+        const relevantReleases = result.releases;
+        const evidence = gatherEvidence(relevantReleases, securityAdvisory, new Map());
+
+        // 6. RISK — deterministic facts, optional model interpretation
+        const riskFacts = factsOnly({
           currentVersion: dep.currentVersion,
           targetVersion,
           updateType,
           releases: relevantReleases,
-          securityAdvisory: null,
-          evidence: [],
+          securityAdvisory,
+          evidence,
           isDev: dep.dev,
-        }),
-        evidence: [], // TODO: fetch changelogs and release notes
-        edits: [], // TODO: compute file edits via manager.applyUpdate
-        groupName: null,
-      };
+        });
 
-      proposals.push(proposal);
+        // 7. MODEL RISK INTERPRETATION — when drafts > 0 and models available
+        let risk = riskFacts;
+        if (settings.drafts > 0 && settings.models.length > 0) {
+          const enclosed = encloseEvidence(evidence);
+          const prompt = interpretationPrompt(
+            {
+              dependency: dep,
+              currentVersion: dep.currentVersion,
+              targetVersion,
+              updateType,
+              releases: relevantReleases,
+              securityAdvisory,
+              risk: riskFacts,
+              evidence,
+              edits: [],
+              groupName: null,
+            },
+            riskFacts.facts,
+            enclosed?.block ?? "",
+          );
+
+          const rotation = await rotateModels(
+            settings.models,
+            (model) => client.stages.risk.complete(model, [{ role: "user", content: prompt }]),
+            weather,
+          );
+
+          if (rotation.success) {
+            const interpretation = parseInterpretation(rotation.success.content);
+            if (interpretation !== null) {
+              risk = { facts: riskFacts.facts, interpretation };
+            }
+          }
+        }
+
+        // Compute file edits via the manager's applyUpdate.
+        // Use the accumulated content for this manifest so that multiple
+        // proposals editing the same file compose sequentially rather than
+        // each mutating the original independently (last-writer-wins bug).
+        const edits: FileEdit[] = [];
+        const manager = managers.get(dep.manager as ManagerId);
+        const manifestContent =
+          accumulatedEdits.get(dep.manifestPath) ?? manifestContentCache.get(dep.manifestPath);
+        if (manager !== undefined && manifestContent !== undefined) {
+          const updatedContent = manager.applyUpdate(manifestContent, {
+            dependency: dep,
+            currentVersion: dep.currentVersion,
+            targetVersion,
+            updateType,
+            releases: relevantReleases,
+            securityAdvisory,
+            risk,
+            evidence,
+            edits: [],
+            groupName: null,
+          });
+          if (updatedContent !== null) {
+            accumulatedEdits.set(dep.manifestPath, updatedContent);
+            edits.push({
+              path: dep.manifestPath,
+              content: updatedContent,
+              message: `dependa: update ${dep.name} ${dep.currentVersion} → ${targetVersion}`,
+            });
+          }
+        }
+
+        const proposal: UpdateProposal = {
+          dependency: dep,
+          currentVersion: dep.currentVersion,
+          targetVersion,
+          updateType,
+          releases: relevantReleases,
+          securityAdvisory,
+          risk,
+          evidence,
+          edits,
+          groupName: null,
+        };
+
+        // Skip proposals with no file edits — they would produce a no-op PR
+        if (edits.length > 0) {
+          proposals.push(proposal);
+        } else {
+          core.info(
+            `dependa: no edits produced for \`${dep.name}\` ${dep.currentVersion} → ${targetVersion} — skipping`,
+          );
+        }
+      }
     }
 
     if (proposals.length === 0) {
       core.info("dependa: no update proposals after classification and policy filtering.");
       settleAuth(weather);
       return;
+    }
+
+    // Warn when lockfile updates would be needed but cannot be generated.
+    // dependa updates manifest constraints but does not regenerate lockfiles —
+    // that requires running the package manager, which dependa cannot do.
+    // The manifest-only update is still valid; the lockfile update is expected
+    // to happen when the PR is merged and CI runs install.
+    const lockfileManifestPaths = new Set<string>();
+    for (const result of managerResults) {
+      if (result.partial) {
+        lockfileManifestPaths.add(result.manifestPath);
+      }
+    }
+    if (lockfileManifestPaths.size > 0) {
+      core.info(
+        `dependa: ${String(lockfileManifestPaths.size)} manifest(s) had lockfiles — ` +
+          "manifest constraints will be updated but lockfiles are not regenerated. " +
+          "CI should run install after merge to update lockfiles.",
+      );
     }
 
     // 8. GROUP — group proposals by policy
@@ -273,6 +470,31 @@ export async function run(): Promise<void> {
       }
 
       const admittedGroup: ProposalGroup = { ...group, proposals: admitted };
+
+      // 9b. VALIDATE — every edit must survive a round-trip check.
+      // A failed validation prevents publication — this is a safety gate.
+      const allEdits = admitted.flatMap((p) => p.edits);
+      if (allEdits.length > 0) {
+        const validation = validateEdits(allEdits, discoveredManifestPaths);
+        if (!validation.valid) {
+          const vRefusals = validationRefusals(validation.failed);
+          core.warning(
+            `dependa: ${String(validation.failed.length)} edit(s) in group \`${admittedGroup.id}\` failed validation.`,
+          );
+          refused.push(...vRefusals);
+
+          // Drop proposals whose edits failed validation
+          const failedPaths = new Set(validation.failed.map((f) => f.edit.path));
+          const validated = admitted.filter((p) => !p.edits.some((e) => failedPaths.has(e.path)));
+          if (validated.length === 0) {
+            groupResults.push({ group: admittedGroup, pr: null, outcome: "refused", refused });
+            continue;
+          }
+          const validatedGroup: ProposalGroup = { ...group, proposals: validated };
+          // Overwrite admittedGroup with the validated subset
+          Object.assign(admittedGroup, validatedGroup);
+        }
+      }
 
       // 10. PUBLISH
       if (!mayPublish) {
@@ -359,13 +581,65 @@ function notGranted(warrant: Warrant): string {
 }
 
 /**
- * List all files in the repository (default branch).
+ * Find the most relevant security advisory for a dependency at its current
+ * version. An advisory is relevant when the current version falls within
+ * its affected range — i.e., the advisory describes a vulnerability that
+ * the current version has not yet patched.
+ *
+ * Returns the highest-severity relevant advisory, or null when none apply.
+ * A failed advisory query degrades gracefully (no security evidence), per D12.
+ */
+function findRelevantAdvisory(
+  advisories: readonly SecurityAdvisory[],
+  currentVersion: string,
+): SecurityAdvisory | null {
+  // When no advisories are returned (ecosystem not covered, network error,
+  // or genuinely no advisories), there is no security evidence.
+  if (advisories.length === 0) return null;
+
+  // Severity ordering for picking the most relevant advisory
+  const severityRank: ReadonlyMap<string, number> = new Map([
+    ["critical", 4],
+    ["high", 3],
+    ["moderate", 2],
+    ["low", 1],
+  ]);
+
+  let best: SecurityAdvisory | null = null;
+  let bestRank = 0;
+  for (const adv of advisories) {
+    // If patchedVersions is available and the current version satisfies it,
+    // the current version is already patched — this advisory is not relevant.
+    if (adv.patchedVersions !== null) {
+      const currentParsed = parse(currentVersion);
+      if (currentParsed !== null) {
+        const satisfied = satisfies(currentParsed, adv.patchedVersions);
+        if (satisfied === true) continue; // Already patched — not applicable
+      }
+    }
+    // When patchedVersions is null, we cannot determine relevance, so the
+    // advisory is conservatively included (evidence, never authority).
+
+    const rank = severityRank.get(adv.severity) ?? 0;
+    if (rank > bestRank) {
+      best = adv;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+/**
+ * List all files in the repository (default branch), optionally filtered by
+ * the `paths` input. When `paths` is non-empty, only files whose path starts
+ * with one of the given prefixes are returned.
  *
  * Uses the git tree API, same approach as `atlas.ts`.
  */
 async function listRepositoryFiles(
   api: ReturnType<typeof getOctokit>,
   at: Pick<Location, "owner" | "repo">,
+  paths: readonly string[],
 ): Promise<readonly string[]> {
   const files: string[] = [];
 
@@ -383,6 +657,12 @@ async function listRepositoryFiles(
 
     for (const item of tree.tree) {
       if (item.type === "blob") {
+        if (
+          paths.length > 0 &&
+          !paths.some((p) => item.path === p || item.path.startsWith(`${p}/`))
+        ) {
+          continue;
+        }
         files.push(item.path);
       }
     }
@@ -398,28 +678,159 @@ async function listRepositoryFiles(
 }
 
 /**
- * Create the manager registry with all built-in managers.
+ * Check whether dependa should run according to the schedule.
  *
- * TODO: add actual manager implementations as they are built.
- * For now, this returns an empty registry so the pipeline can be tested.
+ * For interval schedules: find the most recent dependa PR update and check
+ * if enough days have passed. When no previous PR exists, the schedule is
+ * satisfied (first run is always allowed).
+ *
+ * For cron schedules: evaluate the cron expression against the current time.
+ * A cron schedule means "only run when the expression matches" — this is a
+ * simplified check: the expression's minute and hour must match the current
+ * time, and day-of-month/day-of-week must also match.
+ *
+ * Degrades gracefully on API errors — a failed schedule check allows the run.
+ */
+async function checkSchedule(
+  schedule: ScheduleConfig,
+  api: ReturnType<typeof getOctokit>,
+  at: Pick<Location, "owner" | "repo">,
+): Promise<boolean> {
+  if (schedule.kind === "interval") {
+    try {
+      // Find the most recent dependa PR to determine when dependa last ran.
+      // We check open and recently-closed PRs on dependa branches.
+      const { data: prs } = await api.rest.pulls.list({
+        owner: at.owner,
+        repo: at.repo,
+        state: "all",
+        sort: "updated",
+        direction: "desc",
+        per_page: 10,
+      });
+
+      // Find the most recent dependa PR
+      const dependaPr = prs.find((pr) => pr.head.ref.startsWith("reeve/dependa/"));
+      if (dependaPr === undefined) return true; // No previous run — allow
+
+      // Use created_at instead of updated_at — updated_at advances on any
+      // PR interaction (comments, labels, etc.), which would incorrectly
+      // reset the interval timer. created_at reflects when the PR was opened.
+      const lastCreated = new Date(dependaPr.created_at);
+      const now = new Date();
+      const daysSince = (now.getTime() - lastCreated.getTime()) / (1000 * 60 * 60 * 24);
+
+      if (daysSince < schedule.days) {
+        core.info(
+          `dependa: last run was ${daysSince.toFixed(1)} days ago — ` +
+            `schedule requires at least ${String(schedule.days)} days. Skipping.`,
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      if (isCapacityError(error)) {
+        core.warning("dependa: could not check schedule — capacity error. Allowing run.");
+        return true;
+      }
+      core.warning(
+        `dependa: could not check schedule — ${error instanceof Error ? error.message : String(error)}. Allowing run.`,
+      );
+      return true;
+    }
+  }
+
+  // Cron schedule: simplified check — match minute, hour, day-of-month, day-of-week
+  // After the interval branch above, schedule.kind is narrowed to "cron".
+  const now = new Date();
+  const parts = schedule.expression.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    core.warning(`dependa: invalid cron expression "${schedule.expression}" — allowing run.`);
+    return true;
+  }
+
+  const [minute, hour, dom, month, dow] = parts as [string, string, string, string, string];
+  const matches = (field: string, value: number, max: number): boolean => {
+    if (field === "*") return true;
+    if (field === String(value)) return true;
+    // Handle ranges and steps: "1-5", "*/2", "1,3,5"
+    if (field.includes(",")) return field.split(",").some((p) => matches(p.trim(), value, max));
+    if (field.includes("/")) {
+      const slashParts = field.split("/");
+      const range = slashParts[0] ?? "*";
+      const stepStr = slashParts[1] ?? "1";
+      const step = Number(stepStr);
+      if (!Number.isSafeInteger(step) || step <= 0) return false;
+      let lo = 0;
+      let hi = max;
+      if (range === "*") {
+        // */N — step from 0 to max
+      } else if (range.includes("-")) {
+        // e.g. "1-15/3" — step from lo to hi
+        const rangeParts = range.split("-").map(Number);
+        lo = rangeParts[0] ?? 0;
+        hi = rangeParts[1] ?? max;
+        if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
+      } else {
+        const start = Number(range);
+        if (!Number.isSafeInteger(start)) return false;
+        lo = start;
+      }
+      return value >= lo && value <= hi && (value - lo) % step === 0;
+    }
+    if (field.includes("-")) {
+      const rangeParts = field.split("-").map(Number);
+      const lo = rangeParts[0] ?? 0;
+      const hi = rangeParts[1] ?? 0;
+      return value >= lo && value <= hi;
+    }
+    return false;
+  };
+
+  const minuteMatch = matches(minute, now.getMinutes(), 59);
+  const hourMatch = matches(hour, now.getHours(), 23);
+  // Month check (1-indexed in cron, 0-indexed in JS)
+  const monthMatch = matches(month, now.getMonth() + 1, 12);
+  // Day-of-month check
+  const domMatch = matches(dom, now.getDate(), 31);
+  // Day-of-week check (0 = Sunday in cron, 0 = Sunday in JS)
+  const dowMatch = matches(dow, now.getDay(), 6);
+
+  if (minuteMatch && hourMatch && monthMatch && (domMatch || dowMatch)) {
+    return true;
+  }
+
+  core.info(
+    `dependa: cron schedule "${schedule.expression}" does not match current time. Skipping.`,
+  );
+  return false;
+}
+
+/**
+ * Create the manager registry with all built-in managers.
  */
 function createManagerRegistry(): ManagerRegistry {
-  const managers: Manager[] = [];
-  // Managers will be registered here as they are implemented
-  // e.g., managers.push(new NpmManager());
+  const managers: Manager[] = [
+    createNpmManager(),
+    createCargoManager(),
+    createGoManager(),
+    createDockerManager(),
+    createGithubActionsManager(),
+  ];
   return new ManagerRegistry(managers);
 }
 
 /**
  * Create the datasource registry with all built-in datasources.
- *
- * TODO: add actual datasource implementations as they are built.
- * For now, this returns an empty registry so the pipeline can be tested.
  */
-function createDatasourceRegistry(_token: string): DatasourceRegistry {
-  const datasources: Datasource[] = [];
-  // Datasources will be registered here as they are implemented
-  // e.g., datasources.push(new NpmDatasource(token));
+function createDatasourceRegistry(token: string): DatasourceRegistry {
+  const datasources: Datasource[] = [
+    createNpmDatasource(),
+    createCratesDatasource(),
+    createGoProxyDatasource(),
+    createDockerRegistryDatasource(),
+    createGithubTagsDatasource(token),
+  ];
   return new DatasourceRegistry(datasources);
 }
 

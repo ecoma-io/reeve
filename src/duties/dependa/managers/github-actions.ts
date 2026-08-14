@@ -46,6 +46,7 @@ export function createGithubActionsManager(): Manager {
     manifestFilenames: MANIFEST_FILENAMES,
     parse,
     applyUpdate,
+    matchManifest: isWorkflowFile,
   };
 }
 
@@ -119,7 +120,15 @@ function parseUsesLine(line: string): { owner: string; repo: string; ref: string
   if (!trimmed.startsWith("uses:")) return null;
 
   // Extract the value after "uses:"
-  const value = trimmed.slice(5).trim();
+  let value = trimmed.slice(5).trim();
+
+  // Strip surrounding quotes (YAML allows single or double quoted strings)
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1);
+  }
 
   // Skip local actions (starts with ./)
   if (value.startsWith("./")) return null;

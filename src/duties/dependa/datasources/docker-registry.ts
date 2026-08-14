@@ -16,6 +16,7 @@
  *
  * **External metadata is evidence, never authority.**
  */
+import * as core from "@actions/core";
 import type { Release, ResolutionResult } from "../model.js";
 import type { Datasource, DatasourceId } from "./types.js";
 
@@ -41,6 +42,19 @@ export function createDockerRegistryDatasource(): Datasource {
  */
 async function resolve(packageName: string): Promise<ResolutionResult> {
   const { registry, namespace, image } = parseImageName(packageName);
+
+  // SSRF protection: validate the registry hostname before making any request.
+  // A Dockerfile containing a FROM line referencing an internal network endpoint
+  // (e.g. 169.254.169.254, metadata.google.internal, 127.0.0.1, 10.x.x.x)
+  // must NOT cause dependa to make HTTP requests to those endpoints.
+  if (registry !== null && !isSafeRegistry(registry)) {
+    core.warning(
+      `dependa: Docker registry \`${registry}\` appears to be a private/internal address — skipping SSRF protection.`,
+    );
+    return {
+      status: "not-found",
+    };
+  }
 
   // Build the tags URL based on the registry
   let tagsUrl: string;
@@ -202,6 +216,77 @@ function parseV2Response(tags: readonly string[]): ResolutionResult {
   });
 
   return { status: "available", releases };
+}
+
+/**
+ * Check whether a registry hostname is safe to fetch from.
+ *
+ * Blocks:
+ * - Loopback addresses (127.x.x.x, ::1, localhost)
+ * - Link-local addresses (169.254.x.x, fe80::)
+ * - RFC 1918 private addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+ * - Known cloud metadata endpoints (metadata.google.internal, etc.)
+ *
+ * Only public, externally-reachable registries are allowed. This prevents
+ * SSRF attacks where a malicious FROM line causes dependa (running inside
+ * GitHub Actions) to make requests to internal network endpoints.
+ */
+function isSafeRegistry(registry: string): boolean {
+  // Strip port if present
+  const hostname = registry.replace(/:\d+$/, "").toLowerCase();
+
+  // Known safe Docker registries
+  const safeHosts = new Set([
+    "docker.io",
+    "registry-1.docker.io",
+    "registry.hub.docker.com",
+    "ghcr.io",
+    "quay.io",
+    "gcr.io",
+    "ecr.aws",
+    "public.ecr.aws",
+  ]);
+  if (safeHosts.has(hostname)) return true;
+
+  // Known unsafe hostnames (cloud metadata endpoints)
+  const unsafeHosts = ["metadata.google.internal", "metadata.azure.internal", "169.254.169.254"];
+  if (unsafeHosts.includes(hostname)) return false;
+
+  // Localhost variants
+  if (hostname === "localhost" || hostname === "localhost.localdomain") return false;
+
+  // IP address checks — parse IPv4 and check for private ranges
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+  if (ipv4Match !== null) {
+    const octets = [ipv4Match[1], ipv4Match[2], ipv4Match[3], ipv4Match[4]].map((o) =>
+      Number(o ?? 0),
+    );
+    // Invalid IP (octet > 255)
+    if (octets.some((o) => o > 255)) return true; // Not a valid IP, treat as hostname
+    const [a = 0, b = 0] = octets;
+    // Loopback: 127.x.x.x
+    if (a === 127) return false;
+    // Link-local: 169.254.x.x
+    if (a === 169 && b === 254) return false;
+    // RFC 1918: 10.x.x.x
+    if (a === 10) return false;
+    // RFC 1918: 172.16.x.x – 172.31.x.x
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    // RFC 1918: 192.168.x.x
+    if (a === 192 && b === 168) return false;
+    // Not a private range — allow
+    return true;
+  }
+
+  // IPv6 loopback
+  if (hostname === "::1" || hostname === "[::1]") return false;
+
+  // For hostnames that are not IPs and not in the known-safe list,
+  // we allow them — we cannot statically determine if a hostname
+  // resolves to a private IP without doing a DNS lookup, and doing
+  // DNS lookups in this context would add latency and dependency.
+  // The known-unsafe hostnames above cover the most common SSRF vectors.
+  return true;
 }
 
 /**

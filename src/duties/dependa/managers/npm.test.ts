@@ -408,4 +408,248 @@ describe("npm applyUpdate", () => {
 
     expect(result).toBeNull();
   });
+
+  it("updates npm alias constraints correctly", () => {
+    const content =
+      JSON.stringify(
+        {
+          dependencies: { mylodash: "npm:lodash@^4.17.21" },
+        },
+        null,
+        2,
+      ) + "\n";
+
+    const result = manager.applyUpdate(content, {
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash", // resolved name, not the alias key
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+      releases: [],
+      securityAdvisory: null,
+      risk: {
+        facts: {
+          updateType: "patch",
+          majorDistance: 0,
+          minorDistance: 0,
+          patchDistance: 1,
+          daysBetweenReleases: null,
+          currentVersionStale: null,
+          isSecurity: false,
+          hasChangelog: false,
+          isDev: false,
+        },
+        interpretation: null,
+      },
+      evidence: [],
+      edits: [],
+      groupName: null,
+    });
+
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!) as Record<string, unknown>;
+    const deps = parsed.dependencies as Record<string, string> | undefined;
+    // The alias key should be preserved, version updated within the alias
+    expect(deps?.mylodash).toBe("npm:lodash@^4.17.22");
+  });
+
+  it("updates dependency in all sections where it appears", () => {
+    // When a package appears in both dependencies and peerDependencies,
+    // both sections must be updated — not just the first one found.
+    const content =
+      JSON.stringify(
+        {
+          dependencies: { lodash: "^4.17.21" },
+          peerDependencies: { lodash: "^4.17.21" },
+        },
+        null,
+        2,
+      ) + "\n";
+
+    const result = manager.applyUpdate(content, {
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash",
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+      releases: [],
+      securityAdvisory: null,
+      risk: {
+        facts: {
+          updateType: "patch",
+          majorDistance: 0,
+          minorDistance: 0,
+          patchDistance: 1,
+          daysBetweenReleases: null,
+          currentVersionStale: null,
+          isSecurity: false,
+          hasChangelog: false,
+          isDev: false,
+        },
+        interpretation: null,
+      },
+      evidence: [],
+      edits: [],
+      groupName: null,
+    });
+
+    expect(result).not.toBeNull();
+    const parsed = JSON.parse(result!) as Record<string, unknown>;
+    const deps = parsed.dependencies as Record<string, string> | undefined;
+    const peers = parsed.peerDependencies as Record<string, string> | undefined;
+    expect(deps?.lodash).toBe("^4.17.22");
+    expect(peers?.lodash).toBe("^4.17.22");
+  });
+});
+
+// ── applyUpdate: indentation preservation ──────────────────────────────────
+
+describe("npm applyUpdate — indentation preservation", () => {
+  const baseProposal = {
+    releases: [] as const,
+    securityAdvisory: null,
+    risk: {
+      facts: {
+        updateType: "patch" as const,
+        majorDistance: 0,
+        minorDistance: 0,
+        patchDistance: 1,
+        daysBetweenReleases: null,
+        currentVersionStale: null,
+        isSecurity: false,
+        hasChangelog: false,
+        isDev: false,
+      },
+      interpretation: null,
+    },
+    evidence: [] as const,
+    edits: [] as const,
+    groupName: null,
+  };
+
+  it("preserves 2-space indentation", () => {
+    const content =
+      JSON.stringify({ name: "test", dependencies: { lodash: "^4.17.21" } }, null, 2) + "\n";
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash",
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+    });
+    expect(result).not.toBeNull();
+    // Should use 2-space indent, not tabs or 4-space
+    expect(result).toContain('  "lodash"');
+  });
+
+  it("preserves 4-space indentation", () => {
+    const content =
+      JSON.stringify({ name: "test", dependencies: { lodash: "^4.17.21" } }, null, 4) + "\n";
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash",
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+    });
+    expect(result).not.toBeNull();
+    // Should use 4-space indent
+    expect(result).toContain('    "lodash"');
+  });
+
+  it("preserves tab indentation", () => {
+    const content =
+      JSON.stringify({ name: "test", dependencies: { lodash: "^4.17.21" } }, null, "\t") + "\n";
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash",
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+    });
+    expect(result).not.toBeNull();
+    // Should use tab indent
+    expect(result).toContain('\t"lodash"');
+  });
+
+  it("preserves trailing newline", () => {
+    const content =
+      JSON.stringify({ name: "test", dependencies: { lodash: "^4.17.21" } }, null, 2) + "\n";
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash",
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.endsWith("\n")).toBe(true);
+  });
+
+  it("does not add trailing newline when original lacks one", () => {
+    const content = JSON.stringify({ name: "test", dependencies: { lodash: "^4.17.21" } }, null, 2);
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "npm",
+        name: "lodash",
+        constraint: "^4.17.21",
+        currentVersion: "4.17.21",
+        manifestPath: "package.json",
+        dev: false,
+        manager: "npm",
+      },
+      currentVersion: "4.17.21",
+      targetVersion: "4.17.22",
+      updateType: "patch",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.endsWith("\n")).toBe(false);
+  });
 });

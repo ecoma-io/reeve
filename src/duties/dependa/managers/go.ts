@@ -213,7 +213,12 @@ function parseGoSum(content: string): Map<string, string> | null {
  */
 function applyUpdate(manifestContent: string, proposal: UpdateProposal): string | null {
   const moduleName = proposal.dependency.name;
-  const oldVersion = `v${proposal.currentVersion}`;
+  // Use the constraint (the version written in go.mod) as the search string,
+  // NOT currentVersion (which may come from go.sum and differ from go.mod).
+  // go.mod contains the constraint version — that is what we must find and replace.
+  const constraint = proposal.dependency.constraint;
+  if (constraint === null) return null; // No constraint to search for — cannot update
+  const oldVersion = `v${constraint}`;
   const newVersion = `v${proposal.targetVersion}`;
 
   const lines = manifestContent.split("\n");

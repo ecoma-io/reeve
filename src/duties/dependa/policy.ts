@@ -150,8 +150,19 @@ function matchesIgnoreRule(proposal: UpdateProposal, rule: IgnoreRule): boolean 
  * Supports `*` (any segment) and `?` (single char). No `**` — package
  * names don't have directories. A pattern without wildcards is an exact
  * match.
+ *
+ * **ReDoS protection:** patterns longer than 256 characters are rejected,
+ * and consecutive wildcards (`**`, `*?`, `?*`) are collapsed to a single
+ * `.*` to prevent catastrophic backtracking.
  */
 function matchesGlob(name: string, pattern: string): boolean {
+  if (pattern.length > 256) {
+    core.warning(
+      `dependa: ignore pattern exceeds 256 characters — skipping: ${pattern.slice(0, 50)}…`,
+    );
+    return false;
+  }
+
   if (!pattern.includes("*") && !pattern.includes("?")) {
     return name === pattern;
   }
@@ -161,9 +172,16 @@ function matchesGlob(name: string, pattern: string): boolean {
   return regex.test(name);
 }
 
-/** Convert a simple glob pattern to a RegExp. */
+/** Convert a simple glob pattern to a RegExp. Collapses consecutive wildcards. */
 function globToRegex(pattern: string): RegExp {
-  const escaped = pattern
+  // Collapse consecutive wildcards to prevent ReDoS — `**` → `*`, `*?` → `*`, etc.
+  const collapsed = pattern.replace(/[*?]+/g, (seq) => {
+    // Any mix of * and ? is equivalent to a single .* — ? alone stays as .
+    if (seq.includes("*")) return "*";
+    return seq; // all ?s — keep each as .
+  });
+
+  const escaped = collapsed
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*/g, ".*")
     .replace(/\?/g, ".");

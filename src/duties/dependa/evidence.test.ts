@@ -11,6 +11,7 @@ import type { Evidence, Release, SecurityAdvisory } from "./model.js";
 
 import {
   encloseEvidence,
+  escapeMarkdown,
   fromChangelog,
   fromCommitLog,
   fromGithubRelease,
@@ -299,5 +300,37 @@ describe("renderForPr", () => {
 
     const rendered = renderForPr(evidence);
     expect(rendered).toContain("*(model-derived)*");
+  });
+});
+
+// ── escapeMarkdown ──────────────────────────────────────────────────────────
+
+describe("escapeMarkdown", () => {
+  it("defangs Markdown links: [text](url) → text (url)", () => {
+    expect(escapeMarkdown("[click here](https://evil.com/phish)")).toBe(
+      "click here (https://evil.com/phish)",
+    );
+  });
+
+  it("defangs Markdown images: ![alt](url) → alt (url)", () => {
+    expect(escapeMarkdown("![tracking pixel](https://evil.com/track)")).toBe(
+      "tracking pixel (https://evil.com/track)",
+    );
+  });
+
+  it("escapes HTML tags (defangs rather than strips)", () => {
+    expect(escapeMarkdown('<script>alert("xss")</script>')).toBe(
+      '&lt;script&gt;alert("xss")&lt;/script&gt;',
+    );
+  });
+
+  it("escapes all angle brackets to prevent HTML element injection", () => {
+    // Both complete (<script>) and incomplete (<script) tags are defanged
+    expect(escapeMarkdown("a <3 b")).toBe("a &lt;3 b");
+    expect(escapeMarkdown("<script")).toBe("&lt;script");
+  });
+
+  it("leaves plain text untouched", () => {
+    expect(escapeMarkdown("Hello world")).toBe("Hello world");
   });
 });

@@ -76,6 +76,34 @@ jobs:
     expect(result.dependencies[0]?.currentVersion).toBe(sha);
   });
 
+  it("handles double-quoted uses values", () => {
+    const content = `
+jobs:
+  build:
+    steps:
+      - uses: "actions/checkout@v4"
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("actions/checkout");
+    expect(result.dependencies[0]?.constraint).toBe("v4");
+  });
+
+  it("handles single-quoted uses values", () => {
+    const content = `
+jobs:
+  build:
+    steps:
+      - uses: 'actions/checkout@v4'
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("actions/checkout");
+    expect(result.dependencies[0]?.constraint).toBe("v4");
+  });
+
   it("deduplicates same action@ref in the same file", () => {
     const content = `
 jobs:

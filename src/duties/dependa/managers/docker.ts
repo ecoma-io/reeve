@@ -36,6 +36,7 @@ export function createDockerManager(): Manager {
     manifestFilenames: MANIFEST_FILENAMES,
     parse,
     applyUpdate,
+    matchManifest: (path: string): boolean => isDockerfile(path) !== null,
   };
 }
 
@@ -88,10 +89,16 @@ function parse(
     dependencies.push({
       ecosystem: "docker",
       name: match.image,
-      // The constraint is the explicit tag (e.g. "lts", "20-slim"), or null
-      // when no tag was specified — even for tag+digest, the tag is the
-      // constraint and the digest is the resolved version.
-      constraint: match.tag,
+      // The constraint is the explicit tag (e.g. "lts", "20-slim").
+      // When no tag was specified AND there's no digest, the implicit tag is "latest"
+      // and we set constraint to "latest" (not null) so the pipeline can correctly
+      // classify the update. A null constraint would fail pin detection (which
+      // requires currentVersion === "") and semver classification ("latest" doesn't
+      // parse as semver). Setting constraint = "latest" means the constraint matches
+      // currentVersion and the update pipeline handles it.
+      // For digest-only references (no tag, just a digest), constraint remains null
+      // — the digest IS the constraint and is handled as a "digest" update type.
+      constraint: match.tag ?? (isDigest ? null : "latest"),
       currentVersion: isDigest ? (match.digest ?? "") : tag,
       manifestPath,
       dev: false,
@@ -173,15 +180,18 @@ function parseImageRef(
   }
 
   // Split image and tag
+  // The tag separator colon is the last colon that appears after the last slash.
+  // A colon before the last slash is part of a registry hostname:port.
+  // e.g. `localhost:5000/myimage:tag` → tag="tag"
+  // e.g. `node:20` → tag="20"
+  // e.g. `ghcr.io/owner/image:20` → tag="20"
   let tag: string | null = null;
+  const lastSlash = remaining.lastIndexOf("/");
   const colonIdx = remaining.lastIndexOf(":");
-  if (colonIdx !== -1) {
-    // Check if the colon is part of a registry port or the tag separator
-    // A tag colon comes after the image name, which may contain slashes
-    // Registry ports like localhost:5000 are before the first slash of the image path
+  if (colonIdx !== -1 && colonIdx > lastSlash) {
+    // Colon is after the last slash — this is a tag separator
     const afterColon = remaining.slice(colonIdx + 1);
-    // A tag contains only [a-zA-Z0-9_.-] — a port has digits only
-    if (/^[a-zA-Z0-9_.-]+$/.test(afterColon) && !/^\d+$/.test(afterColon)) {
+    if (/^[a-zA-Z0-9_.-]+$/.test(afterColon)) {
       tag = afterColon;
       remaining = remaining.slice(0, colonIdx);
     }
@@ -233,11 +243,16 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
     let modifiedLine = line;
 
     // Tag reference: image:old-tag
+    // Use a tag-boundary-aware regex to avoid substring matching:
+    // "node:20" should NOT match "node:20-slim" or "node:20.5".
+    // A tag ends at: whitespace, @ (digest), AS (alias), or end-of-line.
     if (!oldVersion.startsWith("sha256:") && !newVersion.startsWith("sha256:")) {
-      const oldRef = `${imageName}:${oldVersion}`;
+      const tagBoundaryPattern = new RegExp(
+        `${escapeRegex(imageName)}:${escapeRegex(oldVersion)}(?=[\\s@]|$|[Aa][Ss]\\s)`,
+      );
       const newRef = `${imageName}:${newVersion}`;
-      if (modifiedLine.includes(oldRef)) {
-        modifiedLine = modifiedLine.replace(oldRef, newRef);
+      if (tagBoundaryPattern.test(modifiedLine)) {
+        modifiedLine = modifiedLine.replace(tagBoundaryPattern, newRef);
         replaced = true;
       }
     }

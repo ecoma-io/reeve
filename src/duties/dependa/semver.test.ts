@@ -15,9 +15,11 @@ import {
   gt,
   highestSatisfying,
   isSha,
+  latestAvailable,
   lt,
   parse,
   satisfies,
+  candidateVersions,
   type Semver,
 } from "./semver.js";
 
@@ -136,6 +138,36 @@ describe("compare", () => {
     const beta: Semver = { major: 1, minor: 0, patch: 0, prerelease: "beta" };
     expect(compare(alpha, beta)).toBe(-1);
     expect(compare(beta, alpha)).toBe(1);
+  });
+
+  it("shorter pre-release is lower when prefix matches (npm rule 4)", () => {
+    const alpha: Semver = { major: 1, minor: 0, patch: 0, prerelease: "alpha" };
+    const alpha1: Semver = { major: 1, minor: 0, patch: 0, prerelease: "alpha.1" };
+    expect(compare(alpha, alpha1)).toBe(-1);
+    expect(compare(alpha1, alpha)).toBe(1);
+  });
+
+  it("numeric pre-release identifiers compare numerically", () => {
+    const a2: Semver = { major: 1, minor: 0, patch: 0, prerelease: "alpha.2" };
+    const a10: Semver = { major: 1, minor: 0, patch: 0, prerelease: "alpha.10" };
+    expect(compare(a2, a10)).toBe(-1);
+    expect(compare(a10, a2)).toBe(1);
+  });
+
+  it("numeric identifiers have lower precedence than non-numeric (npm rule 3)", () => {
+    const num: Semver = { major: 1, minor: 0, patch: 0, prerelease: "1" };
+    const str: Semver = { major: 1, minor: 0, patch: 0, prerelease: "alpha" };
+    expect(compare(num, str)).toBe(-1);
+    expect(compare(str, num)).toBe(1);
+  });
+
+  it("multi-segment pre-release compares correctly", () => {
+    const rc1: Semver = { major: 1, minor: 0, patch: 0, prerelease: "rc.1" };
+    const rc2: Semver = { major: 1, minor: 0, patch: 0, prerelease: "rc.2" };
+    const rc10: Semver = { major: 1, minor: 0, patch: 0, prerelease: "rc.10" };
+    expect(compare(rc1, rc2)).toBe(-1);
+    expect(compare(rc2, rc10)).toBe(-1);
+    expect(compare(rc1, rc10)).toBe(-1);
   });
 
   it("equal pre-release identifiers compare as equal", () => {
@@ -353,6 +385,47 @@ describe("satisfies", () => {
     const v = parse("1.2.3")!;
     expect(satisfies(v, "xyz")).toBeNull();
   });
+
+  // OR ranges: ||
+
+  it("OR range: matches when either sub-range matches", () => {
+    const v418 = parse("4.18.0")!;
+    const v5 = parse("5.0.0")!;
+    expect(satisfies(v418, ">=4.17.21 || >=5.0.0")).toBe(true);
+    expect(satisfies(v5, ">=4.17.21 || >=5.0.0")).toBe(true);
+  });
+
+  it("OR range: returns false when neither sub-range matches", () => {
+    const v3 = parse("3.0.0")!;
+    expect(satisfies(v3, ">=4.17.21 || >=5.0.0")).toBe(false);
+  });
+
+  it("OR range: correctly identifies already-patched versions", () => {
+    // CVE with patched_versions: ">=4.17.21 || >=5.0.0"
+    // Version 5.0.0 should satisfy (already patched)
+    const v5 = parse("5.0.0")!;
+    expect(satisfies(v5, ">=4.17.21 || >=5.0.0")).toBe(true);
+  });
+
+  // Caret ^0.0 (2-part)
+
+  it("caret range: ^0.0 matches any 0.0.x (2-part constraint)", () => {
+    const v000 = parse("0.0.0")!;
+    const v001 = parse("0.0.1")!;
+    const v005 = parse("0.0.5")!;
+    const v010 = parse("0.1.0")!;
+    expect(satisfies(v000, "^0.0")).toBe(true);
+    expect(satisfies(v001, "^0.0")).toBe(true);
+    expect(satisfies(v005, "^0.0")).toBe(true);
+    expect(satisfies(v010, "^0.0")).toBe(false); // 0.1.0 is outside ^0.0
+  });
+
+  it("caret range: ^0.0.3 locks patch (3-part constraint)", () => {
+    const v003 = parse("0.0.3")!;
+    const v004 = parse("0.0.4")!;
+    expect(satisfies(v003, "^0.0.3")).toBe(true);
+    expect(satisfies(v004, "^0.0.3")).toBe(false); // Patch-locked for 3-part
+  });
 });
 
 // ── highestSatisfying ────────────────────────────────────────────────────
@@ -416,9 +489,81 @@ describe("distance", () => {
   });
 });
 
-// ── isSha ────────────────────────────────────────────────────────────────
+// ── latestAvailable ────────────────────────────────────────────────────
+
+describe("latestAvailable", () => {
+  it("returns the first stable release (newest-first)", () => {
+    const releases = ["3.0.0-beta.1", "2.1.0", "2.0.0", "1.0.0"];
+    expect(latestAvailable(releases)).toBe("2.1.0");
+  });
+
+  it("returns null when all releases are prerelease", () => {
+    const releases = ["3.0.0-beta.1", "2.0.0-alpha.1"];
+    expect(latestAvailable(releases)).toBeNull();
+  });
+
+  it("returns null for empty releases", () => {
+    expect(latestAvailable([])).toBeNull();
+  });
+});
+
+// ── candidateVersions ──────────────────────────────────────────────────
+
+describe("candidateVersions", () => {
+  it("returns single candidate when latest also satisfies constraint", () => {
+    const releases = ["1.6.0", "1.5.0", "1.0.0"];
+    const candidates = candidateVersions(releases, "^1.0.0");
+    expect(candidates).toEqual(["1.6.0"]);
+  });
+
+  it("returns both satisfying and latest when latest is outside constraint", () => {
+    const releases = ["2.0.0", "1.6.0", "1.0.0"];
+    const candidates = candidateVersions(releases, "^1.0.0");
+    // satisfying first, then latest available
+    expect(candidates).toEqual(["1.6.0", "2.0.0"]);
+  });
+
+  it("returns only latest when no version satisfies constraint", () => {
+    const releases = ["2.0.0", "3.0.0"];
+    const candidates = candidateVersions(releases, "^1.0.0");
+    expect(candidates).toEqual(["2.0.0"]);
+  });
+
+  it("returns empty when no releases exist", () => {
+    expect(candidateVersions([], "^1.0.0")).toEqual([]);
+    expect(candidateVersions([], null)).toEqual([]);
+  });
+
+  it("returns first non-prerelease when no constraint", () => {
+    const releases = ["3.0.0-beta.1", "2.0.0", "1.0.0"];
+    const candidates = candidateVersions(releases, null);
+    expect(candidates).toEqual(["2.0.0"]);
+  });
+});
+
+// ── isSha ──────────────────────────────────────────────────────────────
 
 describe("isSha", () => {
+  it("recognizes a 40-character SHA", () => {
+    expect(isSha("abc123def456789012345678901234567890abcd")).toBe(true);
+  });
+
+  it("recognizes a short SHA (7 chars)", () => {
+    expect(isSha("abc1234")).toBe(true);
+  });
+
+  it("rejects a version-like string", () => {
+    expect(isSha("1.2.3")).toBe(false);
+  });
+
+  it("rejects too-short hex", () => {
+    expect(isSha("abc123")).toBe(false);
+  });
+});
+
+// ── isSha (extended) ──────────────────────────────────────────────────────
+
+describe("isSha (extended)", () => {
   it("recognises 40-char SHA", () => {
     expect(isSha("a81bbbf8298c0fa03ea29cdc473d45769f953675")).toBe(true);
   });

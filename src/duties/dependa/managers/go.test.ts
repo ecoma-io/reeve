@@ -219,6 +219,33 @@ require (
     expect(result).toContain("v1.2.4");
   });
 
+  it("uses constraint (not currentVersion) as the search string when they differ", () => {
+    // When go.sum has a different version than go.mod, applyUpdate must search
+    // for the go.mod version (constraint), not the go.sum version (currentVersion).
+    // The file contains the constraint version, not the go.sum version.
+    const content = `require github.com/foo/bar v1.2.0\n`;
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "go",
+        name: "github.com/foo/bar",
+        constraint: "1.2.0", // what's written in go.mod
+        currentVersion: "1.2.3", // what go.sum says — must NOT be used for search
+        manifestPath: "go.mod",
+        dev: false,
+        manager: "go",
+      },
+      currentVersion: "1.2.3",
+      targetVersion: "1.3.0",
+      updateType: "minor",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("v1.3.0");
+    expect(result).not.toContain("v1.2.0");
+  });
+
   it("returns null when the module is not found", () => {
     const content = `require github.com/foo/bar v1.2.3\n`;
 

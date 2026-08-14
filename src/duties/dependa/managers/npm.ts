@@ -181,13 +181,20 @@ function extractPinnedVersion(constraint: string | null): string {
  * Returns null when the lockfile cannot be parsed.
  */
 function parseLockfile(content: string): Map<string, string> | null {
-  // Try to detect lockfile format and parse accordingly
-  if (content.includes("lockfileVersion")) {
+  // Try to detect lockfile format and parse accordingly.
+  // package-lock.json is JSON; pnpm-lock.yaml and yarn.lock are YAML.
+
+  // Quick JSON check — if it starts with '{', it's package-lock.json
+  if (content.trimStart().startsWith("{")) {
     return parsePackageLockJson(content);
   }
 
   // pnpm-lock.yaml or yarn.lock — parse the importers section
-  if (content.startsWith("#") || content.includes("specifiers:")) {
+  if (
+    content.startsWith("#") ||
+    content.includes("specifiers:") ||
+    content.includes("lockfileVersion:")
+  ) {
     return parsePnpmLockYaml(content);
   }
 
@@ -353,41 +360,106 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
     return null;
   }
 
-  // Determine which section the dependency lives in
+  // Determine which sections the dependency lives in.
+  // For npm aliases, the manifest key is the alias name, not the resolved
+  // package name — so we search by value too.
+  // A dependency may appear in multiple sections (e.g. both dependencies
+  // and peerDependencies) — we update ALL occurrences.
   const sections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
-  let targetSection: string | null = null;
-  let oldConstraint: string | null = null;
+  const matches: { section: string; manifestKey: string; oldConstraint: string }[] = [];
 
   for (const section of sections) {
     const map = pkg[section];
     if (typeof map !== "object" || map === null) continue;
 
     const deps = map as Record<string, unknown>;
-    const value = deps[proposal.dependency.name];
-    if (typeof value === "string") {
-      targetSection = section;
-      oldConstraint = value;
-      break;
+
+    // First: direct key match (non-alias case)
+    const directValue = deps[proposal.dependency.name];
+    if (typeof directValue === "string") {
+      matches.push({ section, manifestKey: proposal.dependency.name, oldConstraint: directValue });
+      continue; // Check remaining sections for other occurrences
+    }
+
+    // Second: search by value for npm aliases.
+    // An alias like "my-alias": "npm:lodash@^4.0.0" — the resolved name
+    // is "lodash" but the manifest key is "my-alias".
+    for (const [key, value] of Object.entries(deps)) {
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (trimmed.startsWith("npm:")) {
+        const aliasPkg = trimmed.slice(4);
+        // Extract the package name from "npm:@scope/pkg@^1.2.3" or "npm:pkg@^1.2.3"
+        const atIdx = aliasPkg.lastIndexOf("@");
+        const aliasName = atIdx > 0 ? aliasPkg.slice(0, atIdx) : aliasPkg;
+        if (aliasName === proposal.dependency.name) {
+          matches.push({ section, manifestKey: key, oldConstraint: trimmed });
+          break; // Only one alias match per section
+        }
+      }
     }
   }
 
-  if (targetSection === null || oldConstraint === null) {
+  if (matches.length === 0) {
     // Dependency not found in any section — cannot apply
     return null;
   }
 
-  // Determine the new constraint
-  const newConstraint = rewriteConstraint(oldConstraint, proposal.targetVersion);
-  if (newConstraint === null) {
-    // Constraint grammar not recognized — cannot safely rewrite
-    return null;
+  // Apply updates to all matching sections
+  let anyRewritten = false;
+  for (const { section, manifestKey, oldConstraint } of matches) {
+    // Determine the new constraint
+    const newConstraint = rewriteConstraint(oldConstraint, proposal.targetVersion);
+    if (newConstraint === null) {
+      // Constraint grammar not recognized — cannot safely rewrite
+      // For npm aliases, rewrite the version within the alias string
+      if (oldConstraint.startsWith("npm:")) {
+        const aliasRewrite = rewriteAliasConstraint(oldConstraint, proposal.targetVersion);
+        if (aliasRewrite !== null) {
+          const sectionMap = pkg[section] as Record<string, unknown>;
+          sectionMap[manifestKey] = aliasRewrite;
+          anyRewritten = true;
+          continue;
+        }
+      }
+      // Unrecognized constraint in this section — skip it (other sections may still apply)
+      continue;
+    }
+
+    // Apply the change
+    const sectionMap = pkg[section] as Record<string, unknown>;
+    sectionMap[manifestKey] = newConstraint;
+    anyRewritten = true;
   }
 
-  // Apply the change
-  const section = pkg[targetSection] as Record<string, unknown>;
-  section[proposal.dependency.name] = newConstraint;
+  // When no section could be rewritten, the update cannot be applied
+  if (!anyRewritten) return null;
 
-  return JSON.stringify(pkg, null, 2) + "\n";
+  return stringifyPreservingIndent(manifestContent, pkg);
+}
+
+/**
+ * Rewrite an npm alias constraint to target a new version.
+ *
+ * npm alias: `"npm:package-name@^1.2.3"` → `"npm:package-name@^2.0.0"`
+ * Preserves the `npm:` prefix, package name, and constraint prefix.
+ * Returns null when the alias structure cannot be parsed.
+ */
+function rewriteAliasConstraint(oldConstraint: string, newVersion: string): string | null {
+  if (!oldConstraint.startsWith("npm:")) return null;
+
+  const alias = oldConstraint.slice(4);
+  const atIdx = alias.lastIndexOf("@");
+  if (atIdx <= 0) return null; // No version separator, or @ at start (scope-only)
+
+  const pkgName = alias.slice(0, atIdx);
+  const versionPart = alias.slice(atIdx + 1);
+
+  // Rewrite the version portion, preserving any constraint prefix
+  const rewritten = rewriteConstraint(versionPart, newVersion);
+  if (rewritten === null) return null;
+
+  return `npm:${pkgName}@${rewritten}`;
 }
 
 /**
@@ -442,4 +514,36 @@ function rewriteConstraint(oldConstraint: string, newVersion: string): string | 
 
   // Cannot safely rewrite this constraint
   return null;
+}
+
+/**
+ * Stringify a package.json object preserving the original indentation.
+ *
+ * `JSON.stringify(pkg, null, 2)` always uses 2-space indent, but real
+ * package.json files may use tabs or 4-space indentation. Detecting and
+ * preserving the original indent avoids unnecessary diff noise in PRs.
+ *
+ * Detection: find the first indented line in the original content and
+ * measure its whitespace. Fall back to 2 spaces when detection fails.
+ */
+function stringifyPreservingIndent(originalContent: string, pkg: Record<string, unknown>): string {
+  const indent = detectIndent(originalContent);
+  const suffix = originalContent.endsWith("\n") ? "\n" : "";
+  return JSON.stringify(pkg, null, indent) + suffix;
+}
+
+/**
+ * Detect the indentation of a JSON string by examining the first indented line.
+ *
+ * Returns the indent string (e.g. "  " or "\t" or "    ") or "  " as default.
+ */
+function detectIndent(content: string): string {
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const match = /^(\s+)\S/.exec(line);
+    if (match?.[1] !== undefined) {
+      return match[1];
+    }
+  }
+  return "  ";
 }
