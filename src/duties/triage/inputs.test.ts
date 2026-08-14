@@ -46,6 +46,7 @@ function warrantOf(labels: readonly Label[]): Warrant {
     memory: null,
     about: null,
     lifecycle: null,
+    dependa: null,
     propose: DEFAULT_PROPOSE_WORKSPACE,
     granted: (_duty, fallback) => fallback,
     unnamed: () => false,

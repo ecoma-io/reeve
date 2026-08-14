@@ -310,6 +310,12 @@ These are not defaults. There is no input, no file key and no flag:
   this time. See [Memory](#memory) below for how that reversal gets recorded
   and what the refusal checks against.
 - **Writing code, opening a pull request, or running your tests.**
+  The first two are now grantable capabilities (`edit-file`, `open-pr`) rather
+  than permanently forbidden — but they are still off by default, and they are
+  still bounded by what the warrant names. A duty that was not granted `edit-file`
+  cannot write one; a duty that was not granted `open-pr` cannot open one. The
+  product boundary that moved was where the default sits, not where the
+  enforcement check runs. See [§9.1 of the north star](../doctrine/north-star.md#91--does-reeve-modify-repository-state-only-within-explicit-authority).
 
 The last one is a product boundary rather than a safety one, and it is argued in
 [the north star](../doctrine/north-star.md#8-non-goals).

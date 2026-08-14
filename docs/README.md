@@ -76,14 +76,18 @@ section true. Where a document describes something not yet built, it says so
 in that section rather than in a global disclaimer you would have to
 remember.
 
-Five duties ship — [`triage`](reference/duties/triage.md),
+Seven duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
 [`duplicate`](reference/duties/duplicate.md),
-[`respond`](reference/duties/respond.md), and
-[`lifecycle`](reference/duties/lifecycle.md) — and all five are
+[`respond`](reference/duties/respond.md),
+[`lifecycle`](reference/duties/lifecycle.md),
+[`harmonise`](reference/duties/harmonise.md), and
+[`dependa`](reference/duties/dependa.md) — and all seven are
 dogfooded on this repository: `triage` and `translate` acting on real
 threads, `duplicate` and `respond` in report-only mode, writing verdicts to
-job summaries and touching nothing, `lifecycle` observing in dry-run.
+job summaries and touching nothing, `lifecycle` observing in dry-run,
+`harmonise` synchronising this repository's own README translations,
+`dependa` maintaining this repository's own dependencies.
 See [Self-dogfood](guides/dogfood.md) for how the feedback loop works.
 
 ## Full index
@@ -106,12 +110,14 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`guides/doctor.md`](guides/doctor.md)                                     | how-to                   | Check a warrant against a repository before anything runs for real.               |
 | [`concepts/authority-model.md`](concepts/authority-model.md)               | concept                  | Explain capabilities, the warrant, and the ladder as one coherent model.          |
 | [`concepts/language-layer.md`](concepts/language-layer.md)                 | concept                  | Explain the three language roles and how detection reasons about them.            |
-| [`concepts/duties-and-the-core.md`](concepts/duties-and-the-core.md)       | concept                  | Explain the boundary between the core and a duty, and why it's drawn there.       |
+| [`concepts/dependency-maintenance.md`](concepts/dependency-maintenance.md) | concept                  | Explain how dependa discovers, assesses, and proposes dependency updates.         |
 | [`reference/duties/triage.md`](reference/duties/triage.md)                 | reference                | Full contract for the triage duty.                                                |
 | [`reference/duties/translate.md`](reference/duties/translate.md)           | reference                | Full contract for the translate duty.                                             |
 | [`reference/duties/duplicate.md`](reference/duties/duplicate.md)           | reference                | Full contract for the duplicate duty.                                             |
 | [`reference/duties/respond.md`](reference/duties/respond.md)               | reference                | Full contract for the respond duty.                                               |
 | [`reference/duties/lifecycle.md`](reference/duties/lifecycle.md)           | reference                | Full contract for the lifecycle duty.                                             |
+| [`reference/duties/harmonise.md`](reference/duties/harmonise.md)           | reference                | Full contract for the harmonise duty.                                             |
+| [`reference/duties/dependa.md`](reference/duties/dependa.md)               | reference                | Full contract for the dependa duty.                                               |
 | [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
 | [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
 | [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action and its `doctor: true` diagnostic mode.     |

@@ -222,7 +222,7 @@ underneath all of them:
 core — `action`, `provider`, `language`, `warrant`, `score`, `judge`,
 `sanitize`, `memory`, `forge`, `publish`, `atlas`, `marker`, `chrome`,
 `doctor`; duties — `translate`, `triage`, `duplicate`, `respond`,
-`lifecycle`, `harmonise`; and around them — `eval`, `brand`, `docs`, `workspace`, `deps`,
+`lifecycle`, `harmonise`, `dependa`; and around them — `eval`, `brand`, `docs`, `workspace`, `deps`,
 `ci`.
 
 `deps` and `ci` are on that list because Renovate writes them: it opens

@@ -31880,6 +31880,18 @@ function findLanguage(languages, code) {
   return languages.find((language) => language.code.toLowerCase() === wanted);
 }
 
+// src/duties/dependa/model.ts
+var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
+var UPDATE_TYPES = [
+  "major",
+  "minor",
+  "patch",
+  "pin",
+  "digest",
+  "rollback",
+  "security"
+];
+
 // src/core/warrant.ts
 var CAPABILITIES = [
   "label",
@@ -31933,6 +31945,7 @@ function parseWarrant(path, source) {
   const about = readAbout(path, document2.about);
   const lifecycle = readLifecycle(path, document2.lifecycle);
   const propose = readPropose(path, document2.propose);
+  const dependa = readDependa(path, document2.dependa);
   const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
@@ -31954,6 +31967,7 @@ function parseWarrant(path, source) {
     about,
     lifecycle,
     propose,
+    dependa,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
@@ -31991,6 +32005,7 @@ function implicitWarrant(path, repositoryLabels) {
       memory: null,
       about: null,
       lifecycle: null,
+      dependa: null,
       propose: DEFAULT_PROPOSE_WORKSPACE,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
@@ -32370,6 +32385,204 @@ function readLifecycleOverrides(path, raw) {
     return { label, after, never };
   });
 }
+function readDependa(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`dependa:\` with nothing under it. Write \`allowed-types:\` under it, or remove the key to leave dependa's own defaults in charge.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`dependa\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`dependa\``, fields, [
+    "ecosystems",
+    "allowed-types",
+    "ignore",
+    "grouping",
+    "security-separate",
+    "auto-approve",
+    "auto-close",
+    "auto-rebase",
+    "schedule"
+  ]);
+  return {
+    ecosystems: readDependaEcosystems(path, fields.ecosystems),
+    allowedTypes: readDependaAllowedTypes(path, fields["allowed-types"]),
+    ignore: readDependaIgnore(path, fields.ignore),
+    grouping: readDependaGrouping(path, fields.grouping),
+    securitySeparate: booleanField(
+      `\`${path}\`'s \`dependa\``,
+      "security-separate",
+      fields["security-separate"],
+      true
+    ),
+    autoApprove: readDependaAutoApprove(path, fields["auto-approve"]),
+    autoClose: booleanField(`\`${path}\`'s \`dependa\``, "auto-close", fields["auto-close"], false),
+    autoRebase: booleanField(
+      `\`${path}\`'s \`dependa\``,
+      "auto-rebase",
+      fields["auto-rebase"],
+      true
+    ),
+    schedule: readDependaSchedule(path, fields.schedule)
+  };
+}
+function readDependaEcosystems(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  const list = strings(`\`${path}\`'s \`dependa\``, "ecosystems", raw);
+  const ecosystems = [];
+  for (const entry of list) {
+    const eco = ECOSYSTEMS.find((e) => e === entry);
+    if (eco === void 0) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.ecosystems\` names \`${entry}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
+      );
+    }
+    if (!ecosystems.includes(eco)) ecosystems.push(eco);
+  }
+  return ecosystems;
+}
+function readDependaAllowedTypes(path, raw) {
+  if (raw === void 0 || raw === null) {
+    return ["patch", "minor", "pin", "digest", "rollback", "security"];
+  }
+  const list = strings(`\`${path}\`'s \`dependa\``, "allowed-types", raw);
+  if (list.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.allowed-types\` is empty. Write at least one, or remove the key to take the defaults.`
+    );
+  }
+  const types = [];
+  for (const entry of list) {
+    const ut = UPDATE_TYPES.find((t) => t === entry);
+    if (ut === void 0) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.allowed-types\` names \`${entry}\`, which is not a known update type. Expected any of ${UPDATE_TYPES.join(", ")}.`
+      );
+    }
+    if (!types.includes(ut)) types.push(ut);
+  }
+  return types;
+}
+function readDependaIgnore(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.ignore\` is ${describe(raw)}, expected a list.`
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`dependa.ignore\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "ecosystem", "types"]);
+    const name = text(at, "name", fields.name, { required: true });
+    const ecosystem = readIgnoreEcosystem(at, fields.ecosystem);
+    const types = readIgnoreTypes(at, fields.types);
+    return { name, ecosystem, types };
+  });
+}
+function readIgnoreEcosystem(at, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(
+      `warrant: ${at} has \`ecosystem\` as ${describe(raw)}, expected an ecosystem name.`
+    );
+  }
+  const eco = ECOSYSTEMS.find((e) => e === raw.trim());
+  if (eco === void 0) {
+    throw new Error(
+      `warrant: ${at} has \`ecosystem: ${raw}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
+    );
+  }
+  return eco;
+}
+function readIgnoreTypes(at, raw) {
+  if (raw === void 0 || raw === null) return [];
+  const list = strings(at, "types", raw);
+  const types = [];
+  for (const entry of list) {
+    const ut = UPDATE_TYPES.find((t) => t === entry);
+    if (ut === void 0) {
+      throw new Error(
+        `warrant: ${at} has \`types\` naming \`${entry}\`, which is not a known update type. Expected any of ${UPDATE_TYPES.join(", ")}.`
+      );
+    }
+    if (!types.includes(ut)) types.push(ut);
+  }
+  return types;
+}
+function readDependaGrouping(path, raw) {
+  if (raw === void 0 || raw === null) return "by-ecosystem";
+  if (raw !== "by-ecosystem" && raw !== "by-package" && raw !== "single") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.grouping\` is ${describe(raw)}, expected \`by-ecosystem\`, \`by-package\`, or \`single\`.`
+    );
+  }
+  return raw;
+}
+function readDependaAutoApprove(path, raw) {
+  if (raw === void 0 || raw === null) return "minor";
+  if (raw === "none") return "none";
+  const ut = UPDATE_TYPES.find((t) => t === raw);
+  if (ut === void 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.auto-approve\` is ${describe(raw)}, expected an update type or \`none\`.`
+    );
+  }
+  return ut;
+}
+function readDependaSchedule(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (/^\d+d$/.test(trimmed)) {
+      const days = Number(trimmed.slice(0, -1));
+      if (days === 0) {
+        throw new Error(
+          `warrant: \`${path}\`'s \`dependa.schedule: 0d\` is not a schedule. Write a duration like \`7d\`, a cron expression, or remove the key.`
+        );
+      }
+      return { kind: "interval", days };
+    }
+    return { kind: "cron", expression: trimmed };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const fields = raw;
+    rejectUnknownKeys(`\`${path}\`'s \`dependa.schedule\``, fields, ["interval", "cron"]);
+    const interval = fields.interval;
+    const cron = fields.cron;
+    if (interval !== void 0 && cron !== void 0) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.schedule\` has both \`interval\` and \`cron\` \u2014 write one.`
+      );
+    }
+    if (interval !== void 0 && interval !== null) {
+      const days = wholeNumber(`\`${path}\`'s \`dependa.schedule\``, "interval", interval, 1);
+      return { kind: "interval", days };
+    }
+    if (cron !== void 0 && cron !== null) {
+      if (typeof cron !== "string" || cron.trim().length === 0) {
+        throw new Error(
+          `warrant: \`${path}\`'s \`dependa.schedule.cron\` is ${describe(cron)}, expected a cron expression.`
+        );
+      }
+      return { kind: "cron", expression: cron.trim() };
+    }
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.schedule\` writes a mapping with neither \`interval\` nor \`cron\`.`
+    );
+  }
+  throw new Error(
+    `warrant: \`${path}\`'s \`dependa.schedule\` is ${describe(raw)}, expected a duration, a cron expression, or a mapping.`
+  );
+}
 function readPropose(path, raw) {
   if (raw === void 0) return DEFAULT_PROPOSE_WORKSPACE;
   if (raw === null) {
@@ -32596,7 +32809,8 @@ var STAGE = {
   screen: "Screening",
   triage: "Triage",
   pivot: "Pivot translation",
-  duplicate: "Duplicate check"
+  duplicate: "Duplicate check",
+  risk: "Risk assessment"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();

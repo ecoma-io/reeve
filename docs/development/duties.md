@@ -112,9 +112,11 @@ not finished, and a reviewer will say so.
 | ----------- | ------------------------------------------------------------------------------------------ |
 | `translate` | Multi-draft scoring, refusal-vs-ranking, publishing under a marker, per-reply fingerprints |
 | `triage`    | The warrant as an allowlist, the guardrail stage, screening before spending                |
+| `harmonise` | Writing files through `edit-file`, opening PRs through `open-pr`, state-branch management  |
+| `dependa`   | External datasources, evidence enclosure, policy-driven grouping, risk assessment          |
 
-Between them they exercise every part of the core. A third duty that needs
-something neither of them does is worth a conversation before it is worth a
+Between them they exercise every part of the core. A duty that needs
+something none of them does is worth a conversation before it is worth a
 branch.
 
 ---

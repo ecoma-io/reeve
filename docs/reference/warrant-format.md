@@ -23,6 +23,7 @@ behind each field, see [The warrant](../guides/warrant.md).
 | `about`        | no       | text                                    | What this repository is about, in the maintainer's own words. Read only by `triage` and `respond`, the two duties that reason about content rather than only translate or judge it. Absent falls back to the `about` input those duties already read. |
 | `lifecycle`    | no       | mapping — see below                     | The staleness policy `lifecycle` runs. Absent is a no-op — there is no built-in default track. Present but empty (`null`) is refused.                                                                                                                 |
 | `propose`      | no       | mapping — see below                     | How `triage`'s `propose` capability chooses names and gates evidence. Absent takes the design's own defaults. Present but empty (`null`) is refused — write `workspace:` under it, or remove the key.                                                 |
+| `dependa`      | no       | mapping — see below                     | How `dependa` discovers, groups, and proposes dependency updates. Absent takes the defaults: all non-major update types allowed, grouped by ecosystem, security updates separated. Present but empty (`null`) is refused.                             |
 
 ### `memory` fields
 
@@ -102,6 +103,31 @@ Schema only, here — everything sits under a `workspace:` sub-key:
 | `window`   | no       | How far back an issue may date and still count as evidence, as a duration. Default `90d`.                                                               |
 | `retire`   | no       | Whether an existing templated label with no packages left matching it is proposed for retirement. Default `false`.                                      |
 
+### `dependa` fields
+
+Full behavioural contract: [the `dependa` duty](duties/dependa.md).
+Schema only, here:
+
+| Field               | Required | What it does                                                                                                                                       |
+| ------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ecosystems`        | no       | Non-empty list of ecosystems to scan. One of `npm`, `github-actions`, `cargo`, `go`, `docker`. Default: all five.                                  |
+| `allowed-types`     | no       | Non-empty list of update types to propose. One of `patch`, `minor`, `major`, `pin`, `digest`, `rollback`, `security`. Default: all except `major`. |
+| `ignore`            | no       | List of ignore rules — see below.                                                                                                                  |
+| `grouping`          | no       | `by-ecosystem` (default), `by-package`, or `single`. How updates are grouped into PRs.                                                             |
+| `security-separate` | no       | Whether security updates get their own PR regardless of grouping. Default `true`.                                                                  |
+| `auto-approve`      | no       | Which update types may be auto-approved on the PR. One of `patch`, `minor`, `pin`, `digest`, `rollback`, `security`, or `none`. Default `minor`.   |
+| `auto-close`        | no       | Whether PRs for obsolete updates are auto-closed. Default `true`.                                                                                  |
+| `auto-rebase`       | no       | Whether PRs are auto-rebased when the target branch advances. Default `true`.                                                                      |
+| `schedule`          | no       | A duration shorthand (`7d`), a cron expression, or a mapping with `interval` or `cron`. Default: every run.                                        |
+
+**An ignore rule** (one entry of `ignore:`):
+
+| Field       | Required | What it does                                                                         |
+| ----------- | -------- | ------------------------------------------------------------------------------------ |
+| `name`      | no       | Glob pattern on the dependency name. At least one of `name`/`ecosystem` is required. |
+| `ecosystem` | no       | An ecosystem name. At least one of `name`/`ecosystem` is required.                   |
+| `types`     | no       | List of update types this ignore rule applies to. Absent means all types.            |
+
 ## Label fields
 
 | Field            | Required | What it does                                                                                                                                                                      |
@@ -119,17 +145,18 @@ Schema only, here — everything sits under a `workspace:` sub-key:
 
 ## Capabilities
 
-| Capability  | What it permits                                                                                                                                                                                                                                                                     | Default                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `label`     | Add a label from the taxonomy. Never remove one — except `lifecycle`'s own clock-hand labels, un-staled in code, and only when its own actor applied the one being removed.                                                                                                         | on for `triage`, `lifecycle` |
-| `edit-body` | Append Reeve's own block below its marker in a body.                                                                                                                                                                                                                                | on for `translate`           |
-| `comment`   | Post a rationale as a new comment.                                                                                                                                                                                                                                                  | on for `lifecycle`           |
-| `close`     | Close as not planned, with a comment saying why.                                                                                                                                                                                                                                    | off                          |
-| `assign`    | Assign the `owner` the taxonomy names for a label.                                                                                                                                                                                                                                  | off                          |
-| `record`    | Commit the thread's current labels to the corrections store, on a labelled or unlabelled event from a human — or a human's reversal of Reeve's own prior action (a removed label, a reopen after a Reeve duplicate-close). Needs `contents: write` on the token.                    | off                          |
-| `propose`   | Open or update a pull request adding or retiring taxonomy labels, from a monorepo's own package layout. `triage`-only, sweep-only. Needs `contents: write` and `pull-requests: write` on the token.                                                                                 | off                          |
-| `open-pr`   | Open or update a draft PR for state files, when `state-branch` is set. Required alongside the duty's own write capability (`record` for `triage`, `edit-file` for `harmonise`) to write state to a branch instead of the default branch. Needs `pull-requests: write` on the token. | off                          |
-| `none`      | Run everything, write every output, change nothing.                                                                                                                                                                                                                                 | —                            |
+| Capability  | What it permits                                                                                                                                                                                                                                                                                   | Default                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `label`     | Add a label from the taxonomy. Never remove one — except `lifecycle`'s own clock-hand labels, un-staled in code, and only when its own actor applied the one being removed.                                                                                                                       | on for `triage`, `lifecycle` |
+| `edit-body` | Append Reeve's own block below its marker in a body.                                                                                                                                                                                                                                              | on for `translate`           |
+| `comment`   | Post a rationale as a new comment.                                                                                                                                                                                                                                                                | on for `lifecycle`           |
+| `close`     | Close as not planned, with a comment saying why.                                                                                                                                                                                                                                                  | off                          |
+| `assign`    | Assign the `owner` the taxonomy names for a label.                                                                                                                                                                                                                                                | off                          |
+| `record`    | Commit the thread's current labels to the corrections store, on a labelled or unlabelled event from a human — or a human's reversal of Reeve's own prior action (a removed label, a reopen after a Reeve duplicate-close). Needs `contents: write` on the token.                                  | off                          |
+| `propose`   | Open or update a pull request adding or retiring taxonomy labels, from a monorepo's own package layout. `triage`-only, sweep-only. Needs `contents: write` and `pull-requests: write` on the token.                                                                                               | off                          |
+| `open-pr`   | Open or update a draft PR for state files, when `state-branch` is set. Required alongside the duty's own write capability (`record` for `triage`, `edit-file` for `harmonise` and `dependa`) to write state to a branch instead of the default branch. Needs `pull-requests: write` on the token. | off                          |
+| `edit-file` | Write or modify a file in the repository, through the Contents API. Used by `harmonise` (translated documentation) and `dependa` (dependency manifests and lockfiles). Needs `contents: write` on the token. Must be granted alongside `open-pr` when `state-branch` is set.                      | off                          |
+| `none`      | Run everything, write every output, change nothing.                                                                                                                                                                                                                                               | —                            |
 
 `duplicate` and `respond` are the two exceptions with no default at all — not
 even the cheapest one. See [Capabilities](../guides/warrant.md#capabilities)
