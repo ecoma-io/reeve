@@ -32614,10 +32614,17 @@ async function listOpenThreads(api, at, since, state = "open", maxPages) {
 function isCapacityError(error2) {
   if (typeof error2 === "object" && error2 !== null && "status" in error2) {
     const status = error2.status;
-    if (status === 429 || typeof status === "number" && status >= 500) return true;
+    if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
+      return true;
   }
+  if (typeof error2 === "object" && error2 !== null && "code" in error2) {
+    const code = error2.code;
+    if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "UND_ERR_CONNECT_TIMEOUT")
+      return true;
+  }
+  if (error2 instanceof Error && error2.name === "TimeoutError") return true;
   const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
+  return message.includes("timed out");
 }
 function createEffects(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };

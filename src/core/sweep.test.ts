@@ -81,6 +81,42 @@ describe("remainingOf", () => {
 
     expect(remainingOf(acc)).toBe(0);
   });
+
+  it("answers zero when nothing was candidates, nothing was done, nothing was skipped", () => {
+    const acc: SweepAccumulator<string> = {
+      results: [],
+      skipped: 0,
+      starvedRun: false,
+      candidates: 0,
+      ungranted: null,
+    };
+
+    expect(remainingOf(acc)).toBe(0);
+  });
+
+  it("never goes negative when skipped alone exceeds candidates", () => {
+    const acc: SweepAccumulator<string> = {
+      results: [],
+      skipped: 5,
+      starvedRun: false,
+      candidates: 2,
+      ungranted: null,
+    };
+
+    expect(remainingOf(acc)).toBe(0);
+  });
+
+  it("never goes negative when results and skipped together exceed candidates", () => {
+    const acc: SweepAccumulator<string> = {
+      results: ["a"],
+      skipped: 5,
+      starvedRun: false,
+      candidates: 3,
+      ungranted: null,
+    };
+
+    expect(remainingOf(acc)).toBe(0);
+  });
 });
 
 describe("standingFromListing", () => {
@@ -309,5 +345,33 @@ describe("reportNoSweep", () => {
     expect(vi.mocked(core.setOutput)).toHaveBeenCalledWith("processed", "0");
     expect(vi.mocked(core.setOutput)).toHaveBeenCalledWith("remaining", "0");
     expect(vi.mocked(core.setOutput)).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not touch `skipped` or `budget-exhausted` — those belong to the caller", () => {
+    // The contract this module's own doc comment spells out: `skipped` and
+    // `budget-exhausted` have duty-specific meanings (a JSON array vs a count,
+    // a real ceiling vs always-false) and are the caller's responsibility.
+    // `reportNoSweep` must not overwrite them.
+    reportNoSweep();
+
+    expect(core.setOutput).not.toHaveBeenCalledWith("skipped", expect.anything());
+    expect(core.setOutput).not.toHaveBeenCalledWith("budget-exhausted", expect.anything());
+  });
+
+  it("does not overwrite `skipped` or `budget-exhausted` that the caller already set", () => {
+    // Simulate a duty that sets its own `skipped` and `budget-exhausted`
+    // before calling `reportNoSweep()` — the pattern `duplicate/outputs.ts`
+    // follows. If `reportNoSweep` were to accidentally set either key, it
+    // would clobber the duty's own values.
+    core.setOutput("skipped", "3");
+    core.setOutput("budget-exhausted", "true");
+    vi.clearAllMocks();
+
+    reportNoSweep();
+
+    expect(core.setOutput).not.toHaveBeenCalledWith("skipped", expect.anything());
+    expect(core.setOutput).not.toHaveBeenCalledWith("budget-exhausted", expect.anything());
+    expect(core.setOutput).toHaveBeenCalledWith("processed", "0");
+    expect(core.setOutput).toHaveBeenCalledWith("remaining", "0");
   });
 });

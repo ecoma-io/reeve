@@ -136,3 +136,50 @@ jobs:
           models: ${{ secrets.ECOMA_REEVE_MODELS }}
           judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
           drafts: "2"
+
+  harmonise:
+    name: Sweep — harmonise
+    runs-on: ubuntu-latest
+    # Classification plus drafting plus judging, per document group, times the
+    # limit — the same generous allowance the per-thread workflows give, extended
+    # for a batch. A starved roster ends the sweep early rather than hanging.
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was swept."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+        run: |
+          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        uses: ./harmonise
+        with:
+          sweep: true
+          limit: "20"
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          # Empty when the endpoint is keyless, which is a supported
+          # configuration rather than a missing secret.
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+          drafts: "2"
+          source-language: en
+          languages: "vi:Tiếng Việt, zh:简体中文"
+          apply: edit-file, open-pr
+          paths: "README.md"

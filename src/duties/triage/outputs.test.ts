@@ -203,6 +203,12 @@ describe("reportSweep", () => {
     expect(core.setOutput).toHaveBeenCalledWith("recorded", "true");
   });
 
+  it("always reports budget-exhausted as false — triage has no request budget", () => {
+    reportSweep(accumulatorOf(), false);
+
+    expect(core.setOutput).toHaveBeenCalledWith("budget-exhausted", "false");
+  });
+
   it("reports `recorded` false for an ordinary sweep", () => {
     reportSweep(accumulatorOf({ recording: false }), false);
 

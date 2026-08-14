@@ -434,6 +434,13 @@ outputs:
       triaging sweep, and a labelled event where `record` is not granted —
       never unset.
 
+  budget-exhausted:
+    description: >-
+      `true` when this run's own `max-requests` ceiling genuinely turned work
+      away. Always `false` for this duty, which has no request budget — the
+      output exists so a workflow reading it across duties finds a value rather
+      than an unset key.
+
   state-pr:
     description: >-
       The number of the draft PR that carries the correction files, when

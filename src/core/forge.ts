@@ -866,27 +866,54 @@ export function isMissing(error: unknown): boolean {
 
 /**
  * Whether a GitHub API failure is capacity, not configuration — D12's
- * "weather" side. A 429/5xx status, or a network-timeout-shaped error with
- * no status at all, is the platform being slow or briefly unavailable, not
- * a mistake in the run's own setup; 401/403 (and everything else) is not
- * this classifier's business and stays red. Shared rather than
- * reimplemented per duty — `triage`'s `propose.ts` and `lifecycle`'s sweep
- * both need the identical answer to "is this worth ending the run over."
+ * "weather" side. A 429/5xx status, a Node system error (`.code`), or a
+ * timeout-shaped error with no status at all, is the platform being slow or
+ * briefly unavailable, not a mistake in the run's own setup; 401/403 (and
+ * everything else) is not this classifier's business and stays red. Shared
+ * rather than reimplemented per duty — `triage`'s `propose.ts` and
+ * `lifecycle`'s sweep both need the identical answer to "is this worth
+ * ending the run over."
+ *
+ * Status codes are bounded to the 5xx range (500–599). Node system errors
+ * are matched by their `.code` property — exact match, no substring — so
+ * `ECONNRESET` is capacity but a message containing "network" is not.
+ * `AbortSignal.timeout` fires a `DOMException` with `name: "TimeoutError"`,
+ * which is also capacity. The only message-level fallback is "timed out"
+ * (what Node and Octokit actually report); "timeout" alone is too generic
+ * and matches `TypeError: timeout is not a function`.
  */
 export function isCapacityError(error: unknown): boolean {
+  // 1. HTTP status: 429 (rate limit) or 5xx (server error).
   if (typeof error === "object" && error !== null && "status" in error) {
     const status = (error as { status?: unknown }).status;
-    if (status === 429 || (typeof status === "number" && status >= 500)) return true;
+    if (status === 429 || (typeof status === "number" && status >= 500 && status < 600))
+      return true;
   }
+
+  // 2. Node.js system errors: exact `.code` match, no substring guessing.
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (
+      code === "ECONNRESET" ||
+      code === "ETIMEDOUT" ||
+      code === "ECONNREFUSED" ||
+      code === "ENOTFOUND" ||
+      code === "ENETUNREACH" ||
+      code === "EAI_AGAIN" ||
+      code === "UND_ERR_CONNECT_TIMEOUT"
+    )
+      return true;
+  }
+
+  // 3. AbortSignal.timeout fires a DOMException named "TimeoutError".
+  if (error instanceof Error && error.name === "TimeoutError") return true;
+
+  // 4. Fallback: message substring for "timed out" only — the phrase Node
+  //    and Octokit actually use. "timeout" alone is too generic (matches
+  //    "timeout is not a function", etc.).
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return (
-    message.includes("timeout") ||
-    message.includes("timed out") ||
-    message.includes("network") ||
-    message.includes("econnreset") ||
-    message.includes("etimedout")
-  );
+  return message.includes("timed out");
 }
 
 /**

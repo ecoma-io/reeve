@@ -233,6 +233,45 @@ inputs:
     required: false
     default: ""
 
+  sweep:
+    description: >-
+      Process document groups in batches, stopping when the roster runs out of
+      capacity or the limit is reached. When `true`, `remaining` reports how
+      many groups were not reached, and a scheduled re-run picks up where this
+      one left off. When `false` (the default), every group is processed in
+      one run as before.
+
+      Unlike the other duties, `since` has no effect here — document groups
+      are discovered by file-tree scan, not by issue/PR creation date, so
+      there is no creation-date filter to apply.
+
+      Cannot be combined with `number` — set one or the other.
+    required: false
+    default: "false"
+
+  number:
+    description: >-
+      A specific document group to process, identified by its base path
+      (e.g. `docs/guide`). Empty means all groups. Cannot be combined with
+      `sweep`.
+    required: false
+    default: ""
+
+  since:
+    description: >-
+      Accepted but has no effect — document groups have no creation date.
+      The input exists so the same workflow template that passes `since` to
+      other duties does not fail when it reaches this one.
+    required: false
+    default: ""
+
+  limit:
+    description: >-
+      The most document groups one sweep will actually process, or `none`
+      for no cap. `0` is refused — write `none` for that meaning instead.
+    required: false
+    default: "none"
+
 outputs:
   classified:
     description: >-
@@ -271,6 +310,17 @@ outputs:
       `state-branch` is set and the run completed successfully. Empty when
       writing to the default branch, when no state was written, or when the
       run was a dry run.
+
+  processed:
+    description: >-
+      How many document groups a sweep actually processed this run. `0`
+      outside `sweep`.
+
+  remaining:
+    description: >-
+      Document groups a sweep did not reach — past `limit`, or left behind
+      when the roster ran out of capacity. The next sweep starts here. `0`
+      outside `sweep`, and `0` when a sweep finished its whole backlog.
 
 runs:
   using: node24
