@@ -33574,6 +33574,16 @@ function extract(content) {
         output.push(lines[i] ?? "");
         i += 1;
       }
+      if (i < lines.length) {
+        const candidate = stripTerminator(lines[i] ?? "");
+        if (IGNORE_NEXT_LINE.test(candidate) || IGNORE_START.test(candidate) || IGNORE_END.test(candidate)) {
+          spans.push({
+            content: lines.slice(markerLine, markerLine + 1).join("")
+          });
+          output.push(PLACEHOLDER + "\n");
+          continue;
+        }
+      }
       const ignoredLine = i < lines.length ? i : -1;
       if (ignoredLine >= 0) {
         i += 1;
@@ -33758,8 +33768,11 @@ async function draftSyncs(request2) {
     chunkChars,
     ignore
   } = request2;
-  const { content: maskedSource } = ignore ? extract(sourceContent) : { content: sourceContent, spans: [] };
-  const { content: maskedTarget, spans: targetSpans } = ignore ? extract(targetContent) : { content: targetContent, spans: [] };
+  const sourceResult = ignore ? extract(sourceContent) : void 0;
+  const targetResult = ignore ? extract(targetContent) : void 0;
+  const maskedSource = sourceResult?.content ?? sourceContent;
+  const maskedTarget = targetResult?.content ?? targetContent;
+  const targetSpans = targetResult?.spans ?? [];
   if (chunkChars > 0 && (maskedSource.length > chunkChars || maskedTarget.length > chunkChars)) {
     return draftChunked({
       ...request2,
