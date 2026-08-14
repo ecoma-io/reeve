@@ -477,10 +477,37 @@ describe("compare — version selection edge cases", () => {
   });
 });
 
+// ─── Update classification edge cases ──────────────────────────────────────────
+
+describe("compare — update classification edge cases", () => {
+  it("classifies different non-replacement update types as INSUFFICIENT_EVIDENCE", () => {
+    // Same target version, but different update type (e.g. major vs minor)
+    const renovate: RenovateFinding[] = [
+      makeRenovateNpm("pkg", "^1.0.0", "1.0.0", "2.0.0", "major"),
+    ];
+    const dependa: DependaFinding[] = [makeDependaNpm("pkg", "^1.0.0", "1.0.0", "2.0.0", "minor")];
+    const result = compare(renovate, dependa, CONTEXT);
+    expect(result.comparisons).toHaveLength(1);
+    expect(result.comparisons[0]!.level).toBe("update-classification");
+    expect(result.comparisons[0]!.classification).toBe("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("classifies replacement update type as DEPENDA_MISSING_CAPABILITY", () => {
+    const renovate: RenovateFinding[] = [
+      { ...makeRenovateNpm("pkg", "^1.0.0", "1.0.0", "2.0.0", "replacement") },
+    ];
+    const dependa: DependaFinding[] = [makeDependaNpm("pkg", "^1.0.0", "1.0.0", "2.0.0", "minor")];
+    const result = compare(renovate, dependa, CONTEXT);
+    expect(result.comparisons).toHaveLength(1);
+    expect(result.comparisons[0]!.level).toBe("update-classification");
+    expect(result.comparisons[0]!.classification).toBe("DEPENDA_MISSING_CAPABILITY");
+  });
+});
+
 // ─── Mutation level ──────────────────────────────────────────────────────────
 
 describe("compare — mutation level", () => {
-  it("classifies file difference at mutation level", () => {
+  it("classifies file difference at mutation level (Renovate extra files)", () => {
     const renovate: RenovateFinding[] = [
       {
         ...makeRenovateNpm("lodash", "^4.17.0", "4.17.21", "4.18.0", "minor"),
@@ -494,6 +521,23 @@ describe("compare — mutation level", () => {
     expect(result.comparisons).toHaveLength(1);
     expect(result.comparisons[0]!.level).toBe("mutation");
     expect(result.comparisons[0]!.classification).toBe("INTENTIONAL_DIFFERENCE");
+  });
+
+  it("classifies file difference at mutation level (dependa extra files)", () => {
+    const renovate: RenovateFinding[] = [
+      makeRenovateNpm("lodash", "^4.17.0", "4.17.21", "4.18.0", "minor"),
+    ];
+    const dependa: DependaFinding[] = [
+      {
+        ...makeDependaNpm("lodash", "^4.17.0", "4.17.21", "4.18.0", "minor"),
+        files: ["package.json", "pnpm-lock.yaml"],
+      },
+    ];
+    const result = compare(renovate, dependa, CONTEXT);
+    expect(result.comparisons).toHaveLength(1);
+    expect(result.comparisons[0]!.level).toBe("mutation");
+    expect(result.comparisons[0]!.classification).toBe("INTENTIONAL_DIFFERENCE");
+    expect(result.comparisons[0]!.reason).toContain("dependa edits");
   });
 
   it("skips mutation level when files are identical", () => {
@@ -653,6 +697,67 @@ describe("JSONL serialization — edge cases", () => {
     for (let i = 0; i < dataset.comparisons.length; i++) {
       expect(restored.comparisons[i]!.classification).toBe(dataset.comparisons[i]!.classification);
     }
+  });
+});
+
+// ─── Report generation ──────────────────────────────────────────────────────────
+
+describe("generateReport — sorting", () => {
+  it("sorts security discrepancies before non-security", () => {
+    const renovate: RenovateFinding[] = [
+      {
+        ecosystem: "npm",
+        name: "secure-pkg",
+        constraint: "^1.0.0",
+        currentVersion: "1.0.0",
+        targetVersion: "1.1.0",
+        updateType: "patch",
+        group: null,
+        files: ["package.json"],
+        security: true,
+        manager: "npm",
+        datasource: "npm",
+        wouldPr: true,
+      },
+      makeRenovateNpm("normal-pkg", "^1.0.0", "1.0.0", "2.0.0", "major"),
+    ];
+    const dependa: DependaFinding[] = [
+      makeDependaNpm("secure-pkg", "^1.0.0", "1.0.0", "1.1.0", "patch"),
+      makeDependaNpm("normal-pkg", "^1.0.0", "1.0.0", "1.5.0", "minor"),
+    ];
+    const dataset = compare(renovate, dependa, CONTEXT);
+    const report = generateReport(dataset);
+    // Security discrepancy (secure-pkg) should come before non-security (normal-pkg)
+    expect(report.highestValueDiscrepancies.length).toBeGreaterThanOrEqual(2);
+    expect(report.highestValueDiscrepancies[0]!.name).toBe("secure-pkg");
+    expect(report.highestValueDiscrepancies[1]!.name).toBe("normal-pkg");
+  });
+
+  it("sorts DEPENDA_BUG before INTENTIONAL_DIFFERENCE", () => {
+    const renovate: RenovateFinding[] = [
+      makeRenovateNpm("bug-pkg", "^1.0.0", "1.0.0", "1.1.0", "minor"),
+      {
+        ecosystem: "github-actions",
+        name: "actions/checkout",
+        constraint: null,
+        currentVersion: "abc123def456abc123def456abc123def456abcd",
+        targetVersion: "def456abc123def456abc123def456abc123def0",
+        updateType: "pinDigest",
+        group: null,
+        files: [".github/workflows/ci.yml"],
+        security: false,
+        manager: "github-actions",
+        datasource: "github-tags",
+        wouldPr: true,
+      },
+    ];
+    const dependa: DependaFinding[] = [];
+    const dataset = compare(renovate, dependa, CONTEXT);
+    const report = generateReport(dataset);
+    expect(report.highestValueDiscrepancies.length).toBeGreaterThanOrEqual(2);
+    // DEPENDA_BUG (bug-pkg) has priority 0, INTENTIONAL_DIFFERENCE (pinDigest) has priority 4
+    expect(report.highestValueDiscrepancies[0]!.classification).toBe("DEPENDA_BUG");
+    expect(report.highestValueDiscrepancies[1]!.classification).toBe("INTENTIONAL_DIFFERENCE");
   });
 });
 
