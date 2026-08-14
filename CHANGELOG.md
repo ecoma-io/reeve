@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/ecoma-io/reeve/compare/v0.5.0...v0.6.0) (2026-08-14)
+
+
+### Features
+
+* **dependa:** add dependency maintenance duty ([#61](https://github.com/ecoma-io/reeve/issues/61)) ([c83d397](https://github.com/ecoma-io/reeve/commit/c83d3975004753248c63a91459ba2cce7b02d67d))
+* harmonise sweep pattern, capacity error guards, standardised outputs, tighter isCapacityError ([#60](https://github.com/ecoma-io/reeve/issues/60)) ([779b23b](https://github.com/ecoma-io/reeve/commit/779b23b34d3008c53052917eee9bb69cc1d2f139))
+* **harmonise:** add dogfood workflow for README.md translation to vi and zh ([8d230c9](https://github.com/ecoma-io/reeve/commit/8d230c90c0d5dc34254d2728408152e73f772fe7))
+
+
+### Bug Fixes
+
+* **dependa:** harden against adversarial findings from correctness + security review ([#62](https://github.com/ecoma-io/reeve/issues/62)) ([3c65ffb](https://github.com/ecoma-io/reeve/commit/3c65ffb6b9dad8f770b1b1c5d1c8e6044e7e2c4d))
+
 ## [0.5.0](https://github.com/ecoma-io/reeve/compare/v0.4.0...v0.5.0) (2026-08-14)
 
 
