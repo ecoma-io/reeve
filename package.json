@@ -1,6 +1,6 @@
 {
   "name": "@ecoma-io/reeve",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Automated upkeep for a repository — triage, translation and the duties after them — in whatever language the contributor wrote in, with any OpenAI-compatible model, inside an authority you wrote down.",
   "keywords": [
