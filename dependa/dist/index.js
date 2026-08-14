@@ -34232,7 +34232,7 @@ ${escapeMarkdown(e.content)}
 ${sections.join("\n\n")}`;
 }
 function escapeMarkdown(text2) {
-  return text2.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/<[^>]*>/g, "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text2.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function sanitise(text2) {
   return mapProse(text2, (prose) => prose);

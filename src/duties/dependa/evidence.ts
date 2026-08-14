@@ -197,9 +197,8 @@ export function escapeMarkdown(text: string): string {
       .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)")
       // Defang Markdown links: [text](url) → text (url)
       .replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)")
-      // Strip HTML tags entirely — evidence should never contain active HTML
-      .replace(/<[^>]*>/g, "")
-      // Escape remaining < and > that might be interpreted as HTML
+      // Escape angle brackets first — prevents both complete (<script>)
+      // and incomplete (<script) HTML element injection
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
   );

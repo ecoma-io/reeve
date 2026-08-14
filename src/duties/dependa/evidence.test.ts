@@ -318,14 +318,16 @@ describe("escapeMarkdown", () => {
     );
   });
 
-  it("strips HTML tags", () => {
-    expect(escapeMarkdown('<script>alert("xss")</script>')).toBe('alert("xss")');
+  it("escapes HTML tags (defangs rather than strips)", () => {
+    expect(escapeMarkdown('<script>alert("xss")</script>')).toBe(
+      '&lt;script&gt;alert("xss")&lt;/script&gt;',
+    );
   });
 
-  it("escapes remaining angle brackets not consumed by HTML tag stripping", () => {
-    // "<3" is not a valid HTML tag, so after HTML stripping the "<" survives
-    // and then gets escaped. "a <3 b" → strip HTML tags (none match) → escape < → "a &lt;3 b"
+  it("escapes all angle brackets to prevent HTML element injection", () => {
+    // Both complete (<script>) and incomplete (<script) tags are defanged
     expect(escapeMarkdown("a <3 b")).toBe("a &lt;3 b");
+    expect(escapeMarkdown("<script")).toBe("&lt;script");
   });
 
   it("leaves plain text untouched", () => {
