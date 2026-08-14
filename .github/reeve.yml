@@ -40,6 +40,7 @@ capabilities:
   duplicate: [comment]
   respond: [comment]
   lifecycle: [label, comment]
+  harmonise: [edit-file, open-pr]
 
 labels:
   - name: bug
