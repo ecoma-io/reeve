@@ -41,6 +41,10 @@ capabilities:
   respond: [comment]
   lifecycle: [label, comment]
   harmonise: [edit-file, open-pr]
+  # dependa is deliberately omitted: it runs in shadow/dry-run mode alongside
+  # Renovate, observing what it would propose but creating no PRs. Granting
+  # dependa: [edit-file, open-pr] would be the act that transitions dependa
+  # from observer to actor. See dogfood/README.md for details.
 
 labels:
   - name: bug

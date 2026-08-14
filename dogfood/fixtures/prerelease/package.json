@@ -1,0 +1,8 @@
+{
+  "name": "fixture-prerelease",
+  "version": "1.0.0",
+  "dependencies": {
+    "typescript": "^5.4.0-beta.1",
+    "vitest": "^2.0.0-alpha.0"
+  }
+}

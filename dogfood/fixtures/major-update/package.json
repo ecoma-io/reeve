@@ -1,0 +1,8 @@
+{
+  "name": "fixture-major-update",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^3.10.1",
+    "express": "^3.21.2"
+  }
+}

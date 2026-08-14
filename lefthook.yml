@@ -44,4 +44,8 @@ pre-commit:
         # file agrees with it is one edit away from not working.
         - "dist/**"
         - "*/dist/**"
+        # Dogfood CLI tools outside src/ are not in the tsconfig project,
+        # so eslint cannot resolve their types. The canonical conformance
+        # code lives in src/duties/dependa/conformance/ which IS checked.
+        - "dogfood/**"
       run: pnpm exec eslint {staged_files}

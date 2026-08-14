@@ -1,0 +1,8 @@
+{
+  "name": "fixture-zero-major",
+  "version": "1.0.0",
+  "dependencies": {
+    "some-lib": "^0.3.0",
+    "another-lib": "^0.0.5"
+  }
+}
