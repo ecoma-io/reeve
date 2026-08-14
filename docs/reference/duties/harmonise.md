@@ -139,6 +139,7 @@ Every input `harmonise/action.yml` declares.
 | `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                   |
 | `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                             |
 | `chunk-chars`     | no       | `0`                         | Maximum character budget per drafting request. When above zero, source and target are split into chunks at Markdown boundaries and each chunk is drafted independently. Zero sends the whole document in one request.                                        |
+| `ignore`          | no       | `true`                      | Whether to honour `<!-- reeve:ignore-* -->` markers. When true, marked sections are preserved as-is and excluded from translation.                                                                                                                           |
 | `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                 |
 
 **`source-language` names the authoritative locale.** The unsuffixed files —
@@ -199,6 +200,28 @@ verbatim without spending a model request. The reassembled draft is scored
 against the full original target, not per-chunk. Zero, the default, sends
 the whole document in one request — the right choice when the document fits
 the model's context window.
+
+**`ignore` preserves sections that must not be translated.** HTML comment
+directives in target files mark sections that `harmonise` should skip:
+
+```markdown
+<!-- reeve:ignore-next-line -->
+
+This line will not be translated or propagated.
+
+<!-- reeve:ignore-start -->
+
+Everything between these markers
+is preserved as-is in every locale.
+<!-- reeve:ignore-end -->
+```
+
+`ignore-next-line` skips the immediately following non-blank line.
+`ignore-start` / `ignore-end` skip everything between them, inclusive.
+An unclosed `ignore-start` runs to the end of the document. An
+`ignore-end` without a matching `ignore-start` is a literal comment — no
+effect. Nesting is not supported. When `ignore` is `false`, all markers
+are treated as ordinary HTML comments.
 
 ## Diff classification
 
