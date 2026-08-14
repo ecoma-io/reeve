@@ -894,13 +894,44 @@ describe("isCapacityError", () => {
     expect(isCapacityError({ status: 429 })).toBe(true);
     expect(isCapacityError({ status: 500 })).toBe(true);
     expect(isCapacityError({ status: 503 })).toBe(true);
+    expect(isCapacityError({ status: 599 })).toBe(true);
   });
 
-  it("is true for a network-timeout-shaped error with no status at all", () => {
-    expect(isCapacityError(new Error("request timed out"))).toBe(true);
-    expect(isCapacityError(new Error("connect ETIMEDOUT"))).toBe(true);
-    expect(isCapacityError(new Error("socket hang up: ECONNRESET"))).toBe(true);
-    expect(isCapacityError(new Error("network error"))).toBe(true);
+  it("is false for statuses outside the 5xx range", () => {
+    expect(isCapacityError({ status: 600 })).toBe(false);
+  });
+
+  it("is true for Node.js system errors matched by .code", () => {
+    expect(isCapacityError(Object.assign(new Error("connect"), { code: "ECONNRESET" }))).toBe(true);
+    expect(isCapacityError(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }))).toBe(true);
+    expect(isCapacityError(Object.assign(new Error("refused"), { code: "ECONNREFUSED" }))).toBe(
+      true,
+    );
+    expect(isCapacityError(Object.assign(new Error("not found"), { code: "ENOTFOUND" }))).toBe(
+      true,
+    );
+    expect(isCapacityError(Object.assign(new Error("unreach"), { code: "ENETUNREACH" }))).toBe(
+      true,
+    );
+    expect(isCapacityError(Object.assign(new Error("dns"), { code: "EAI_AGAIN" }))).toBe(true);
+    expect(
+      isCapacityError(Object.assign(new Error("undici"), { code: "UND_ERR_CONNECT_TIMEOUT" })),
+    ).toBe(true);
+  });
+
+  it("is false for a non-capacity .code", () => {
+    expect(isCapacityError(Object.assign(new Error("oops"), { code: "ENOENT" }))).toBe(false);
+  });
+
+  it("is true for AbortSignal.timeout (DOMException named TimeoutError)", () => {
+    // DOMException may not exist in all Node versions; simulate it.
+    const err = new Error("The operation was aborted");
+    err.name = "TimeoutError";
+    expect(isCapacityError(err)).toBe(true);
+  });
+
+  it("is true for a message containing 'timed out'", () => {
+    expect(isCapacityError(new Error("request timed out after 5000ms"))).toBe(true);
   });
 
   it("is false for auth/configuration statuses — D12's red side", () => {
@@ -909,9 +940,108 @@ describe("isCapacityError", () => {
     expect(isCapacityError({ status: 404 })).toBe(false);
   });
 
-  it("is false for an ordinary error with no capacity-shaped message", () => {
+  it("is false for an ordinary error with no capacity-shaped signal", () => {
     expect(isCapacityError(new Error("bad request"))).toBe(false);
     expect(isCapacityError(null)).toBe(false);
+  });
+
+  it("does not false-positive on 'timeout' without 'out' — tightening from old substring", () => {
+    expect(isCapacityError(new Error("timeout is not a function"))).toBe(false);
+  });
+
+  it("does not false-positive on 'network' in message — tightening from old substring", () => {
+    expect(isCapacityError(new Error("network configuration error"))).toBe(false);
+  });
+
+  it("does not match capacity-shaped words in message without .code", () => {
+    // ECONNRESET in the message alone is not capacity — must use the .code property.
+    expect(isCapacityError(new Error("socket hang up: ECONNRESET"))).toBe(false);
+  });
+
+  it("is false for status 430 — 429 is exact, not a range", () => {
+    // 430 is in the 4xx range but is not 429, and this duty treats 429 as the
+    // single rate-limit status rather than treating every 4xx as weather.
+    expect(isCapacityError({ status: 430 })).toBe(false);
+  });
+
+  it("is false for status 499 — below the 5xx range", () => {
+    expect(isCapacityError({ status: 499 })).toBe(false);
+  });
+
+  it("checks status before code — an object with both matches on status first", () => {
+    // A response that carries both a 429 status and an ECONNRESET code is
+    // capacity via the status branch, without falling through to code.
+    const err = Object.assign(new Error("rate limited"), {
+      status: 429,
+      code: "ECONNRESET",
+    });
+    expect(isCapacityError(err)).toBe(true);
+  });
+
+  it("is true for TimeoutError even when the message does not say 'timed out'", () => {
+    // Branch 3 matches on name alone — the message is irrelevant once the
+    // name is "TimeoutError".
+    const err = new Error("The operation was aborted");
+    err.name = "TimeoutError";
+    expect(isCapacityError(err)).toBe(true);
+  });
+
+  it("falls through to the message branch for an Error whose name is not TimeoutError", () => {
+    // A plain Error (name "Error") whose message says "timed out" is caught
+    // by the fallback branch, not the TimeoutError branch.
+    expect(isCapacityError(new Error("request timed out"))).toBe(true);
+  });
+
+  it("is false for a string status — typeof must be number", () => {
+    // A response with status: "429" as a string is not the same as 429 the
+    // number. The status branch checks `status === 429` (strict equality) and
+    // `typeof status === "number"`, so a string is excluded.
+    expect(isCapacityError({ status: "429" })).toBe(false);
+    expect(isCapacityError({ status: "500" })).toBe(false);
+  });
+
+  it("is false for status 0 — no status is not a capacity signal", () => {
+    // HTTP status 0 means no response at all (e.g. CORS). It is not capacity.
+    expect(isCapacityError({ status: 0 })).toBe(false);
+  });
+
+  it("is false when .code is undefined — no code is not capacity", () => {
+    expect(isCapacityError(Object.assign(new Error("oops"), { code: undefined }))).toBe(false);
+  });
+
+  it("is false for an empty string as the direct input — String('') has no 'timed out'", () => {
+    expect(isCapacityError("")).toBe(false);
+  });
+
+  it("is false for undefined as the direct input — String(undefined) is 'undefined'", () => {
+    expect(isCapacityError(undefined)).toBe(false);
+  });
+
+  it("is false for false as the direct input — String(false) is 'false'", () => {
+    expect(isCapacityError(false)).toBe(false);
+  });
+
+  it("is true for a bare string 'timed out' — String path matches the fallback", () => {
+    // String("timed out").toLowerCase().includes("timed out") → true.
+    // This is the branch-4 fallback: a non-Error, non-object value that
+    // happens to describe a timeout in its string representation.
+    expect(isCapacityError("timed out")).toBe(true);
+  });
+
+  it("is false for a non-capacity .code with trailing space — exact match only", () => {
+    // "ECONNRESET " (trailing space) is not "ECONNRESET". The exact-match
+    // guard catches typos and whitespace that substring matching would not.
+    expect(isCapacityError(Object.assign(new Error("oops"), { code: "ECONNRESET " }))).toBe(false);
+  });
+
+  it("is false for a lowercase .code — exact match is case-sensitive", () => {
+    expect(isCapacityError(Object.assign(new Error("oops"), { code: "econnreset" }))).toBe(false);
+  });
+
+  it("is false for a numeric .code — only string codes match", () => {
+    // Node.js system errors always carry string codes. A numeric code is not
+    // what the guard checks, and `1 !== "ECONNRESET"` is true for all codes.
+    expect(isCapacityError(Object.assign(new Error("oops"), { code: 1 }))).toBe(false);
   });
 });
 

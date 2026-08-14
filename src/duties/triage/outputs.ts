@@ -36,6 +36,7 @@ interface OutputValues {
   readonly "screened-out": string;
   readonly applied: string;
   readonly starved: string;
+  readonly "budget-exhausted": string;
   readonly processed: string;
   readonly skipped: string;
   readonly remaining: string;
@@ -43,7 +44,7 @@ interface OutputValues {
 }
 
 /**
- * The twelve keys `report` and `reportRecordRun` both answer in full, named
+ * The thirteen keys `report` and `reportRecordRun` both answer in full, named
  * once here rather than in each — so the two can no longer drift onto
  * different keys as one gains a key the other does not.
  */
@@ -86,6 +87,7 @@ export function report(
     // keys whether or not it did anything with them.
     applied: dryRun ? "{}" : JSON.stringify(done),
     starved: String(rosterStarved),
+    "budget-exhausted": "false",
     // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
     // outputs, and a single-thread run answers all three honestly at zero rather
     // than leaving a workflow that reads them on every run reading an empty
@@ -110,6 +112,7 @@ export function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): voi
   core.setOutput("skipped", String(bulk.skipped));
   core.setOutput("remaining", String(remainingOf(bulk)));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("budget-exhausted", "false");
   // `true` only for bulk migration — `record` composed with `sweep`, decided
   // once for the whole run and carried on the accumulator. An ordinary
   // triaging sweep never records, the same as it always did.
@@ -132,6 +135,7 @@ export function reportRecordRun(outcome: RecordOutcome, rosterStarved: boolean):
     "screened-out": "",
     applied: JSON.stringify(NOTHING_DONE),
     starved: String(rosterStarved),
+    "budget-exhausted": "false",
     processed: "0",
     skipped: "0",
     remaining: "0",

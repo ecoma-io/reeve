@@ -39,7 +39,7 @@ import { isCapacityError, readBlob, type Location, readContentsFile } from "../.
 import {
   bounded,
   counted,
-  readCore,
+  readShared,
   whole,
   type ApiKeySpec,
   type EndpointSpec,
@@ -51,11 +51,13 @@ import {
   createWeather,
   parseSeats,
   settleAuth,
+  starved,
   type Names,
   type Provider,
   type Weather,
 } from "../../core/provider.js";
 import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import { newAccumulator, remainingOf, reportNoSweep } from "../../core/sweep.js";
 import {
   dutyLanguages,
   openAuthority,
@@ -116,14 +118,18 @@ export interface Settings {
   readonly temperature: number | undefined;
   readonly chunkChars: number;
   readonly ignore: boolean;
+  readonly sweep: boolean;
+  readonly limit: number | null;
+  readonly number: number | null;
+  readonly since: Date | null;
 }
 
 function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permitted"> {
-  const coreInputs = readCore();
+  const shared = readShared();
   const panel = parseSeats(core.getInput("judge-models"));
 
   return {
-    ...coreInputs,
+    ...shared,
     warrant: core.getInput("warrant", { required: true }),
     apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
@@ -160,7 +166,7 @@ export async function run(): Promise<void> {
   let weather = createWeather();
   let settings: Settings | null = null;
   let authority: Authority | null = null;
-  const groupResults: GroupResult[] = [];
+  const acc = newAccumulator<GroupResult>();
   let statePr: number | null = null;
 
   try {
@@ -270,6 +276,7 @@ export async function run(): Promise<void> {
     // Discover document groups
     const allFiles = await listMarkdownFiles(api, context.repo);
     const groups = discoverGroups(allFiles, sourceLanguage, targetLanguages, settings.paths);
+    acc.candidates = groups.length;
 
     if (groups.length === 0) {
       core.info("harmonise: no document groups found with locale variants.");
@@ -291,8 +298,29 @@ export async function run(): Promise<void> {
 
     // Process each document group
     for (const group of groups) {
-      // Checked before spending the requests a group is about to cost — so a
-      // budget already at its ceiling does not start a group it cannot finish.
+      // Starvation check: every model in the roster has failed on capacity.
+      // Stop before spending requests that cannot succeed.
+      if (starved(settings.models, weather)) {
+        acc.starvedRun = true;
+        core.warning(
+          "harmonise: the roster ran out of capacity — remaining document groups were not attempted. " +
+            "What was already drafted still publishes.",
+        );
+        break;
+      }
+
+      // Limit check: a sweep cap stops the walk before the next group.
+      if (settings.limit !== null && acc.results.length >= settings.limit) {
+        core.info(
+          `harmonise: sweep limit (${String(settings.limit)}) reached — ` +
+            "remaining document groups were not attempted this run.",
+        );
+        break;
+      }
+
+      // Budget check: checked before spending the requests a group is about to
+      // cost — so a budget already at its ceiling does not start a group it
+      // cannot finish.
       if (budgetExhausted(settings, meter, budget)) {
         core.warning(
           "`max-requests` was reached, so remaining document groups were not attempted this run. " +
@@ -317,7 +345,7 @@ export async function run(): Promise<void> {
         budget,
         weather,
       );
-      groupResults.push(result);
+      acc.results.push(result);
     }
 
     // Write updated state
@@ -396,17 +424,17 @@ export async function run(): Promise<void> {
       core.setOutput(
         "classified",
         JSON.stringify(
-          groupResults.filter((r) => r.classification !== "none").map((r) => r.group.id),
+          acc.results.filter((r) => r.classification !== "none").map((r) => r.group.id),
         ),
       );
       core.setOutput(
         "synced",
-        JSON.stringify(groupResults.filter((r) => r.synced.length > 0).map((r) => r.group.id)),
+        JSON.stringify(acc.results.filter((r) => r.synced.length > 0).map((r) => r.group.id)),
       );
       core.setOutput(
         "conflicts",
         JSON.stringify(
-          groupResults
+          acc.results
             .filter((r) => r.conflicts.length > 0)
             .map((r) => ({ group: r.group.id, locales: r.conflicts })),
         ),
@@ -414,7 +442,7 @@ export async function run(): Promise<void> {
       core.setOutput(
         "skipped",
         JSON.stringify(
-          groupResults
+          acc.results
             .filter(
               (r) =>
                 r.classification === "none" ||
@@ -427,10 +455,20 @@ export async function run(): Promise<void> {
       core.setOutput("budget-exhausted", String(budgetSpent));
       core.setOutput("state-pr", statePr !== null ? String(statePr) : "");
 
+      // Sweep outputs: `processed` and `remaining` answer the question "how
+      // much of the backlog did this run reach?" — honestly at zero when
+      // `sweep` is off, and from the accumulator when it is on.
+      if (settings.sweep) {
+        core.setOutput("processed", String(acc.results.length));
+        core.setOutput("remaining", String(remainingOf(acc)));
+      } else {
+        reportNoSweep();
+      }
+
       await writeRunSummary(
         summarize({
           dryRun: settings.dryRun,
-          results: groupResults,
+          results: acc.results,
           warrant: settings.warrant,
           implicit: authority.implicit,
           ungranted: authority.warrant.unnamed("harmonise") ? notGranted(authority.warrant) : null,

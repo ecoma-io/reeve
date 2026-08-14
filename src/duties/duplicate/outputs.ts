@@ -34,21 +34,26 @@ export function report(outcome: Outcome, done: Done, rosterStarved: boolean): vo
   core.setOutput("language", outcome.language ?? "");
   core.setOutput("commented", String(done.commented));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("skipped", "0");
+  core.setOutput("budget-exhausted", "false");
   reportNoSweep();
 }
 
 /**
- * `processed` and `remaining` — a sweep's own outputs. `starved` is shared
- * vocabulary between the two modes, so it keeps the same name here. The
- * single-thread outputs are left unset on a sweep run, the same choice
- * `triage/main.ts`'s own `reportSweep` makes: none of them name one thread,
- * and a workflow reading `duplicate-of` off a sweep was never going to find
- * one thread's answer there either way.
+ * `processed`, `remaining`, `skipped` and `budget-exhausted` — a sweep's own
+ * outputs. `starved` is shared vocabulary between the two modes, so it keeps
+ * the same name here. `skipped` is always zero — this duty has no idempotent
+ * skip (see `runSweep`), so every thread the walk reaches is processed.
+ * `budget-exhausted` is always false — this duty has no request budget.
+ * Both are reported anyway so a workflow reading them across duties finds
+ * a value rather than an unset key.
  */
 export function reportSweep(bulk: SweepAccumulator, rosterStarved: boolean): void {
   core.setOutput("processed", String(bulk.results.length));
+  core.setOutput("skipped", "0");
   core.setOutput("remaining", String(remainingOf(bulk)));
   core.setOutput("starved", String(rosterStarved));
+  core.setOutput("budget-exhausted", "false");
 }
 
 export function page(

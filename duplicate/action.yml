@@ -344,6 +344,20 @@ outputs:
       producing it, because that is a quota worth raising rather than a run
       worth retrying.
 
+  skipped:
+    description: >-
+      How many issues a sweep left alone at no cost beyond the listing
+      itself. Always `0` for this duty, which has no idempotent skip — every
+      thread the walk reaches is processed. The output exists so a workflow
+      reading it across duties finds a value rather than an unset key.
+
+  budget-exhausted:
+    description: >-
+      `true` when this run's own `max-requests` ceiling genuinely turned work
+      away. Always `false` for this duty, which has no request budget — the
+      output exists so a workflow reading it across duties finds a value rather
+      than an unset key.
+
   processed:
     description: >-
       How many issues a sweep actually processed this run — decided about,

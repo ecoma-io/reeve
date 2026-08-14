@@ -1,6 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import * as core from "@actions/core";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureBranch, publishState, publishStatePr, type StateBranchApi } from "./state-branch.js";
+
+// `@actions/core` is stubbed so the capacity-error catch blocks' `core.warning`
+// calls can be asserted against without a real Action environment.
+vi.mock("@actions/core", () => ({
+  setOutput: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+}));
 
 const AT = { owner: "ecoma-io", repo: "reeve" };
 
@@ -15,6 +24,10 @@ function notFound(): Promise<never> {
 // ---------------------------------------------------------------------------
 // ensureBranch
 // ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("ensureBranch", () => {
   /**
@@ -155,7 +168,8 @@ describe("ensureBranch", () => {
     };
 
     const result = await ensureBranch(api, AT, "reeve/provenance");
-    expect(result.defaultBranch).toBe("main");
+    expect(result).not.toBeNull();
+    expect(result!.defaultBranch).toBe("main");
   });
 
   it("lets a non-404 error from getRef propagate, rather than treating it as missing", async () => {
@@ -178,6 +192,143 @@ describe("ensureBranch", () => {
     // The first getRef call (for the default branch) will also 403 — but that
     // is the one that should propagate, not the branch-existence check.
     await expect(ensureBranch(api, AT, "reeve/provenance")).rejects.toThrow("Forbidden");
+  });
+
+  it("returns null when repos.get hits a capacity error (429)", async () => {
+    const reposGet = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("rate limited"), { status: 429 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not ensure branch"));
+  });
+
+  it("returns null when git.getRef (default branch) hits a capacity error (503)", async () => {
+    const gitGetRef = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("service unavailable"), { status: 503 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: vi.fn(() => Promise.resolve({ data: { default_branch: "main" } })),
+          getContent: vi.fn(),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: { getRef: gitGetRef, createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not ensure branch"));
+  });
+
+  it("returns null when git.createRef hits a capacity error", async () => {
+    const createRef = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 500 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: vi.fn(() => Promise.resolve({ data: { default_branch: "main" } })),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: {
+          getRef: vi.fn((params: { ref: string }) => {
+            if (params.ref === "heads/main") {
+              return Promise.resolve({ data: { object: { sha: "base-sha" } } });
+            }
+            return notFound();
+          }),
+          createRef,
+          updateRef: vi.fn(),
+        },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(createRef).toHaveBeenCalled();
+  });
+
+  it("returns null when git.updateRef (branch reset) hits a capacity error", async () => {
+    const updateRef = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 502 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: vi.fn(() => Promise.resolve({ data: { default_branch: "main" } })),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: {
+          getRef: vi.fn((params: { ref: string }) => {
+            if (params.ref === "heads/main" || params.ref === "heads/reeve/provenance") {
+              return Promise.resolve({ data: { object: { sha: "sha" } } });
+            }
+            return notFound();
+          }),
+          createRef: vi.fn(),
+          updateRef,
+        },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [] })),
+          create: vi.fn(),
+          update: vi.fn(),
+        },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(updateRef).toHaveBeenCalled();
+  });
+
+  it("returns null when pulls.list hits a capacity error", async () => {
+    const pullsList = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 500 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: vi.fn(() => Promise.resolve({ data: { default_branch: "main" } })),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: {
+          getRef: vi.fn((params: { ref: string }) => {
+            if (params.ref === "heads/main" || params.ref === "heads/reeve/provenance") {
+              return Promise.resolve({ data: { object: { sha: "sha" } } });
+            }
+            return notFound();
+          }),
+          createRef: vi.fn(),
+          updateRef: vi.fn(),
+        },
+        pulls: { list: pullsList, create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(pullsList).toHaveBeenCalled();
   });
 });
 
@@ -473,6 +624,121 @@ describe("publishState", () => {
       "Forbidden",
     );
   });
+
+  it("returns null when ensureBranch hits a capacity error", async () => {
+    const reposGet = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("rate limited"), { status: 429 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+    const files = [{ path: "state.json", content: "{}", message: "update" }];
+
+    const result = await publishState(api, AT, BRANCH, files, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not ensure branch"));
+  });
+
+  it("returns null when writing a file hits a capacity error", async () => {
+    const createOrUpdateFileContents = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 500 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents,
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: vi.fn(),
+          updateRef: vi.fn(),
+        },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [] })),
+          create: vi.fn(),
+          update: vi.fn(),
+        },
+      },
+    };
+    const files = [{ path: "state.json", content: "{}", message: "update" }];
+
+    const result = await publishState(api, AT, BRANCH, files, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(createOrUpdateFileContents).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish"));
+  });
+
+  it("returns null when PR creation hits a capacity error", async () => {
+    const pullsCreate = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 502 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents: vi.fn(() => Promise.resolve(undefined)),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: vi.fn(),
+          updateRef: vi.fn(),
+        },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [] })),
+          create: pullsCreate,
+          update: vi.fn(),
+        },
+      },
+    };
+    const files = [{ path: "state.json", content: "{}", message: "update" }];
+
+    const result = await publishState(api, AT, BRANCH, files, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(pullsCreate).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish"));
+  });
+
+  it("returns null when PR update hits a capacity error", async () => {
+    const pullsUpdate = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 503 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents: vi.fn(() => Promise.resolve(undefined)),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: vi.fn(),
+          updateRef: vi.fn(),
+        },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [{ number: 42, body: "" }] })),
+          create: vi.fn(),
+          update: pullsUpdate,
+        },
+      },
+    };
+    const files = [{ path: "state.json", content: "{}", message: "update" }];
+
+    const result = await publishState(api, AT, BRANCH, files, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(pullsUpdate).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish"));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -594,5 +860,142 @@ describe("publishStatePr", () => {
     await publishStatePr(api, AT, BRANCH, "title", "body", false);
 
     expect(createdPrs[0]?.base).toBe("develop");
+  });
+
+  it("returns null when repos.get hits a capacity error", async () => {
+    const reposGet = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("rate limited"), { status: 429 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await publishStatePr(api, AT, BRANCH, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not open PR"));
+  });
+
+  it("returns null when pulls.list hits a capacity error", async () => {
+    const pullsList = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 500 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: pullsList, create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await publishStatePr(api, AT, BRANCH, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(pullsList).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not open PR"));
+  });
+
+  it("returns null when pulls.create hits a capacity error", async () => {
+    const pullsCreate = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 502 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [] })),
+          create: pullsCreate,
+          update: vi.fn(),
+        },
+      },
+    };
+
+    const result = await publishStatePr(api, AT, BRANCH, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(pullsCreate).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not open PR"));
+  });
+
+  it("returns null when pulls.update hits a capacity error", async () => {
+    const pullsUpdate = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("server error"), { status: 503 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [{ number: 42, body: "" }] })),
+          create: vi.fn(),
+          update: pullsUpdate,
+        },
+      },
+    };
+
+    const result = await publishStatePr(api, AT, BRANCH, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(pullsUpdate).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not open PR"));
+  });
+
+  it("lets a non-capacity error from repos.get propagate rather than returning null", async () => {
+    const reposGet = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("Forbidden"), { status: 403 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    await expect(publishStatePr(api, AT, BRANCH, "title", "body", false)).rejects.toThrow(
+      "Forbidden",
+    );
+  });
+
+  it("lets a non-capacity error from pulls.create propagate rather than returning null", async () => {
+    const pullsCreate = vi.fn(() =>
+      Promise.reject(Object.assign(new Error("Forbidden"), { status: 403 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(),
+          createOrUpdateFileContents: vi.fn(),
+        },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [] })),
+          create: pullsCreate,
+          update: vi.fn(),
+        },
+      },
+    };
+
+    await expect(publishStatePr(api, AT, BRANCH, "title", "body", false)).rejects.toThrow(
+      "Forbidden",
+    );
   });
 });

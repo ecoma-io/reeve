@@ -65,6 +65,10 @@ export function newAccumulator<Row>(): SweepAccumulator<Row> {
  * would read an empty string on this one and have to guess whether that meant
  * zero or meant broken. Answering honestly costs two lines and removes the
  * guess.
+ *
+ * Only these two: `skipped` and `budget-exhausted` have duty-specific
+ * meanings (a JSON array vs a count, a real ceiling vs always-false) and are
+ * the caller's responsibility. `reportNoSweep` must not overwrite them.
  */
 export function reportNoSweep(): void {
   core.setOutput("processed", "0");

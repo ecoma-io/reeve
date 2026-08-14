@@ -115,6 +115,8 @@ describe("report", () => {
     expect(core.setOutput).toHaveBeenCalledWith("language", "en");
     expect(core.setOutput).toHaveBeenCalledWith("commented", "true");
     expect(core.setOutput).toHaveBeenCalledWith("starved", "false");
+    expect(core.setOutput).toHaveBeenCalledWith("skipped", "0");
+    expect(core.setOutput).toHaveBeenCalledWith("budget-exhausted", "false");
     expect(core.setOutput).toHaveBeenCalledWith("processed", "0");
     expect(core.setOutput).toHaveBeenCalledWith("remaining", "0");
   });
@@ -146,6 +148,21 @@ describe("reportSweep", () => {
     expect(core.setOutput).toHaveBeenCalledWith("remaining", "3");
     expect(core.setOutput).toHaveBeenCalledWith("starved", "true");
     expect(core.setOutput).not.toHaveBeenCalledWith("duplicate-of", expect.anything());
+  });
+
+  it("always reports budget-exhausted as false and skipped as zero — duplicate has no request budget or idempotent skip", () => {
+    const acc: SweepAccumulator = {
+      results: [{ number: 1, outcome: "no duplicate" }],
+      skipped: 0,
+      starvedRun: true,
+      candidates: 5,
+      ungranted: null,
+    };
+
+    reportSweep(acc, true);
+
+    expect(core.setOutput).toHaveBeenCalledWith("budget-exhausted", "false");
+    expect(core.setOutput).toHaveBeenCalledWith("skipped", "0");
   });
 });
 

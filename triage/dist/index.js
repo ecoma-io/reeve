@@ -31744,10 +31744,17 @@ function isMissing(error2) {
 function isCapacityError(error2) {
   if (typeof error2 === "object" && error2 !== null && "status" in error2) {
     const status = error2.status;
-    if (status === 429 || typeof status === "number" && status >= 500) return true;
+    if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
+      return true;
   }
+  if (typeof error2 === "object" && error2 !== null && "code" in error2) {
+    const code = error2.code;
+    if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "UND_ERR_CONNECT_TIMEOUT")
+      return true;
+  }
+  if (error2 instanceof Error && error2.name === "TimeoutError") return true;
   const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
+  return message.includes("timed out");
 }
 async function listCorrectionFiles(api, at, path, ref) {
   let data;
@@ -35126,94 +35133,114 @@ ${body}`);
 
 // src/core/state-branch.ts
 async function ensureBranch(api, at, branchName) {
-  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
-  const defaultBranch = repo.default_branch ?? "main";
-  const { data: baseRef } = await api.rest.git.getRef({
-    owner: at.owner,
-    repo: at.repo,
-    ref: `heads/${defaultBranch}`
-  });
-  const baseSha = baseRef.object.sha;
-  let branchExists = true;
   try {
-    await api.rest.git.getRef({
+    const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+    const defaultBranch = repo.default_branch ?? "main";
+    const { data: baseRef } = await api.rest.git.getRef({
       owner: at.owner,
       repo: at.repo,
-      ref: `heads/${branchName}`
+      ref: `heads/${defaultBranch}`
     });
-  } catch (error2) {
-    if (isMissing(error2)) {
-      branchExists = false;
-    } else {
-      throw error2;
-    }
-  }
-  if (!branchExists) {
-    await api.rest.git.createRef({
-      owner: at.owner,
-      repo: at.repo,
-      ref: `refs/heads/${branchName}`,
-      sha: baseSha
-    });
-    info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
-  } else {
-    const { data: prs } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1
-    });
-    if (prs.length === 0) {
-      await api.rest.git.updateRef({
+    const baseSha = baseRef.object.sha;
+    let branchExists = true;
+    try {
+      await api.rest.git.getRef({
         owner: at.owner,
         repo: at.repo,
-        ref: `heads/${branchName}`,
-        sha: baseSha,
-        force: true
+        ref: `heads/${branchName}`
       });
-      info(`state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`);
+    } catch (error2) {
+      if (isMissing(error2)) {
+        branchExists = false;
+      } else {
+        throw error2;
+      }
     }
+    if (!branchExists) {
+      await api.rest.git.createRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `refs/heads/${branchName}`,
+        sha: baseSha
+      });
+      info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
+    } else {
+      const { data: prs } = await api.rest.pulls.list({
+        owner: at.owner,
+        repo: at.repo,
+        state: "open",
+        head: `${at.owner}:${branchName}`,
+        per_page: 1
+      });
+      if (prs.length === 0) {
+        await api.rest.git.updateRef({
+          owner: at.owner,
+          repo: at.repo,
+          ref: `heads/${branchName}`,
+          sha: baseSha,
+          force: true
+        });
+        info(
+          `state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`
+        );
+      }
+    }
+    return { defaultBranch, baseSha };
+  } catch (error2) {
+    if (isCapacityError(error2)) {
+      warning(
+        `state-branch: could not ensure branch \`${branchName}\` \u2014 capacity error. State may be stale.`
+      );
+      return null;
+    }
+    throw error2;
   }
-  return { defaultBranch, baseSha };
 }
 async function publishStatePr(api, at, branchName, prTitle, prBody, dryRun) {
   if (dryRun) {
     info(`dry-run: would open PR on \`${branchName}\``);
     return null;
   }
-  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
-  const defaultBranch = repo.default_branch ?? "main";
-  const { data: existing } = await api.rest.pulls.list({
-    owner: at.owner,
-    repo: at.repo,
-    state: "open",
-    head: `${at.owner}:${branchName}`,
-    per_page: 1
-  });
-  const existingPr = existing[0];
-  if (existingPr !== void 0) {
-    await api.rest.pulls.update({
+  try {
+    const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+    const defaultBranch = repo.default_branch ?? "main";
+    const { data: existing } = await api.rest.pulls.list({
       owner: at.owner,
       repo: at.repo,
-      pull_number: existingPr.number,
-      title: prTitle,
-      body: prBody
+      state: "open",
+      head: `${at.owner}:${branchName}`,
+      per_page: 1
     });
-    info(`state-branch: updated PR #${String(existingPr.number)}`);
-    return { pr: existingPr.number };
+    const existingPr = existing[0];
+    if (existingPr !== void 0) {
+      await api.rest.pulls.update({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: existingPr.number,
+        title: prTitle,
+        body: prBody
+      });
+      info(`state-branch: updated PR #${String(existingPr.number)}`);
+      return { pr: existingPr.number };
+    }
+    const { data: pr } = await api.rest.pulls.create({
+      owner: at.owner,
+      repo: at.repo,
+      title: prTitle,
+      head: branchName,
+      base: defaultBranch,
+      body: prBody,
+      draft: true
+    });
+    info(`state-branch: opened PR #${String(pr.number)}`);
+    return { pr: pr.number };
+  } catch (error2) {
+    if (isCapacityError(error2)) {
+      warning(`state-branch: could not open PR on \`${branchName}\` \u2014 capacity error.`);
+      return null;
+    }
+    throw error2;
   }
-  const { data: pr } = await api.rest.pulls.create({
-    owner: at.owner,
-    repo: at.repo,
-    title: prTitle,
-    head: branchName,
-    base: defaultBranch,
-    body: prBody,
-    draft: true
-  });
-  info(`state-branch: opened PR #${String(pr.number)}`);
-  return { pr: pr.number };
 }
 
 // src/core/summary.ts
@@ -36062,6 +36089,7 @@ function report(outcome, done, dryRun, rosterStarved) {
     // keys whether or not it did anything with them.
     applied: dryRun ? "{}" : JSON.stringify(done),
     starved: String(rosterStarved),
+    "budget-exhausted": "false",
     // `0`, not unset: `processed`/`skipped`/`remaining` are a sweep's own
     // outputs, and a single-thread run answers all three honestly at zero rather
     // than leaving a workflow that reads them on every run reading an empty
@@ -36080,6 +36108,7 @@ function reportSweep(bulk, rosterStarved) {
   setOutput("skipped", String(bulk.skipped));
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
+  setOutput("budget-exhausted", "false");
   setOutput("recorded", String(bulk.recording));
 }
 function reportRecordRun(outcome, rosterStarved) {
@@ -36092,6 +36121,7 @@ function reportRecordRun(outcome, rosterStarved) {
     "screened-out": "",
     applied: JSON.stringify(NOTHING_DONE),
     starved: String(rosterStarved),
+    "budget-exhausted": "false",
     processed: "0",
     skipped: "0",
     remaining: "0",

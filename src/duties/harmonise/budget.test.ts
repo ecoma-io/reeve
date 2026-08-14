@@ -35,6 +35,10 @@ function settingsWith(maxRequests: number | null): Settings {
     temperature: undefined,
     chunkChars: 0,
     ignore: true,
+    sweep: false,
+    limit: null,
+    number: null,
+    since: null,
   };
 }
 

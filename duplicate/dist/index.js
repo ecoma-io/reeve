@@ -35031,12 +35031,16 @@ function report(outcome, done, rosterStarved) {
   setOutput("language", outcome.language ?? "");
   setOutput("commented", String(done.commented));
   setOutput("starved", String(rosterStarved));
+  setOutput("skipped", "0");
+  setOutput("budget-exhausted", "false");
   reportNoSweep();
 }
 function reportSweep(bulk, rosterStarved) {
   setOutput("processed", String(bulk.results.length));
+  setOutput("skipped", "0");
   setOutput("remaining", String(remainingOf(bulk)));
   setOutput("starved", String(rosterStarved));
+  setOutput("budget-exhausted", "false");
 }
 function page(settings, thread, outcome, done, posted, spent) {
   return summarize({

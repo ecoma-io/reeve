@@ -487,6 +487,8 @@ describe("the action", () => {
       language: "English",
       commented: "false",
       starved: "false",
+      skipped: "0",
+      "budget-exhausted": "false",
       processed: "0",
       remaining: "0",
     });

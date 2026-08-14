@@ -31604,10 +31604,17 @@ function isMissing(error2) {
 function isCapacityError(error2) {
   if (typeof error2 === "object" && error2 !== null && "status" in error2) {
     const status = error2.status;
-    if (status === 429 || typeof status === "number" && status >= 500) return true;
+    if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
+      return true;
   }
+  if (typeof error2 === "object" && error2 !== null && "code" in error2) {
+    const code = error2.code;
+    if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "UND_ERR_CONNECT_TIMEOUT")
+      return true;
+  }
+  if (error2 instanceof Error && error2.name === "TimeoutError") return true;
   const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message.includes("timeout") || message.includes("timed out") || message.includes("network") || message.includes("econnreset") || message.includes("etimedout");
+  return message.includes("timed out");
 }
 async function readContentsFile(api, at, path, ref) {
   let data;
@@ -32931,6 +32938,22 @@ function readCore() {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
+function readShared() {
+  const sweep = getBooleanInput("sweep");
+  const configuredNumber = getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
+    );
+  }
+  return {
+    ...readCore(),
+    number: sweep ? null : threadNumber(),
+    sweep,
+    since: parseSince(getInput("since")),
+    limit: bounded("limit", getInput("limit"))
+  };
+}
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
   return parseList(raw).map((entry) => {
@@ -33024,6 +33047,40 @@ function parseTemperature(raw) {
     throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
   }
   return value;
+}
+function parseSince(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
+  }
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
+  );
+}
+function threadNumber() {
+  const configured = getInput("number");
+  if (configured.length > 0) return whole("number", configured);
+  const triggered = context2.issue.number;
+  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
+    throw new Error(
+      // Read from the environment rather than from `context.eventName`, which
+      // is typed as always present and is not: it is this variable.
+      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
+    );
+  }
+  return triggered;
 }
 function whole(name, raw) {
   const value = Number(raw);
@@ -33162,6 +33219,18 @@ function cost(spent, name) {
     );
   }
   return lines.join("\n");
+}
+
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
 
 // src/duties/harmonise/budget.ts
@@ -34532,56 +34601,68 @@ ${MARKER.render(fp)}`;
 
 // src/core/state-branch.ts
 async function ensureBranch(api, at, branchName) {
-  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
-  const defaultBranch = repo.default_branch ?? "main";
-  const { data: baseRef } = await api.rest.git.getRef({
-    owner: at.owner,
-    repo: at.repo,
-    ref: `heads/${defaultBranch}`
-  });
-  const baseSha = baseRef.object.sha;
-  let branchExists = true;
   try {
-    await api.rest.git.getRef({
+    const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+    const defaultBranch = repo.default_branch ?? "main";
+    const { data: baseRef } = await api.rest.git.getRef({
       owner: at.owner,
       repo: at.repo,
-      ref: `heads/${branchName}`
+      ref: `heads/${defaultBranch}`
     });
-  } catch (error2) {
-    if (isMissing(error2)) {
-      branchExists = false;
-    } else {
-      throw error2;
-    }
-  }
-  if (!branchExists) {
-    await api.rest.git.createRef({
-      owner: at.owner,
-      repo: at.repo,
-      ref: `refs/heads/${branchName}`,
-      sha: baseSha
-    });
-    info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
-  } else {
-    const { data: prs } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1
-    });
-    if (prs.length === 0) {
-      await api.rest.git.updateRef({
+    const baseSha = baseRef.object.sha;
+    let branchExists = true;
+    try {
+      await api.rest.git.getRef({
         owner: at.owner,
         repo: at.repo,
-        ref: `heads/${branchName}`,
-        sha: baseSha,
-        force: true
+        ref: `heads/${branchName}`
       });
-      info(`state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`);
+    } catch (error2) {
+      if (isMissing(error2)) {
+        branchExists = false;
+      } else {
+        throw error2;
+      }
     }
+    if (!branchExists) {
+      await api.rest.git.createRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `refs/heads/${branchName}`,
+        sha: baseSha
+      });
+      info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
+    } else {
+      const { data: prs } = await api.rest.pulls.list({
+        owner: at.owner,
+        repo: at.repo,
+        state: "open",
+        head: `${at.owner}:${branchName}`,
+        per_page: 1
+      });
+      if (prs.length === 0) {
+        await api.rest.git.updateRef({
+          owner: at.owner,
+          repo: at.repo,
+          ref: `heads/${branchName}`,
+          sha: baseSha,
+          force: true
+        });
+        info(
+          `state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`
+        );
+      }
+    }
+    return { defaultBranch, baseSha };
+  } catch (error2) {
+    if (isCapacityError(error2)) {
+      warning(
+        `state-branch: could not ensure branch \`${branchName}\` \u2014 capacity error. State may be stale.`
+      );
+      return null;
+    }
+    throw error2;
   }
-  return { defaultBranch, baseSha };
 }
 async function publishState(api, at, branchName, files, prTitle, prBody, dryRun) {
   if (files.length === 0) return null;
@@ -34591,63 +34672,75 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
     );
     return null;
   }
-  const { defaultBranch } = await ensureBranch(api, at, branchName);
-  for (const file of files) {
-    let fileSha;
-    try {
-      const { data } = await api.rest.repos.getContent({
+  try {
+    const branch = await ensureBranch(api, at, branchName);
+    if (branch === null) return null;
+    const { defaultBranch } = branch;
+    for (const file of files) {
+      let fileSha;
+      try {
+        const { data } = await api.rest.repos.getContent({
+          owner: at.owner,
+          repo: at.repo,
+          path: file.path,
+          ref: branchName
+        });
+        if (!Array.isArray(data) && typeof data.sha === "string") {
+          fileSha = data.sha;
+        }
+      } catch (error2) {
+        if (!isMissing(error2)) throw error2;
+      }
+      await api.rest.repos.createOrUpdateFileContents({
         owner: at.owner,
         repo: at.repo,
         path: file.path,
-        ref: branchName
+        message: file.message,
+        content: Buffer.from(file.content, "utf8").toString("base64"),
+        branch: branchName,
+        ...fileSha !== void 0 ? { sha: fileSha } : {}
       });
-      if (!Array.isArray(data) && typeof data.sha === "string") {
-        fileSha = data.sha;
-      }
-    } catch (error2) {
-      if (!isMissing(error2)) throw error2;
+      info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
-    await api.rest.repos.createOrUpdateFileContents({
+    const { data: existing } = await api.rest.pulls.list({
       owner: at.owner,
       repo: at.repo,
-      path: file.path,
-      message: file.message,
-      content: Buffer.from(file.content, "utf8").toString("base64"),
-      branch: branchName,
-      ...fileSha !== void 0 ? { sha: fileSha } : {}
+      state: "open",
+      head: `${at.owner}:${branchName}`,
+      per_page: 1
     });
-    info(`state-branch: wrote ${file.path} on \`${branchName}\``);
-  }
-  const { data: existing } = await api.rest.pulls.list({
-    owner: at.owner,
-    repo: at.repo,
-    state: "open",
-    head: `${at.owner}:${branchName}`,
-    per_page: 1
-  });
-  const existingPr = existing[0];
-  if (existingPr !== void 0) {
-    await api.rest.pulls.update({
+    const existingPr = existing[0];
+    if (existingPr !== void 0) {
+      await api.rest.pulls.update({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: existingPr.number,
+        title: prTitle,
+        body: prBody
+      });
+      info(`state-branch: updated PR #${String(existingPr.number)}`);
+      return { pr: existingPr.number };
+    }
+    const { data: pr } = await api.rest.pulls.create({
       owner: at.owner,
       repo: at.repo,
-      pull_number: existingPr.number,
       title: prTitle,
-      body: prBody
+      head: branchName,
+      base: defaultBranch,
+      body: prBody,
+      draft: true
     });
-    info(`state-branch: updated PR #${String(existingPr.number)}`);
-    return { pr: existingPr.number };
+    info(`state-branch: opened PR #${String(pr.number)}`);
+    return { pr: pr.number };
+  } catch (error2) {
+    if (isCapacityError(error2)) {
+      warning(
+        `state-branch: could not publish to \`${branchName}\` \u2014 capacity error. Files were not written.`
+      );
+      return null;
+    }
+    throw error2;
   }
-  const { data: pr } = await api.rest.pulls.create({
-    owner: at.owner,
-    repo: at.repo,
-    title: prTitle,
-    head: branchName,
-    base: defaultBranch,
-    body: prBody,
-    draft: true
-  });
-  info(`state-branch: opened PR #${String(pr.number)}`);
-  return { pr: pr.number };
 }
 
 // src/duties/harmonise/summary.ts
@@ -34693,10 +34786,10 @@ function summarize(run2) {
 var DEFAULT_LANGUAGES_INPUT = "vi, zh";
 var DEFAULT_SOURCE_LANGUAGE_INPUT = "en";
 function readSettings() {
-  const coreInputs = readCore();
+  const shared = readShared();
   const panel = parseSeats(getInput("judge-models"));
   return {
-    ...coreInputs,
+    ...shared,
     warrant: getInput("warrant", { required: true }),
     apply: parseApply(getInput("apply", { required: true })),
     judges: panel.seats,
@@ -34720,7 +34813,7 @@ async function run() {
   let weather = createWeather();
   let settings = null;
   let authority = null;
-  const groupResults = [];
+  const acc = newAccumulator();
   let statePr = null;
   try {
     const base = readSettings();
@@ -34798,6 +34891,7 @@ async function run() {
     }
     const allFiles = await listMarkdownFiles(api, context2.repo);
     const groups = discoverGroups(allFiles, sourceLanguage, targetLanguages, settings.paths);
+    acc.candidates = groups.length;
     if (groups.length === 0) {
       info("harmonise: no document groups found with locale variants.");
       settleAuth(weather);
@@ -34812,6 +34906,19 @@ async function run() {
     );
     const glossary = await loadGlossary(api, context2.repo, settings.glossaryDir);
     for (const group of groups) {
+      if (starved(settings.models, weather)) {
+        acc.starvedRun = true;
+        warning(
+          "harmonise: the roster ran out of capacity \u2014 remaining document groups were not attempted. What was already drafted still publishes."
+        );
+        break;
+      }
+      if (settings.limit !== null && acc.results.length >= settings.limit) {
+        info(
+          `harmonise: sweep limit (${String(settings.limit)}) reached \u2014 remaining document groups were not attempted this run.`
+        );
+        break;
+      }
       if (budgetExhausted(settings, meter, budget)) {
         warning(
           "`max-requests` was reached, so remaining document groups were not attempted this run. What was already drafted still publishes."
@@ -34834,7 +34941,7 @@ async function run() {
         budget,
         weather
       );
-      groupResults.push(result);
+      acc.results.push(result);
     }
     if (!settings.dryRun) {
       try {
@@ -34898,23 +35005,23 @@ async function run() {
       setOutput(
         "classified",
         JSON.stringify(
-          groupResults.filter((r) => r.classification !== "none").map((r) => r.group.id)
+          acc.results.filter((r) => r.classification !== "none").map((r) => r.group.id)
         )
       );
       setOutput(
         "synced",
-        JSON.stringify(groupResults.filter((r) => r.synced.length > 0).map((r) => r.group.id))
+        JSON.stringify(acc.results.filter((r) => r.synced.length > 0).map((r) => r.group.id))
       );
       setOutput(
         "conflicts",
         JSON.stringify(
-          groupResults.filter((r) => r.conflicts.length > 0).map((r) => ({ group: r.group.id, locales: r.conflicts }))
+          acc.results.filter((r) => r.conflicts.length > 0).map((r) => ({ group: r.group.id, locales: r.conflicts }))
         )
       );
       setOutput(
         "skipped",
         JSON.stringify(
-          groupResults.filter(
+          acc.results.filter(
             (r) => r.classification === "none" || r.classification !== "semantic" && r.synced.length === 0
           ).map((r) => r.group.id)
         )
@@ -34922,10 +35029,16 @@ async function run() {
       setOutput("starved", String(rosterStarved));
       setOutput("budget-exhausted", String(budgetSpent));
       setOutput("state-pr", statePr !== null ? String(statePr) : "");
+      if (settings.sweep) {
+        setOutput("processed", String(acc.results.length));
+        setOutput("remaining", String(remainingOf(acc)));
+      } else {
+        reportNoSweep();
+      }
       await writeRunSummary(
         summarize({
           dryRun: settings.dryRun,
-          results: groupResults,
+          results: acc.results,
           warrant: settings.warrant,
           implicit: authority.implicit,
           ungranted: authority.warrant.unnamed("harmonise") ? notGranted(authority.warrant) : null,

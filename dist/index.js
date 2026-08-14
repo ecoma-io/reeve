@@ -31624,10 +31624,17 @@ async function listRepositoryLabels(api, at) {
 function isCapacityError(error2) {
   if (typeof error2 === "object" && error2 !== null && "status" in error2) {
     const status = error2.status;
-    if (status === 429 || typeof status === "number" && status >= 500) return true;
+    if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
+      return true;
   }
+  if (typeof error2 === "object" && error2 !== null && "code" in error2) {
+    const code = error2.code;
+    if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "UND_ERR_CONNECT_TIMEOUT")
+      return true;
+  }
+  if (error2 instanceof Error && error2.name === "TimeoutError") return true;
   const message2 = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message2.includes("timeout") || message2.includes("timed out") || message2.includes("network") || message2.includes("econnreset") || message2.includes("etimedout");
+  return message2.includes("timed out");
 }
 
 // src/core/script.ts

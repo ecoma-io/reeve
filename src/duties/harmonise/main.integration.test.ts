@@ -48,18 +48,13 @@ describe("the action contract", () => {
       readFile(join(ROOT, "src", "core", "inputs.ts"), "utf8"),
     ]);
     // A set, not a list: `models` is read twice — once in `inputs.ts`, once
-    // in `readSettings` via `readCore` — and that duplication is harmless
+    // in `readSettings` via `readShared` — and that duplication is harmless
     // plumbing rather than a second, different input.
-    //
-    // `readCore()` is used (not `readShared()`), so sweep-only inputs read by
-    // the latter — `limit`, `number`, `since`, `sweep` — are excluded: they
-    // are not in this duty's `action.yml` and would never be set.
-    const sweepOnly = new Set(["limit", "number", "since", "sweep"]);
     return [
       ...new Set(
-        [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)]
-          .map(([, name]) => name ?? "")
-          .filter((name) => !sweepOnly.has(name)),
+        [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
+          ([, name]) => name ?? "",
+        ),
       ),
     ];
   }

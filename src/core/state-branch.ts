@@ -14,7 +14,7 @@
  */
 import * as core from "@actions/core";
 
-import { isMissing, type Location } from "./forge.js";
+import { isCapacityError, isMissing, type Location } from "./forge.js";
 
 /**
  * The GitHub calls state-branch publishing needs.
@@ -120,67 +120,79 @@ export async function ensureBranch(
   api: StateBranchApi,
   at: Pick<Location, "owner" | "repo">,
   branchName: string,
-): Promise<{ readonly defaultBranch: string; readonly baseSha: string }> {
-  // Get the default branch's current head
-  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
-  const defaultBranch = repo.default_branch ?? "main";
-  const { data: baseRef } = await api.rest.git.getRef({
-    owner: at.owner,
-    repo: at.repo,
-    ref: `heads/${defaultBranch}`,
-  });
-  const baseSha = baseRef.object.sha;
-
-  // Check if the state branch exists
-  let branchExists = true;
+): Promise<{ readonly defaultBranch: string; readonly baseSha: string } | null> {
   try {
-    await api.rest.git.getRef({
+    // Get the default branch's current head
+    const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+    const defaultBranch = repo.default_branch ?? "main";
+    const { data: baseRef } = await api.rest.git.getRef({
       owner: at.owner,
       repo: at.repo,
-      ref: `heads/${branchName}`,
+      ref: `heads/${defaultBranch}`,
     });
-  } catch (error) {
-    if (isMissing(error)) {
-      branchExists = false;
-    } else {
-      throw error;
-    }
-  }
+    const baseSha = baseRef.object.sha;
 
-  if (!branchExists) {
-    // Create the branch from the default branch head
-    await api.rest.git.createRef({
-      owner: at.owner,
-      repo: at.repo,
-      ref: `refs/heads/${branchName}`,
-      sha: baseSha,
-    });
-    core.info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
-  } else {
-    // Check for an existing open PR — if none, reset the branch to keep it
-    // a clean staging area (same reasoning as propose.ts's resetBranch)
-    const { data: prs } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1,
-    });
-
-    if (prs.length === 0) {
-      // No open PR — reset the branch to the default branch head
-      await api.rest.git.updateRef({
+    // Check if the state branch exists
+    let branchExists = true;
+    try {
+      await api.rest.git.getRef({
         owner: at.owner,
         repo: at.repo,
         ref: `heads/${branchName}`,
-        sha: baseSha,
-        force: true,
       });
-      core.info(`state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`);
+    } catch (error) {
+      if (isMissing(error)) {
+        branchExists = false;
+      } else {
+        throw error;
+      }
     }
-  }
 
-  return { defaultBranch, baseSha };
+    if (!branchExists) {
+      // Create the branch from the default branch head
+      await api.rest.git.createRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `refs/heads/${branchName}`,
+        sha: baseSha,
+      });
+      core.info(`state-branch: created \`${branchName}\` from \`${defaultBranch}\``);
+    } else {
+      // Check for an existing open PR — if none, reset the branch to keep it
+      // a clean staging area (same reasoning as propose.ts's resetBranch)
+      const { data: prs } = await api.rest.pulls.list({
+        owner: at.owner,
+        repo: at.repo,
+        state: "open",
+        head: `${at.owner}:${branchName}`,
+        per_page: 1,
+      });
+
+      if (prs.length === 0) {
+        // No open PR — reset the branch to the default branch head
+        await api.rest.git.updateRef({
+          owner: at.owner,
+          repo: at.repo,
+          ref: `heads/${branchName}`,
+          sha: baseSha,
+          force: true,
+        });
+        core.info(
+          `state-branch: reset \`${branchName}\` to \`${defaultBranch}\` head (no open PR)`,
+        );
+      }
+    }
+
+    return { defaultBranch, baseSha };
+  } catch (error) {
+    if (isCapacityError(error)) {
+      core.warning(
+        `state-branch: could not ensure branch \`${branchName}\` — capacity error. State may be stale.`,
+      );
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -212,77 +224,89 @@ export async function publishState(
     return null;
   }
 
-  // Ensure the branch exists and is current
-  const { defaultBranch } = await ensureBranch(api, at, branchName);
+  try {
+    // Ensure the branch exists and is current
+    const branch = await ensureBranch(api, at, branchName);
+    if (branch === null) return null;
+    const { defaultBranch } = branch;
 
-  // Write each file to the branch
-  for (const file of files) {
-    // Read the file's current SHA on the branch (needed for update)
-    let fileSha: string | undefined;
-    try {
-      const { data } = await api.rest.repos.getContent({
+    // Write each file to the branch
+    for (const file of files) {
+      // Read the file's current SHA on the branch (needed for update)
+      let fileSha: string | undefined;
+      try {
+        const { data } = await api.rest.repos.getContent({
+          owner: at.owner,
+          repo: at.repo,
+          path: file.path,
+          ref: branchName,
+        });
+        if (!Array.isArray(data) && typeof data.sha === "string") {
+          fileSha = data.sha;
+        }
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+        // File does not exist yet — that's fine, we'll create it
+      }
+
+      await api.rest.repos.createOrUpdateFileContents({
         owner: at.owner,
         repo: at.repo,
         path: file.path,
-        ref: branchName,
+        message: file.message,
+        content: Buffer.from(file.content, "utf8").toString("base64"),
+        branch: branchName,
+        ...(fileSha !== undefined ? { sha: fileSha } : {}),
       });
-      if (!Array.isArray(data) && typeof data.sha === "string") {
-        fileSha = data.sha;
-      }
-    } catch (error) {
-      if (!isMissing(error)) throw error;
-      // File does not exist yet — that's fine, we'll create it
+
+      core.info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
 
-    await api.rest.repos.createOrUpdateFileContents({
+    // Check for an existing open PR on this branch
+    const { data: existing } = await api.rest.pulls.list({
       owner: at.owner,
       repo: at.repo,
-      path: file.path,
-      message: file.message,
-      content: Buffer.from(file.content, "utf8").toString("base64"),
-      branch: branchName,
-      ...(fileSha !== undefined ? { sha: fileSha } : {}),
+      state: "open",
+      head: `${at.owner}:${branchName}`,
+      per_page: 1,
     });
 
-    core.info(`state-branch: wrote ${file.path} on \`${branchName}\``);
-  }
+    const existingPr = existing[0];
+    if (existingPr !== undefined) {
+      // Update existing PR
+      await api.rest.pulls.update({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: existingPr.number,
+        title: prTitle,
+        body: prBody,
+      });
+      core.info(`state-branch: updated PR #${String(existingPr.number)}`);
+      return { pr: existingPr.number };
+    }
 
-  // Check for an existing open PR on this branch
-  const { data: existing } = await api.rest.pulls.list({
-    owner: at.owner,
-    repo: at.repo,
-    state: "open",
-    head: `${at.owner}:${branchName}`,
-    per_page: 1,
-  });
-
-  const existingPr = existing[0];
-  if (existingPr !== undefined) {
-    // Update existing PR
-    await api.rest.pulls.update({
+    // Create new draft PR
+    const { data: pr } = await api.rest.pulls.create({
       owner: at.owner,
       repo: at.repo,
-      pull_number: existingPr.number,
       title: prTitle,
+      head: branchName,
+      base: defaultBranch,
       body: prBody,
+      draft: true,
     });
-    core.info(`state-branch: updated PR #${String(existingPr.number)}`);
-    return { pr: existingPr.number };
+
+    core.info(`state-branch: opened PR #${String(pr.number)}`);
+    return { pr: pr.number };
+  } catch (error) {
+    if (isCapacityError(error)) {
+      core.warning(
+        `state-branch: could not publish to \`${branchName}\` — capacity error. Files were not written.`,
+      );
+      return null;
+    }
+    throw error;
   }
-
-  // Create new draft PR
-  const { data: pr } = await api.rest.pulls.create({
-    owner: at.owner,
-    repo: at.repo,
-    title: prTitle,
-    head: branchName,
-    base: defaultBranch,
-    body: prBody,
-    draft: true,
-  });
-
-  core.info(`state-branch: opened PR #${String(pr.number)}`);
-  return { pr: pr.number };
 }
 
 /**
@@ -310,43 +334,51 @@ export async function publishStatePr(
     return null;
   }
 
-  // Resolve the default branch name for the PR base
-  const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
-  const defaultBranch = repo.default_branch ?? "main";
+  try {
+    // Resolve the default branch name for the PR base
+    const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
+    const defaultBranch = repo.default_branch ?? "main";
 
-  // Check for an existing open PR on this branch
-  const { data: existing } = await api.rest.pulls.list({
-    owner: at.owner,
-    repo: at.repo,
-    state: "open",
-    head: `${at.owner}:${branchName}`,
-    per_page: 1,
-  });
-
-  const existingPr = existing[0];
-  if (existingPr !== undefined) {
-    await api.rest.pulls.update({
+    // Check for an existing open PR on this branch
+    const { data: existing } = await api.rest.pulls.list({
       owner: at.owner,
       repo: at.repo,
-      pull_number: existingPr.number,
-      title: prTitle,
-      body: prBody,
+      state: "open",
+      head: `${at.owner}:${branchName}`,
+      per_page: 1,
     });
-    core.info(`state-branch: updated PR #${String(existingPr.number)}`);
-    return { pr: existingPr.number };
+
+    const existingPr = existing[0];
+    if (existingPr !== undefined) {
+      await api.rest.pulls.update({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: existingPr.number,
+        title: prTitle,
+        body: prBody,
+      });
+      core.info(`state-branch: updated PR #${String(existingPr.number)}`);
+      return { pr: existingPr.number };
+    }
+
+    // Create new draft PR
+    const { data: pr } = await api.rest.pulls.create({
+      owner: at.owner,
+      repo: at.repo,
+      title: prTitle,
+      head: branchName,
+      base: defaultBranch,
+      body: prBody,
+      draft: true,
+    });
+
+    core.info(`state-branch: opened PR #${String(pr.number)}`);
+    return { pr: pr.number };
+  } catch (error) {
+    if (isCapacityError(error)) {
+      core.warning(`state-branch: could not open PR on \`${branchName}\` — capacity error.`);
+      return null;
+    }
+    throw error;
   }
-
-  // Create new draft PR
-  const { data: pr } = await api.rest.pulls.create({
-    owner: at.owner,
-    repo: at.repo,
-    title: prTitle,
-    head: branchName,
-    base: defaultBranch,
-    body: prBody,
-    draft: true,
-  });
-
-  core.info(`state-branch: opened PR #${String(pr.number)}`);
-  return { pr: pr.number };
 }
