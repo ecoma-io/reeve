@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0](https://github.com/ecoma-io/reeve/compare/v0.4.0...v0.5.0) (2026-08-14)
+
+
+### Features
+
+* configurable branch target for provenance and corrections ([#51](https://github.com/ecoma-io/reeve/issues/51)) ([ad4925f](https://github.com/ecoma-io/reeve/commit/ad4925ff477f9a09adc6cbd904844c637ff49f17))
+* default state-branch to dedicated branches, rename storage inputs to -dir suffix ([#55](https://github.com/ecoma-io/reeve/issues/55)) ([1364d6b](https://github.com/ecoma-io/reeve/commit/1364d6b75b008bc51c4c6656e38d8ea7e260fa0e))
+* **harmonise:** add chunk-chars input for large document drafting ([#54](https://github.com/ecoma-io/reeve/issues/54)) ([31c812d](https://github.com/ecoma-io/reeve/commit/31c812d06cc55f98cc79f3024c2624e226c3f3c6))
+
+
+### Bug Fixes
+
+* **harmonise:** address medium and low findings from adversarial review ([#53](https://github.com/ecoma-io/reeve/issues/53)) ([3fb39c8](https://github.com/ecoma-io/reeve/commit/3fb39c8156682948f00a30518e0da407da906080))
+* **harmonise:** implement draft loop, judge panel, budget enforcement, and script verification ([#52](https://github.com/ecoma-io/reeve/issues/52)) ([2e2821b](https://github.com/ecoma-io/reeve/commit/2e2821b5c12684ff07edf40c378c182e896185ff))
+* **harmonise:** prevent adjacent ignore markers from consuming each other ([#57](https://github.com/ecoma-io/reeve/issues/57)) ([9b6fd9f](https://github.com/ecoma-io/reeve/commit/9b6fd9f724c3e0728df0d7bb451bfde6af43dd5d))
+* **harmonise:** resolve sourceRevision blob SHA to historical content before diffing ([#46](https://github.com/ecoma-io/reeve/issues/46)) ([64cd304](https://github.com/ecoma-io/reeve/commit/64cd304d5d8a29f2b42e4a74726e85427cd21061))
+
 ## [0.4.0](https://github.com/ecoma-io/reeve/compare/v0.3.0...v0.4.0) (2026-08-13)
 
 
