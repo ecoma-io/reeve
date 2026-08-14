@@ -115,12 +115,11 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
   // Extract ignore markers from source and target. The model sees
   // placeholder comments where ignored blocks were, and the original
   // target content is reinserted after sanitize runs.
-  const { content: maskedSource } = ignore
-    ? extract(sourceContent)
-    : { content: sourceContent, spans: [] };
-  const { content: maskedTarget, spans: targetSpans } = ignore
-    ? extract(targetContent)
-    : { content: targetContent, spans: [] as IgnoreSpan[] };
+  const sourceResult = ignore ? extract(sourceContent) : undefined;
+  const targetResult = ignore ? extract(targetContent) : undefined;
+  const maskedSource = sourceResult?.content ?? sourceContent;
+  const maskedTarget = targetResult?.content ?? targetContent;
+  const targetSpans = targetResult?.spans ?? [];
 
   if (chunkChars > 0 && (maskedSource.length > chunkChars || maskedTarget.length > chunkChars)) {
     return draftChunked({

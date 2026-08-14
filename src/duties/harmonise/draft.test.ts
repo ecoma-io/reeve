@@ -60,6 +60,7 @@ describe("draftSyncs", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -79,6 +80,7 @@ describe("draftSyncs", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -105,6 +107,7 @@ describe("draftSyncs", () => {
       glossary: [{ term: "Reeve" }],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -126,6 +129,7 @@ describe("draftSyncs", () => {
       glossary: [{ term: "Reeve" }],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -147,6 +151,7 @@ describe("draftSyncs", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -168,6 +173,7 @@ describe("draftSyncs", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -191,6 +197,7 @@ describe("draftSyncs chunking", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -213,6 +220,7 @@ describe("draftSyncs chunking", () => {
       drafts: 1,
       // Budget larger than either document — no chunking needed.
       chunkChars: 10_000,
+      ignore: true,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -269,6 +277,7 @@ describe("draftSyncs chunking", () => {
       drafts: 1,
       // Small budget to force chunking.
       chunkChars: 50,
+      ignore: true,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -327,6 +336,7 @@ describe("draftSyncs chunking", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 50,
+      ignore: true,
     });
 
     expect(result.attempts).toHaveLength(1);
@@ -369,6 +379,7 @@ describe("draftSyncs chunking", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 50,
+      ignore: true,
     });
 
     // Reassembled from original target chunks — identical, so refused.

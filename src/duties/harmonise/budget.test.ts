@@ -34,6 +34,7 @@ function settingsWith(maxRequests: number | null): Settings {
     requestTimeoutMs: 120_000,
     temperature: undefined,
     chunkChars: 0,
+    ignore: true,
   };
 }
 

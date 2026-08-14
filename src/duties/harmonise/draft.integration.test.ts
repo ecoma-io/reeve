@@ -100,6 +100,7 @@ describe("drafting a harmonisation", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     const [best] = result.attempts;
@@ -123,6 +124,7 @@ describe("drafting a harmonisation", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -143,6 +145,7 @@ describe("drafting a harmonisation", () => {
       glossary: [{ term: "Reeve" }],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -164,6 +167,7 @@ describe("drafting a harmonisation", () => {
       glossary: [],
       drafts: 2,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts.map((attempt) => attempt.model)).toEqual(["model-b", "model-a"]);
@@ -188,6 +192,7 @@ describe("drafting a harmonisation", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts.map((attempt) => attempt.model)).toEqual(["model-b"]);
@@ -214,6 +219,7 @@ describe("drafting a harmonisation", () => {
       glossary: [],
       drafts: 2,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
@@ -238,6 +244,7 @@ describe("drafting a harmonisation", () => {
       glossary: [],
       drafts: 1,
       chunkChars: 0,
+      ignore: true,
     });
 
     expect(result.attempts).toEqual([]);
