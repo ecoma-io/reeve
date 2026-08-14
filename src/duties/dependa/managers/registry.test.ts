@@ -208,4 +208,99 @@ describe("discoverAll", () => {
     await discoverAll(activations, readFile);
     expect(lockfilePathSeen).toBe(true);
   });
+
+  it("reads Cargo.lock for cargo ecosystem", async () => {
+    let lockfileContent: string | null = null;
+
+    const cargoManager: Manager = {
+      id: "cargo",
+      ecosystem: "cargo",
+      manifestFilenames: ["Cargo.toml"],
+      parse: (_path, _content, lockContent) => {
+        lockfileContent = lockContent;
+        return { manifestPath: "Cargo.toml", dependencies: [], partial: false };
+      },
+      applyUpdate: () => null,
+    };
+
+    const activations: ManagerActivation[] = [{ manager: cargoManager, manifests: ["Cargo.toml"] }];
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const readFile = async (path: string) => {
+      if (path === "Cargo.toml") return '[package]\nname = "app"';
+      if (path === "Cargo.lock") return "# cargo lockfile";
+      return null;
+    };
+
+    await discoverAll(activations, readFile);
+    expect(lockfileContent).toBe("# cargo lockfile");
+  });
+
+  it("reads go.sum for go ecosystem", async () => {
+    let lockfileContent: string | null = null;
+
+    const goManager: Manager = {
+      id: "go",
+      ecosystem: "go",
+      manifestFilenames: ["go.mod"],
+      parse: (_path, _content, lockContent) => {
+        lockfileContent = lockContent;
+        return { manifestPath: "go.mod", dependencies: [], partial: false };
+      },
+      applyUpdate: () => null,
+    };
+
+    const activations: ManagerActivation[] = [{ manager: goManager, manifests: ["go.mod"] }];
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const readFile = async (path: string) => {
+      if (path === "go.mod") return "module example.com/app\ngo 1.21";
+      if (path === "go.sum") return "github.com/pkg v0.1.0 h1:abc";
+      return null;
+    };
+
+    await discoverAll(activations, readFile);
+    expect(lockfileContent).toBe("github.com/pkg v0.1.0 h1:abc");
+  });
+
+  it("does not attempt lockfile reads for docker and github-actions", async () => {
+    const readPaths: string[] = [];
+
+    const dockerManager: Manager = {
+      id: "docker",
+      ecosystem: "docker",
+      manifestFilenames: ["Dockerfile"],
+      parse: () => ({ manifestPath: "Dockerfile", dependencies: [], partial: false }),
+      applyUpdate: () => null,
+    };
+
+    const ghManager: Manager = {
+      id: "github-actions",
+      ecosystem: "github-actions",
+      manifestFilenames: [".github/workflows/ci.yml"],
+      parse: () => ({
+        manifestPath: ".github/workflows/ci.yml",
+        dependencies: [],
+        partial: false,
+      }),
+      applyUpdate: () => null,
+    };
+
+    const activations: ManagerActivation[] = [
+      { manager: dockerManager, manifests: ["Dockerfile"] },
+      { manager: ghManager, manifests: [".github/workflows/ci.yml"] },
+    ];
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const readFile = async (path: string) => {
+      readPaths.push(path);
+      if (path === "Dockerfile") return "FROM node:20";
+      if (path === ".github/workflows/ci.yml") return "on: push";
+      return null;
+    };
+
+    await discoverAll(activations, readFile);
+    // Docker and github-actions have no lockfiles, so only manifest paths should be read
+    expect(readPaths).toEqual(["Dockerfile", ".github/workflows/ci.yml"]);
+  });
 });

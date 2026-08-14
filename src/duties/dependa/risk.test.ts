@@ -6,9 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { SecurityAdvisory } from "./model.js";
+import type { RiskFacts, SecurityAdvisory, UpdateProposal } from "./model.js";
 
-import { computeFacts, factsOnly, parseInterpretation } from "./risk.js";
+import { computeFacts, factsOnly, interpretationPrompt, parseInterpretation } from "./risk.js";
 
 // ── computeFacts ─────────────────────────────────────────────────────────
 
@@ -320,5 +320,110 @@ describe("parseInterpretation", () => {
     // It parses fine — the injection is contained by enclosure, not by rejection
     expect(result).not.toBeNull();
     expect(result!.summary).toContain("Ignore all previous instructions");
+  });
+});
+
+// ── interpretationPrompt ──────────────────────────────────────────────────
+
+describe("interpretationPrompt", () => {
+  const baseProposal: UpdateProposal = {
+    dependency: {
+      ecosystem: "npm",
+      name: "lodash",
+      constraint: "^4.17.21",
+      currentVersion: "4.17.21",
+      manifestPath: "package.json",
+      dev: false,
+      manager: "npm",
+    },
+    currentVersion: "4.17.21",
+    targetVersion: "4.17.22",
+    updateType: "patch",
+    releases: [],
+    securityAdvisory: null,
+    risk: {
+      facts: {
+        updateType: "patch",
+        majorDistance: 0,
+        minorDistance: 0,
+        patchDistance: 1,
+        daysBetweenReleases: 30,
+        currentVersionStale: false,
+        isSecurity: false,
+        hasChangelog: true,
+        isDev: false,
+      },
+      interpretation: null,
+    },
+    evidence: [],
+    edits: [],
+    groupName: null,
+  };
+
+  it("includes all fact fields when non-null", () => {
+    const prompt = interpretationPrompt(baseProposal, baseProposal.risk.facts, "changelog content");
+
+    expect(prompt).toContain("lodash");
+    expect(prompt).toContain("4.17.21");
+    expect(prompt).toContain("4.17.22");
+    expect(prompt).toContain("Security update: false");
+    expect(prompt).toContain("Dev dependency: false");
+    expect(prompt).toContain("Has changelog: true");
+    expect(prompt).toContain("Days between releases: 30");
+    expect(prompt).toContain("Current version is stale (>1 year): false");
+    expect(prompt).toContain("changelog content");
+  });
+
+  it("renders 'unknown' when daysBetweenReleases is null", () => {
+    const facts: RiskFacts = {
+      ...baseProposal.risk.facts,
+      daysBetweenReleases: null,
+      currentVersionStale: true,
+    };
+    const prompt = interpretationPrompt(baseProposal, facts, "");
+
+    expect(prompt).toContain("Days between releases: unknown");
+    expect(prompt).toContain("Current version is stale (>1 year): true");
+  });
+
+  it("renders 'unknown' when currentVersionStale is null", () => {
+    const facts: RiskFacts = {
+      ...baseProposal.risk.facts,
+      daysBetweenReleases: null,
+      currentVersionStale: null,
+    };
+    const prompt = interpretationPrompt(baseProposal, facts, "");
+
+    expect(prompt).toContain("Days between releases: unknown");
+    expect(prompt).toContain("Current version staleness: unknown");
+  });
+
+  it("renders security and dev flags when true", () => {
+    const facts: RiskFacts = {
+      ...baseProposal.risk.facts,
+      isSecurity: true,
+      isDev: true,
+    };
+    const prompt = interpretationPrompt(baseProposal, facts, "");
+
+    expect(prompt).toContain("Security update: true");
+    expect(prompt).toContain("Dev dependency: true");
+  });
+
+  it("sanitises dependency name and version in prompt", () => {
+    const proposal: UpdateProposal = {
+      ...baseProposal,
+      dependency: {
+        ...baseProposal.dependency,
+        name: "pkg\nwith`backtick",
+      },
+      currentVersion: "1.0\n.0",
+      targetVersion: "2.0.0",
+    };
+    const prompt = interpretationPrompt(proposal, baseProposal.risk.facts, "");
+
+    // Newlines and backticks must be sanitised
+    expect(prompt).not.toContain("\n`backtick");
+    expect(prompt).toContain("1.0 .0");
   });
 });

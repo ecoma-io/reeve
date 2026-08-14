@@ -372,3 +372,19 @@ describe("docker parse: no-tag FROM line", () => {
     expect(result.dependencies[0]?.currentVersion).toBe("latest");
   });
 });
+
+// ── matchManifest ─────────────────────────────────────────────────────────
+
+describe("matchManifest", () => {
+  it("matches Dockerfile paths", () => {
+    expect(manager.matchManifest!("Dockerfile")).toBe(true);
+    expect(manager.matchManifest!("Dockerfile.prod")).toBe(true);
+    expect(manager.matchManifest!("dir/Dockerfile")).toBe(true);
+  });
+
+  it("rejects non-Dockerfile paths", () => {
+    expect(manager.matchManifest!("main.go")).toBe(false);
+    expect(manager.matchManifest!("package.json")).toBe(false);
+    expect(manager.matchManifest!("Makefile")).toBe(false);
+  });
+});
