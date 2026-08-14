@@ -39,6 +39,7 @@ export default {
         "respond",
         "lifecycle",
         "harmonise",
+        "dependa",
 
         // Everything else.
         "eval", // evaluation sets and the harness over them

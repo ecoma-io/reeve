@@ -84,6 +84,7 @@ function warrantWith(labels: readonly Label[], propose?: Partial<ProposeWorkspac
     memory: null,
     about: null,
     lifecycle: null,
+    dependa: null,
     propose: cfg(propose),
     granted: (_duty, fallback) => fallback,
     unnamed: () => false,

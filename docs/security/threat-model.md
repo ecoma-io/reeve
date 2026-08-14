@@ -80,8 +80,15 @@ should never have to rule out the other first.
   never do, however it is configured: the "Security considerations" section
   on [`triage`](../reference/duties/triage.md#security-considerations),
   [`translate`](../reference/duties/translate.md#security-considerations),
-  [`duplicate`](../reference/duties/duplicate.md#security-considerations) and
-  [`respond`](../reference/duties/respond.md#security-considerations).
+  [`duplicate`](../reference/duties/duplicate.md#security-considerations),
+  [`respond`](../reference/duties/respond.md#security-considerations),
+  [`harmonise`](../reference/duties/harmonise.md#security-considerations), and
+  [`dependa`](../reference/duties/dependa.md#security-considerations).
+
+- **Dependency-specific threats** — external registry metadata as an attack
+  surface, prompt injection through release notes and changelogs, and why
+  external content is evidence rather than authority:
+  [the dependa duty's security considerations](../reference/duties/dependa.md#security-considerations).
 
 ---
 

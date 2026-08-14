@@ -2,8 +2,12 @@
 
 _How Reeve runs on itself, and how the feedback loop works. Prerequisites: [The authority model](concepts/authority-model.md), [The warrant](guides/warrant.md)._
 
-Reeve is dogfooded: four of its five duties run against this repository's own
-issues and pull requests, and the fifth — `lifecycle` — runs in dry-run. This
+Reeve is dogfooded: its duties run against this repository's own
+issues, pull requests, and dependencies. `triage` and `translate` act on
+real threads; `duplicate` and `respond` run in report-only mode, writing
+verdicts to job summaries and touching nothing; `lifecycle` observes in
+dry-run; `harmonise` synchronises this repository's own README translations;
+and `dependa` maintains this repository's own dependencies. This
 is not self-modification; it is **proving the execution path**. A duty that
 labels a stranger's issue and a duty that labels its own follow the same code,
 the same warrant, and the same guardrails.
@@ -22,7 +26,7 @@ warrant does not name is never applied, and `gateClose` refuses a duplicate
 close that a human reversed — whether the thread belongs to this repository
 or to someone else's.
 
-## The five workflows
+## The workflows
 
 | Duty      | Workflow                                      | Trigger                                      | `apply`                    | Status      |
 | --------- | --------------------------------------------- | -------------------------------------------- | -------------------------- | ----------- |
@@ -31,6 +35,8 @@ or to someone else's.
 | duplicate | `.github/workflows/reeve-duplicate-issue.yml` | `opened`                                     | `none`                     | Report-only |
 | respond   | `.github/workflows/reeve-respond-issue.yml`   | `opened`                                     | `none`                     | Report-only |
 | lifecycle | `.github/workflows/reeve-lifecycle-issue.yml` | schedule, `workflow_dispatch`                | `label, comment` (dry-run) | Observing   |
+| harmonise | `.github/workflows/reeve-harmonise.yml`       | `push` (README.md)                           | `edit-file, open-pr`       | Active      |
+| dependa   | `.github/workflows/reeve-dependa.yml`         | schedule, `workflow_dispatch`                | `edit-file, open-pr`       | Active      |
 
 `duplicate` and `respond` write their verdicts to the job summary without
 touching a thread — the same path any consumer would walk when `apply: none`

@@ -1328,3 +1328,359 @@ describe("implicitWarrant", () => {
     expect(warrant.labelNamed("missing")).toBeUndefined();
   });
 });
+
+describe("readDependa", () => {
+  it("is null when `dependa:` is never written", () => {
+    expect(warrant(MINIMAL).dependa).toBeNull();
+  });
+
+  it("refuses `dependa:` written with nothing under it", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n`)).toThrow(
+      /writes `dependa:` with nothing under it/,
+    );
+  });
+
+  it("refuses `dependa:` that is not a mapping", () => {
+    expect(() => warrant(`${MINIMAL}dependa: [patch]\n`)).toThrow(
+      /`dependa` as a list, expected a mapping/,
+    );
+    expect(() => warrant(`${MINIMAL}dependa: 3\n`)).toThrow(/`dependa` as `3`, expected a mapping/);
+  });
+
+  it("refuses an unrecognized key on the `dependa:` block", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  tpyes: [patch]\n`)).toThrow(
+      /unrecognized key `tpyes`/,
+    );
+  });
+
+  it("takes every default when `dependa:` is written as an empty mapping", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.ecosystems).toEqual([]);
+    expect(policy.allowedTypes).toEqual([
+      "patch",
+      "minor",
+      "pin",
+      "digest",
+      "rollback",
+      "security",
+    ]);
+    expect(policy.ignore).toEqual([]);
+    expect(policy.grouping).toBe("by-ecosystem");
+    expect(policy.securitySeparate).toBe(true);
+    expect(policy.autoApprove).toBe("minor");
+    expect(policy.autoClose).toBe(false);
+    expect(policy.autoRebase).toBe(true);
+    expect(policy.schedule).toBeNull();
+  });
+
+  // ── ecosystems ───────────────────────────────────────────────────────
+
+  it("reads the ecosystems list", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  ecosystems: [npm, cargo]\n`).dependa!;
+    expect(policy.ecosystems).toEqual(["npm", "cargo"]);
+  });
+
+  it("deduplicates ecosystem entries", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  ecosystems: [npm, npm]\n`).dependa!;
+    expect(policy.ecosystems).toEqual(["npm"]);
+  });
+
+  it("refuses an unknown ecosystem name", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  ecosystems: [pip]\n`)).toThrow(
+      /`pip`, which is not a known ecosystem/,
+    );
+  });
+
+  it("defaults to an empty list when `ecosystems:` is absent", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.ecosystems).toEqual([]);
+  });
+
+  // ── allowed-types ────────────────────────────────────────────────────
+
+  it("reads the allowed-types list", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  allowed-types: [patch, minor]\n`).dependa!;
+    expect(policy.allowedTypes).toEqual(["patch", "minor"]);
+  });
+
+  it("defaults to all non-major types when `allowed-types:` is absent", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.allowedTypes).toEqual([
+      "patch",
+      "minor",
+      "pin",
+      "digest",
+      "rollback",
+      "security",
+    ]);
+    expect(policy.allowedTypes).not.toContain("major");
+  });
+
+  it("refuses an empty `allowed-types:` list", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  allowed-types: []\n`)).toThrow(
+      /`dependa\.allowed-types` is empty/,
+    );
+  });
+
+  it("refuses an unknown update type", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  allowed-types: [mega]\n`)).toThrow(
+      /`mega`, which is not a known update type/,
+    );
+  });
+
+  it("deduplicates allowed-types entries", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  allowed-types: [patch, patch]\n`).dependa!;
+    expect(policy.allowedTypes).toEqual(["patch"]);
+  });
+
+  it("allows major when explicitly listed", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  allowed-types: [major, patch]\n`).dependa!;
+    expect(policy.allowedTypes).toContain("major");
+  });
+
+  // ── ignore ───────────────────────────────────────────────────────────
+
+  it("reads ignore rules with name, ecosystem, and types", () => {
+    const policy = warrant(
+      `${MINIMAL}dependa:\n  ignore:\n    - name: "@types/*"\n      ecosystem: npm\n      types: [major]\n`,
+    ).dependa!;
+    expect(policy.ignore).toEqual([{ name: "@types/*", ecosystem: "npm", types: ["major"] }]);
+  });
+
+  it("defaults ecosystem and types on an ignore rule", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  ignore:\n    - name: lodash\n`).dependa!;
+    expect(policy.ignore).toEqual([{ name: "lodash", ecosystem: null, types: [] }]);
+  });
+
+  it("reads multiple ignore rules", () => {
+    const policy = warrant(
+      `${MINIMAL}dependa:\n  ignore:\n    - name: lodash\n    - name: eslint\n      ecosystem: npm\n`,
+    ).dependa!;
+    expect(policy.ignore).toHaveLength(2);
+  });
+
+  it("defaults to an empty list when `ignore:` is absent", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.ignore).toEqual([]);
+  });
+
+  it("refuses `ignore:` that is not a list", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  ignore: lodash\n`)).toThrow(
+      /`dependa\.ignore` is the text `lodash`, expected a list/,
+    );
+  });
+
+  it("refuses an ignore entry without a `name`", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  ignore:\n    - ecosystem: npm\n`)).toThrow(
+      /has no `name`/,
+    );
+  });
+
+  it("refuses an unknown ecosystem in an ignore rule", () => {
+    expect(() =>
+      warrant(`${MINIMAL}dependa:\n  ignore:\n    - name: lodash\n      ecosystem: pip\n`),
+    ).toThrow(/not a known ecosystem/);
+  });
+
+  it("refuses an unknown update type in an ignore rule", () => {
+    expect(() =>
+      warrant(`${MINIMAL}dependa:\n  ignore:\n    - name: lodash\n      types: [mega]\n`),
+    ).toThrow(/not a known update type/);
+  });
+
+  it("refuses an ignore entry that is not a mapping", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  ignore:\n    - lodash\n`)).toThrow(
+      /expected a mapping/,
+    );
+  });
+
+  it("refuses an unrecognized key on an ignore entry", () => {
+    expect(() =>
+      warrant(`${MINIMAL}dependa:\n  ignore:\n    - name: lodash\n      ecosystm: npm\n`),
+    ).toThrow(/unrecognized key `ecosystm`/);
+  });
+
+  // ── grouping ─────────────────────────────────────────────────────────
+
+  it("defaults to `by-ecosystem` when `grouping:` is absent", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.grouping).toBe("by-ecosystem");
+  });
+
+  it.each(["by-ecosystem", "by-package", "single"] as const)("accepts `%s`", (grouping) => {
+    const policy = warrant(`${MINIMAL}dependa:\n  grouping: ${grouping}\n`).dependa!;
+    expect(policy.grouping).toBe(grouping);
+  });
+
+  it("refuses an unknown grouping value", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  grouping: by-name\n`)).toThrow(
+      /expected `by-ecosystem`, `by-package`, or `single`/,
+    );
+  });
+
+  // ── auto-approve ─────────────────────────────────────────────────────
+
+  it("defaults to `minor` when `auto-approve:` is absent", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.autoApprove).toBe("minor");
+  });
+
+  it.each(["patch", "minor", "major"] as const)("accepts a known update type `%s`", (ut) => {
+    const policy = warrant(`${MINIMAL}dependa:\n  auto-approve: ${ut}\n`).dependa!;
+    expect(policy.autoApprove).toBe(ut);
+  });
+
+  it('accepts `"none"` to disable auto-approve', () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  auto-approve: none\n`).dependa!;
+    expect(policy.autoApprove).toBe("none");
+  });
+
+  it("refuses an unknown auto-approve value", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  auto-approve: always\n`)).toThrow(
+      /expected an update type or `none`/,
+    );
+  });
+
+  // ── security-separate ────────────────────────────────────────────────
+
+  it("defaults security-separate to true", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.securitySeparate).toBe(true);
+  });
+
+  it("reads an explicit `security-separate: false`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  security-separate: false\n`).dependa!;
+    expect(policy.securitySeparate).toBe(false);
+  });
+
+  // ── auto-close ───────────────────────────────────────────────────────
+
+  it("defaults auto-close to false", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.autoClose).toBe(false);
+  });
+
+  it("reads an explicit `auto-close: true`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  auto-close: true\n`).dependa!;
+    expect(policy.autoClose).toBe(true);
+  });
+
+  // ── auto-rebase ──────────────────────────────────────────────────────
+
+  it("defaults auto-rebase to true", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.autoRebase).toBe(true);
+  });
+
+  it("reads an explicit `auto-rebase: false`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  auto-rebase: false\n`).dependa!;
+    expect(policy.autoRebase).toBe(false);
+  });
+
+  // ── schedule ─────────────────────────────────────────────────────────
+
+  it("defaults to null when `schedule:` is absent", () => {
+    const policy = warrant(`${MINIMAL}dependa: {}\n`).dependa!;
+    expect(policy.schedule).toBeNull();
+  });
+
+  it("reads an interval shorthand like `7d`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  schedule: 7d\n`).dependa!;
+    expect(policy.schedule).toEqual({ kind: "interval", days: 7 });
+  });
+
+  it("reads a longer interval shorthand like `30d`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  schedule: 30d\n`).dependa!;
+    expect(policy.schedule).toEqual({ kind: "interval", days: 30 });
+  });
+
+  it("refuses `0d` as a schedule — not a duration", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  schedule: 0d\n`)).toThrow(
+      /`dependa\.schedule: 0d` is not a schedule/,
+    );
+  });
+
+  it("reads a cron expression as a string", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  schedule: "0 3 * * 1"\n`).dependa!;
+    expect(policy.schedule).toEqual({ kind: "cron", expression: "0 3 * * 1" });
+  });
+
+  it("reads a schedule as a mapping with `interval`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  schedule:\n    interval: 14\n`).dependa!;
+    expect(policy.schedule).toEqual({ kind: "interval", days: 14 });
+  });
+
+  it("reads a schedule as a mapping with `cron`", () => {
+    const policy = warrant(`${MINIMAL}dependa:\n  schedule:\n    cron: "0 6 * * 1-5"\n`).dependa!;
+    expect(policy.schedule).toEqual({ kind: "cron", expression: "0 6 * * 1-5" });
+  });
+
+  it("refuses a schedule mapping with both `interval` and `cron`", () => {
+    expect(() =>
+      warrant(`${MINIMAL}dependa:\n  schedule:\n    interval: 7\n    cron: "0 3 * * *"\n`),
+    ).toThrow(/has both `interval` and `cron`/);
+  });
+
+  it("refuses a schedule mapping with neither `interval` nor `cron`", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  schedule: {}\n`)).toThrow(
+      /neither `interval` nor `cron`/,
+    );
+  });
+
+  it("refuses a schedule that is not a string or mapping", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  schedule: 42\n`)).toThrow(
+      /expected a duration, a cron expression, or a mapping/,
+    );
+  });
+
+  it("refuses an empty `cron` string", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  schedule:\n    cron: ""\n`)).toThrow(
+      /expected a cron expression/,
+    );
+  });
+
+  it("refuses a non-string `cron` value", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  schedule:\n    cron: 5\n`)).toThrow(
+      /expected a cron expression/,
+    );
+  });
+
+  it("refuses an unrecognized key on the schedule mapping", () => {
+    expect(() => warrant(`${MINIMAL}dependa:\n  schedule:\n    itnerval: 7\n`)).toThrow(
+      /unrecognized key `itnerval`/,
+    );
+  });
+
+  // ── full policy read ─────────────────────────────────────────────────
+
+  it("reads every knob at once", () => {
+    const source =
+      `${MINIMAL}dependa:\n` +
+      `  ecosystems: [npm, github-actions]\n` +
+      `  allowed-types: [patch, minor, security]\n` +
+      `  ignore:\n` +
+      `    - name: "@types/*"\n` +
+      `      ecosystem: npm\n` +
+      `      types: [major]\n` +
+      `    - name: eslint\n` +
+      `  grouping: by-package\n` +
+      `  security-separate: false\n` +
+      `  auto-approve: patch\n` +
+      `  auto-close: true\n` +
+      `  auto-rebase: false\n` +
+      `  schedule: 14d\n`;
+    const policy = warrant(source).dependa!;
+    expect(policy.ecosystems).toEqual(["npm", "github-actions"]);
+    expect(policy.allowedTypes).toEqual(["patch", "minor", "security"]);
+    expect(policy.ignore).toEqual([
+      { name: "@types/*", ecosystem: "npm", types: ["major"] },
+      { name: "eslint", ecosystem: null, types: [] },
+    ]);
+    expect(policy.grouping).toBe("by-package");
+    expect(policy.securitySeparate).toBe(false);
+    expect(policy.autoApprove).toBe("patch");
+    expect(policy.autoClose).toBe(true);
+    expect(policy.autoRebase).toBe(false);
+    expect(policy.schedule).toEqual({ kind: "interval", days: 14 });
+  });
+});

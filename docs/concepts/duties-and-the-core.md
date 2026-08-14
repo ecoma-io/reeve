@@ -2,7 +2,7 @@
 
 _Understand the boundary between the core and a duty, and why it is drawn there. Prerequisites: [The authority model](authority-model.md)._
 
-Every duty — `triage`, `translate`, `duplicate`, `respond`, `lifecycle` — is a decision
+Every duty — `triage`, `translate`, `duplicate`, `respond`, `lifecycle`, `harmonise`, `dependa` — is a decision
 sitting on top of the same pipeline, the same warrant, the same guardrails.
 Knowing where that boundary runs is what makes the rest of the model
 predictable: once you have used one duty, you already know what any other
@@ -25,10 +25,16 @@ src/
     triage/        another decision
     duplicate/     another
     respond/       another
+    lifecycle/     another
+    harmonise/     another
+    dependa/       another
 translate/action.yml
 triage/action.yml
 duplicate/action.yml
 respond/action.yml
+lifecycle/action.yml
+harmonise/action.yml
+dependa/action.yml
 ```
 
 ## What the core supplies
@@ -76,7 +82,7 @@ that only reads well in English is not finished.
 
 These are not implementation notes — they are the reason [the warrant](../guides/warrant.md)
 can be a single, small file that governs every duty at once, and the reason
-adding a fifth duty tomorrow changes nothing about how the first four are
+adding a seventh duty tomorrow changes nothing about how the first six are
 trusted today.
 
 ---

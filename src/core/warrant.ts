@@ -50,6 +50,14 @@ import { parse, YAMLParseError } from "yaml";
 import type { Location, TrackerApi } from "./forge.js";
 import { listRepositoryLabels } from "./forge.js";
 import { findLanguage, parseLanguages, type Language } from "./languages.js";
+import type {
+  DependaPolicy,
+  Ecosystem,
+  IgnoreRule,
+  ScheduleConfig,
+  UpdateType,
+} from "../duties/dependa/model.js";
+import { ECOSYSTEMS, UPDATE_TYPES } from "../duties/dependa/model.js";
 
 /**
  * What a duty may do to a thread or a repository. The closed set; a name
@@ -289,6 +297,14 @@ export interface Warrant {
    */
   readonly propose: ProposeWorkspace;
   /**
+   * The `dependa:` key, or `null` when the file never wrote one — the
+   * dependa duty's own no-implicit-policy floor, the same pattern
+   * `lifecycle` follows. When absent, dependa runs with its own
+   * conservative defaults. Written with nothing under it is refused,
+   * the same half-finished-edit shape `lifecycle:`/`capabilities:` refuse.
+   */
+  readonly dependa: DependaPolicy | null;
+  /**
    * What this duty was granted.
    *
    * Three shapes, not two. No `capabilities:` block at all means the file
@@ -396,6 +412,7 @@ export function parseWarrant(path: string, source: string): Warrant {
   const about = readAbout(path, document.about);
   const lifecycle = readLifecycle(path, document.lifecycle);
   const propose = readPropose(path, document.propose);
+  const dependa = readDependa(path, document.dependa);
   const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
@@ -423,6 +440,7 @@ export function parseWarrant(path: string, source: string): Warrant {
     about,
     lifecycle,
     propose,
+    dependa,
     granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
@@ -589,6 +607,7 @@ export function implicitWarrant(
       memory: null,
       about: null,
       lifecycle: null,
+      dependa: null,
       propose: DEFAULT_PROPOSE_WORKSPACE,
       granted: (_duty, fallback) => fallback,
       unnamed: () => false,
@@ -1292,6 +1311,231 @@ function readLifecycleOverrides(path: string, raw: unknown): readonly LifecycleO
     const after = hasAfter ? durationField(at, "after", fields.after, { allowNever: false }) : null;
     return { label, after, never };
   });
+}
+
+/**
+ * The `dependa:` key. Absent entirely is `null` — dependa runs with its own
+ * conservative defaults, the same pattern `lifecycle` follows. Written with
+ * nothing under it is refused, the same half-finished-edit shape
+ * `lifecycle:`/`capabilities:` both refuse rather than guess at.
+ */
+function readDependa(path: string, raw: unknown): DependaPolicy | null {
+  if (raw === undefined) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`dependa:\` with nothing under it. Write \`allowed-types:\` under it, ` +
+        "or remove the key to leave dependa's own defaults in charge.",
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`dependa\` as ${describe(raw)}, expected a mapping.`,
+    );
+  }
+  const fields = raw as Record<string, unknown>;
+  rejectUnknownKeys(`\`${path}\`'s \`dependa\``, fields, [
+    "ecosystems",
+    "allowed-types",
+    "ignore",
+    "grouping",
+    "security-separate",
+    "auto-approve",
+    "auto-close",
+    "auto-rebase",
+    "schedule",
+  ]);
+
+  return {
+    ecosystems: readDependaEcosystems(path, fields.ecosystems),
+    allowedTypes: readDependaAllowedTypes(path, fields["allowed-types"]),
+    ignore: readDependaIgnore(path, fields.ignore),
+    grouping: readDependaGrouping(path, fields.grouping),
+    securitySeparate: booleanField(
+      `\`${path}\`'s \`dependa\``,
+      "security-separate",
+      fields["security-separate"],
+      true,
+    ),
+    autoApprove: readDependaAutoApprove(path, fields["auto-approve"]),
+    autoClose: booleanField(`\`${path}\`'s \`dependa\``, "auto-close", fields["auto-close"], false),
+    autoRebase: booleanField(
+      `\`${path}\`'s \`dependa\``,
+      "auto-rebase",
+      fields["auto-rebase"],
+      true,
+    ),
+    schedule: readDependaSchedule(path, fields.schedule),
+  };
+}
+
+function readDependaEcosystems(path: string, raw: unknown): readonly Ecosystem[] {
+  if (raw === undefined || raw === null) return [];
+  const list = strings(`\`${path}\`'s \`dependa\``, "ecosystems", raw);
+  const ecosystems: Ecosystem[] = [];
+  for (const entry of list) {
+    const eco = ECOSYSTEMS.find((e) => e === entry);
+    if (eco === undefined) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.ecosystems\` names \`${entry}\`, which is not a known ecosystem. ` +
+          `Expected any of ${ECOSYSTEMS.join(", ")}.`,
+      );
+    }
+    if (!ecosystems.includes(eco)) ecosystems.push(eco);
+  }
+  return ecosystems;
+}
+
+function readDependaAllowedTypes(path: string, raw: unknown): readonly UpdateType[] {
+  if (raw === undefined || raw === null) {
+    return ["patch", "minor", "pin", "digest", "rollback", "security"];
+  }
+  const list = strings(`\`${path}\`'s \`dependa\``, "allowed-types", raw);
+  if (list.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.allowed-types\` is empty. Write at least one, or remove the key to take the defaults.`,
+    );
+  }
+  const types: UpdateType[] = [];
+  for (const entry of list) {
+    const ut = UPDATE_TYPES.find((t) => t === entry);
+    if (ut === undefined) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.allowed-types\` names \`${entry}\`, which is not a known update type. ` +
+          `Expected any of ${UPDATE_TYPES.join(", ")}.`,
+      );
+    }
+    if (!types.includes(ut)) types.push(ut);
+  }
+  return types;
+}
+
+function readDependaIgnore(path: string, raw: unknown): readonly IgnoreRule[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.ignore\` is ${describe(raw)}, expected a list.`,
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`dependa.ignore\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry as Record<string, unknown>;
+    rejectUnknownKeys(at, fields, ["name", "ecosystem", "types"]);
+
+    const name = text(at, "name", fields.name, { required: true });
+    const ecosystem = readIgnoreEcosystem(at, fields.ecosystem);
+    const types = readIgnoreTypes(at, fields.types);
+
+    return { name, ecosystem, types };
+  });
+}
+
+function readIgnoreEcosystem(at: string, raw: unknown): Ecosystem | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(
+      `warrant: ${at} has \`ecosystem\` as ${describe(raw)}, expected an ecosystem name.`,
+    );
+  }
+  const eco = ECOSYSTEMS.find((e) => e === raw.trim());
+  if (eco === undefined) {
+    throw new Error(
+      `warrant: ${at} has \`ecosystem: ${raw}\`, which is not a known ecosystem. ` +
+        `Expected any of ${ECOSYSTEMS.join(", ")}.`,
+    );
+  }
+  return eco;
+}
+
+function readIgnoreTypes(at: string, raw: unknown): readonly UpdateType[] {
+  if (raw === undefined || raw === null) return [];
+  const list = strings(at, "types", raw);
+  const types: UpdateType[] = [];
+  for (const entry of list) {
+    const ut = UPDATE_TYPES.find((t) => t === entry);
+    if (ut === undefined) {
+      throw new Error(
+        `warrant: ${at} has \`types\` naming \`${entry}\`, which is not a known update type. ` +
+          `Expected any of ${UPDATE_TYPES.join(", ")}.`,
+      );
+    }
+    if (!types.includes(ut)) types.push(ut);
+  }
+  return types;
+}
+
+function readDependaGrouping(path: string, raw: unknown): "by-ecosystem" | "by-package" | "single" {
+  if (raw === undefined || raw === null) return "by-ecosystem";
+  if (raw !== "by-ecosystem" && raw !== "by-package" && raw !== "single") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.grouping\` is ${describe(raw)}, expected \`by-ecosystem\`, \`by-package\`, or \`single\`.`,
+    );
+  }
+  return raw;
+}
+
+function readDependaAutoApprove(path: string, raw: unknown): UpdateType | "none" {
+  if (raw === undefined || raw === null) return "minor";
+  if (raw === "none") return "none";
+  const ut = UPDATE_TYPES.find((t) => t === raw);
+  if (ut === undefined) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.auto-approve\` is ${describe(raw)}, expected an update type or \`none\`.`,
+    );
+  }
+  return ut;
+}
+
+function readDependaSchedule(path: string, raw: unknown): ScheduleConfig | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    // Interval shorthand: "7d", "14d", etc.
+    if (/^\d+d$/.test(trimmed)) {
+      const days = Number(trimmed.slice(0, -1));
+      if (days === 0) {
+        throw new Error(
+          `warrant: \`${path}\`'s \`dependa.schedule: 0d\` is not a schedule. Write a duration like \`7d\`, a cron expression, or remove the key.`,
+        );
+      }
+      return { kind: "interval", days };
+    }
+    // Anything else is treated as a cron expression
+    return { kind: "cron", expression: trimmed };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const fields = raw as Record<string, unknown>;
+    rejectUnknownKeys(`\`${path}\`'s \`dependa.schedule\``, fields, ["interval", "cron"]);
+
+    const interval = fields.interval;
+    const cron = fields.cron;
+
+    if (interval !== undefined && cron !== undefined) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.schedule\` has both \`interval\` and \`cron\` — write one.`,
+      );
+    }
+    if (interval !== undefined && interval !== null) {
+      const days = wholeNumber(`\`${path}\`'s \`dependa.schedule\``, "interval", interval, 1);
+      return { kind: "interval", days };
+    }
+    if (cron !== undefined && cron !== null) {
+      if (typeof cron !== "string" || cron.trim().length === 0) {
+        throw new Error(
+          `warrant: \`${path}\`'s \`dependa.schedule.cron\` is ${describe(cron)}, expected a cron expression.`,
+        );
+      }
+      return { kind: "cron", expression: cron.trim() };
+    }
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.schedule\` writes a mapping with neither \`interval\` nor \`cron\`.`,
+    );
+  }
+  throw new Error(
+    `warrant: \`${path}\`'s \`dependa.schedule\` is ${describe(raw)}, expected a duration, a cron expression, or a mapping.`,
+  );
 }
 
 /**

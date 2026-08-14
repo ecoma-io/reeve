@@ -32,6 +32,7 @@ export const DUTIES: readonly string[] = [
   "respond",
   "lifecycle",
   "harmonise",
+  "dependa",
 ];
 
 /**

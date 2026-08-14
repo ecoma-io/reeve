@@ -21,8 +21,9 @@ which moved first, in its own commit, per that document's own amendment
 rule.
 
 > [!IMPORTANT]
-> **Nothing on this page ships today.** Reeve today runs exactly five duties —
-> `triage`, `translate`, `duplicate`, `respond`, `lifecycle` — each a fixed
+> **Nothing on this page ships today.** Reeve today runs seven duties —
+> `triage`, `translate`, `duplicate`, `respond`, `lifecycle`, `harmonise`,
+> `dependa` — each a fixed
 > pipeline of reviewed TypeScript, exactly as described in
 > [Architecture](architecture.md).
 > There is no agent runtime in this repository's `src/`, no workflow can opt
@@ -93,7 +94,8 @@ actually allow, before any of them run. A plan is data, exactly the way a
 duty's proposed effect is data before the enforcement stage checks it.
 
 **Act.** Execute one step of the plan, restricted to the same category of
-effects a duty may already produce — label, comment, edit-body, record —
+effects a duty may already produce — label, comment, edit-body, record,
+edit-file, open-pr —
 checked against the warrant the same way, in the same code, with no
 separate, looser gate for the agentic path.
 
@@ -161,7 +163,8 @@ Bounded by whatever the warrant already grants the duties it is sequencing
 
 - Read any repository state a duty could already read.
 - Propose and, once granted, execute any effect a duty already has a name
-  for: `label`, `comment`, `edit-body`, `close`, `assign`, `record`.
+  for: `label`, `comment`, `edit-body`, `close`, `assign`, `record`,
+  `edit-file`, `open-pr`.
 - Sequence more than one such effect within a single run, where Explicit
   mode would need a separate invocation per effect.
 
@@ -249,8 +252,9 @@ maintainer, no orchestration language. What the maintainer writes is what
 they already write: a warrant that grants, and a workflow line that invokes.
 
 **[Settled question §9.1](../doctrine/north-star.md#9-settled-questions)
-stands, unconditionally.** "Never writes code" remains settled in both
-modes. Agent Mode's Act stage executes effects a duty already has a name
+stands, unconditionally.** The authority-bounded invariant — Reeve modifies
+repository state only through explicit capabilities — holds in both modes.
+Agent Mode's Act stage executes effects a duty already has a name
 for; it does not gain a new category of effect by being agentic, and
 `code.write` sits permanently on the forbidden floor in
 [`authority.yaml`](agent-governance.md#authorityyaml--the-grant) — not a
@@ -264,9 +268,12 @@ rather than only this page's ruling.
 not put one on the roadmap. Reeve does a duty and stops
 ([non-goals, north star §8](../doctrine/north-star.md#8-non-goals)); Agent
 Mode sequences duties, it does not become one that writes software.
-`code.write` is not a capability under design, under discussion, or planned
+`code.write` — authoring diffs, running tests, fixing bugs — is not a
+capability under design, under discussion, or planned
 for a later warrant version — it is excluded from this direction the same
-way it is excluded from Reeve today.
+way it is excluded from Reeve today. Repository file mutations through
+`edit-file` and `open-pr` are a different boundary, already granted and
+enforced today.
 
 **This is not a standing service.** Every run starts, executes a bounded
 plan, and stops, inside one GitHub Actions job. There is no memory that

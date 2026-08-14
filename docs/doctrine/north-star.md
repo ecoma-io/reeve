@@ -28,12 +28,15 @@ deterministic scoring, a language layer that knows who wrote in what and who
 reads in what, a sanitiser that assumes the thread is hostile, an allowlist
 checked in code, and state kept as plain files in the user's own repository.
 
-| Duty        | Status | Does                                                                            |
-| ----------- | ------ | ------------------------------------------------------------------------------- |
-| `triage`    | ships  | Sorts the backlog against a taxonomy the project wrote.                         |
-| `translate` | ships  | Puts every issue and pull request in the languages the project reads.           |
-| `duplicate` | ships  | Finds the thread that already asked this — across the language it was asked in. |
-| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.     |
+| Duty        | Status | Does                                                                             |
+| ----------- | ------ | -------------------------------------------------------------------------------- |
+| `triage`    | ships  | Sorts the backlog against a taxonomy the project wrote.                          |
+| `translate` | ships  | Puts every issue and pull request in the languages the project reads.            |
+| `duplicate` | ships  | Finds the thread that already asked this — across the language it was asked in.  |
+| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.      |
+| `lifecycle` | ships  | Runs the staleness policy the project wrote — from timestamps and labels alone.  |
+| `harmonise` | ships  | Synchronises documentation across languages and formats.                         |
+| `dependa`   | ships  | Maintains dependencies — discovers updates, assesses risk, opens reviewable PRs. |
 
 ## 2. The end state
 
@@ -403,9 +406,19 @@ reeve/
 │                  dry-run, failure semantics
 ├── src/duties/
 │   ├── translate/
-│   └── triage/
+│   ├── triage/
+│   ├── duplicate/
+│   ├── respond/
+│   ├── lifecycle/
+│   ├── harmonise/
+│   └── dependa/
 ├── translate/action.yml      thin per-duty action contracts
-└── triage/action.yml
+├── triage/action.yml
+├── duplicate/action.yml
+├── respond/action.yml
+├── lifecycle/action.yml
+├── harmonise/action.yml
+└── dependa/action.yml
 ```
 
 GitHub resolves actions in subdirectories, so consolidation does not cost
@@ -574,6 +587,36 @@ ever lets it post.
 **Done when:** a project can point at a thread that was found, matched and
 answered across a language boundary with no human reading both.
 
+### Stage 5b — Repository maintenance · **landed**
+
+`lifecycle`, `harmonise`, and `dependa` — three duties that maintain the
+repository itself rather than its threads. `lifecycle` runs a staleness policy
+from timestamps and labels alone, calling no model. `harmonise` synchronises
+documentation across languages, writing translated files through the `edit-file`
+and `open-pr` capabilities the warrant must grant. `dependa` maintains
+dependencies — discovers available updates, assesses risk from deterministic
+facts and optional model interpretation, and opens reviewable PRs, again through
+explicit capabilities.
+
+The authority model is unchanged: `harmonise` and `dependa` both default to
+empty capabilities at level 0, and both require an explicit grant of `edit-file`
+and `open-pr` in the warrant before they write anything. This is the same
+enforcement that every other duty passes through; the file-mutation duties do not
+get a second, weaker path.
+
+**Standing:** all three have landed — see each duty's own reference page:
+[`lifecycle`](../reference/duties/lifecycle.md),
+[`harmonise`](../reference/duties/harmonise.md),
+[`dependa`](../reference/duties/dependa.md).
+`dependa` supports five ecosystems (npm, GitHub Actions, Cargo, Go, Docker) and
+groups updates by policy rules written in the warrant's `dependa:` key. External
+metadata — changelogs, release notes, registry responses — is treated as
+evidence, never as authority, and is enclosed before it reaches any model.
+
+**Done when:** a maintainer can point at a dependency update PR that was
+discovered, assessed, and opened entirely by Reeve, within the authority the
+warrant granted.
+
 ### Stage 6 — The number
 
 A small paired-fixture evaluation, committed here: the same case written in two
@@ -592,7 +635,9 @@ this repository.
 ### Then `1.0`
 
 Every stage above done, the numbers published, and the input surface frozen
-under semver's promise. Nothing else is waiting on it.
+under semver's promise — issue maintenance, documentation synchronisation,
+and dependency maintenance all landing under one authority model.
+Nothing else is waiting on it.
 
 ### Beyond `1.0` — the 2.x line · **direction, nothing ships**
 
@@ -627,22 +672,23 @@ parsed file, extended to a loop that may propose several effects per run
 instead of one. A better model produces a better plan; it never produces a
 wider warrant.
 
-**[Settled question §9.1](#91--does-reeve-ever-write-code-no) stands in both
-modes, unconditionally.** `code.write` — writing, running, or modifying any
-code, workflow file, or CI configuration in a consumer's repository — is
-permanently forbidden: a floor no warrant key, no authority file, and no
-future version of this roadmap may grant, not a default awaiting a policy
-that loosens it. An agent that sequences duties does not thereby become one
-that writes software, and the moment that sentence needs weakening is the
-moment this section has failed and must be argued down in its own commit,
+**[Settled question §9.1](#91--does-reeve-modify-repository-state-only-within-explicit-authority) stands in both
+modes, unconditionally.** The authority-bounded invariant — Reeve modifies
+repository state only through explicit capabilities granted in the warrant —
+holds regardless of execution mode. No warrant key, no authority file, and no
+future version of this roadmap may grant a capability that bypasses the
+enforcement stage. An agent that sequences duties does not thereby become one
+that can widen its own authority, and the moment that sentence needs weakening
+is the moment this section has failed and must be argued down in its own commit,
 like everything else in this file.
 
 ## 8. Non-goals
 
 Stated so that "why doesn't it..." has an answer that is not a shrug.
 
-- **Not a coding agent.** Reeve reads and decides. It does not author diffs, run
-  tests, or fix bugs. See §9.1.
+- **Not a coding agent.** Reeve does not author diffs, run
+  tests, or fix bugs. It modifies repository files only through explicit
+  capabilities granted in the warrant. See §9.1.
 - **Not a hosted service.** No account, no dashboard, no data of yours anywhere
   we control. (D6)
 - **Not a chatbot.** Reeve does not hold a conversation in your thread. It does
@@ -663,13 +709,24 @@ Stated so that "why doesn't it..." has an answer that is not a shrug.
 Recorded with the reasoning, because a decision without its argument gets
 relitigated every six months.
 
-### 9.1 — Does Reeve ever write code? No.
+### 9.1 — Does Reeve modify repository state? Only within explicit authority.
 
-Authoring a diff needs a checkout, a sandbox, and a test run to be worth
-anything, and every one of those contradicts the shape Reeve chose. It is also
-the most crowded and best-funded part of the field. Reeve stays in the half of
-maintenance that is reading and deciding — which is the half where language is
-the hard problem, and therefore the half where Reeve has an argument.
+Reeve does not grant itself authority. Reeve does not treat model output as
+permission. Reeve modifies repository state only through explicit capabilities
+(`edit-file`, `open-pr`) that a maintainer granted in the warrant, and every
+mutation passes through deterministic enforcement before it reaches the
+repository. Dependency updates are reviewable proposals; model output is
+evidence, never permission; and no run can widen its own grant.
+
+This replaces an earlier boundary that said "Reeve does not write code." The
+older line was simpler but incomplete: `harmonise` already writes documentation
+files, and `dependa` writes dependency manifests. The invariant that actually
+holds — and that the enforcement code checks — is not about what _kind_ of file
+is modified, but about whether the modification was authorised. A capability
+granted for `edit-file` does not care whether the file is Markdown or TOML; it
+cares that the warrant said yes. That is the stronger boundary, because it
+covers every file mutation the same way, with no special case for code versus
+non-code.
 
 ### 9.2 — Does Reeve define its own policy format? No.
 

@@ -213,6 +213,7 @@ function warrantOf(): Warrant {
     memory: null,
     about: null,
     lifecycle: null,
+    dependa: null,
     propose: DEFAULT_PROPOSE_WORKSPACE,
     granted: (_duty, fallback) => fallback,
     unnamed: () => false,

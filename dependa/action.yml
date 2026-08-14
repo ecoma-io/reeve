@@ -1,0 +1,178 @@
+# The `dependa` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/dependa@v0.1`.
+name: Reeve - dependa
+description: Keep dependencies up to date — discover, classify, evidence, and propose updates through pull requests governed by your warrant.
+author: ecoma.io
+
+branding:
+  icon: package
+  color: orange
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read and write repository files and pull requests.
+      `GITHUB_TOKEN` is enough, and it is what gives the run recursion
+      prevention: a PR this duty opens does not start another run.
+    required: false
+    default: ${{ github.token }}
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key. Used only for optional risk interpretation — dependa's
+      core pipeline (discovery, classification, grouping, policy) is
+      deterministic and makes no model calls.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. Used only
+      for optional risk interpretation — the model may assess whether evidence
+      suggests breaking changes, but its assessment is advisory and never
+      authority. The deterministic pipeline (discovery, classification,
+      grouping, policy enforcement) runs regardless of whether a model is
+      configured.
+
+      `id = Name` gives a model a display name, and everything a person reads —
+      the published block, every warning — shows the name instead of the id.
+    required: false
+    default: ""
+
+  warrant:
+    description: >-
+      Where the permissions live. `edit-file` and `open-pr` are this duty's
+      capabilities, and they are NOT granted by default — committing files
+      and opening PRs is too much authority for zero-config. Once a
+      `capabilities:` block is written in this file, the enumeration is total:
+      leaving `dependa` out of it grants this duty nothing, and the run says
+      so rather than guessing.
+
+      Missing at this default path, there is no failure: the duty discovers
+      and classifies without touching the repository, exactly as if `apply`
+      were `none`. Point this at a path of your own instead, and a file missing
+      there fails the run red, because naming a file that is not there is a
+      configuration mistake rather than an absence.
+    required: false
+    default: .github/reeve.yml
+
+  apply:
+    description: >-
+      What this run may do: `edit-file, open-pr`, or `none` for a run that
+      discovers, classifies, and groups but never commits or opens a PR. The
+      narrower of this and the warrant file wins, always — the same double-gate
+      every other duty applies, with the same shape: discovery and
+      classification all run and spend whatever they were going to spend
+      regardless of this input, and only the write at the end is gated. `none`
+      is a good way to watch what a run would have changed before it is allowed
+      to.
+    required: false
+    default: none
+
+  ecosystems:
+    description: >-
+      Which dependency ecosystems to scan, comma or newline separated. `npm`,
+      `github-actions`, `cargo`, `go`, `docker` — or empty for all known.
+      Unknown names are refused. This input narrows the warrant's own
+      `ecosystems:` list; it cannot widen it.
+    required: false
+    default: ""
+
+  drafts:
+    description: >-
+      How many risk interpretations to ask for per proposal. Every answer is
+      scored deterministically and the best is kept. The quality lever that
+      costs calls instead of money. `0` means no model-assisted risk
+      interpretation at all — the deterministic facts alone are used.
+    required: false
+    default: "0"
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and change nothing. The
+      classification and the PR that would have been opened are printed to
+      the log.
+    required: false
+    default: "false"
+
+  max-requests:
+    description: >-
+      How many provider requests — resolution, risk interpretation combined —
+      one run may spend before it stops asking for more, or `none` for no
+      bound. Every request made counts against this, whatever it answered.
+      Checked at every clean-cut boundary — before each dependency, before each
+      proposal group — never mid-proposal. `none`, the default, never trips it.
+    required: false
+    default: none
+
+  paths:
+    description: >-
+      Manifest paths to scan for dependencies, comma or newline separated.
+      Empty scans the whole repository. Use this to limit dependa to a
+      specific directory (e.g. `src/`, `packages/app/`).
+    required: false
+    default: ""
+
+  request-timeout:
+    description: >-
+      How long one request is allowed to run before it counts as a timeout —
+      weather, not a failure — expressed as a whole number of seconds or
+      minutes. A bare number is refused rather than assumed to be seconds.
+    required: false
+    default: 120s
+
+  temperature:
+    description: >-
+      Sampling temperature, between 0 and 2. Empty is the default and omits
+      the field from every request outright. Refused outside its range.
+    required: false
+    default: ""
+
+outputs:
+  proposed:
+    description: >-
+      JSON array of proposal group IDs that were proposed this run.
+
+  refused:
+    description: >-
+      JSON array of proposal group IDs that were refused by policy or
+      enforcement this run.
+
+  security:
+    description: >-
+      JSON array of proposal group IDs that contain security updates.
+
+  pull-requests:
+    description: >-
+      JSON array of objects with `group` (proposal group ID) and `pr`
+      (pull request number) for each PR opened or updated this run.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a 429,
+      a 5xx, a timeout, or a network failure, on every one of them. Weather,
+      never a failure by itself.
+
+  budget-exhausted:
+    description: >-
+      `true` when this run's own `max-requests` ceiling genuinely turned work
+      away. Never `true` when `max-requests` is `none`, the default.
+
+runs:
+  using: node24
+  main: dist/index.js

@@ -72,7 +72,12 @@ they are boundaries the model itself does not participate in setting. Reeve
 does not remove a label a person applied, reopen what a person closed,
 reassign what a person assigned, rewrite a person's own words, apply a label
 outside the taxonomy, or touch code, a pull request, or a test suite on your
-behalf. The one bounded carve-out proves the rule:
+behalf — except through the explicit capabilities the warrant grants. `edit-file`
+and `open-pr` are grantable capabilities, not defaults, and they only govern
+what the warrant names: `harmonise` writing a translated README, `dependa`
+writing a dependency manifest. No duty can widen its own authority, and no
+external metadata — a changelog, a release note, a registry response — can
+become permission. The one bounded carve-out proves the rule:
 [`lifecycle`'s clock-hand exception](../reference/duties/lifecycle.md#the-clock-hand-exception)
 removes only a label its own actor applied as a track's declared clock-hand —
 a label a person applied is still never touched. A maintainer who wants any of that has to do it themselves; no warrant
