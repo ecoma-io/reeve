@@ -6,7 +6,13 @@
  */
 import * as core from "@actions/core";
 
-import { bounded, readCore, whole, type ApiKeySpec, type EndpointSpec } from "../../core/inputs.js";
+import {
+  bounded,
+  counted,
+  readCore,
+  type ApiKeySpec,
+  type EndpointSpec,
+} from "../../core/inputs.js";
 import type { Capability } from "../../core/warrant.js";
 import type { Names } from "../../core/provider.js";
 import { parseApply } from "../../core/enforce.js";
@@ -42,8 +48,8 @@ export function readSettings(): Omit<Settings, "permitted"> {
     warrant: core.getInput("warrant", { required: true }),
     apply: parseApply(core.getInput("apply", { required: true })),
     ecosystems: parseEcosystems(core.getInput("ecosystems")),
-    drafts: whole("drafts", core.getInput("drafts")),
-    dryRun: core.getInput("dry-run") !== "false",
+    drafts: counted("drafts", core.getInput("drafts")),
+    dryRun: core.getBooleanInput("dry-run"),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     paths: parsePaths(core.getInput("paths")),
   };

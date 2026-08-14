@@ -105,9 +105,9 @@ describe("evaluate", () => {
     expect(verdict.action).toBe("allow");
   });
 
-  it("proposes major updates by default (autoApprove: minor)", () => {
+  it("refuses major updates by default (major not in allowedTypes)", () => {
     const verdict = evaluate(proposal({ updateType: "major" }), DEFAULT_DEPENDA_POLICY);
-    expect(verdict.action).toBe("propose");
+    expect(verdict.action).toBe("refuse");
   });
 
   it("refuses major updates when not in allowedTypes", () => {
@@ -137,28 +137,28 @@ describe("evaluate", () => {
   });
 
   it("propose everything when autoApprove is none", () => {
-    const p = policy({ autoApprove: "none" });
+    const p = policy({ autoApprove: "none", allowedTypes: ["patch", "minor", "major"] });
     expect(evaluate(proposal({ updateType: "patch" }), p).action).toBe("propose");
     expect(evaluate(proposal({ updateType: "minor" }), p).action).toBe("propose");
     expect(evaluate(proposal({ updateType: "major" }), p).action).toBe("propose");
   });
 
   it("allows patch only when autoApprove is patch", () => {
-    const p = policy({ autoApprove: "patch" });
+    const p = policy({ autoApprove: "patch", allowedTypes: ["patch", "minor", "major"] });
     expect(evaluate(proposal({ updateType: "patch" }), p).action).toBe("allow");
     expect(evaluate(proposal({ updateType: "minor" }), p).action).toBe("propose");
     expect(evaluate(proposal({ updateType: "major" }), p).action).toBe("propose");
   });
 
   it("allows patch and minor when autoApprove is minor", () => {
-    const p = policy({ autoApprove: "minor" });
+    const p = policy({ autoApprove: "minor", allowedTypes: ["patch", "minor", "major"] });
     expect(evaluate(proposal({ updateType: "patch" }), p).action).toBe("allow");
     expect(evaluate(proposal({ updateType: "minor" }), p).action).toBe("allow");
     expect(evaluate(proposal({ updateType: "major" }), p).action).toBe("propose");
   });
 
   it("allows patch, minor, major when autoApprove is major", () => {
-    const p = policy({ autoApprove: "major" });
+    const p = policy({ autoApprove: "major", allowedTypes: ["patch", "minor", "major"] });
     expect(evaluate(proposal({ updateType: "patch" }), p).action).toBe("allow");
     expect(evaluate(proposal({ updateType: "minor" }), p).action).toBe("allow");
     expect(evaluate(proposal({ updateType: "major" }), p).action).toBe("allow");
@@ -328,5 +328,79 @@ describe("group", () => {
     const onlyMajor = policy({ allowedTypes: ["patch", "minor"] });
     const groups = group([p1], onlyMajor);
     expect(groups).toEqual([]);
+  });
+});
+
+// ── ignore glob ReDoS protection ────────────────────────────────────────────
+
+describe("ignore glob — ReDoS protection", () => {
+  it("rejects patterns longer than 256 characters", () => {
+    const longPattern = "a".repeat(300);
+    const p = policy({ ignore: [{ name: longPattern, ecosystem: null, types: [] }] });
+    const prop = proposal({ dependency: dep({ name: "anything" }) });
+    const verdict = evaluate(prop, p);
+    // Overly long pattern should not match (rejected by matchesGlob)
+    expect(verdict.action).not.toBe("refuse");
+  });
+
+  it("handles consecutive wildcards without catastrophic backtracking", () => {
+    // Patterns like "***" or "*.*.*.*" should not cause ReDoS
+    const patterns = ["***", "*.*.*.*.*", "*?*?*", "**"];
+    const p = policy({
+      allowedTypes: ["patch", "minor", "major"],
+      ignore: patterns.map((pat) => ({ name: pat, ecosystem: null, types: [] })),
+    });
+
+    // This should complete quickly (no ReDoS)
+    const prop = proposal({ dependency: dep({ name: "some-package" }) });
+    const start = Date.now();
+    const verdict = evaluate(prop, p);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(100); // Must not hang
+    expect(verdict.action).toBeDefined();
+  });
+
+  it("collapses consecutive wildcards to a single match", () => {
+    // "***" should match the same as "*"
+    const p = policy({
+      allowedTypes: ["patch", "minor", "major"],
+      ignore: [{ name: "lodash***", ecosystem: null, types: [] }],
+    });
+    const prop = proposal({ dependency: dep({ name: "lodash" }) });
+    const verdict = evaluate(prop, p);
+    expect(verdict.action).toBe("refuse");
+    expect(verdict.ignored).toBe(true);
+  });
+
+  it("still matches exact names without wildcards", () => {
+    const p = policy({
+      allowedTypes: ["patch", "minor", "major"],
+      ignore: [{ name: "lodash", ecosystem: null, types: [] }],
+    });
+    const prop = proposal({ dependency: dep({ name: "lodash" }) });
+    const verdict = evaluate(prop, p);
+    expect(verdict.action).toBe("refuse");
+    expect(verdict.ignored).toBe(true);
+  });
+
+  it("still matches single-star glob", () => {
+    const p = policy({
+      allowedTypes: ["patch", "minor", "major"],
+      ignore: [{ name: "@scope/*", ecosystem: null, types: [] }],
+    });
+    const prop = proposal({ dependency: dep({ name: "@scope/utils" }) });
+    const verdict = evaluate(prop, p);
+    expect(verdict.action).toBe("refuse");
+    expect(verdict.ignored).toBe(true);
+  });
+
+  it("does not match unrelated names with glob", () => {
+    const p = policy({
+      allowedTypes: ["patch", "minor", "major"],
+      ignore: [{ name: "@scope/*", ecosystem: null, types: [] }],
+    });
+    const prop = proposal({ dependency: dep({ name: "lodash" }) });
+    const verdict = evaluate(prop, p);
+    expect(verdict.action).not.toBe("refuse");
   });
 });

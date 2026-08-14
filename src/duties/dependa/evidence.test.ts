@@ -11,6 +11,7 @@ import type { Evidence, Release, SecurityAdvisory } from "./model.js";
 
 import {
   encloseEvidence,
+  escapeMarkdown,
   fromChangelog,
   fromCommitLog,
   fromGithubRelease,
@@ -299,5 +300,35 @@ describe("renderForPr", () => {
 
     const rendered = renderForPr(evidence);
     expect(rendered).toContain("*(model-derived)*");
+  });
+});
+
+// ── escapeMarkdown ──────────────────────────────────────────────────────────
+
+describe("escapeMarkdown", () => {
+  it("defangs Markdown links: [text](url) → text (url)", () => {
+    expect(escapeMarkdown("[click here](https://evil.com/phish)")).toBe(
+      "click here (https://evil.com/phish)",
+    );
+  });
+
+  it("defangs Markdown images: ![alt](url) → alt (url)", () => {
+    expect(escapeMarkdown("![tracking pixel](https://evil.com/track)")).toBe(
+      "tracking pixel (https://evil.com/track)",
+    );
+  });
+
+  it("strips HTML tags", () => {
+    expect(escapeMarkdown('<script>alert("xss")</script>')).toBe('alert("xss")');
+  });
+
+  it("escapes remaining angle brackets not consumed by HTML tag stripping", () => {
+    // "<3" is not a valid HTML tag, so after HTML stripping the "<" survives
+    // and then gets escaped. "a <3 b" → strip HTML tags (none match) → escape < → "a &lt;3 b"
+    expect(escapeMarkdown("a <3 b")).toBe("a &lt;3 b");
+  });
+
+  it("leaves plain text untouched", () => {
+    expect(escapeMarkdown("Hello world")).toBe("Hello world");
   });
 });

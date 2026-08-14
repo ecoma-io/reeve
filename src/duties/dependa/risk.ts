@@ -120,8 +120,8 @@ export function interpretationPrompt(
   enclosedEvidence: string,
 ): string {
   return [
-    `You are assessing the risk of updating \`${proposal.dependency.name}\` ` +
-      `from \`${proposal.currentVersion}\` to \`${proposal.targetVersion}\`.`,
+    `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` ` +
+      `from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
     "",
     "Risk facts (deterministic, from version metadata):",
     `- Update type: ${facts.updateType}`,
@@ -159,6 +159,25 @@ export function interpretationPrompt(
  * is dropped, not best-effort read. The shapes that fail to parse are the
  * ones an injection produced.
  */
+/**
+ * Sanitize a string for safe interpolation into a model prompt.
+ *
+ * Removes characters that could be interpreted as prompt instructions
+ * (newlines, backticks, and common injection markers). The values
+ * originate from registry API responses and are untrusted — a maliciously
+ * named package could attempt prompt injection.
+ *
+ * This is a defense-in-depth layer; the model's output is constrained by
+ * parseInterpretation and the enforcement layer does not grant authority
+ * based on model output.
+ */
+function sanitizeForPrompt(value: string): string {
+  return value
+    .replace(/[\r\n]/g, " ")
+    .replace(/`/g, "'")
+    .slice(0, 200);
+}
+
 export function parseInterpretation(response: string): RiskInterpretation | null {
   try {
     const parsed: unknown = JSON.parse(response.trim());

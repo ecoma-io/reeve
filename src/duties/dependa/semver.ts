@@ -31,6 +31,23 @@ export interface Semver {
 const SEMVER_RE = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+](.+))?$/;
 
 /**
+ * Count the number of version parts in a constraint string.
+ *
+ * "1" → 1, "1.2" → 2, "1.2.3" → 3.
+ * Used by `satisfies` to determine whether a caret constraint like ^0.0
+ * is 2-part (locks minor) or 3-part like ^0.0.3 (locks patch).
+ */
+function countVersionParts(constraint: string): number {
+  const trimmed = constraint.trim().replace(/^v/, "");
+  // Strip any prerelease/build suffix
+  // split() always returns at least one element; the assertion is safe.
+  // ESLint: no-non-null-assertion — use indexed access with fallback.
+  const core = (trimmed.split("-")[0] ?? trimmed).split("+")[0] ?? trimmed;
+  const parts = core.split(".");
+  return parts.length;
+}
+
+/**
  * Parse a version string into a Semver, or return null when it does not
  * resemble one. The grammar is intentionally permissive at the edges —
  * `1`, `1.2`, and `1.2.3` all parse, because ecosystems actually write
@@ -71,11 +88,42 @@ export function compare(a: Semver, b: Semver): number {
   if (a.prerelease !== null && b.prerelease === null) return -1;
   if (a.prerelease === null && b.prerelease === null) return 0;
 
-  // Both have pre-release: compare lexicographically
+  // Both have pre-release: compare per npm semver spec rules:
+  // 1. Numeric identifiers compare numerically.
+  // 2. Non-numeric identifiers compare lexicographically.
+  // 3. Numeric identifiers always have lower precedence than non-numeric.
+  // 4. A larger set of fields has higher precedence when all preceding equal.
   const ap = a.prerelease ?? "";
   const bp = b.prerelease ?? "";
-  if (ap < bp) return -1;
-  if (ap > bp) return 1;
+  const aParts = ap.split(".");
+  const bParts = bp.split(".");
+  const minLen = Math.min(aParts.length, bParts.length);
+
+  for (let i = 0; i < minLen; i++) {
+    const aSeg = aParts[i] ?? "";
+    const bSeg = bParts[i] ?? "";
+    const aNum = Number(aSeg);
+    const bNum = Number(bSeg);
+    const aIsNum = aSeg !== "" && Number.isSafeInteger(aNum);
+    const bIsNum = bSeg !== "" && Number.isSafeInteger(bNum);
+
+    if (aIsNum && bIsNum) {
+      // Rule 1: both numeric — compare as integers
+      if (aNum !== bNum) return aNum < bNum ? -1 : 1;
+    } else if (aIsNum && !bIsNum) {
+      // Rule 3: numeric sorts lower than non-numeric
+      return -1;
+    } else if (!aIsNum && bIsNum) {
+      return 1;
+    } else {
+      // Rule 2: both non-numeric — compare lexicographically
+      if (aSeg !== bSeg) return aSeg < bSeg ? -1 : 1;
+    }
+  }
+
+  // Rule 4: all shared identifiers matched — shorter set has lower precedence
+  if (aParts.length < bParts.length) return -1;
+  if (aParts.length > bParts.length) return 1;
   return 0;
 }
 
@@ -106,14 +154,19 @@ export function eq(a: Semver, b: Semver): boolean {
  * version does not parse is not proposed for update.
  */
 export function classify(current: string, target: string, isSecurity: boolean): UpdateType | null {
-  if (isSecurity) return "security";
-
   const cur = parse(current);
   const tgt = parse(target);
   if (cur === null || tgt === null) return null;
 
-  // Target must be newer than current for a forward update
+  // Same version — nothing to update, even if isSecurity is true
+  // (a no-op security classification produces a proposal that does nothing)
   const cmp = compare(tgt, cur);
+  if (cmp === 0) return null;
+
+  // Security overrides semver classification when the version actually changes
+  if (isSecurity) return "security";
+
+  // Target must be newer than current for a forward update
   if (cmp < 0) return "rollback";
   if (cmp === 0) return null; // Same version — nothing to update
 
@@ -140,6 +193,23 @@ export function classify(current: string, target: string, isSecurity: boolean): 
 export function satisfies(version: Semver, constraint: string): boolean | null {
   const trimmed = constraint.trim();
 
+  // OR ranges: ">=1.2.3 || >=2.0.0" — satisfied when ANY sub-range matches
+  if (trimmed.includes("||")) {
+    const parts = trimmed
+      .split("||")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    let anyParsed = false;
+    for (const part of parts) {
+      const result = satisfies(version, part);
+      if (result === true) return true;
+      if (result !== null) anyParsed = true;
+    }
+    // If at least one sub-range was parsed and none matched, return false.
+    // If no sub-range could be parsed, return null (cannot determine).
+    return anyParsed ? false : null;
+  }
+
   // Exact version match
   if (/^\d/.test(trimmed)) {
     const pinned = parse(trimmed);
@@ -149,11 +219,21 @@ export function satisfies(version: Semver, constraint: string): boolean | null {
 
   // Caret range: ^1.2.3 → >=1.2.3, <2.0.0
   if (trimmed.startsWith("^")) {
-    const floor = parse(trimmed.slice(1));
+    const constraintBody = trimmed.slice(1);
+    const floor = parse(constraintBody);
     if (floor === null) return null;
     if (lt(version, floor)) return false;
+    // Determine how many parts the original constraint had.
+    // ^0.0.3 (3-part) locks the patch: >=0.0.3, <0.0.4
+    // ^0.0 (2-part) locks the minor: >=0.0.0, <0.1.0
+    // ^0 (1-part) locks the major: >=0.0.0, <1.0.0
+    const partCount = countVersionParts(constraintBody);
     if (floor.major === 0) {
-      // ^0.2.3 → >=0.2.3, <0.3.0
+      if (floor.minor === 0 && partCount >= 3) {
+        // ^0.0.3 → >=0.0.3, <0.0.4 (patch-locked)
+        return version.major === 0 && version.minor === 0 && version.patch === floor.patch;
+      }
+      // ^0.0 or ^0.2 → minor-locked
       return version.major === 0 && version.minor === floor.minor;
     }
     return version.major === floor.major;
@@ -236,6 +316,57 @@ export function highestSatisfying(
   }
 
   return null;
+}
+
+/**
+ * Find the latest stable version from `releases`, ignoring the constraint.
+ *
+ * Used to discover major updates that fall outside the current constraint.
+ * For a dependency at ^1.5.0 with available versions [1.6.0, 2.0.0],
+ * highestSatisfying returns 1.6.0 (within constraint) while
+ * latestAvailable returns 2.0.0 (newest regardless of constraint).
+ *
+ * This is essential for Renovate-class behaviour: a major update outside
+ * the constraint should be *discovered* (so policy can decide), not *hidden*
+ * (because the constraint excludes it).
+ *
+ * Returns null when no stable (non-prerelease) release exists.
+ */
+export function latestAvailable(releases: readonly string[]): string | null {
+  for (const version of releases) {
+    const parsed = parse(version);
+    if (parsed !== null && parsed.prerelease === null) return version;
+  }
+  // No stable release found — return null (do not fall back to prerelease)
+  return null;
+}
+
+/**
+ * Find all candidate versions for a dependency — both the highest satisfying
+ * the constraint and the latest available overall.
+ *
+ * Returns an array of candidate version strings. When the latest available
+ * also satisfies the constraint, returns a single-element array. When the
+ * latest available does NOT satisfy the constraint (i.e., it's a major
+ * update outside the constraint), returns both candidates.
+ *
+ * Deterministic: same releases, same constraint, same candidates.
+ */
+export function candidateVersions(
+  releases: readonly string[],
+  constraint: string | null,
+): readonly string[] {
+  const satisfying = highestSatisfying(releases, constraint);
+  const available = latestAvailable(releases);
+
+  if (satisfying === null && available === null) return [];
+  if (satisfying === null) return available !== null ? [available] : [];
+  if (available === null) return [satisfying];
+  if (satisfying === available) return [satisfying];
+
+  // Both exist and differ — return satisfying first (within constraint),
+  // then latest available (outside constraint, typically a major bump).
+  return [satisfying, available];
 }
 
 /**

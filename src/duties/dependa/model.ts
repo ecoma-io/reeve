@@ -451,7 +451,7 @@ export interface Refusal {
 /** Defaults `readDependaPolicy` returns when `dependa:` was never written. */
 export const DEFAULT_DEPENDA_POLICY: DependaPolicy = {
   ecosystems: [],
-  allowedTypes: ["patch", "minor", "major", "pin", "digest", "rollback", "security"],
+  allowedTypes: ["patch", "minor", "pin", "digest", "rollback", "security"],
   ignore: [],
   grouping: "by-ecosystem",
   securitySeparate: true,

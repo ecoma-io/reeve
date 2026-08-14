@@ -69,8 +69,9 @@ describe("sanitizeBranchSegment", () => {
     expect(sanitizeBranchSegment("by-ecosystem")).toBe("by-ecosystem");
   });
 
-  it("replaces slashes with dashes", () => {
-    expect(sanitizeBranchSegment("@types/node")).toBe("@types-node");
+  it("replaces slashes and at-signs with dashes", () => {
+    // @ is replaced with -, / becomes -, leading dash gets "branch" prefix
+    expect(sanitizeBranchSegment("@types/node")).toBe("branch-types-node");
   });
 
   it("replaces unsafe characters with dashes", () => {
