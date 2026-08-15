@@ -109,6 +109,17 @@ export async function queryAdvisories(
     page++;
   }
 
+  // Warn when pagination was truncated by the page cap — the maintainer
+  // should know that not all advisories were retrieved so they can decide
+  // whether to investigate further.
+  if (page > maxPages) {
+    core.warning(
+      `dependa: security advisory query for \`${packageName}\` (${apiEcosystem}) ` +
+        `was truncated at ${String(maxPages)} pages (${String(maxPages * 100)} advisories). ` +
+        "Some advisories may be missing.",
+    );
+  }
+
   return parseAdvisories(allAdvisories);
 }
 
