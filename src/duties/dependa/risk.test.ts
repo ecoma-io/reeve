@@ -203,6 +203,31 @@ describe("computeFacts", () => {
 
     expect(facts.currentVersionStale).toBe(false);
   });
+
+  // Regression: F13 — when the releases list does NOT contain the current
+  // version (as happened when main.ts passed filterReleases output which
+  // excludes current), date-based facts are always null. Callers must pass
+  // the full releases list so computeFacts can find the current version.
+  it("returns null date facts when current version is missing from releases", () => {
+    const targetRelease = new Date("2024-06-15");
+
+    const facts = computeFacts({
+      currentVersion: "1.0.0",
+      targetVersion: "1.1.0",
+      updateType: "minor",
+      releases: [
+        // Current version 1.0.0 is intentionally absent
+        { version: "1.0.1", releasedAt: new Date("2024-03-01") },
+        { version: "1.1.0", releasedAt: targetRelease },
+      ],
+      securityAdvisory: null,
+      evidence: [],
+      isDev: false,
+    });
+
+    expect(facts.daysBetweenReleases).toBeNull();
+    expect(facts.currentVersionStale).toBeNull();
+  });
 });
 
 // ── factsOnly ────────────────────────────────────────────────────────────

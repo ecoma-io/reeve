@@ -352,11 +352,16 @@ export async function run(): Promise<void> {
         const evidence = gatherEvidence(relevantReleases, securityAdvisory, new Map());
 
         // 6. RISK — deterministic facts, optional model interpretation
+        // Pass the FULL releases list (not filtered) so computeFacts can find
+        // the current version's release date for daysBetweenReleases and
+        // currentVersionStale. filterReleases excludes the current version
+        // (it returns (current, target]) which is correct for evidence but
+        // would make date-based facts always null.
         const riskFacts = factsOnly({
           currentVersion: dep.currentVersion,
           targetVersion,
           updateType,
-          releases: relevantReleases,
+          releases: result.releases,
           securityAdvisory,
           evidence,
           isDev: dep.dev,
