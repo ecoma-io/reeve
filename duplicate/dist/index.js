@@ -32838,6 +32838,9 @@ function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
 function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
+function protocolExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+}
 function weatherFailure(model) {
   return {
     ok: false,
@@ -33087,6 +33090,18 @@ var UPDATE_TYPES = [
   "security"
 ];
 
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+  "harmonise",
+  "dependa"
+];
+var PLANNED = [];
+
 // src/core/warrant.ts
 var CAPABILITIES = [
   "label",
@@ -33127,6 +33142,25 @@ function isNotFound(error2) {
 }
 function parseWarrant(path, source) {
   const document2 = load(path, source);
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "capabilities"
+  ];
+  for (const key of Object.keys(document2)) {
+    if (!KNOWN_ROOT.includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+      );
+    }
+  }
   const version = document2.version;
   if (version !== VERSION7) {
     throw new Error(
@@ -33288,6 +33322,25 @@ function readLabels(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color"
+    ];
+    for (const key of Object.keys(fields)) {
+      if (!KNOWN_LABEL.includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
+        );
+      }
+    }
     const name = text(at, "name", fields.name, { required: true });
     if (seen.has(name.toLowerCase())) {
       throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
@@ -33861,6 +33914,11 @@ function readCapabilities(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` capabilities for \`${duty}\``;
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      throw new Error(
+        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+      );
+    }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(
@@ -34393,6 +34451,16 @@ function warnIfStarved(models, weather, sweep) {
   const rosterStarved = starved(models, weather);
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted = protocolExhausted(models, failures);
+  if (exhausted) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted;
 }
 async function writeRunSummary(page2, weather) {
   await writeSummary(page2 + authSection(weather.authFailures));
@@ -35782,6 +35850,9 @@ ${pivot.draft.body}`);
     warning(
       `The verdict could not be read, so nothing was proposed. A half-parsed answer is the shape an injection produces, so it is refused whole \u2014 it began: ${excerpt3(judged.unreadable)}`
     );
+  }
+  if (judged.model === null) {
+    failIfProtocolExhausted(settings.models, judged.failures);
   }
   const note = judged.unreadable !== null ? "the verdict did not parse" : judged.model === null ? "every model failed" : null;
   const verdict2 = judged.verdict;

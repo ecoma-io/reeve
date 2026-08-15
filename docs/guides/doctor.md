@@ -109,7 +109,7 @@ step itself fails if even one of them is present.
 **GitHub's own capacity is weather, not a finding against your
 configuration** — a rate limit, a 5xx, or a timeout on the labels endpoint
 is reported green, naming the endpoint and saying plainly that the check
-was not performed, the same posture [D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+was not performed, the same posture [D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
 takes everywhere else in this project. Run `doctor` again once GitHub
 answers.
 

@@ -176,7 +176,7 @@ both lists is still a step in [the duty checklist](duties.md).
    from commit subjects — a subject nobody could read in a changelog is a subject
    to fix before merging, not after.
 4. If a duty changed, put its evaluation numbers in the release notes
-   ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)).
+   ([D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation)).
 5. Merge. The rest runs on its own.
 6. Verify: the release exists, `reeve-action.tar.gz` and
    `reeve-action.intoto.jsonl` are attached, and the floating tag moved.

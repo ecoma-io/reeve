@@ -31760,6 +31760,49 @@ var UPDATE_TYPES = [
   "security"
 ];
 
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+  "harmonise",
+  "dependa"
+];
+var PLANNED = [];
+var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
+function pinned() {
+  const ref = process.env.GITHUB_ACTION_REF ?? "";
+  return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
+}
+function normalise(raw) {
+  return raw.trim().toLowerCase();
+}
+function refusal(raw, built = DUTIES, planned = PLANNED) {
+  const duty = normalise(raw);
+  if (duty.length > 0 && built.includes(duty)) {
+    return [
+      `\`${duty}\` is a duty, but it is not this action.`,
+      `Write \`uses: ecoma-io/reeve/${duty}@${pinned()}\` instead of \`uses: ecoma-io/reeve@${pinned()}\`.`
+    ].join("\n");
+  }
+  if (duty.length > 0 && planned.includes(duty)) {
+    return [
+      `\`${duty}\` has a documented contract but no code at this ref.`,
+      `It arrives with the stage that builds it: ${ROADMAP}`
+    ].join("\n");
+  }
+  const opening = duty.length === 0 ? "`ecoma-io/reeve` is not a duty. Reeve ships one action per duty, and a workflow names the one it wants." : `Reeve has no duty called \`${duty}\`.`;
+  return [opening, available(built)].join("\n");
+}
+function available(built) {
+  if (built.length === 0) {
+    return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
+  }
+  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@${pinned()}`).join(", ")}`;
+}
+
 // src/core/warrant.ts
 var CAPABILITIES = [
   "label",
@@ -31800,6 +31843,25 @@ function isNotFound(error2) {
 }
 function parseWarrant(path, source) {
   const document = load(path, source);
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "capabilities"
+  ];
+  for (const key of Object.keys(document)) {
+    if (!KNOWN_ROOT.includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+      );
+    }
+  }
   const version = document.version;
   if (version !== VERSION7) {
     throw new Error(
@@ -31949,6 +32011,25 @@ function readLabels(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color"
+    ];
+    for (const key of Object.keys(fields)) {
+      if (!KNOWN_LABEL.includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
+        );
+      }
+    }
     const name = text(at, "name", fields.name, { required: true });
     if (seen.has(name.toLowerCase())) {
       throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
@@ -32522,6 +32603,11 @@ function readCapabilities(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` capabilities for \`${duty}\``;
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      throw new Error(
+        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+      );
+    }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(
@@ -32637,49 +32723,6 @@ function describe(value) {
     return `\`${String(value)}\``;
   }
   return "a value of a kind this file cannot hold";
-}
-
-// src/refusal.ts
-var DUTIES = [
-  "translate",
-  "triage",
-  "duplicate",
-  "respond",
-  "lifecycle",
-  "harmonise",
-  "dependa"
-];
-var PLANNED = [];
-var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
-function pinned() {
-  const ref = process.env.GITHUB_ACTION_REF ?? "";
-  return ref.trim().length === 0 ? "<the ref you pinned>" : ref.trim();
-}
-function normalise(raw) {
-  return raw.trim().toLowerCase();
-}
-function refusal(raw, built = DUTIES, planned = PLANNED) {
-  const duty = normalise(raw);
-  if (duty.length > 0 && built.includes(duty)) {
-    return [
-      `\`${duty}\` is a duty, but it is not this action.`,
-      `Write \`uses: ecoma-io/reeve/${duty}@${pinned()}\` instead of \`uses: ecoma-io/reeve@${pinned()}\`.`
-    ].join("\n");
-  }
-  if (duty.length > 0 && planned.includes(duty)) {
-    return [
-      `\`${duty}\` has a documented contract but no code at this ref.`,
-      `It arrives with the stage that builds it: ${ROADMAP}`
-    ].join("\n");
-  }
-  const opening = duty.length === 0 ? "`ecoma-io/reeve` is not a duty. Reeve ships one action per duty, and a workflow names the one it wants." : `Reeve has no duty called \`${duty}\`.`;
-  return [opening, available(built)].join("\n");
-}
-function available(built) {
-  if (built.length === 0) {
-    return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
-  }
-  return `Available here: ${built.map((duty) => `ecoma-io/reeve/${duty}@${pinned()}`).join(", ")}`;
 }
 
 // src/duties/duplicate/capabilities.ts

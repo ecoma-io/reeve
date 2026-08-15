@@ -85,6 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/dependa@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -239,15 +240,19 @@ major PRs are opened as drafts. `"patch"` means only patches are ready.
 
 **`auto-close` controls whether dependa may close its own obsolete PRs.**
 Defaults `false` — closing is a maintainer decision
-([D3](../../doctrine/north-star.md#d3--the-humans-work-is-inviolable)).
+([D3](../../doctrine/north-star.md#d3-the-humans-work-is-inviolable)).
 When `true`, dependa closes a PR when the update is no longer relevant:
 the target version was yanked, the dependency was removed from the manifest,
-or a newer proposal supersedes it.
+or a newer proposal supersedes it. **Not yet implemented** — the setting is
+parsed from the warrant but has no effect at runtime; a `core.notice()` is
+emitted when it is set.
 
 **`auto-rebase` controls whether dependa may rebase its own PRs.** Defaults
 `true` — rebasing is a mechanical operation that does not change the
 proposal's content. When `false`, a PR with merge conflicts stays conflicted
-until a maintainer resolves it.
+until a maintainer resolves it. **Not yet implemented** — the setting is
+parsed from the warrant but has no effect at runtime; a `core.notice()` is
+emitted when it is set.
 
 **`schedule` throttles how often dependa runs.** An interval means "skip if
 the last run was fewer than N days ago." A cron expression means "only run

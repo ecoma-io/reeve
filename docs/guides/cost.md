@@ -97,7 +97,7 @@ tier.
 ## Running it with no key at all
 
 Some providers serve OpenAI-compatible models with no key. That configuration is
-supported by design ([D7](../doctrine/north-star.md#d7--any-endpoint-including-the-free-ones)),
+supported by design ([D7](../doctrine/north-star.md#d7-any-endpoint-including-the-free-ones)),
 not tolerated:
 
 ```yaml

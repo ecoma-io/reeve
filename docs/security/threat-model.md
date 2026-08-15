@@ -18,7 +18,7 @@ does not depend on any one defence working.
 
 ## Every thread is hostile
 
-[D8](../doctrine/north-star.md#d8--every-thread-is-hostile) is the starting
+[D8](../doctrine/north-star.md#d8-every-thread-is-hostile) is the starting
 assumption, not a conclusion reached after an incident: input from a stranger
 does not enter a decision at the same weight as input from someone the
 project has already merged, and untrusted text is contained by the code
@@ -47,7 +47,7 @@ it safe. They are quality work. The warrant is the security property.
 
 ## Failure is loud, never a plausible empty answer
 
-[D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible)
+[D5](../doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
 closes the gap an attacker would otherwise aim for: a shape that fails to
 parse is treated as evidence of tampering, not as an unlucky format error to
 work around. A best-effort parse of the parts of a malformed answer that
@@ -59,7 +59,7 @@ same way.
 
 ## Capacity failures are not authority failures
 
-[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
 draws a line a threat model has to draw somewhere: a `429` from a free,
 IP-rate-limited provider says nothing about whether Reeve was ever allowed
 near the repository, and a run does not treat running out of quota as a

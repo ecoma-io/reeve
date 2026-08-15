@@ -1,5 +1,4 @@
 <p align="center">
-  <a href="README.vi.md">Tiếng Việt</a> · <a href="README.zh.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -62,6 +61,11 @@ as one feature bolted on beside the others. That is the whole thesis, and
 
 ## Quick start
 
+> [!IMPORTANT]
+> Running this workflow will incur charges on your OpenAI account.
+> See [Cost](docs/guides/cost.md) for estimates. `dry-run: true` runs the full
+> pipeline without writing anything — use it first.
+
 ```yaml
 name: Reeve
 
@@ -77,6 +81,7 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -85,12 +90,20 @@ jobs:
   translate:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/translate@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
           languages: en, vi
 ```
+
+> [!NOTE]
+> `actions/checkout` is required: Reeve reads your warrant file
+> (`.github/reeve.yml`) from the local checkout, not the GitHub API.
+> Without checkout, your warrant restrictions are silently bypassed.
+> At level 0 — no warrant file — this step can be omitted, but adding it
+> now costs nothing and prevents a silent misconfiguration later.
 
 One repository, one version line, one core — and each duty keeps its own inputs,
 so nothing you write is meaningless to the thing you are configuring.
@@ -146,7 +159,7 @@ state kept as files in your repository — and differs only in what it decides:
 What comes after them is decided by one test, and it is a strict one: the work
 has to recur, be uniformly expensive today, already be work a maintainer stopped
 doing, and be harder on a project whose contributors do not share a language.
-[Doctrine D10](docs/doctrine/north-star.md#d10--a-duty-must-earn-its-place)
+[Doctrine D10](docs/doctrine/north-star.md#d10-a-duty-must-earn-its-place)
 rejects most feature requests, on purpose.
 
 ## Cost

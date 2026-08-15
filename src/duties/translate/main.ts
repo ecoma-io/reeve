@@ -105,7 +105,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { createMeter, type Meter } from "../../core/meter.js";
-import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
 import {
   newAccumulator,
   remainingOf,
@@ -367,6 +367,7 @@ async function runSweep(
         weather,
         meter,
         budget,
+        failIfProtocolExhausted,
       );
       return { number: thread.number, outcome: describeOutcome(result) };
     },
@@ -477,7 +478,17 @@ export async function run(): Promise<void> {
         // `number:` backfill has no listing to have filtered it out of.
         result = isReeveProposalPr(standing)
           ? skippedResult(number, RECURSION_GUARD_REASON)
-          : await processThread(api, at, standing.body, settings, stages, weather, meter, budget);
+          : await processThread(
+              api,
+              at,
+              standing.body,
+              settings,
+              stages,
+              weather,
+              meter,
+              budget,
+              failIfProtocolExhausted,
+            );
       }
       single = { number, result };
     }

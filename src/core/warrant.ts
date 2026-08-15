@@ -58,6 +58,7 @@ import type {
   UpdateType,
 } from "../duties/dependa/model.js";
 import { ECOSYSTEMS, UPDATE_TYPES } from "../duties/dependa/model.js";
+import { DUTIES, PLANNED } from "../refusal.js";
 
 /**
  * What a duty may do to a thread or a repository. The closed set; a name
@@ -395,6 +396,30 @@ function isNotFound(error: unknown): boolean {
 
 export function parseWarrant(path: string, source: string): Warrant {
   const document = load(path, source);
+
+  // Reject unknown root keys before any sub-reader runs, so a typo is caught
+  // before it becomes a silently ignored setting that someone ships to prod.
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "capabilities",
+  ] as const;
+  for (const key of Object.keys(document)) {
+    if (!(KNOWN_ROOT as readonly string[]).includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. ` +
+          `Expected any of ${KNOWN_ROOT.join(", ")}.`,
+      );
+    }
+  }
+
   const version: unknown = document.version;
   if (version !== VERSION) {
     // Naming the version rather than parsing a future format into something
@@ -890,6 +915,28 @@ function readLabels(path: string, raw: unknown): readonly Label[] {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry as Record<string, unknown>;
+
+    // Reject unknown keys so a typo is caught rather than silently ignored.
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color",
+    ] as const;
+    for (const key of Object.keys(fields)) {
+      if (!(KNOWN_LABEL as readonly string[]).includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. ` +
+            `Expected any of ${KNOWN_LABEL.join(", ")}.`,
+        );
+      }
+    }
 
     const name = text(at, "name", fields.name, { required: true });
     if (seen.has(name.toLowerCase())) {
@@ -1650,6 +1697,14 @@ function readCapabilities(path: string, raw: unknown): Capabilities {
 
   for (const [duty, value] of Object.entries(raw as Record<string, unknown>)) {
     const at = `\`${path}\` capabilities for \`${duty}\``;
+
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      throw new Error(
+        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. ` +
+          `Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`,
+      );
+    }
+
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(

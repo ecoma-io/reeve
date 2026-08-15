@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -34,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/translate@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}

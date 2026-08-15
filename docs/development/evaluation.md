@@ -9,7 +9,7 @@ Almost nothing in this category publishes a number. Tools in adjacent spaces shi
 accuracy claims with no method, or no claim at all, and a maintainer deciding
 whether to install one is left with a demo and a feeling.
 
-[D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation) makes that a
+[D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation) makes that a
 release blocker rather than a nice-to-have: **a duty ships with a way to measure
 it, or it does not ship.**
 
@@ -160,7 +160,7 @@ until the number is honest, or withdraw the duty. Publishing the lower number an
 shipping anyway is not one of the options — a number that never blocks anything
 is decoration.
 
-**A duty can be withdrawn.** [D10](../doctrine/north-star.md#d10--a-duty-must-earn-its-place)
+**A duty can be withdrawn.** [D10](../doctrine/north-star.md#d10-a-duty-must-earn-its-place)
 cuts both ways: a duty that cannot be measured to work is a duty that has not
 earned its place, whatever it looked like in a demo.
 

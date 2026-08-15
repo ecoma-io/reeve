@@ -1,6 +1,6 @@
 # Self-dogfood
 
-_How Reeve runs on itself, and how the feedback loop works. Prerequisites: [The authority model](concepts/authority-model.md), [The warrant](guides/warrant.md)._
+_How Reeve runs on itself, and how the feedback loop works. Prerequisites: [The authority model](../concepts/authority-model.md), [The warrant](warrant.md)._
 
 Reeve is dogfooded: its duties run against this repository's own
 issues, pull requests, and dependencies. `triage` and `translate` act on
@@ -136,4 +136,4 @@ An unreadable answer is never converted into authority.
 
 ---
 
-**Related:** [The authority model](concepts/authority-model.md) · [The warrant](guides/warrant.md) · [The warrant format reference](reference/warrant-format.md) · [Duties and the core](concepts/duties-and-the-core.md)
+**Related:** [The authority model](../concepts/authority-model.md) · [The warrant](warrant.md) · [The warrant format reference](../reference/warrant-format.md) · [Duties and the core](../concepts/duties-and-the-core.md)

@@ -95,7 +95,7 @@ import {
 import { assemble } from "../../core/publish.js";
 import { recallCorrections } from "../../core/recall.js";
 import { sift } from "../../core/spam.js";
-import { writeRunSummary } from "../../core/summary.js";
+import { failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
 import {
   dutyLanguages,
   openAuthority,
@@ -454,6 +454,7 @@ async function decide(
   }
 
   if (drafted.attempts.length === 0) {
+    failIfProtocolExhausted(settings.models, drafted.failures);
     core.warning(`#${String(at.number)}: no draft survived this run.`);
     return settled({ language: language?.label ?? null });
   }

@@ -106,6 +106,12 @@ describe("parseWarrant", () => {
   it("keeps the path, so every message about the file can name it", () => {
     expect(warrant(MINIMAL).path).toBe(PATH);
   });
+
+  it("refuses an unrecognized root key rather than silently ignoring a typo", () => {
+    expect(() => warrant(`${MINIMAL}capabilites:\n  triage: [label]\n`)).toThrow(
+      /unrecognized key `capabilites`/,
+    );
+  });
 });
 
 describe("version", () => {
@@ -184,6 +190,14 @@ describe("labels", () => {
     expect(() => warrant("version: 1\nlabels:\n  - name: bug\n    description: 3\n")).toThrow(
       /`description` as `3`, expected text/,
     );
+  });
+
+  it("refuses an unrecognized label key rather than silently ignoring a typo", () => {
+    expect(() =>
+      warrant(
+        "version: 1\nlabels:\n  - name: bug\n    description: A defect.\n    confidnce: 0.9\n",
+      ),
+    ).toThrow(/unrecognized key `confidnce`/);
   });
 });
 
@@ -287,6 +301,11 @@ describe("capabilities", () => {
     // as an absence, which is the hardest kind to notice.
     const source = `version: 1\ncapabilities:\n  triage: [lablel]\n`;
     expect(() => warrant(source)).toThrow(/names `lablel`, which is not something a duty/);
+  });
+
+  it("refuses an unknown duty rather than silently creating a dead grant", () => {
+    const source = `version: 1\ncapabilities:\n  traige: [label]\n`;
+    expect(() => warrant(source)).toThrow(/names `traige`, which is not a known duty/);
   });
 
   it("refuses an empty list, which is what a half-finished edit leaves behind", () => {

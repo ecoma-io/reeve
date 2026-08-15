@@ -13,6 +13,7 @@ import {
   cost,
   count,
   fence,
+  failIfProtocolExhausted,
   starvedWarning,
   table,
   warnIfStarved,
@@ -28,6 +29,7 @@ import {
 vi.mock("@actions/core", async (importOriginal) => ({
   ...(await importOriginal<typeof core>()),
   warning: vi.fn(),
+  setFailed: vi.fn(),
   debug: vi.fn(),
 }));
 
@@ -292,6 +294,37 @@ describe("warnIfStarved", () => {
     // refused by all of them.
     expect(warnIfStarved([], createWeather(), false)).toBe(false);
     expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
+  });
+});
+
+describe("failIfProtocolExhausted", () => {
+  it("fails the run when every model on the roster failed with a protocol error", () => {
+    const failures: Failure[] = [
+      { ok: false, model: "a", reason: "model not found", kind: "protocol" },
+      { ok: false, model: "b", reason: "invalid request", kind: "protocol" },
+    ];
+
+    expect(failIfProtocolExhausted(["a", "b"], failures)).toBe(true);
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalledTimes(1);
+    const message = String(vi.mocked(core.setFailed).mock.calls[0]?.[0]);
+    expect(message).toContain("configuration problem");
+    expect(message).toContain("a: model not found");
+    expect(message).toContain("b: invalid request");
+  });
+
+  it("does not fail the run when at least one failure is not protocol", () => {
+    const failures: Failure[] = [
+      { ok: false, model: "a", reason: "timeout", kind: "capacity" },
+      { ok: false, model: "b", reason: "model not found", kind: "protocol" },
+    ];
+
+    expect(failIfProtocolExhausted(["a", "b"], failures)).toBe(false);
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  it("does not fail the run for an empty roster", () => {
+    expect(failIfProtocolExhausted([], [])).toBe(false);
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
   });
 });
 

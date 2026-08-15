@@ -23,12 +23,12 @@
 import * as core from "@actions/core";
 
 import { STAGE, total, type Spend } from "./meter.js";
-import { starved, type Failure, type Weather } from "./provider.js";
+import { starved, protocolExhausted, type Failure, type Weather } from "./provider.js";
 
 /**
  * The endpoints whose keys were refused, named on the page — the half of the
  * multi-endpoint amendment to
- * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * [D12](../../docs/doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
  * that is a reporting duty rather than a control-flow one: a run that kept
  * going on its other endpoints has to say which ones it kept going *without*,
  * not just that it finished.
@@ -113,6 +113,31 @@ export function warnIfStarved(
   const rosterStarved = starved(models, weather);
   if (rosterStarved) core.warning(starvedWarning(sweep));
   return rosterStarved;
+}
+
+/**
+ * When every model on the roster failed with a protocol error — a model id
+ * that does not exist, a body the provider rejected, a field it does not
+ * accept — the roster was not starved by capacity; it was exhausted by a
+ * configuration error. A run like this must not stay green: [D5](../../docs/doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
+ * says a run that cannot do its job fails red.
+ *
+ * Call this after a rotation returns no usable answer, alongside
+ * {@link warnIfStarved} for the capacity case. Returns `true` and sets the
+ * job failed; returns `false` when the condition does not apply.
+ */
+export function failIfProtocolExhausted(
+  models: readonly string[],
+  failures: readonly Failure[],
+): boolean {
+  const exhausted = protocolExhausted(models, failures);
+  if (exhausted) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    core.setFailed(
+      `every model on the roster failed with a protocol error — this is a configuration problem, not capacity weather. ${reasons}`,
+    );
+  }
+  return exhausted;
 }
 
 /**

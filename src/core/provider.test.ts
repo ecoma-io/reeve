@@ -18,6 +18,7 @@ import {
   shown,
   splitEndpointAlias,
   starved,
+  protocolExhausted,
   weatherFailure,
   type Completion,
   type Failure,
@@ -783,6 +784,25 @@ describe("rotateModels", () => {
 
       weather.ground("b");
       expect(starved(["a", "b"], weather)).toBe(true);
+    });
+
+    it("reports protocolExhausted when every model failed with a protocol error", () => {
+      const failures: Failure[] = [failed("a", "protocol"), failed("b", "protocol")];
+      expect(protocolExhausted(["a", "b"], failures)).toBe(true);
+    });
+
+    it("does not report protocolExhausted when at least one failure is capacity", () => {
+      const failures: Failure[] = [failed("a", "protocol"), failed("b", "capacity")];
+      expect(protocolExhausted(["a", "b"], failures)).toBe(false);
+    });
+
+    it("does not report protocolExhausted for an empty roster", () => {
+      expect(protocolExhausted([], [])).toBe(false);
+    });
+
+    it("does not report protocolExhausted when fewer failures than models", () => {
+      const failures: Failure[] = [failed("a", "protocol")];
+      expect(protocolExhausted(["a", "b"], failures)).toBe(false);
     });
 
     it("reckon grounds on capacity and throws on auth, leaving protocol untouched", () => {

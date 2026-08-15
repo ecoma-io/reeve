@@ -34,7 +34,7 @@ import { narrowWarned } from "../../core/enforce.js";
 import { isCapacityError, type Location, readContentsFile } from "../../core/forge.js";
 import { createMeter } from "../../core/meter.js";
 import { assembleClient, createWeather, rotateModels, settleAuth } from "../../core/provider.js";
-import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
 import { openAuthority, type Authority, type Warrant } from "../../core/warrant.js";
 
 import { budgetExhausted, createBudget } from "./budget.js";
@@ -388,6 +388,8 @@ export async function run(): Promise<void> {
             if (interpretation !== null) {
               risk = { facts: riskFacts.facts, interpretation };
             }
+          } else {
+            failIfProtocolExhausted(settings.models, rotation.failures);
           }
         }
 

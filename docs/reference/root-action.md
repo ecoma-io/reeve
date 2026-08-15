@@ -49,11 +49,11 @@ this line actually has.
 
 The one thing `doctor: false` may not do is succeed quietly. A green run
 that did nothing is indistinguishable from a duty that found nothing to do,
-and [D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible)
+and [D5](../doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
 does not allow the two to look alike. `doctor: true` keeps the same
 posture in its own register: a red finding fails the step, and capacity —
 never a finding — stays green and says so, exactly the way
-[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
 asks of every duty.
 
 ## Required permissions
@@ -124,7 +124,7 @@ prompt-injection attempt to reach. `doctor: true` reads no thread either —
 only your warrant, already a file this repository's own maintainers wrote
 and review, and this repository's own label listing — so it carries the
 same absence of a text-injection surface. It writes nothing under any
-input, so [D2](../doctrine/north-star.md#d2--no-mutation-beyond-declared-authority)
+input, so [D2](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded)
 is satisfied by construction rather than by a check.
 
 ## Related concepts

@@ -13,7 +13,23 @@ import * as core from "@actions/core";
 
 import type { Language } from "../../core/languages.js";
 import { chunks, isCodeOnly } from "../../core/markdown.js";
-import { shown, type Provider, type Weather } from "../../core/provider.js";
+import { shown, type Failure, type Provider, type Weather } from "../../core/provider.js";
+
+/**
+ * A hook the caller can supply to detect whole-roster protocol exhaustion at
+ * the point where it is discovered — the one operation whose models all failed.
+ *
+ * Translate's pipeline discards failures after logging them, so main.ts cannot
+ * reconstruct which operation's models exhausted the roster from any run-wide
+ * aggregate. The callback receives the exact models and failures from the
+ * single empty-draft operation, which is the only semantically safe input for
+ * {@link failIfProtocolExhausted}: merging unrelated failures from separate
+ * rotations could falsely imply the entire roster was protocol-exhausted when
+ * each rotation independently had at least one success.
+ *
+ * Optional because tests and internal callers have no reason to act on it.
+ */
+export type ProtocolCheck = (models: readonly string[], failures: readonly Failure[]) => void;
 
 import { translate } from "./draft.js";
 import { judge } from "./judge.js";
@@ -53,6 +69,7 @@ export async function translateChunk(
   from: Language | null,
   source: string,
   weather: Weather,
+  onProtocolExhausted?: ProtocolCheck,
 ): Promise<ChunkResult | null> {
   const drafted = await translate({
     provider: stages.draft,
@@ -78,6 +95,10 @@ export async function translateChunk(
     core.warning(
       `${to.code}: ${model(refused.model)} was refused — ${refused.score.reason ?? "unscored"}`,
     );
+  }
+
+  if (drafted.attempts.length === 0) {
+    onProtocolExhausted?.(settings.models, drafted.failures);
   }
 
   const verdict = await judge({
@@ -146,6 +167,7 @@ export async function translateInto(
   from: Language | null,
   source: string,
   weather: Weather,
+  onProtocolExhausted?: ProtocolCheck,
 ): Promise<Posted | null> {
   const pieces = chunks(source, settings.chunkChars);
   const results: ChunkResult[] = [];
@@ -164,7 +186,15 @@ export async function translateInto(
       continue;
     }
 
-    const outcome = await translateChunk(to, settings, stages, from, piece, weather);
+    const outcome = await translateChunk(
+      to,
+      settings,
+      stages,
+      from,
+      piece,
+      weather,
+      onProtocolExhausted,
+    );
     if (outcome === null) return null;
     results.push(outcome);
   }
