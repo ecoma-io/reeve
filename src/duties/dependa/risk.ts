@@ -175,6 +175,8 @@ function sanitizeForPrompt(value: string): string {
   return value
     .replace(/[\r\n]/g, " ")
     .replace(/`/g, "'")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
     .slice(0, 200);
 }
 

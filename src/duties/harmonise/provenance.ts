@@ -255,8 +255,15 @@ export function markStale(
     const currentSha = currentTargetShas.get(locale);
 
     if (currentSha !== undefined && lastSynced !== undefined && currentSha !== lastSynced) {
-      // Human edit since last sync — conflict
-      conflicts.push(locale);
+      // "pending" means the locale was just synced by the bot but the real SHA
+      // wasn't recorded yet (it becomes available only after the branch write).
+      // A pending SHA is not evidence of a human edit — skip conflict detection.
+      if (lastSynced === "pending") {
+        stale.push(locale);
+      } else {
+        // Human edit since last sync — conflict
+        conflicts.push(locale);
+      }
     } else {
       stale.push(locale);
     }

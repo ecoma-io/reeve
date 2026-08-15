@@ -164,6 +164,22 @@ describe("evaluate", () => {
     expect(evaluate(proposal({ updateType: "major" }), p).action).toBe("allow");
   });
 
+  // Non-hierarchy autoApprove values: the warrant parser accepts any UpdateType,
+  // but only "patch", "minor", "major" participate in the hierarchy. Others
+  // should default to the most conservative setting (only patch auto-approved).
+  it("treats autoApprove pin as conservative (patch-only auto-approve)", () => {
+    const p = policy({ autoApprove: "pin", allowedTypes: ["patch", "minor", "major"] });
+    expect(evaluate(proposal({ updateType: "patch" }), p).action).toBe("allow");
+    expect(evaluate(proposal({ updateType: "minor" }), p).action).toBe("propose");
+    expect(evaluate(proposal({ updateType: "major" }), p).action).toBe("propose");
+  });
+
+  it("treats autoApprove digest as conservative (patch-only auto-approve)", () => {
+    const p = policy({ autoApprove: "digest", allowedTypes: ["patch", "minor", "major"] });
+    expect(evaluate(proposal({ updateType: "patch" }), p).action).toBe("allow");
+    expect(evaluate(proposal({ updateType: "minor" }), p).action).toBe("propose");
+  });
+
   // Security/pin/digest/rollback always bypass autoApprove
   it("security is always allowed regardless of autoApprove", () => {
     const p = policy({ autoApprove: "none" });

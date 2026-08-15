@@ -832,7 +832,7 @@ describe("the action", () => {
 
     const run = await runAction(stub, { "max-body-chars": String(VIETNAMESE.length) });
 
-    expect(stub.body).toContain("The body was longer than this run's limit");
+    expect(stub.body).toContain("The body was longer than this run&#39;s limit");
     expect(run.log).toContain("Raise `max-body-chars`");
   });
 
@@ -844,14 +844,14 @@ describe("the action", () => {
     const long = `${VIETNAMESE}\n\n${VIETNAMESE}`;
     stub.body = long;
     await runAction(stub, { "max-body-chars": String(VIETNAMESE.length) });
-    expect(stub.body).toContain("The body was longer than this run's limit");
+    expect(stub.body).toContain("The body was longer than this run&#39;s limit");
     stub.asked.length = 0;
 
     const run = await runAction(stub, { "max-body-chars": String(long.length + 100) });
 
     expect(run.code).toBe(0);
     expect(stub.asked).not.toHaveLength(0);
-    expect(stub.body).not.toContain("The body was longer than this run's limit");
+    expect(stub.body).not.toContain("The body was longer than this run&#39;s limit");
   });
 
   it("writes nothing and stays green for a thread with an empty body", async () => {

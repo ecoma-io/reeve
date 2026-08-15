@@ -33133,11 +33133,12 @@ function createEffects(api, at) {
 }
 
 // src/core/inputs.ts
-function readCore() {
+function readCore(options) {
   const apiKey = getInput("api-key");
   if (apiKey.length > 0) setSecret(apiKey);
-  const roster = parseModels(getInput("models", { required: true }));
-  if (roster.models.length === 0) {
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
   const endpoints = parseEndpoints(getInput("endpoints"));
@@ -34954,15 +34955,28 @@ function examples(recalled) {
 
 // src/duties/respond/guidance.ts
 import { readFile as readFile3 } from "node:fs/promises";
+var MAX_GUIDANCE_LENGTH = 1e4;
 async function readGuidance(path) {
   let raw;
   try {
     raw = await readFile3(path, "utf8");
-  } catch {
+  } catch (error2) {
+    if (error2 !== null && typeof error2 === "object" && "code" in error2 && error2.code !== "ENOENT") {
+      warning(
+        `respond: could not read guidance file \`${path}\` \u2014 ${error2.message}. Proceeding without guidance.`
+      );
+    }
     return null;
   }
   const trimmed = raw.trim();
-  return trimmed.length === 0 ? null : trimmed;
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > MAX_GUIDANCE_LENGTH) {
+    warning(
+      `respond: guidance file \`${path}\` is ${String(trimmed.length)} characters, exceeding the ${String(MAX_GUIDANCE_LENGTH)}-character limit. Truncating.`
+    );
+    return trimmed.slice(0, MAX_GUIDANCE_LENGTH);
+  }
+  return trimmed;
 }
 
 // src/core/judge.ts
@@ -35775,7 +35789,7 @@ function readSettings() {
   };
 }
 async function walkReplies(api, at, settled) {
-  const { replies, more } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at, { max: 1e3 });
   let alreadyAnswered = false;
   let humanFirst = false;
   for (const reply of replies) {

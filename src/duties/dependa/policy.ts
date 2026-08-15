@@ -208,8 +208,12 @@ function autoApproveAction(updateType: UpdateType, autoApprove: UpdateType | "no
   const autoIndex = hierarchy.indexOf(autoApprove);
   const typeIndex = hierarchy.indexOf(updateType);
 
+  // If autoApprove is not a hierarchy value (e.g., "pin", "digest"), treat it
+  // as the most conservative setting — only patches are auto-approved.
+  const effectiveAutoIndex = autoIndex >= 0 ? autoIndex : 0;
+
   // If the update type is at or below the auto-approve level, allow
-  if (typeIndex >= 0 && typeIndex <= autoIndex) return "allow";
+  if (typeIndex >= 0 && typeIndex <= effectiveAutoIndex) return "allow";
 
   return "propose";
 }
@@ -218,10 +222,15 @@ function autoApproveAction(updateType: UpdateType, autoApprove: UpdateType | "no
  * Group proposals into PR groups based on the policy.
  *
  * Deterministic: same proposals, same policy, same groups.
+ *
+ * `lockfilePaths` carries the set of manifest paths whose lockfiles cannot be
+ * regenerated — these are attached to each resulting group so the PR body can
+ * render a desync warning.
  */
 export function group(
   proposals: readonly UpdateProposal[],
   policy: DependaPolicy,
+  lockfilePaths: readonly string[] = [],
 ): readonly ProposalGroup[] {
   if (proposals.length === 0) return [];
 
@@ -246,14 +255,15 @@ export function group(
         ecosystem: null,
         proposals: sorted(security),
         security: true,
+        lockfilePaths,
       });
     }
 
     if (nonSecurity.length === 0) return groups;
-    return [...groups, ...groupByPolicy(nonSecurity, policy)];
+    return [...groups, ...groupByPolicy(nonSecurity, policy, lockfilePaths)];
   }
 
-  return groupByPolicy(admitted, policy);
+  return groupByPolicy(admitted, policy, lockfilePaths);
 }
 
 /**
@@ -262,6 +272,7 @@ export function group(
 function groupByPolicy(
   proposals: readonly UpdateProposal[],
   policy: DependaPolicy,
+  lockfilePaths: readonly string[],
 ): readonly ProposalGroup[] {
   switch (policy.grouping) {
     case "single":
@@ -271,6 +282,7 @@ function groupByPolicy(
           ecosystem: null,
           proposals: sorted(proposals),
           security: false,
+          lockfilePaths,
         },
       ];
 
@@ -280,6 +292,7 @@ function groupByPolicy(
         ecosystem: p.dependency.ecosystem,
         proposals: [p],
         security: false,
+        lockfilePaths,
       }));
 
     case "by-ecosystem": {
@@ -297,6 +310,7 @@ function groupByPolicy(
         ecosystem,
         proposals: sorted(props),
         security: false,
+        lockfilePaths,
       }));
     }
   }

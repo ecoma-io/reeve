@@ -54,6 +54,7 @@ import type {
   GroupResult,
   ProposalGroup,
   Refusal,
+  Release,
   ScheduleConfig,
   SecurityAdvisory,
   UpdateProposal,
@@ -69,9 +70,36 @@ import type { Manager, ManagerId } from "./managers/types.js";
 import { resolvePolicy, evaluate, group as groupProposals } from "./policy.js";
 import { publishGroup, type PublishApi } from "./publish.js";
 import { factsOnly, interpretationPrompt, parseInterpretation } from "./risk.js";
-import { classify, candidateVersions, isSha, parse, satisfies } from "./semver.js";
+import { classify, candidateVersions, compare, isSha, parse, satisfies } from "./semver.js";
 import { summarize, renderSummary } from "./summary.js";
 import { validateEdits, validationRefusals } from "./validation.js";
+
+/**
+ * Filter releases to only those between the current version and the target
+ * version (exclusive of current, inclusive of target).
+ *
+ * Releases outside this range are irrelevant to the update proposal — they
+ * don't appear in the PR body evidence table, and the model shouldn't waste
+ * context reading about versions this update doesn't touch.
+ *
+ * When either version cannot be parsed, returns the full list unfiltered —
+ * a non-semver version (e.g. a Git SHA) means semver comparison doesn't
+ * apply, and returning everything is safer than returning nothing.
+ */
+function filterReleases(
+  releases: readonly Release[],
+  currentVersion: string,
+  targetVersion: string,
+): readonly Release[] {
+  const cur = parse(currentVersion);
+  const tgt = parse(targetVersion);
+  if (cur === null || tgt === null) return releases;
+  return releases.filter((r) => {
+    const v = parse(r.version);
+    if (v === null) return false;
+    return compare(v, cur) > 0 && compare(v, tgt) <= 0;
+  });
+}
 
 export async function run(): Promise<void> {
   const meter = createMeter();
@@ -114,6 +142,21 @@ export async function run(): Promise<void> {
       core.notice("dependa: no update types are allowed by the policy — nothing to propose.");
       settleAuth(weather);
       return;
+    }
+
+    // 1a-notice. Warn about configured-but-unimplemented features.
+    // auto-close and auto-rebase are parsed from the warrant but not yet
+    // consumed at runtime. A maintainer who set them should know they have
+    // no effect, rather than discovering it by watching PRs stay open.
+    if (policy.autoClose) {
+      core.notice(
+        "dependa: `auto-close` is configured but not yet implemented — PRs will not be auto-closed.",
+      );
+    }
+    if (!policy.autoRebase) {
+      core.notice(
+        "dependa: `auto-rebase` is configured but not yet implemented — PRs will be rebased regardless of this setting.",
+      );
     }
 
     // 1b. SCHEDULE — enforce the policy's schedule, if any.
@@ -299,7 +342,7 @@ export async function run(): Promise<void> {
         }
 
         // 5. EVIDENCE — gather releases between current and target
-        const relevantReleases = result.releases;
+        const relevantReleases = filterReleases(result.releases, dep.currentVersion, targetVersion);
         const evidence = gatherEvidence(relevantReleases, securityAdvisory, new Map());
 
         // 6. RISK — deterministic facts, optional model interpretation
@@ -429,7 +472,7 @@ export async function run(): Promise<void> {
     }
 
     // 8. GROUP — group proposals by policy
-    const groups = groupProposals(proposals, policy);
+    const groups = groupProposals(proposals, policy, [...lockfileManifestPaths]);
 
     if (groups.length === 0) {
       core.info("dependa: all proposals were refused by the policy.");

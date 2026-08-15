@@ -221,7 +221,7 @@ async function walkReplies(
   at: Location,
   settled: (over: Settled) => Outcome,
 ): Promise<Outcome | null> {
-  const { replies, more } = await listReplies(api, at);
+  const { replies, more } = await listReplies(api, at, { max: 1000 });
   let alreadyAnswered = false;
   let humanFirst = false;
   for (const reply of replies) {

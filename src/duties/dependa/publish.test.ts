@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ProposalGroup, UpdateProposal } from "./model.js";
 
-import { buildPrBody, buildPrTitle, sanitizeBranchSegment } from "./publish.js";
+import { buildPrBody, buildPrTitle, publishGroup, sanitizeBranchSegment } from "./publish.js";
+import type { PublishApi } from "./publish.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ function group(overrides: Partial<ProposalGroup> = {}): ProposalGroup {
     ecosystem: "npm",
     proposals: [proposal()],
     security: false,
+    lockfilePaths: [],
     ...overrides,
   };
 }
@@ -215,5 +217,81 @@ describe("buildPrBody", () => {
     const body = buildPrBody(group());
     // No ### Evidence header when there's no evidence
     expect(body).not.toContain("### Evidence");
+  });
+});
+
+// ── publishGroup: D3 force-reset safety ──────────────────────────────────
+
+describe("publishGroup: D3 branch safety", () => {
+  const AT = { owner: "acme", repo: "widgets" };
+
+  function baseApi(): PublishApi {
+    return {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.resolve({}),
+          listCommits: () =>
+            Promise.resolve({
+              data: [{ sha: "abc", author: { login: "github-actions[bot]" }, committer: null }],
+            }),
+        },
+        git: {
+          getRef: () => {
+            // Branch exists by default — return a valid ref
+            return Promise.resolve({ data: { object: { sha: "branch-sha" } } });
+          },
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () => Promise.resolve({ data: [] }),
+          create: () => Promise.resolve({ data: { number: 1 } }),
+          update: () => Promise.resolve({}),
+        },
+      },
+    };
+  }
+
+  it("refuses force-reset when listCommits fails with a non-404 API error", async () => {
+    const apiError = Object.assign(new Error("Internal Server Error"), { status: 500 });
+    const base = baseApi();
+    base.rest.repos.listCommits = () => Promise.reject(apiError);
+
+    const result = await publishGroup(base, AT, group(), false, true);
+
+    expect(result.outcome).toBe("refused");
+    expect(result.pr).toBeNull();
+  });
+
+  it("proceeds with force-reset when listCommits returns only bot-authored commits", async () => {
+    const base = baseApi();
+    base.rest.repos.listCommits = () =>
+      Promise.resolve({
+        data: [
+          { sha: "a1", author: { login: "github-actions[bot]" }, committer: null },
+          { sha: "b2", author: { login: "reeve[bot]" }, committer: null },
+        ],
+      });
+
+    // Should not refuse — bot-only commits means safe to reset
+    const result = await publishGroup(base, AT, group(), false, true);
+    expect(result.outcome).not.toBe("refused");
+  });
+
+  it("refuses force-reset when listCommits finds a human-authored commit", async () => {
+    const base = baseApi();
+    base.rest.repos.listCommits = () =>
+      Promise.resolve({
+        data: [
+          { sha: "a1", author: { login: "github-actions[bot]" }, committer: null },
+          { sha: "b2", author: { login: "maintainer" }, committer: null },
+        ],
+      });
+
+    const result = await publishGroup(base, AT, group(), false, true);
+    expect(result.outcome).toBe("refused");
+    expect(result.pr).toBeNull();
   });
 });

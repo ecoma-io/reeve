@@ -33206,11 +33206,12 @@ function excerpt(text2) {
 }
 
 // src/core/inputs.ts
-function readCore() {
+function readCore(options) {
   const apiKey = getInput("api-key");
   if (apiKey.length > 0) setSecret(apiKey);
-  const roster = parseModels(getInput("models", { required: true }));
-  if (roster.models.length === 0) {
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
   const endpoints = parseEndpoints(getInput("endpoints"));
@@ -35638,7 +35639,7 @@ function footer(translated) {
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
 }
 function escapeHtml(text2) {
-  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // src/duties/translate/inputs.ts

@@ -105,10 +105,14 @@ function parse(
  * Parse a `uses:` line from a workflow YAML file.
  *
  * Matches patterns like:
- * - `uses: actions/checkout@v4`
+ * - `uses: actions/checkout@v4` (regular action)
+ * - `uses: octo-org/example-repo/.github/workflows/ci.yml@main` (reusable workflow)
  * - `- uses: actions/checkout@v4` (step in a job)
  * - `uses: ./.github/actions/my-action` (local action — skipped)
  * - `uses: docker://alpine:3.8` (docker action — skipped)
+ *
+ * For reusable workflows, the `repo` field includes the path component
+ * (e.g. `example-repo/.github/workflows/ci.yml`).
  *
  * Returns null when the line does not contain a remote action reference.
  */
@@ -136,22 +140,26 @@ function parseUsesLine(line: string): { owner: string; repo: string; ref: string
   // Skip docker actions (starts with docker://)
   if (value.startsWith("docker://")) return null;
 
-  // Parse owner/repo@ref
+  // Parse owner/repo@ref — split at the LAST @ to handle refs like SHA hashes
   const atIdx = value.lastIndexOf("@");
   if (atIdx <= 0) return null; // No @ or @ at start
 
   const actionPart = value.slice(0, atIdx);
   const ref = value.slice(atIdx + 1);
 
-  // Action reference must be owner/repo format
+  // Action reference must be owner/repo format (or owner/repo/path for reusable workflows).
+  // Split at the FIRST slash to get the owner; everything after is the repo (possibly with path).
   const slashIdx = actionPart.indexOf("/");
   if (slashIdx <= 0) return null; // No slash or slash at start (e.g. @ref)
 
   const owner = actionPart.slice(0, slashIdx);
   const repo = actionPart.slice(slashIdx + 1);
 
-  // Validate: owner and repo must be non-empty and contain only valid chars
-  if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) return null;
+  // Validate: owner must be non-empty and contain only valid chars
+  if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || owner.length === 0) return null;
+  // Validate: repo may contain slashes (reusable workflows like
+  // `example-repo/.github/workflows/ci.yml`) — allow path characters
+  if (repo.length === 0 || !/^[a-zA-Z0-9_.\-/]+$/.test(repo)) return null;
   if (ref.length === 0) return null;
 
   return { owner, repo, ref };

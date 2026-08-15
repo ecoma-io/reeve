@@ -65,7 +65,7 @@ function parse(
     const table = extractTomlTable(manifestContent, key);
     if (table === null) continue;
 
-    for (const entry of parseTomlEntries(table)) {
+    for (const entry of parseTomlEntries(table, key)) {
       const { name, constraint } = resolveCargoConstraint(entry.key, entry.value);
 
       if (constraint === null) {
@@ -102,25 +102,176 @@ function parse(
 /**
  * Extract a TOML table's content from the manifest.
  *
- * Returns the text between `[tablename]` and the next `[` or end of file.
- * This is a simplified parser — it does not handle inline tables at the
- * top level or nested tables, which are not common in Cargo.toml
- * dependency sections.
+ * Returns the text between `[tablename]` and the next section header that
+ * is NOT a sub-table of `tablename`.
+ *
+ * Sub-tables (dotted headers like `[dependencies.serde]`) extend their parent
+ * table — their content belongs to the same dependency section. This function
+ * includes sub-table content by continuing past dotted headers that start with
+ * `[tablename.`.
+ *
+ * Handles both:
+ * - A bare `[tablename]` header followed by key=value entries
+ * - Only dotted sub-tables like `[tablename.dep]` with no bare header
+ *
+ * Array-of-tables headers like `[[example]]` are NOT sub-tables of
+ * `[dependencies]`, so they terminate the section.
  */
 function extractTomlTable(content: string, tableName: string): string | null {
   const header = `[${tableName}]`;
-  const startIdx = content.indexOf(header);
+  const subHeader = `[${tableName}.`;
+
+  // Find the start: either a bare header [tablename] or a sub-table [tablename.X]
+  let startIdx = -1;
+  let startsWithSubTable = false;
+
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] !== "[") continue;
+    // Must be at line start or after a newline
+    if (i > 0 && content[i - 1] !== "\n") continue;
+
+    // Check for bare header
+    if (content.slice(i).startsWith(header)) {
+      // Make sure it's not a sub-table by checking the char after the header
+      const afterHeader = i + header.length;
+      if (
+        afterHeader >= content.length ||
+        content[afterHeader] === "\n" ||
+        content[afterHeader] === "]"
+      ) {
+        startIdx = i;
+        startsWithSubTable = false;
+        break;
+      }
+      // It's something like [dependencies.serde] — keep looking
+    }
+
+    // Check for sub-table header
+    if (content.slice(i).startsWith(subHeader)) {
+      startIdx = i;
+      startsWithSubTable = true;
+      break;
+    }
+  }
+
   if (startIdx === -1) return null;
 
-  // Find the next section header
-  const afterHeader = startIdx + header.length;
-  const nextSection = content.indexOf("\n[", afterHeader);
+  if (startsWithSubTable) {
+    // No bare header — extract from the first sub-table
+    return extractFromSubTableStart(content, startIdx, tableName);
+  }
 
-  if (nextSection === -1) {
+  return extractFromHeader(content, startIdx, header, tableName);
+}
+
+/**
+ * Extract content when the section starts with a sub-table (no bare header).
+ */
+function extractFromSubTableStart(content: string, startIdx: number, tableName: string): string {
+  // The sub-table header IS part of the content we return
+  let searchFrom = startIdx;
+  let endIdx = -1;
+
+  while (searchFrom < content.length) {
+    const nextBracket = content.indexOf("\n[", searchFrom + 1);
+    if (nextBracket === -1) {
+      endIdx = -1;
+      break;
+    }
+
+    const headerStart = nextBracket + 1;
+    const afterBracket = headerStart + 1;
+
+    // Array-of-tables: [[ — always a different section
+    if (content[afterBracket] === "[") {
+      endIdx = nextBracket;
+      break;
+    }
+
+    const headerEnd = content.indexOf("]", afterBracket);
+    if (headerEnd === -1) {
+      endIdx = nextBracket;
+      break;
+    }
+
+    const headerName = content.slice(afterBracket, headerEnd);
+
+    // Same table or sub-table — continue
+    if (headerName === tableName || headerName.startsWith(`${tableName}.`)) {
+      searchFrom = headerEnd + 1;
+      continue;
+    }
+
+    endIdx = nextBracket;
+    break;
+  }
+
+  if (endIdx === -1) {
+    return content.slice(startIdx);
+  }
+
+  return content.slice(startIdx, endIdx);
+}
+
+/**
+ * Extract content starting from a found header, scanning past sub-tables.
+ */
+function extractFromHeader(
+  content: string,
+  startIdx: number,
+  header: string,
+  tableName: string,
+): string {
+  const afterHeader = startIdx + header.length;
+
+  // Scan forward, skipping sub-table headers that extend this table
+  let endIdx = -1;
+  let searchFrom = afterHeader;
+
+  while (searchFrom < content.length) {
+    const nextBracket = content.indexOf("\n[", searchFrom);
+    if (nextBracket === -1) {
+      // No more section headers — rest of file belongs to this table
+      endIdx = -1;
+      break;
+    }
+
+    // Check what follows the \n[
+    const headerStart = nextBracket + 1; // Position of the [
+    const afterBracket = headerStart + 1; // Position after [
+
+    // Array-of-tables: [[ — always a different section
+    if (content[afterBracket] === "[") {
+      endIdx = nextBracket;
+      break;
+    }
+
+    // Find the end of this header line
+    const headerEnd = content.indexOf("]", afterBracket);
+    if (headerEnd === -1) {
+      endIdx = nextBracket;
+      break;
+    }
+
+    const headerName = content.slice(afterBracket, headerEnd);
+
+    // Is this a sub-table of our table? (e.g. `dependencies.serde` when tableName is `dependencies`)
+    if (headerName === tableName || headerName.startsWith(`${tableName}.`)) {
+      // It's the same table or a sub-table — continue scanning past it
+      searchFrom = headerEnd + 1;
+      continue;
+    }
+
+    // Different table — this is where our section ends
+    endIdx = nextBracket;
+    break;
+  }
+
+  if (endIdx === -1) {
     return content.slice(afterHeader);
   }
 
-  return content.slice(afterHeader, nextSection);
+  return content.slice(afterHeader, endIdx);
 }
 
 /** A key-value pair from a TOML table. */
@@ -134,15 +285,54 @@ interface TomlEntry {
  *
  * Handles both simple values (`key = "value"`) and inline tables
  * (`key = { version = "1.0", features = [...] }`).
+ *
+ * Also handles sub-table headers like `[dependencies.serde]` — the sub-table
+ * name becomes the dependency key, and `version = "..."` inside the sub-table
+ * is associated with it. Other sub-table keys (features, etc.) are ignored.
  */
-function parseTomlEntries(tableContent: string): readonly TomlEntry[] {
+function parseTomlEntries(tableContent: string, parentTable?: string): readonly TomlEntry[] {
   const entries: TomlEntry[] = [];
+  let currentSubTable: string | null = null;
 
   for (const line of tableContent.split("\n")) {
     const trimmed = line.trim();
 
     // Skip comments and empty lines
     if (trimmed.startsWith("#") || trimmed.length === 0) continue;
+
+    // Sub-table header: [dependencies.serde] or [dev-dependencies.tokio]
+    // These extend the parent table — the sub-table name is the dependency name.
+    const subTableMatch = /^\[(\S+)\]$/.exec(trimmed);
+    if (subTableMatch !== null) {
+      const headerName = subTableMatch[1] ?? "";
+      // Only recognise sub-tables of our parent (e.g. `dependencies.serde` when
+      // parentTable is `dependencies`). If no parentTable, skip this check.
+      if (
+        parentTable !== undefined &&
+        (headerName === parentTable || headerName.startsWith(`${parentTable}.`))
+      ) {
+        // Extract the part after the parent table name + dot
+        const dotParts = headerName.split(".");
+        // e.g. `dependencies.serde` → last part is `serde`
+        // e.g. `dependencies.serde` when parentTable is `dependencies` → `serde`
+        if (dotParts.length >= 2 && dotParts[0] === parentTable) {
+          currentSubTable = dotParts.slice(1).join(".");
+        } else {
+          currentSubTable = null;
+        }
+      } else if (parentTable === undefined) {
+        // No parent context — extract last part after the dot
+        const dotParts = headerName.split(".");
+        if (dotParts.length >= 2) {
+          currentSubTable = dotParts.slice(1).join(".");
+        } else {
+          currentSubTable = null;
+        }
+      } else {
+        currentSubTable = null;
+      }
+      continue;
+    }
 
     // Match key = value
     const eqIdx = trimmed.indexOf("=");
@@ -152,6 +342,15 @@ function parseTomlEntries(tableContent: string): readonly TomlEntry[] {
     const value = trimmed.slice(eqIdx + 1).trim();
 
     if (key.length > 0 && value.length > 0) {
+      if (currentSubTable !== null) {
+        // Inside a sub-table like [dependencies.serde]
+        // Only the `version` key matters for dependency discovery
+        if (key === "version") {
+          entries.push({ key: currentSubTable, value });
+        }
+        // Skip other sub-table keys (features, default-features, etc.)
+        continue;
+      }
       entries.push({ key, value });
     }
   }
@@ -259,6 +458,8 @@ function parseCargoLock(content: string): Map<string, string> | null {
  *
  * For simple version strings: replaces the old version with the new one.
  * For inline tables: replaces the `version = "..."` value.
+ * For sub-tables (`[dependencies.serde]`): replaces the `version = "..."` line
+ * within the sub-table.
  *
  * Returns null when the old reference is not found in the file.
  */
@@ -271,6 +472,7 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
   const newLines: string[] = [];
   let replaced = false;
   let inTargetSection = false;
+  let inSubTable = false; // Inside a [dependencies.X] sub-table
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -278,11 +480,33 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
     // Track which dependency section we're in
     if (/^\[(dependencies|dev-dependencies|build-dependencies)\]/.test(trimmed)) {
       inTargetSection = true;
+      inSubTable = false;
+    } else if (/^\[(dependencies|dev-dependencies|build-dependencies)\./.test(trimmed)) {
+      // Sub-table like [dependencies.serde] — still in the dependency section.
+      // Check if this sub-table is for our target dependency.
+      const subTableMatch = /^\[(dependencies|dev-dependencies|build-dependencies)\.(.+)\]$/.exec(
+        trimmed,
+      );
+      inTargetSection = true;
+      inSubTable = subTableMatch?.[2] === depName;
     } else if (trimmed.startsWith("[") && !trimmed.startsWith("[[")) {
+      // A different section — stop looking
       inTargetSection = false;
+      inSubTable = false;
     }
 
     if (inTargetSection && !replaced) {
+      // Sub-table version: under [dependencies.serde], the line is just `version = "1.0"`
+      if (inSubTable) {
+        const versionMatch = /^version\s*=\s*"([^"]*)"/.exec(trimmed);
+        if (versionMatch?.[1] !== undefined) {
+          newLines.push(line.replace(versionMatch[1], newVersion));
+          replaced = true;
+          inSubTable = false; // Done with this sub-table
+          continue;
+        }
+      }
+
       // Match: name = "old-version" or name = { version = "old-version", ... }
       const simpleMatch = new RegExp(`^${escapeRegex(depName)}\\s*=\\s*"([^"]*)"`).exec(trimmed);
       if (simpleMatch?.[1] !== undefined) {

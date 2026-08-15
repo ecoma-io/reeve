@@ -34553,11 +34553,12 @@ function owners(warrant, applied) {
 }
 
 // src/core/inputs.ts
-function readCore() {
+function readCore(options) {
   const apiKey = getInput("api-key");
   if (apiKey.length > 0) setSecret(apiKey);
-  const roster = parseModels(getInput("models", { required: true }));
-  if (roster.models.length === 0) {
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
   const endpoints = parseEndpoints(getInput("endpoints"));
@@ -35693,13 +35694,13 @@ async function checkReversal(api, at, standing, reopener) {
   if (!trusted) return { reversal: null, authorReopen: false };
   return { reversal: attribution, authorReopen: false };
 }
-async function gateClose(contentsApi, at, path, repo, thread) {
-  const files = await listCorrectionFiles(contentsApi, at, path);
+async function gateClose(contentsApi, at, path, repo, thread, stateBranch) {
+  const files = await listCorrectionFiles(contentsApi, at, path, stateBranch);
   const unreadable = [];
   for (const file of files) {
     let read2;
     try {
-      read2 = await readContentsFile(contentsApi, at, file.path);
+      read2 = await readContentsFile(contentsApi, at, file.path, stateBranch);
     } catch (error2) {
       if (!(error2 instanceof UnreadableContentsFile)) throw error2;
       unreadable.push(file.path);
@@ -37226,7 +37227,8 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
         outcome,
         api,
         at,
-        settings.correctionsDir
+        settings.correctionsDir,
+        stateBranch
       );
       return { number: thread.number, outcome: describeOutcome(outcome, done) };
     }
@@ -37349,6 +37351,7 @@ async function run() {
       const at = { ...context2.repo, number };
       let outcome = null;
       let recordOutcome = null;
+      const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : void 0;
       if (authority2.warrant.unnamed("triage")) {
         outcome = notGranted(authority2.warrant);
       } else {
@@ -37359,7 +37362,6 @@ async function run() {
           const trigger = recordTrigger();
           const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
           const { permitted } = narrow(grantedCapabilities, settings.apply);
-          const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : void 0;
           let canRecordToBranch = false;
           if (stateBranch !== void 0) {
             canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
@@ -37448,7 +37450,8 @@ async function run() {
           outcome,
           api,
           at,
-          settings.correctionsDir
+          settings.correctionsDir,
+          stateBranch
         );
         single = { number, outcome, done };
       }
@@ -37734,7 +37737,7 @@ function notGranted(warrant) {
     ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block exists it is the whole answer, so add \`triage: [label]\` to it (or remove the block to return to defaults).`
   };
 }
-async function act(effects, warrant, outcome, contentsApi, at, correctionsPath) {
+async function act(effects, warrant, outcome, contentsApi, at, correctionsPath, stateBranch) {
   let labels = [];
   let assigned = [];
   let closed = false;
@@ -37760,7 +37763,8 @@ async function act(effects, warrant, outcome, contentsApi, at, correctionsPath) 
       at,
       repoRelativePath(correctionsPath),
       `${at.owner}/${at.repo}`,
-      at.number
+      at.number,
+      stateBranch
     );
     if (gate.refuse) {
       if (gate.found) {

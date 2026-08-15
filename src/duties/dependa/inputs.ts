@@ -41,7 +41,10 @@ export interface Settings {
 }
 
 export function readSettings(): Omit<Settings, "permitted"> {
-  const coreInputs = readCore();
+  // Models are optional for dependa — used only for advisory risk
+  // interpretation, not for classification. The deterministic pipeline
+  // runs regardless of whether a model is configured.
+  const coreInputs = readCore({ modelsOptional: true });
 
   return {
     ...coreInputs,

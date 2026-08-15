@@ -34,11 +34,19 @@ export function createDockerRegistryDatasource(): Datasource {
   };
 }
 
+/** Maximum pages to paginate through on Docker Hub. Caps total tags at ~1000. */
+const MAX_PAGES = 10;
+
 /**
  * Resolve available versions for a Docker image.
  *
  * Queries the Docker Hub API (or the appropriate registry) and returns
  * a `ResolutionResult`. Network errors degrade to `temporarily-unavailable` (D12).
+ *
+ * Docker Hub paginates its tag listing (default 10 per page, we request 100).
+ * This function follows `next` URLs up to `MAX_PAGES` pages to collect a
+ * representative set of tags. The v2 `/tags/list` endpoint returns all tags
+ * in one response and does not need pagination.
  */
 async function resolve(packageName: string): Promise<ResolutionResult> {
   const { registry, namespace, image } = parseImageName(packageName);
@@ -56,8 +64,9 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
     };
   }
 
-  // Build the tags URL based on the registry
-  let tagsUrl: string;
+  // Build the tags URL based on the registry.
+  // `null` means no more pages to fetch (pagination exhausted or v2 API done).
+  let tagsUrl: string | null;
   if (registry === null || registry === "docker.io" || registry === "registry-1.docker.io") {
     // Docker Hub
     const ns = namespace ?? "library";
@@ -67,81 +76,125 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
     tagsUrl = `https://${registry}/v2/${namespace !== null ? `${namespace}/` : ""}${image}/tags/list`;
   }
 
-  let response: Response;
-  try {
-    response = await fetch(tagsUrl, {
-      headers: {
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (error) {
-    return temporarilyUnavailable(error);
-  }
+  // Docker Hub returns paginated results; the v2 API returns all tags at once.
+  // Collect all pages from Docker Hub, up to MAX_PAGES.
+  const allResults: Record<string, unknown>[] = [];
+  let v2Tags: string[] | null = null;
+  let pageCount = 0;
 
-  if (response.status === 404) {
-    return { status: "not-found" };
-  }
+  while (tagsUrl !== null && pageCount < MAX_PAGES) {
+    let response: Response;
+    try {
+      response = await fetch(tagsUrl, {
+        headers: {
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (error) {
+      // If we already collected partial results, return what we have
+      if (allResults.length > 0) {
+        core.warning(
+          `dependa: Docker Hub pagination failed after ${String(allResults.length)} tags — returning partial results.`,
+        );
+        return parseDockerHubResponse(allResults);
+      }
+      return temporarilyUnavailable(error);
+    }
 
-  if (response.status === 401 || response.status === 403) {
-    // Auth required — for public Docker Hub images this shouldn't happen,
-    // but private registries may require auth
+    if (response.status === 404) {
+      return { status: "not-found" };
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      // Auth required — for public Docker Hub images this shouldn't happen,
+      // but private registries may require auth
+      return {
+        status: "temporarily-unavailable",
+        reason: `Docker registry returned ${String(response.status)} — authentication may be required`,
+      };
+    }
+
+    if (response.status === 429 || response.status >= 500) {
+      // If we already collected partial results, return what we have
+      if (allResults.length > 0) {
+        core.warning(
+          `dependa: Docker Hub returned ${String(response.status)} after ${String(allResults.length)} tags — returning partial results.`,
+        );
+        return parseDockerHubResponse(allResults);
+      }
+      return {
+        status: "temporarily-unavailable",
+        reason: `Docker registry returned ${String(response.status)}`,
+      };
+    }
+
+    if (!response.ok) {
+      if (allResults.length > 0) {
+        return parseDockerHubResponse(allResults);
+      }
+      return {
+        status: "temporarily-unavailable",
+        reason: `Docker registry returned ${String(response.status)}`,
+      };
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      if (allResults.length > 0) {
+        return parseDockerHubResponse(allResults);
+      }
+      return { status: "malformed-metadata", reason: "Docker registry response is not valid JSON" };
+    }
+
+    if (typeof body !== "object" || body === null) {
+      if (allResults.length > 0) {
+        return parseDockerHubResponse(allResults);
+      }
+      return { status: "malformed-metadata", reason: "Docker registry response is not an object" };
+    }
+
+    const obj = body as Record<string, unknown>;
+
+    // Docker Hub format: { results: [...], next: "url" | null }
+    if (Array.isArray(obj.results)) {
+      for (const tag of obj.results as readonly Record<string, unknown>[]) {
+        allResults.push(tag);
+      }
+      // Follow the next page URL if present
+      tagsUrl = typeof obj.next === "string" && obj.next.length > 0 ? obj.next : null;
+      pageCount++;
+      continue;
+    }
+
+    // v2 API format: { tags: [...] } — not paginated, return directly
+    if (Array.isArray(obj.tags)) {
+      v2Tags = obj.tags as string[];
+      break;
+    }
+
+    if (allResults.length > 0) {
+      return parseDockerHubResponse(allResults);
+    }
     return {
-      status: "temporarily-unavailable",
-      reason: `Docker registry returned ${String(response.status)} — authentication may be required`,
+      status: "malformed-metadata",
+      reason: "Docker registry response has no `results` or `tags` field",
     };
   }
 
-  if (response.status === 429 || response.status >= 500) {
-    return {
-      status: "temporarily-unavailable",
-      reason: `Docker registry returned ${String(response.status)}`,
-    };
+  if (pageCount >= MAX_PAGES && tagsUrl !== null) {
+    core.info(
+      `dependa: Docker Hub pagination reached ${String(MAX_PAGES)} pages — some tags may be missed.`,
+    );
   }
 
-  if (!response.ok) {
-    return {
-      status: "temporarily-unavailable",
-      reason: `Docker registry returned ${String(response.status)}`,
-    };
+  // Return the collected results
+  if (v2Tags !== null) {
+    return parseV2Response(v2Tags);
   }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return { status: "malformed-metadata", reason: "Docker registry response is not valid JSON" };
-  }
-
-  if (typeof body !== "object" || body === null) {
-    return { status: "malformed-metadata", reason: "Docker registry response is not an object" };
-  }
-
-  // Docker Hub and v2 registry have different response formats
-  return parseResponse(body as Record<string, unknown>);
-}
-
-/**
- * Parse a Docker registry response into a `ResolutionResult`.
- *
- * Docker Hub returns `{ results: [{ name: "...", ... }] }` with pagination.
- * The v2 API returns `{ tags: ["...", "..."] }`.
- */
-function parseResponse(body: Record<string, unknown>): ResolutionResult {
-  // Docker Hub format: { results: [...] }
-  if (Array.isArray(body.results)) {
-    return parseDockerHubResponse(body.results as readonly Record<string, unknown>[]);
-  }
-
-  // v2 API format: { tags: [...] }
-  if (Array.isArray(body.tags)) {
-    return parseV2Response(body.tags as readonly string[]);
-  }
-
-  return {
-    status: "malformed-metadata",
-    reason: "Docker registry response has no `results` or `tags` field",
-  };
+  return parseDockerHubResponse(allResults);
 }
 
 /**

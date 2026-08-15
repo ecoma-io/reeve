@@ -79,6 +79,7 @@ function groupResult(overrides: Partial<GroupResult> = {}): GroupResult {
         },
       ],
       security: false,
+      lockfilePaths: [],
     },
     pr: null,
     outcome: "draft",
@@ -134,6 +135,7 @@ describe("renderSummary", () => {
         ecosystem: null,
         proposals: [],
         security: true,
+        lockfilePaths: [],
       },
     });
 

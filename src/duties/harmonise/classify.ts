@@ -14,6 +14,7 @@
  * translated and applied to other locales.
  */
 import * as core from "@actions/core";
+import { enclose, type Enclosed } from "../../core/enclose.js";
 import type { Provider } from "../../core/provider.js";
 
 /** The three classification outcomes. */
@@ -54,10 +55,16 @@ export async function classifyDiff(
   classifier: Provider,
   model: string,
 ): Promise<ClassificationResult> {
-  const prompt = buildClassificationPrompt(sourceDiff, targetContent, sourceLocale, targetLocale);
+  const diffFence = enclose("untrusted-diff", sourceDiff);
+  const targetFence = enclose("untrusted-target", targetContent);
+
+  const prompt = buildClassificationPrompt(sourceLocale, targetLocale, diffFence, targetFence);
 
   const result = await classifier.complete(model, [
-    { role: "system", content: CLASSIFICATION_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: [CLASSIFICATION_SYSTEM_PROMPT, "", diffFence.rule, "", targetFence.rule].join("\n"),
+    },
     { role: "user", content: prompt },
   ]);
 
@@ -105,19 +112,19 @@ locale-specific|Added link to Vietnamese community forum
 Output ONLY classification lines. No other text.`;
 
 function buildClassificationPrompt(
-  sourceDiff: string,
-  targetContent: string,
   sourceLocale: string,
   targetLocale: string,
+  diffFence: Enclosed,
+  targetFence: Enclosed,
 ): string {
   return `Source locale: ${sourceLocale}
 Target locale: ${targetLocale}
 
 Source diff (what changed in the source document):
-${sourceDiff}
+${diffFence.block}
 
 Target locale's current translation:
-${targetContent}
+${targetFence.block}
 
 Classify each distinct change in the source diff.`;
 }

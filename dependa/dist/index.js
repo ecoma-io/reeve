@@ -33246,6 +33246,7 @@ function createDockerRegistryDatasource() {
     resolve: resolve2
   };
 }
+var MAX_PAGES = 10;
 async function resolve2(packageName) {
   const { registry, namespace, image } = parseImageName(packageName);
   if (registry !== null && !isSafeRegistry(registry)) {
@@ -33263,60 +33264,102 @@ async function resolve2(packageName) {
   } else {
     tagsUrl = `https://${registry}/v2/${namespace !== null ? `${namespace}/` : ""}${image}/tags/list`;
   }
-  let response;
-  try {
-    response = await fetch(tagsUrl, {
-      headers: {
-        Accept: "application/json"
-      },
-      signal: AbortSignal.timeout(3e4)
-    });
-  } catch (error2) {
-    return temporarilyUnavailable2(error2);
-  }
-  if (response.status === 404) {
-    return { status: "not-found" };
-  }
-  if (response.status === 401 || response.status === 403) {
+  const allResults = [];
+  let v2Tags = null;
+  let pageCount = 0;
+  while (tagsUrl !== null && pageCount < MAX_PAGES) {
+    let response;
+    try {
+      response = await fetch(tagsUrl, {
+        headers: {
+          Accept: "application/json"
+        },
+        signal: AbortSignal.timeout(3e4)
+      });
+    } catch (error2) {
+      if (allResults.length > 0) {
+        warning(
+          `dependa: Docker Hub pagination failed after ${String(allResults.length)} tags \u2014 returning partial results.`
+        );
+        return parseDockerHubResponse(allResults);
+      }
+      return temporarilyUnavailable2(error2);
+    }
+    if (response.status === 404) {
+      return { status: "not-found" };
+    }
+    if (response.status === 401 || response.status === 403) {
+      return {
+        status: "temporarily-unavailable",
+        reason: `Docker registry returned ${String(response.status)} \u2014 authentication may be required`
+      };
+    }
+    if (response.status === 429 || response.status >= 500) {
+      if (allResults.length > 0) {
+        warning(
+          `dependa: Docker Hub returned ${String(response.status)} after ${String(allResults.length)} tags \u2014 returning partial results.`
+        );
+        return parseDockerHubResponse(allResults);
+      }
+      return {
+        status: "temporarily-unavailable",
+        reason: `Docker registry returned ${String(response.status)}`
+      };
+    }
+    if (!response.ok) {
+      if (allResults.length > 0) {
+        return parseDockerHubResponse(allResults);
+      }
+      return {
+        status: "temporarily-unavailable",
+        reason: `Docker registry returned ${String(response.status)}`
+      };
+    }
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      if (allResults.length > 0) {
+        return parseDockerHubResponse(allResults);
+      }
+      return { status: "malformed-metadata", reason: "Docker registry response is not valid JSON" };
+    }
+    if (typeof body !== "object" || body === null) {
+      if (allResults.length > 0) {
+        return parseDockerHubResponse(allResults);
+      }
+      return { status: "malformed-metadata", reason: "Docker registry response is not an object" };
+    }
+    const obj = body;
+    if (Array.isArray(obj.results)) {
+      for (const tag of obj.results) {
+        allResults.push(tag);
+      }
+      tagsUrl = typeof obj.next === "string" && obj.next.length > 0 ? obj.next : null;
+      pageCount++;
+      continue;
+    }
+    if (Array.isArray(obj.tags)) {
+      v2Tags = obj.tags;
+      break;
+    }
+    if (allResults.length > 0) {
+      return parseDockerHubResponse(allResults);
+    }
     return {
-      status: "temporarily-unavailable",
-      reason: `Docker registry returned ${String(response.status)} \u2014 authentication may be required`
+      status: "malformed-metadata",
+      reason: "Docker registry response has no `results` or `tags` field"
     };
   }
-  if (response.status === 429 || response.status >= 500) {
-    return {
-      status: "temporarily-unavailable",
-      reason: `Docker registry returned ${String(response.status)}`
-    };
+  if (pageCount >= MAX_PAGES && tagsUrl !== null) {
+    info(
+      `dependa: Docker Hub pagination reached ${String(MAX_PAGES)} pages \u2014 some tags may be missed.`
+    );
   }
-  if (!response.ok) {
-    return {
-      status: "temporarily-unavailable",
-      reason: `Docker registry returned ${String(response.status)}`
-    };
+  if (v2Tags !== null) {
+    return parseV2Response(v2Tags);
   }
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    return { status: "malformed-metadata", reason: "Docker registry response is not valid JSON" };
-  }
-  if (typeof body !== "object" || body === null) {
-    return { status: "malformed-metadata", reason: "Docker registry response is not an object" };
-  }
-  return parseResponse(body);
-}
-function parseResponse(body) {
-  if (Array.isArray(body.results)) {
-    return parseDockerHubResponse(body.results);
-  }
-  if (Array.isArray(body.tags)) {
-    return parseV2Response(body.tags);
-  }
-  return {
-    status: "malformed-metadata",
-    reason: "Docker registry response has no `results` or `tags` field"
-  };
+  return parseDockerHubResponse(allResults);
 }
 function parseDockerHubResponse(results) {
   const releases = [];
@@ -34159,6 +34202,51 @@ function findClosingRun(text2, from, runLength) {
   return -1;
 }
 
+// src/core/sanitize.ts
+var OPENER = "<!--";
+var CLOSER = "-->";
+var INERT = "<!---->";
+var REFERENCE = new RegExp(
+  [
+    String.raw`(https?://\S+|\]\([^\s)]*\))`,
+    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
+    String.raw`#(?:${INERT})?\d+`,
+    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
+  ].join("|"),
+  "gi"
+);
+function sanitize(markdown) {
+  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
+}
+function defangComments(prose) {
+  const lastCloser = prose.lastIndexOf(CLOSER);
+  let defanged = "";
+  let read = 0;
+  for (; ; ) {
+    const opener = prose.indexOf(OPENER, read);
+    if (opener === -1) return defanged + prose.slice(read);
+    defanged += prose.slice(read, opener);
+    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
+    if (closer === -1) {
+      defanged += `<${INERT}!--`;
+      read = opener + OPENER.length;
+      continue;
+    }
+    defanged += emptied(prose.slice(opener + OPENER.length, closer));
+    read = closer + CLOSER.length;
+  }
+}
+var OPAQUE = /[^`~\\\n\r ]/g;
+function emptied(payload) {
+  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
+}
+function defangReferences(prose) {
+  return prose.replace(REFERENCE, (match, passthrough) => {
+    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
+    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
+  });
+}
+
 // src/duties/dependa/evidence.ts
 var MAX_EVIDENCE_CHARS = 4e3;
 function fromChangelog(url, content, deterministic) {
@@ -34235,7 +34323,7 @@ function escapeMarkdown(text2) {
   return text2.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function sanitise(text2) {
-  return mapProse(text2, (prose) => prose);
+  return sanitize(text2);
 }
 function cap(text2) {
   if (text2.length <= MAX_EVIDENCE_CHARS) return text2;
@@ -34243,11 +34331,12 @@ function cap(text2) {
 }
 
 // src/core/inputs.ts
-function readCore() {
+function readCore(options) {
   const apiKey = getInput("api-key");
   if (apiKey.length > 0) setSecret(apiKey);
-  const roster = parseModels(getInput("models", { required: true }));
-  if (roster.models.length === 0) {
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
   const endpoints = parseEndpoints(getInput("endpoints"));
@@ -34381,7 +34470,7 @@ function bounded(name, raw) {
 
 // src/duties/dependa/inputs.ts
 function readSettings() {
-  const coreInputs = readCore();
+  const coreInputs = readCore({ modelsOptional: true });
   return {
     ...coreInputs,
     warrant: getInput("warrant", { required: true }),
@@ -34443,7 +34532,7 @@ function parse4(manifestPath, manifestContent, lockfileContent) {
   for (const { key, dev } of sections) {
     const table = extractTomlTable(manifestContent, key);
     if (table === null) continue;
-    for (const entry of parseTomlEntries(table)) {
+    for (const entry of parseTomlEntries(table, key)) {
       const { name, constraint } = resolveCargoConstraint(entry.key, entry.value);
       if (constraint === null) {
         dependencies.push({
@@ -34473,25 +34562,138 @@ function parse4(manifestPath, manifestContent, lockfileContent) {
 }
 function extractTomlTable(content, tableName) {
   const header = `[${tableName}]`;
-  const startIdx = content.indexOf(header);
+  const subHeader = `[${tableName}.`;
+  let startIdx = -1;
+  let startsWithSubTable = false;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] !== "[") continue;
+    if (i > 0 && content[i - 1] !== "\n") continue;
+    if (content.slice(i).startsWith(header)) {
+      const afterHeader = i + header.length;
+      if (afterHeader >= content.length || content[afterHeader] === "\n" || content[afterHeader] === "]") {
+        startIdx = i;
+        startsWithSubTable = false;
+        break;
+      }
+    }
+    if (content.slice(i).startsWith(subHeader)) {
+      startIdx = i;
+      startsWithSubTable = true;
+      break;
+    }
+  }
   if (startIdx === -1) return null;
+  if (startsWithSubTable) {
+    return extractFromSubTableStart(content, startIdx, tableName);
+  }
+  return extractFromHeader(content, startIdx, header, tableName);
+}
+function extractFromSubTableStart(content, startIdx, tableName) {
+  let searchFrom = startIdx;
+  let endIdx = -1;
+  while (searchFrom < content.length) {
+    const nextBracket = content.indexOf("\n[", searchFrom + 1);
+    if (nextBracket === -1) {
+      endIdx = -1;
+      break;
+    }
+    const headerStart = nextBracket + 1;
+    const afterBracket = headerStart + 1;
+    if (content[afterBracket] === "[") {
+      endIdx = nextBracket;
+      break;
+    }
+    const headerEnd = content.indexOf("]", afterBracket);
+    if (headerEnd === -1) {
+      endIdx = nextBracket;
+      break;
+    }
+    const headerName = content.slice(afterBracket, headerEnd);
+    if (headerName === tableName || headerName.startsWith(`${tableName}.`)) {
+      searchFrom = headerEnd + 1;
+      continue;
+    }
+    endIdx = nextBracket;
+    break;
+  }
+  if (endIdx === -1) {
+    return content.slice(startIdx);
+  }
+  return content.slice(startIdx, endIdx);
+}
+function extractFromHeader(content, startIdx, header, tableName) {
   const afterHeader = startIdx + header.length;
-  const nextSection = content.indexOf("\n[", afterHeader);
-  if (nextSection === -1) {
+  let endIdx = -1;
+  let searchFrom = afterHeader;
+  while (searchFrom < content.length) {
+    const nextBracket = content.indexOf("\n[", searchFrom);
+    if (nextBracket === -1) {
+      endIdx = -1;
+      break;
+    }
+    const headerStart = nextBracket + 1;
+    const afterBracket = headerStart + 1;
+    if (content[afterBracket] === "[") {
+      endIdx = nextBracket;
+      break;
+    }
+    const headerEnd = content.indexOf("]", afterBracket);
+    if (headerEnd === -1) {
+      endIdx = nextBracket;
+      break;
+    }
+    const headerName = content.slice(afterBracket, headerEnd);
+    if (headerName === tableName || headerName.startsWith(`${tableName}.`)) {
+      searchFrom = headerEnd + 1;
+      continue;
+    }
+    endIdx = nextBracket;
+    break;
+  }
+  if (endIdx === -1) {
     return content.slice(afterHeader);
   }
-  return content.slice(afterHeader, nextSection);
+  return content.slice(afterHeader, endIdx);
 }
-function parseTomlEntries(tableContent) {
+function parseTomlEntries(tableContent, parentTable) {
   const entries = [];
+  let currentSubTable = null;
   for (const line of tableContent.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.startsWith("#") || trimmed.length === 0) continue;
+    const subTableMatch = /^\[(\S+)\]$/.exec(trimmed);
+    if (subTableMatch !== null) {
+      const headerName = subTableMatch[1] ?? "";
+      if (parentTable !== void 0 && (headerName === parentTable || headerName.startsWith(`${parentTable}.`))) {
+        const dotParts = headerName.split(".");
+        if (dotParts.length >= 2 && dotParts[0] === parentTable) {
+          currentSubTable = dotParts.slice(1).join(".");
+        } else {
+          currentSubTable = null;
+        }
+      } else if (parentTable === void 0) {
+        const dotParts = headerName.split(".");
+        if (dotParts.length >= 2) {
+          currentSubTable = dotParts.slice(1).join(".");
+        } else {
+          currentSubTable = null;
+        }
+      } else {
+        currentSubTable = null;
+      }
+      continue;
+    }
     const eqIdx = trimmed.indexOf("=");
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
     const value = trimmed.slice(eqIdx + 1).trim();
     if (key.length > 0 && value.length > 0) {
+      if (currentSubTable !== null) {
+        if (key === "version") {
+          entries.push({ key: currentSubTable, value });
+        }
+        continue;
+      }
       entries.push({ key, value });
     }
   }
@@ -34551,14 +34753,32 @@ function applyUpdate(manifestContent, proposal) {
   const newLines = [];
   let replaced = false;
   let inTargetSection = false;
+  let inSubTable = false;
   for (const line of lines) {
     const trimmed = line.trim();
     if (/^\[(dependencies|dev-dependencies|build-dependencies)\]/.test(trimmed)) {
       inTargetSection = true;
+      inSubTable = false;
+    } else if (/^\[(dependencies|dev-dependencies|build-dependencies)\./.test(trimmed)) {
+      const subTableMatch = /^\[(dependencies|dev-dependencies|build-dependencies)\.(.+)\]$/.exec(
+        trimmed
+      );
+      inTargetSection = true;
+      inSubTable = subTableMatch?.[2] === depName;
     } else if (trimmed.startsWith("[") && !trimmed.startsWith("[[")) {
       inTargetSection = false;
+      inSubTable = false;
     }
     if (inTargetSection && !replaced) {
+      if (inSubTable) {
+        const versionMatch = /^version\s*=\s*"([^"]*)"/.exec(trimmed);
+        if (versionMatch?.[1] !== void 0) {
+          newLines.push(line.replace(versionMatch[1], newVersion));
+          replaced = true;
+          inSubTable = false;
+          continue;
+        }
+      }
       const simpleMatch = new RegExp(`^${escapeRegex(depName)}\\s*=\\s*"([^"]*)"`).exec(trimmed);
       if (simpleMatch?.[1] !== void 0) {
         newLines.push(line.replace(simpleMatch[1], newVersion));
@@ -34992,7 +35212,8 @@ function parseUsesLine(line) {
   if (slashIdx <= 0) return null;
   const owner = actionPart.slice(0, slashIdx);
   const repo = actionPart.slice(slashIdx + 1);
-  if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) return null;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || owner.length === 0) return null;
+  if (repo.length === 0 || !/^[a-zA-Z0-9_.\-/]+$/.test(repo)) return null;
   if (ref.length === 0) return null;
   return { owner, repo, ref };
 }
@@ -35576,10 +35797,11 @@ function autoApproveAction(updateType, autoApprove) {
   const hierarchy = ["patch", "minor", "major"];
   const autoIndex = hierarchy.indexOf(autoApprove);
   const typeIndex = hierarchy.indexOf(updateType);
-  if (typeIndex >= 0 && typeIndex <= autoIndex) return "allow";
+  const effectiveAutoIndex = autoIndex >= 0 ? autoIndex : 0;
+  if (typeIndex >= 0 && typeIndex <= effectiveAutoIndex) return "allow";
   return "propose";
 }
-function group(proposals, policy) {
+function group(proposals, policy, lockfilePaths = []) {
   if (proposals.length === 0) return [];
   const admitted = proposals.filter((p) => {
     const verdict = evaluate(p, policy);
@@ -35595,15 +35817,16 @@ function group(proposals, policy) {
         id: "security",
         ecosystem: null,
         proposals: sorted(security),
-        security: true
+        security: true,
+        lockfilePaths
       });
     }
     if (nonSecurity.length === 0) return groups;
-    return [...groups, ...groupByPolicy(nonSecurity, policy)];
+    return [...groups, ...groupByPolicy(nonSecurity, policy, lockfilePaths)];
   }
-  return groupByPolicy(admitted, policy);
+  return groupByPolicy(admitted, policy, lockfilePaths);
 }
-function groupByPolicy(proposals, policy) {
+function groupByPolicy(proposals, policy, lockfilePaths) {
   switch (policy.grouping) {
     case "single":
       return [
@@ -35611,7 +35834,8 @@ function groupByPolicy(proposals, policy) {
           id: "all",
           ecosystem: null,
           proposals: sorted(proposals),
-          security: false
+          security: false,
+          lockfilePaths
         }
       ];
     case "by-package":
@@ -35619,7 +35843,8 @@ function groupByPolicy(proposals, policy) {
         id: packageId(p),
         ecosystem: p.dependency.ecosystem,
         proposals: [p],
-        security: false
+        security: false,
+        lockfilePaths
       }));
     case "by-ecosystem": {
       const byEco = /* @__PURE__ */ new Map();
@@ -35635,7 +35860,8 @@ function groupByPolicy(proposals, policy) {
         id: ecosystem,
         ecosystem,
         proposals: sorted(props),
-        security: false
+        security: false,
+        lockfilePaths
       }));
     }
   }
@@ -35771,10 +35997,12 @@ async function publishGroup(api, at, group2, dryRun, isDraft) {
         return { pr: null, outcome: "refused" };
       }
     } catch (error2) {
-      if (!isMissing(error2)) {
+      if (isMissing(error2)) {
+      } else {
         warning(
-          `dependa: could not check commits on \`${branchName}\` \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. Proceeding with reset.`
+          `dependa: could not check commits on \`${branchName}\` \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. D3: refusing to force-reset without verification.`
         );
+        return { pr: null, outcome: "refused" };
       }
     }
     await api.rest.git.updateRef({
@@ -35887,13 +36115,18 @@ function buildPrBody(group2) {
   const evidenceSection = group2.proposals.flatMap((p) => p.evidence).filter((e, i, arr) => arr.findIndex((o) => o.source === e.source) === i).slice(0, 20);
   const evidenceRendered = renderForPr(evidenceSection);
   const fp = fingerprint(group2.id, group2.proposals.map(summaryKey));
+  const lockfileNote = group2.lockfilePaths.length > 0 ? `
+
+> \u26A0\uFE0F **Lockfile update required:** the following manifests have companion lockfiles that this PR does not regenerate. Run your package manager after merge (e.g. \`npm install\`) to update them.
+> ${group2.lockfilePaths.map((p) => `\`${p}\``).join(", ")}
+` : "";
   return `## dependa update
 
 | Dependency | From | To | Type | Risk |
 |---|---|---|---|---|
 ${rows.join("\n")}` + (evidenceRendered.length > 0 ? `
 
-${evidenceRendered}` : "") + `
+${evidenceRendered}` : "") + lockfileNote + `
 
 ---
 
@@ -36033,7 +36266,7 @@ function interpretationPrompt(proposal, facts, enclosedEvidence) {
   ].join("\n");
 }
 function sanitizeForPrompt(value) {
-  return value.replace(/[\r\n]/g, " ").replace(/`/g, "'").slice(0, 200);
+  return value.replace(/[\r\n]/g, " ").replace(/`/g, "'").replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(0, 200);
 }
 function parseInterpretation(response) {
   try {
@@ -36253,6 +36486,16 @@ function validationRefusals(failed) {
 }
 
 // src/duties/dependa/main.ts
+function filterReleases(releases, currentVersion, targetVersion) {
+  const cur = parse6(currentVersion);
+  const tgt = parse6(targetVersion);
+  if (cur === null || tgt === null) return releases;
+  return releases.filter((r) => {
+    const v = parse6(r.version);
+    if (v === null) return false;
+    return compare(v, cur) > 0 && compare(v, tgt) <= 0;
+  });
+}
 async function run() {
   const meter = createMeter();
   const budget = createBudget();
@@ -36285,6 +36528,16 @@ async function run() {
       notice("dependa: no update types are allowed by the policy \u2014 nothing to propose.");
       settleAuth(weather);
       return;
+    }
+    if (policy.autoClose) {
+      notice(
+        "dependa: `auto-close` is configured but not yet implemented \u2014 PRs will not be auto-closed."
+      );
+    }
+    if (!policy.autoRebase) {
+      notice(
+        "dependa: `auto-rebase` is configured but not yet implemented \u2014 PRs will be rebased regardless of this setting."
+      );
     }
     if (policy.schedule !== null) {
       const shouldRun = checkSchedule(policy.schedule, api, context2.repo);
@@ -36416,7 +36669,7 @@ async function run() {
         if (!policy.allowedTypes.includes(updateType)) {
           continue;
         }
-        const relevantReleases = result.releases;
+        const relevantReleases = filterReleases(result.releases, dep.currentVersion, targetVersion);
         const evidence = gather2(relevantReleases, securityAdvisory, /* @__PURE__ */ new Map());
         const riskFacts = factsOnly({
           currentVersion: dep.currentVersion,
@@ -36520,7 +36773,7 @@ async function run() {
         `dependa: ${String(lockfileManifestPaths.size)} manifest(s) had lockfiles \u2014 manifest constraints will be updated but lockfiles are not regenerated. CI should run install after merge to update lockfiles.`
       );
     }
-    const groups = group(proposals, policy);
+    const groups = group(proposals, policy, [...lockfileManifestPaths]);
     if (groups.length === 0) {
       info("dependa: all proposals were refused by the policy.");
       settleAuth(weather);
