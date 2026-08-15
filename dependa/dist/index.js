@@ -34070,6 +34070,11 @@ async function queryAdvisories(token, ecosystem, packageName) {
     if (body.length < 100) break;
     page++;
   }
+  if (page > maxPages) {
+    warning(
+      `dependa: security advisory query for \`${packageName}\` (${apiEcosystem}) was truncated at ${String(maxPages)} pages (${String(maxPages * 100)} advisories). Some advisories may be missing.`
+    );
+  }
   return parseAdvisories(allAdvisories);
 }
 function parseAdvisories(advisories) {
@@ -34081,12 +34086,12 @@ function parseAdvisories(advisories) {
     if (typeof id !== "string" || id.length === 0) continue;
     const rawSeverity = obj.severity;
     let severity;
-    if (rawSeverity === "low" || rawSeverity === "moderate" || rawSeverity === "high" || rawSeverity === "critical") {
-      severity = rawSeverity;
+    if (rawSeverity === "low" || rawSeverity === "medium" || rawSeverity === "moderate" || rawSeverity === "high" || rawSeverity === "critical") {
+      severity = rawSeverity === "moderate" ? "medium" : rawSeverity;
     } else {
       const cvss = obj.cvss_severity;
-      if (cvss === "low" || cvss === "moderate" || cvss === "high" || cvss === "critical") {
-        severity = cvss;
+      if (cvss === "low" || cvss === "medium" || cvss === "moderate" || cvss === "high" || cvss === "critical") {
+        severity = cvss === "moderate" ? "medium" : cvss;
       } else {
         severity = "low";
       }
@@ -34094,26 +34099,42 @@ function parseAdvisories(advisories) {
     const summary2 = obj.summary;
     if (typeof summary2 !== "string" || summary2.length === 0) continue;
     let patchedVersions = null;
+    let vulnerableRange = null;
     const vulns = obj.vulnerabilities;
     if (Array.isArray(vulns)) {
       const patched = [];
+      const vulnerable = [];
       for (const vuln of vulns) {
         if (typeof vuln !== "object" || vuln === null || Array.isArray(vuln)) continue;
         const v = vuln;
-        const pv = v.patched_versions;
-        if (typeof pv === "string" && pv.length > 0) {
-          patched.push(pv);
+        const fpv = v.first_patched_version;
+        if (typeof fpv === "string" && fpv.length > 0) {
+          patched.push(`>=${fpv}`);
+        }
+        if (patched.length === 0) {
+          const pv = v.patched_versions;
+          if (typeof pv === "string" && pv.length > 0) {
+            patched.push(pv);
+          }
+        }
+        const vvr = v.vulnerable_version_range;
+        if (typeof vvr === "string" && vvr.length > 0) {
+          vulnerable.push(vvr);
         }
       }
       if (patched.length > 0) {
         patchedVersions = patched.join(" || ");
+      }
+      if (vulnerable.length > 0) {
+        vulnerableRange = vulnerable.join(" || ");
       }
     }
     results.push({
       id,
       severity,
       summary: summary2.slice(0, 500),
-      patchedVersions
+      patchedVersions,
+      vulnerableRange
     });
   }
   return results;
@@ -34388,7 +34409,7 @@ ${escapeMarkdown(e.content)}
 ${sections.join("\n\n")}`;
 }
 function escapeMarkdown(text2) {
-  return text2.replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return text2.replace(/!\[([^\]]*)\]\[([^\]]*)\]/g, "$1 [$2]").replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\[([^\]]*)\]/g, "$1 [$2]").replace(/^\s*\[([^\]]+)\]\s*:\s*.+$/gm, "[$1]").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function sanitise(text2) {
   return sanitize(text2);
@@ -34837,7 +34858,7 @@ function applyUpdate(manifestContent, proposal) {
       inTargetSection = false;
       inSubTable = false;
     }
-    if (inTargetSection && !replaced) {
+    if (inTargetSection) {
       if (inSubTable) {
         const versionMatch = /^version\s*=\s*"([^"]*)"/.exec(trimmed);
         if (versionMatch?.[1] !== void 0) {
@@ -35025,7 +35046,7 @@ function escapeRegex2(str) {
 }
 
 // src/duties/dependa/semver.ts
-var SEMVER_RE = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+](.+))?$/;
+var SEMVER_RE = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([^+]+))?(?:\+.+)?$/;
 function countVersionParts(constraint) {
   const trimmed = constraint.trim().replace(/^v/, "");
   const core = (trimmed.split("-")[0] ?? trimmed).split("+")[0] ?? trimmed;
@@ -35123,6 +35144,9 @@ function satisfies(version, constraint) {
     if (lt(version, floor)) return false;
     const partCount = countVersionParts(constraintBody);
     if (floor.major === 0) {
+      if (partCount === 1) {
+        return version.major === 0;
+      }
       if (floor.minor === 0 && partCount >= 3) {
         return version.major === 0 && version.minor === 0 && version.patch === floor.patch;
       }
@@ -35136,31 +35160,46 @@ function satisfies(version, constraint) {
     if (lt(version, floor)) return false;
     return version.major === floor.major && version.minor === floor.minor;
   }
-  if (trimmed.includes(" ")) {
-    const parts = trimmed.split(/\s+/).filter((s) => s.length > 0);
+  if (trimmed.includes(",")) {
+    const parts = trimmed.split(/,\s*/).filter((s) => s.length > 0);
     for (const part of parts) {
       const result = satisfies(version, part);
       if (result !== true) return result;
     }
     return true;
   }
-  if (trimmed.startsWith(">=")) {
-    const floor = parse6(trimmed.slice(2));
+  if (trimmed.includes(" ") && /[><=~^]/.test(trimmed)) {
+    const parts = trimmed.split(/\s+/).filter((s) => s.length > 0);
+    const allOperatorPrefixed = parts.every((p) => /^[><=~^]/.test(p));
+    if (parts.length > 1 && allOperatorPrefixed) {
+      for (const part of parts) {
+        const result = satisfies(version, part);
+        if (result !== true) return result;
+      }
+      return true;
+    }
+  }
+  const gteMatch = /^>=\s*(.+)$/.exec(trimmed);
+  if (gteMatch !== null) {
+    const floor = parse6(gteMatch[1] ?? "");
     if (floor === null) return null;
     return gt(version, floor) || eq(version, floor);
   }
-  if (trimmed.startsWith(">")) {
-    const floor = parse6(trimmed.slice(1));
-    if (floor === null) return null;
-    return gt(version, floor);
-  }
-  if (trimmed.startsWith("<=")) {
-    const ceiling = parse6(trimmed.slice(2));
+  const lteMatch = /^<=\s*(.+)$/.exec(trimmed);
+  if (lteMatch !== null) {
+    const ceiling = parse6(lteMatch[1] ?? "");
     if (ceiling === null) return null;
     return lt(version, ceiling) || eq(version, ceiling);
   }
-  if (trimmed.startsWith("<")) {
-    const ceiling = parse6(trimmed.slice(1));
+  const gtMatch = /^>\s*(.+)$/.exec(trimmed);
+  if (gtMatch !== null) {
+    const floor = parse6(gtMatch[1] ?? "");
+    if (floor === null) return null;
+    return gt(version, floor);
+  }
+  const ltMatch = /^<\s*(.+)$/.exec(trimmed);
+  if (ltMatch !== null) {
+    const ceiling = parse6(ltMatch[1] ?? "");
     if (ceiling === null) return null;
     return lt(version, ceiling);
   }
@@ -35896,16 +35935,16 @@ function group(proposals, policy, lockfilePaths = []) {
 }
 function groupByPolicy(proposals, policy, lockfilePaths) {
   switch (policy.grouping) {
-    case "single":
-      return [
-        {
-          id: "all",
-          ecosystem: null,
-          proposals: sorted(proposals),
-          security: false,
-          lockfilePaths
-        }
-      ];
+    case "single": {
+      const partitions = partitionConflicts(sorted(proposals));
+      return partitions.map((props, idx) => ({
+        id: idx === 0 ? "all" : `all-${String(idx + 1)}`,
+        ecosystem: null,
+        proposals: props,
+        security: false,
+        lockfilePaths
+      }));
+    }
     case "by-package":
       return proposals.map((p) => ({
         id: packageId(p),
@@ -35924,18 +35963,77 @@ function groupByPolicy(proposals, policy, lockfilePaths) {
           byEco.set(p.dependency.ecosystem, [p]);
         }
       }
-      return Array.from(byEco.entries()).map(([ecosystem, props]) => ({
-        id: ecosystem,
-        ecosystem,
-        proposals: sorted(props),
-        security: false,
-        lockfilePaths
-      }));
+      const groups = [];
+      for (const [ecosystem, props] of byEco.entries()) {
+        const partitions = partitionConflicts(sorted(props));
+        for (let idx = 0; idx < partitions.length; idx++) {
+          const idSuffix = idx === 0 ? "" : `-${String(idx + 1)}`;
+          const partition = partitions[idx] ?? [];
+          groups.push({
+            id: `${ecosystem}${idSuffix}`,
+            ecosystem,
+            proposals: partition,
+            security: false,
+            lockfilePaths
+          });
+        }
+      }
+      return groups;
     }
   }
 }
+function partitionConflicts(proposals) {
+  const buckets = [];
+  const seen = /* @__PURE__ */ new Map();
+  for (const p of proposals) {
+    const key = `${p.dependency.ecosystem}::${p.dependency.name}`;
+    const existingIdx = seen.get(key);
+    if (existingIdx !== void 0 && buckets[existingIdx] !== void 0) {
+      let placed = false;
+      for (let i = existingIdx + 1; i < buckets.length; i++) {
+        const bucket = buckets[i];
+        if (bucket === void 0) continue;
+        const hasConflict = bucket.some(
+          (q) => q.dependency.ecosystem === p.dependency.ecosystem && q.dependency.name === p.dependency.name
+        );
+        if (!hasConflict) {
+          bucket.push(p);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        const newBucket = [p];
+        buckets.push(newBucket);
+      }
+    } else {
+      if (buckets.length === 0) {
+        buckets.push([p]);
+      } else {
+        let placed = false;
+        for (const bucket of buckets) {
+          const hasConflict = bucket.some(
+            (q) => q.dependency.ecosystem === p.dependency.ecosystem && q.dependency.name === p.dependency.name
+          );
+          if (!hasConflict) {
+            bucket.push(p);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          buckets.push([p]);
+        }
+      }
+      seen.set(key, buckets.length - 1);
+    }
+  }
+  return buckets;
+}
 function packageId(proposal) {
-  return `${proposal.dependency.ecosystem}-${proposal.dependency.name.replace(/\//g, "-")}`;
+  const safeName = proposal.dependency.name.replace(/\//g, "-");
+  const safeTarget = proposal.targetVersion.replace(/[^a-zA-Z0-9._-]/g, "-");
+  return `${proposal.dependency.ecosystem}-${safeName}-${safeTarget}`;
 }
 function sorted(proposals) {
   return [...proposals].sort((a, b) => {
@@ -35983,10 +36081,18 @@ var PROPOSE_MARKER = markerFor("propose");
 // src/duties/dependa/publish.ts
 var MARKER = markerFor("dependa");
 function sanitizeBranchSegment(id) {
-  const safe = id.replace(/\//g, "-").replace(/@/g, "-").replace(/[^a-zA-Z0-9._-]/g, "-");
-  return safe.startsWith("-") ? `branch${safe}` : safe;
+  let safe = id.replace(/\//g, "-").replace(/@/g, "-").replace(/[^a-zA-Z0-9._-]/g, "-");
+  safe = safe.replace(/\.{2,}/g, ".");
+  safe = safe.replace(/^\.+/, "");
+  if (safe.endsWith(".lock")) {
+    safe = safe.slice(0, -5);
+  }
+  if (safe.startsWith("-") || safe.length === 0) {
+    safe = `branch${safe}`;
+  }
+  return safe;
 }
-async function publishGroup(api, at, group2, dryRun, isDraft) {
+async function publishGroup(api, at, group2, dryRun, isDraft, autoRebase = true) {
   if (group2.proposals.length === 0) {
     return { pr: null, outcome: "refused" };
   }
@@ -36010,7 +36116,7 @@ async function publishGroup(api, at, group2, dryRun, isDraft) {
     repo: at.repo,
     state: "closed",
     head: `${at.owner}:${branchName}`,
-    per_page: 5
+    per_page: 10
   });
   const closedUnmerged = closedPrs.find((pr2) => !pr2.merged);
   if (closedUnmerged !== void 0) {
@@ -36040,13 +36146,14 @@ async function publishGroup(api, at, group2, dryRun, isDraft) {
       ref: `refs/heads/${branchName}`,
       sha: baseSha
     });
-  } else {
+  } else if (autoRebase) {
     try {
-      const { data: commits } = await api.rest.repos.listCommits({
+      const { data: comparison } = await api.rest.repos.compareCommits({
         owner: at.owner,
         repo: at.repo,
-        sha: branchName,
-        per_page: 10
+        base: baseSha,
+        head: branchName,
+        per_page: 100
       });
       const botAuthors = /* @__PURE__ */ new Set([
         "github-actions[bot]",
@@ -36054,9 +36161,12 @@ async function publishGroup(api, at, group2, dryRun, isDraft) {
         "dependabot[bot]",
         "reeve[bot]"
       ]);
-      const hasHumanCommit = commits.some((c) => {
+      const hasHumanCommit = comparison.commits.some((c) => {
         const login = c.author?.login ?? c.committer?.login;
-        return login !== void 0 && !botAuthors.has(login);
+        if (login === void 0) {
+          return true;
+        }
+        return !botAuthors.has(login);
       });
       if (hasHumanCommit) {
         info(
@@ -36073,13 +36183,31 @@ async function publishGroup(api, at, group2, dryRun, isDraft) {
         return { pr: null, outcome: "refused" };
       }
     }
-    await api.rest.git.updateRef({
-      owner: at.owner,
-      repo: at.repo,
-      ref: `heads/${branchName}`,
-      sha: baseSha,
-      force: true
-    });
+    try {
+      await api.rest.git.updateRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `heads/${branchName}`,
+        sha: baseSha,
+        force: true
+      });
+    } catch (error2) {
+      if (isMissing(error2)) {
+        info(`dependa: branch \`${branchName}\` was deleted during publish \u2014 recreating.`);
+        await api.rest.git.createRef({
+          owner: at.owner,
+          repo: at.repo,
+          ref: `refs/heads/${branchName}`,
+          sha: baseSha
+        });
+      } else {
+        throw error2;
+      }
+    }
+  } else {
+    info(
+      `dependa: auto-rebase is disabled \u2014 branch \`${branchName}\` will not be rebased onto \`${baseBranch}\`.`
+    );
   }
   const editsByPath = /* @__PURE__ */ new Map();
   for (const proposal of group2.proposals) {
@@ -36168,7 +36296,10 @@ function buildPrTitle(group2) {
   if (group2.proposals.length === 1) {
     const p = group2.proposals[0];
     if (p === void 0) return `${prefix}: update 1 dependency`;
-    return `${prefix}: update ${p.dependency.name} ${p.currentVersion} \u2192 ${p.targetVersion}`;
+    const safeName = p.dependency.name.replace(/\n/g, " ");
+    const safeCur = p.currentVersion.replace(/\n/g, " ");
+    const safeTgt = p.targetVersion.replace(/\n/g, " ");
+    return `${prefix}: update ${safeName} ${safeCur} \u2192 ${safeTgt}`;
   }
   return `${prefix}: update ${String(group2.proposals.length)} dependencies (${group2.ecosystem ?? "mixed"})`;
 }
@@ -36178,7 +36309,10 @@ function buildPrBody(group2) {
     const devTag = p.dependency.dev ? " *(dev)*" : "";
     const security = p.securityAdvisory !== null ? ` \u2014 \u{1F6E1}\uFE0F ${p.securityAdvisory.id} (${p.securityAdvisory.severity})` : "";
     const riskCell = p.risk.interpretation !== null ? `${p.risk.interpretation.riskLevel} \u2014 ${escapeMarkdown(p.risk.interpretation.summary)} *(model)*` : p.risk.facts.isSecurity ? "security" : p.risk.facts.updateType;
-    return `| ${typeEmoji} \`${p.dependency.name}\` | \`${p.currentVersion}\` | \`${p.targetVersion}\` | \`${p.updateType}\`${devTag}${security} | ${riskCell} |`;
+    const safeName = escapeMarkdown(p.dependency.name).replace(/\|/g, "").replace(/\n/g, " ");
+    const safeCurrent = escapeMarkdown(p.currentVersion).replace(/\|/g, "").replace(/\n/g, " ");
+    const safeTarget = escapeMarkdown(p.targetVersion).replace(/\|/g, "").replace(/\n/g, " ");
+    return `| ${typeEmoji} \`${safeName}\` | \`${safeCurrent}\` | \`${safeTarget}\` | \`${p.updateType}\`${devTag}${security} | ${riskCell} |`;
   });
   const evidenceSection = group2.proposals.flatMap((p) => p.evidence).filter((e, i, arr) => arr.findIndex((o) => o.source === e.source) === i).slice(0, 20);
   const evidenceRendered = renderForPr(evidenceSection);
@@ -36268,6 +36402,41 @@ function isConflict(error2) {
   }
   return false;
 }
+async function closeSupersededPRs(api, at, activeGroupIds) {
+  const { data: openPrs } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    per_page: 100
+  });
+  let closedCount = 0;
+  for (const pr of openPrs) {
+    const split2 = MARKER.split(pr.body ?? "");
+    if (split2.fingerprint === null) continue;
+    const branchName = pr.head.ref;
+    const prefix = "reeve/dependa/";
+    if (!branchName.startsWith(prefix)) continue;
+    const groupId = branchName.slice(prefix.length);
+    if (activeGroupIds.has(groupId)) continue;
+    try {
+      await api.rest.pulls.update({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: pr.number,
+        state: "closed"
+      });
+      info(
+        `dependa: closed superseded PR #${String(pr.number)} (group \`${groupId}\` is no longer proposed).`
+      );
+      closedCount++;
+    } catch (error2) {
+      warning(
+        `dependa: failed to close superseded PR #${String(pr.number)} \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`
+      );
+    }
+  }
+  return closedCount;
+}
 
 // src/duties/dependa/risk.ts
 function computeFacts(fields) {
@@ -36305,10 +36474,12 @@ function factsOnly(fields) {
     interpretation: null
   };
 }
-function interpretationPrompt(proposal, facts, enclosedEvidence) {
+function interpretationPrompt(proposal, facts, enclosedEvidence, enclosedRule) {
+  const ruleSection = enclosedRule !== void 0 && enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
     `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
     "",
+    ...ruleSection,
     "Risk facts (deterministic, from version metadata):",
     `- Update type: ${facts.updateType}`,
     `- Major distance: ${String(facts.majorDistance)}`,
@@ -36509,8 +36680,10 @@ function validateCargo(edit) {
   if (content.trim().length === 0) {
     return `Cargo.toml is empty after edit: ${edit.path}`;
   }
-  if (!content.includes("[")) {
-    return `Cargo.toml has no TOML headers after edit: ${edit.path}`;
+  const tableHeader = /^\[[\t ]*[A-Za-z0-9_.-]+[\t ]*\]/m.test(content);
+  const arrayOfTables = /^\[\[[\t ]*[A-Za-z0-9_.-]+[\t ]*\]\]/m.test(content);
+  if (!tableHeader && !arrayOfTables) {
+    return `Cargo.toml has no valid TOML table headers after edit: ${edit.path}`;
   }
   return null;
 }
@@ -36531,8 +36704,8 @@ function validateGithubActions(edit) {
   if (content.trim().length === 0) {
     return `workflow file is empty after edit: ${edit.path}`;
   }
-  if (!content.includes("jobs:")) {
-    return `workflow file has no jobs key after edit: ${edit.path}`;
+  if (!/^jobs\s*:/m.test(content)) {
+    return `workflow file has no top-level jobs key after edit: ${edit.path}`;
   }
   return null;
 }
@@ -36541,8 +36714,8 @@ function validateDocker(edit) {
   if (content.trim().length === 0) {
     return `Dockerfile is empty after edit: ${edit.path}`;
   }
-  if (!/^FROM\s/im.test(content)) {
-    return `Dockerfile has no FROM instruction after edit: ${edit.path}`;
+  if (!/^FROM[^\S\n]+\S+/im.test(content)) {
+    return `Dockerfile has no valid FROM instruction after edit: ${edit.path}`;
   }
   return null;
 }
@@ -36597,16 +36770,6 @@ async function run() {
       settleAuth(weather);
       return;
     }
-    if (policy.autoClose) {
-      notice(
-        "dependa: `auto-close` is configured but not yet implemented \u2014 PRs will not be auto-closed."
-      );
-    }
-    if (!policy.autoRebase) {
-      notice(
-        "dependa: `auto-rebase` is configured but not yet implemented \u2014 PRs will be rebased regardless of this setting."
-      );
-    }
     if (policy.schedule !== null) {
       const shouldRun = checkSchedule(policy.schedule, api, context2.repo);
       if (!await shouldRun) {
@@ -36626,7 +36789,6 @@ async function run() {
     }
     const manifestContentCache = /* @__PURE__ */ new Map();
     const discoveredManifestPaths = /* @__PURE__ */ new Set();
-    const accumulatedEdits = /* @__PURE__ */ new Map();
     const readFile2 = async (path) => {
       const cached = manifestContentCache.get(path);
       if (cached !== void 0) return cached;
@@ -36712,9 +36874,13 @@ async function run() {
           `dependa: could not query advisories for \`${dep.name}\` \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`
         );
       }
-      const securityAdvisory = findRelevantAdvisory(advisories, dep.currentVersion);
       for (const targetVersion of candidates) {
         if (targetVersion === dep.currentVersion) continue;
+        const securityAdvisory = findSecurityAdvisoryFor(
+          advisories,
+          dep.currentVersion,
+          targetVersion
+        );
         const isSecurity = securityAdvisory !== null;
         let updateType;
         if (isSha(dep.currentVersion) && isSha(targetVersion)) {
@@ -36743,7 +36909,7 @@ async function run() {
           currentVersion: dep.currentVersion,
           targetVersion,
           updateType,
-          releases: relevantReleases,
+          releases: result.releases,
           securityAdvisory,
           evidence,
           isDev: dep.dev
@@ -36765,7 +36931,8 @@ async function run() {
               groupName: null
             },
             riskFacts.facts,
-            enclosed?.block ?? ""
+            enclosed?.block ?? "",
+            enclosed?.rule
           );
           const rotation = await rotateModels(
             settings.models,
@@ -36783,7 +36950,7 @@ async function run() {
         }
         const edits = [];
         const manager = managers.get(dep.manager);
-        const manifestContent = accumulatedEdits.get(dep.manifestPath) ?? manifestContentCache.get(dep.manifestPath);
+        const manifestContent = manifestContentCache.get(dep.manifestPath);
         if (manager !== void 0 && manifestContent !== void 0) {
           const updatedContent = manager.applyUpdate(manifestContent, {
             dependency: dep,
@@ -36798,7 +36965,6 @@ async function run() {
             groupName: null
           });
           if (updatedContent !== null) {
-            accumulatedEdits.set(dep.manifestPath, updatedContent);
             edits.push({
               path: dep.manifestPath,
               content: updatedContent,
@@ -36876,6 +37042,31 @@ async function run() {
         continue;
       }
       const admittedGroup = { ...group2, proposals: admitted };
+      const recomposedEditsByPath = /* @__PURE__ */ new Map();
+      for (const p of admitted) {
+        for (const edit of p.edits) {
+          const baseContent = recomposedEditsByPath.get(edit.path) ?? manifestContentCache.get(edit.path);
+          if (baseContent === void 0) continue;
+          const manager = managers.get(p.dependency.manager);
+          if (manager === void 0) continue;
+          const nextContent = manager.applyUpdate(baseContent, {
+            ...p,
+            edits: [],
+            groupName: null
+          });
+          if (nextContent !== null) {
+            recomposedEditsByPath.set(edit.path, nextContent);
+          }
+        }
+      }
+      const recomposedProposals = admitted.map((p) => ({
+        ...p,
+        edits: p.edits.map((e) => {
+          const finalContent = recomposedEditsByPath.get(e.path);
+          return finalContent !== void 0 ? { ...e, content: finalContent } : e;
+        })
+      }));
+      Object.assign(admittedGroup, { proposals: recomposedProposals });
       const allEdits = admitted.flatMap((p) => p.edits);
       if (allEdits.length > 0) {
         const validation = validateEdits(allEdits, discoveredManifestPaths);
@@ -36910,7 +37101,14 @@ async function run() {
       });
       try {
         const publishApi = api;
-        const result = await publishGroup(publishApi, context2.repo, admittedGroup, false, isDraft);
+        const result = await publishGroup(
+          publishApi,
+          context2.repo,
+          admittedGroup,
+          false,
+          isDraft,
+          policy.autoRebase
+        );
         groupResults.push({
           group: admittedGroup,
           pr: result.pr,
@@ -36928,12 +37126,26 @@ async function run() {
         }
       }
     }
+    if (policy.autoClose && mayPublish) {
+      const activeGroupIds = new Set(groupResults.map((r) => r.group.id));
+      try {
+        const publishApi = api;
+        const closedCount = await closeSupersededPRs(publishApi, context2.repo, activeGroupIds);
+        if (closedCount > 0) {
+          info(`dependa: auto-closed ${String(closedCount)} superseded PR(s).`);
+        }
+      } catch (error2) {
+        warning(
+          `dependa: auto-close failed \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`
+        );
+      }
+    }
     settleAuth(weather);
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   } finally {
-    if (settings !== null && authority !== null) {
-      const rosterStarved = warnIfStarved(settings.models, weather, false);
+    if (authority !== null) {
+      const rosterStarved = settings !== null ? warnIfStarved(settings.models, weather, false) : false;
       const budgetSpent = budget.denied;
       const proposed = groupResults.filter((r) => r.outcome !== "refused").map((r) => r.group.id);
       const refused = groupResults.filter((r) => r.outcome === "refused").map((r) => r.group.id);
@@ -36947,7 +37159,7 @@ async function run() {
       setOutput("pull-requests", JSON.stringify(prs));
       setOutput("starved", String(rosterStarved));
       setOutput("budget-exhausted", String(budgetSpent));
-      const summary2 = summarize(groupResults, weather, settings.models, budgetSpent);
+      const summary2 = summarize(groupResults, weather, settings?.models ?? [], budgetSpent);
       await writeRunSummary(renderSummary(summary2), weather);
     }
   }
@@ -36955,24 +37167,22 @@ async function run() {
 function notGranted(warrant) {
   return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`dependa\`; once that block exists it is the whole answer, so add \`dependa: [edit-file, open-pr]\` to it (or remove the block to return to defaults).`;
 }
-function findRelevantAdvisory(advisories, currentVersion) {
+function findSecurityAdvisoryFor(advisories, currentVersion, targetVersion) {
   if (advisories.length === 0) return null;
   const severityRank = /* @__PURE__ */ new Map([
     ["critical", 4],
     ["high", 3],
+    ["medium", 2],
     ["moderate", 2],
     ["low", 1]
   ]);
   let best = null;
   let bestRank = 0;
   for (const adv of advisories) {
-    if (adv.patchedVersions !== null) {
-      const currentParsed = parse6(currentVersion);
-      if (currentParsed !== null) {
-        const satisfied = satisfies(currentParsed, adv.patchedVersions);
-        if (satisfied === true) continue;
-      }
-    }
+    const currentAffected = isVersionAffectedBy(adv, currentVersion);
+    if (currentAffected === false) continue;
+    const targetPatched = isVersionPatchedBy(adv, targetVersion);
+    if (targetPatched === false) continue;
     const rank = severityRank.get(adv.severity) ?? 0;
     if (rank > bestRank) {
       best = adv;
@@ -36980,6 +37190,36 @@ function findRelevantAdvisory(advisories, currentVersion) {
     }
   }
   return best;
+}
+function isVersionAffectedBy(advisory, version) {
+  const parsed = parse6(version);
+  if (parsed === null) return null;
+  if (advisory.vulnerableRange !== null) {
+    const result = satisfies(parsed, advisory.vulnerableRange);
+    if (result === true) return true;
+    if (result === false) return false;
+  }
+  if (advisory.patchedVersions !== null) {
+    const patched = satisfies(parsed, advisory.patchedVersions);
+    if (patched === true) return false;
+    if (patched === false) return true;
+  }
+  return null;
+}
+function isVersionPatchedBy(advisory, version) {
+  const parsed = parse6(version);
+  if (parsed === null) return null;
+  if (advisory.patchedVersions !== null) {
+    const result = satisfies(parsed, advisory.patchedVersions);
+    if (result === true) return true;
+    if (result === false) return false;
+  }
+  if (advisory.vulnerableRange !== null) {
+    const affected = satisfies(parsed, advisory.vulnerableRange);
+    if (affected === true) return false;
+    if (affected === false) return true;
+  }
+  return null;
 }
 async function listRepositoryFiles(api, at, paths) {
   const files = [];
@@ -37008,6 +37248,84 @@ async function listRepositoryFiles(api, at, paths) {
     }
   }
   return files;
+}
+var CRON_MONTH_NAMES = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
+var CRON_DOW_NAMES = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6
+};
+function resolveCronAlias(token, aliases) {
+  const lower = token.toLowerCase();
+  if (lower in aliases) return String(aliases[lower]);
+  return token;
+}
+function cronFieldMatches(field, value, max, aliases = {}) {
+  const resolved = resolveCronAlias(field, aliases);
+  if (resolved === "*") return true;
+  if (resolved === String(value)) return true;
+  if (resolved.includes(",")) {
+    return resolved.split(",").some((p) => cronFieldMatches(p.trim(), value, max, aliases));
+  }
+  if (resolved.includes("/")) {
+    const slashParts = resolved.split("/");
+    const range = slashParts[0] ?? "*";
+    const stepStr = slashParts[1] ?? "1";
+    const step = Number(stepStr);
+    if (!Number.isSafeInteger(step) || step <= 0) return false;
+    let lo = 0;
+    let hi = max;
+    if (range === "*") {
+    } else if (range.includes("-")) {
+      const rangeParts = range.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
+      lo = rangeParts[0] ?? 0;
+      hi = rangeParts[1] ?? max;
+      if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
+    } else {
+      const start = Number(range);
+      if (!Number.isSafeInteger(start)) return false;
+      lo = start;
+    }
+    return value >= lo && value <= hi && (value - lo) % step === 0;
+  }
+  if (resolved.includes("-")) {
+    const rangeParts = resolved.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
+    const lo = rangeParts[0] ?? 0;
+    const hi = rangeParts[1] ?? 0;
+    return value >= lo && value <= hi;
+  }
+  return false;
+}
+function cronMatches(expression, date) {
+  const parts = expression.trim().split(/\s+/);
+  if (parts.length !== 5) return true;
+  const [minute, hour, dom, month, dow] = parts;
+  const minuteMatch = cronFieldMatches(minute, date.getMinutes(), 59);
+  const hourMatch = cronFieldMatches(hour, date.getHours(), 23);
+  const monthMatch = cronFieldMatches(month, date.getMonth() + 1, 12, CRON_MONTH_NAMES);
+  const domMatch = cronFieldMatches(dom, date.getDate(), 31);
+  const dowMatch = cronFieldMatches(dow, date.getDay(), 6, CRON_DOW_NAMES);
+  const domRestricted = dom !== "*";
+  const dowRestricted = dow !== "*";
+  const dayMatch = !domRestricted && !dowRestricted ? true : domRestricted && !dowRestricted ? domMatch : !domRestricted && dowRestricted ? dowMatch : domMatch || dowMatch;
+  return minuteMatch && hourMatch && monthMatch && dayMatch;
 }
 async function checkSchedule(schedule, api, at) {
   if (schedule.kind === "interval") {
@@ -37044,57 +37362,13 @@ async function checkSchedule(schedule, api, at) {
     }
   }
   const now = /* @__PURE__ */ new Date();
-  const parts = schedule.expression.trim().split(/\s+/);
-  if (parts.length !== 5) {
-    warning(`dependa: invalid cron expression "${schedule.expression}" \u2014 allowing run.`);
-    return true;
-  }
-  const [minute, hour, dom, month, dow] = parts;
-  const matches = (field, value, max) => {
-    if (field === "*") return true;
-    if (field === String(value)) return true;
-    if (field.includes(",")) return field.split(",").some((p) => matches(p.trim(), value, max));
-    if (field.includes("/")) {
-      const slashParts = field.split("/");
-      const range = slashParts[0] ?? "*";
-      const stepStr = slashParts[1] ?? "1";
-      const step = Number(stepStr);
-      if (!Number.isSafeInteger(step) || step <= 0) return false;
-      let lo = 0;
-      let hi = max;
-      if (range === "*") {
-      } else if (range.includes("-")) {
-        const rangeParts = range.split("-").map(Number);
-        lo = rangeParts[0] ?? 0;
-        hi = rangeParts[1] ?? max;
-        if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
-      } else {
-        const start = Number(range);
-        if (!Number.isSafeInteger(start)) return false;
-        lo = start;
-      }
-      return value >= lo && value <= hi && (value - lo) % step === 0;
-    }
-    if (field.includes("-")) {
-      const rangeParts = field.split("-").map(Number);
-      const lo = rangeParts[0] ?? 0;
-      const hi = rangeParts[1] ?? 0;
-      return value >= lo && value <= hi;
-    }
+  if (!cronMatches(schedule.expression, now)) {
+    info(
+      `dependa: cron schedule "${schedule.expression}" does not match current time. Skipping.`
+    );
     return false;
-  };
-  const minuteMatch = matches(minute, now.getMinutes(), 59);
-  const hourMatch = matches(hour, now.getHours(), 23);
-  const monthMatch = matches(month, now.getMonth() + 1, 12);
-  const domMatch = matches(dom, now.getDate(), 31);
-  const dowMatch = matches(dow, now.getDay(), 6);
-  if (minuteMatch && hourMatch && monthMatch && (domMatch || dowMatch)) {
-    return true;
   }
-  info(
-    `dependa: cron schedule "${schedule.expression}" does not match current time. Skipping.`
-  );
-  return false;
+  return true;
 }
 function createManagerRegistry() {
   const managers = [
@@ -37118,5 +37392,7 @@ function createDatasourceRegistry(token) {
 }
 void run();
 export {
+  cronFieldMatches,
+  cronMatches,
   run
 };
