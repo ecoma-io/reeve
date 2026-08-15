@@ -10,7 +10,13 @@ import { describe, expect, it } from "vitest";
 
 import type { ProposalGroup, UpdateProposal } from "./model.js";
 
-import { buildPrBody, buildPrTitle, publishGroup, sanitizeBranchSegment } from "./publish.js";
+import {
+  buildPrBody,
+  buildPrTitle,
+  closeSupersededPRs,
+  publishGroup,
+  sanitizeBranchSegment,
+} from "./publish.js";
 import type { PublishApi } from "./publish.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -386,5 +392,225 @@ describe("publishGroup: D3 branch safety", () => {
 
     const result = await publishGroup(base, AT, group(), false, true);
     expect(result.outcome).not.toBe("refused");
+  });
+
+  it("skips force-reset when autoRebase is false and branch exists", async () => {
+    let updateRefCalled = false;
+    let compareCommitsCalled = false;
+    const base = baseApi();
+    base.rest.git.updateRef = () => {
+      updateRefCalled = true;
+      return Promise.resolve({});
+    };
+    base.rest.repos.compareCommits = () => {
+      compareCommitsCalled = true;
+      return Promise.resolve({
+        data: { ahead_by: 0, behind_by: 0, commits: [] },
+      });
+    };
+
+    // autoRebase=false (6th arg)
+    const result = await publishGroup(base, AT, group(), false, true, false);
+
+    expect(result.outcome).not.toBe("refused");
+    expect(compareCommitsCalled).toBe(false);
+    expect(updateRefCalled).toBe(false);
+  });
+
+  it("force-resets when autoRebase is true (default) and branch exists", async () => {
+    let updateRefCalled = false;
+    const base = baseApi();
+    base.rest.git.updateRef = () => {
+      updateRefCalled = true;
+      return Promise.resolve({});
+    };
+
+    // autoRebase=true (default)
+    const result = await publishGroup(base, AT, group(), false, true, true);
+
+    expect(result.outcome).not.toBe("refused");
+    expect(updateRefCalled).toBe(true);
+  });
+});
+
+// ── closeSupersededPRs ────────────────────────────────────────────────────
+
+describe("closeSupersededPRs", () => {
+  const AT = { owner: "acme", repo: "widgets" };
+
+  function markerBody(groupId: string): string {
+    // Build a body that contains the dependa marker with a valid fingerprint.
+    // The marker format is defined by core/marker.js — we use buildPrBody to
+    // generate a valid one, then extract just the marker line.
+    const g = group({ id: groupId });
+    const body = buildPrBody(g);
+    return body;
+  }
+
+  function makePr(number: number, branchName: string, body: string) {
+    return {
+      number,
+      body,
+      head: { sha: "abc123", ref: branchName },
+      merged: false,
+    };
+  }
+
+  it("closes PRs whose group IDs are not in the active set", async () => {
+    const closedPrs: number[] = [];
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.resolve({}),
+          listCommits: () => Promise.resolve({ data: [] }),
+          compareCommits: () =>
+            Promise.resolve({ data: { ahead_by: 0, behind_by: 0, commits: [] } }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () =>
+            Promise.resolve({
+              data: [
+                makePr(10, "reeve/dependa/npm", markerBody("npm")),
+                makePr(11, "reeve/dependa/cargo", markerBody("cargo")),
+                makePr(12, "reeve/dependa/go", markerBody("go")),
+              ],
+            }),
+          create: () => Promise.resolve({ data: { number: 99 } }),
+          update: (params) => {
+            if (params.state === "closed") {
+              closedPrs.push(params.pull_number);
+            }
+            return Promise.resolve({});
+          },
+        },
+      },
+    };
+
+    // Only "npm" is still active — cargo and go should be closed
+    const activeIds = new Set(["npm"]);
+    const count = await closeSupersededPRs(api, AT, activeIds);
+
+    expect(count).toBe(2);
+    expect(closedPrs).toContain(11);
+    expect(closedPrs).toContain(12);
+    expect(closedPrs).not.toContain(10);
+  });
+
+  it("does not close PRs without the dependa marker", async () => {
+    const closedPrs: number[] = [];
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.resolve({}),
+          listCommits: () => Promise.resolve({ data: [] }),
+          compareCommits: () =>
+            Promise.resolve({ data: { ahead_by: 0, behind_by: 0, commits: [] } }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () =>
+            Promise.resolve({
+              data: [
+                makePr(20, "feature/my-branch", "This is a human PR"),
+                makePr(21, "reeve/dependa/npm", markerBody("npm")),
+              ],
+            }),
+          create: () => Promise.resolve({ data: { number: 99 } }),
+          update: (params) => {
+            if (params.state === "closed") {
+              closedPrs.push(params.pull_number);
+            }
+            return Promise.resolve({});
+          },
+        },
+      },
+    };
+
+    // No groups active — but the human PR should not be touched
+    const activeIds = new Set<string>();
+    const count = await closeSupersededPRs(api, AT, activeIds);
+
+    expect(count).toBe(1);
+    expect(closedPrs).toContain(21);
+    expect(closedPrs).not.toContain(20);
+  });
+
+  it("returns 0 when all open PRs are still active", async () => {
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.resolve({}),
+          listCommits: () => Promise.resolve({ data: [] }),
+          compareCommits: () =>
+            Promise.resolve({ data: { ahead_by: 0, behind_by: 0, commits: [] } }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () =>
+            Promise.resolve({
+              data: [makePr(30, "reeve/dependa/npm", markerBody("npm"))],
+            }),
+          create: () => Promise.resolve({ data: { number: 99 } }),
+          update: () => Promise.resolve({}),
+        },
+      },
+    };
+
+    const activeIds = new Set(["npm"]);
+    const count = await closeSupersededPRs(api, AT, activeIds);
+
+    expect(count).toBe(0);
+  });
+
+  it("handles close API errors gracefully without throwing", async () => {
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.resolve({}),
+          listCommits: () => Promise.resolve({ data: [] }),
+          compareCommits: () =>
+            Promise.resolve({ data: { ahead_by: 0, behind_by: 0, commits: [] } }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () =>
+            Promise.resolve({
+              data: [makePr(40, "reeve/dependa/stale", markerBody("stale"))],
+            }),
+          create: () => Promise.resolve({ data: { number: 99 } }),
+          update: () => Promise.reject(new Error("API rate limit exceeded")),
+        },
+      },
+    };
+
+    const activeIds = new Set<string>();
+    // Should not throw — best-effort close
+    const count = await closeSupersededPRs(api, AT, activeIds);
+    expect(count).toBe(0);
   });
 });

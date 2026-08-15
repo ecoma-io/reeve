@@ -95,7 +95,7 @@ export interface PublishApi {
         data: readonly {
           readonly number: number;
           readonly body?: string | null;
-          readonly head: { readonly sha: string };
+          readonly head: { readonly sha: string; readonly ref: string };
           readonly merged: boolean;
         }[];
       }>;
@@ -114,6 +114,7 @@ export interface PublishApi {
         pull_number: number;
         title?: string;
         body?: string;
+        state?: "open" | "closed";
       }): Promise<unknown>;
     };
   };
@@ -179,6 +180,7 @@ export async function publishGroup(
   group: ProposalGroup,
   dryRun: boolean,
   isDraft: boolean,
+  autoRebase = true,
 ): Promise<PublishResult> {
   if (group.proposals.length === 0) {
     return { pr: null, outcome: "refused" };
@@ -243,7 +245,7 @@ export async function publishGroup(
       ref: `refs/heads/${branchName}`,
       sha: baseSha,
     });
-  } else {
+  } else if (autoRebase) {
     // D3: Before force-resetting the branch, check whether it contains commits
     // not authored by the bot. A human maintainer may have pushed edits to the
     // branch to test or refine the proposed update — those commits are
@@ -324,6 +326,14 @@ export async function publishGroup(
         throw error;
       }
     }
+  } else {
+    // autoRebase is disabled — leave the branch as-is. The existing content
+    // will be overwritten by the file writes below, but the branch base is
+    // not updated. This preserves the maintainer's choice to manage merge
+    // conflicts manually rather than having dependa rebase automatically.
+    core.info(
+      `dependa: auto-rebase is disabled — branch \`${branchName}\` will not be rebased onto \`${baseBranch}\`.`,
+    );
   }
 
   // Write each file edit from each proposal to the branch.
@@ -609,4 +619,68 @@ function isConflict(error: unknown): boolean {
     if (typeof status === "number" && status === 409) return true;
   }
   return false;
+}
+
+/**
+ * Close open dependa PRs whose group IDs are no longer proposed.
+ *
+ * When autoClose is enabled, this scans all open PRs authored by dependa
+ * (identified by the marker in the PR body) and closes any whose group ID
+ * does not appear in the current set of proposed groups. A PR is considered
+ * superseded when its group is no longer produced by the pipeline — for
+ * example, because the dependency was removed from the manifest, the update
+ * was yanked, or a newer version superseded the proposal.
+ *
+ * D3: only closes PRs that carry the dependa marker. Human-authored PRs on
+ * `reeve/dependa/*` branches (if any) are never touched.
+ *
+ * Returns the number of PRs closed.
+ */
+export async function closeSupersededPRs(
+  api: PublishApi,
+  at: Pick<Location, "owner" | "repo">,
+  activeGroupIds: ReadonlySet<string>,
+): Promise<number> {
+  const { data: openPrs } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    per_page: 100,
+  });
+
+  let closedCount = 0;
+  for (const pr of openPrs) {
+    // Only touch PRs with the dependa marker
+    const split = MARKER.split(pr.body ?? "");
+    if (split.fingerprint === null) continue;
+
+    // Extract the group ID from the branch name (reeve/dependa/<group-id>)
+    const branchName = pr.head.ref;
+    const prefix = "reeve/dependa/";
+    if (!branchName.startsWith(prefix)) continue;
+
+    const groupId = branchName.slice(prefix.length);
+    if (activeGroupIds.has(groupId)) continue;
+
+    // This PR's group is no longer proposed — close it.
+    try {
+      await api.rest.pulls.update({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: pr.number,
+        state: "closed",
+      });
+      core.info(
+        `dependa: closed superseded PR #${String(pr.number)} (group \`${groupId}\` is no longer proposed).`,
+      );
+      closedCount++;
+    } catch (error) {
+      // Closing is best-effort — don't fail the run if a close fails.
+      core.warning(
+        `dependa: failed to close superseded PR #${String(pr.number)} — ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return closedCount;
 }

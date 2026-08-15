@@ -68,7 +68,7 @@ import { createNpmManager } from "./managers/npm.js";
 import { discoverAll, ManagerRegistry } from "./managers/registry.js";
 import type { Manager, ManagerId } from "./managers/types.js";
 import { resolvePolicy, evaluate, group as groupProposals } from "./policy.js";
-import { publishGroup, type PublishApi } from "./publish.js";
+import { closeSupersededPRs, publishGroup, type PublishApi } from "./publish.js";
 import { factsOnly, interpretationPrompt, parseInterpretation } from "./risk.js";
 import { classify, candidateVersions, compare, isSha, parse, satisfies } from "./semver.js";
 import { summarize, renderSummary } from "./summary.js";
@@ -142,21 +142,6 @@ export async function run(): Promise<void> {
       core.notice("dependa: no update types are allowed by the policy — nothing to propose.");
       settleAuth(weather);
       return;
-    }
-
-    // 1a-notice. Warn about configured-but-unimplemented features.
-    // auto-close and auto-rebase are parsed from the warrant but not yet
-    // consumed at runtime. A maintainer who set them should know they have
-    // no effect, rather than discovering it by watching PRs stay open.
-    if (policy.autoClose) {
-      core.notice(
-        "dependa: `auto-close` is configured but not yet implemented — PRs will not be auto-closed.",
-      );
-    }
-    if (!policy.autoRebase) {
-      core.notice(
-        "dependa: `auto-rebase` is configured but not yet implemented — PRs will be rebased regardless of this setting.",
-      );
     }
 
     // 1b. SCHEDULE — enforce the policy's schedule, if any.
@@ -608,7 +593,14 @@ export async function run(): Promise<void> {
 
       try {
         const publishApi = api as unknown as PublishApi;
-        const result = await publishGroup(publishApi, context.repo, admittedGroup, false, isDraft);
+        const result = await publishGroup(
+          publishApi,
+          context.repo,
+          admittedGroup,
+          false,
+          isDraft,
+          policy.autoRebase,
+        );
         groupResults.push({
           group: admittedGroup,
           pr: result.pr,
@@ -624,6 +616,28 @@ export async function run(): Promise<void> {
         } else {
           throw error;
         }
+      }
+    }
+
+    // 11. AUTO-CLOSE — close superseded PRs when policy allows it.
+    // Only runs after all groups have been published so we know the full set
+    // of active group IDs. Groups that were refused or drafted still count as
+    // "active" — their PRs should stay open (the proposal exists, just wasn't
+    // published this run). Only groups that were never proposed at all (e.g.
+    // dependency removed from manifest) trigger a close.
+    if (policy.autoClose && mayPublish) {
+      const activeGroupIds = new Set(groupResults.map((r) => r.group.id));
+      try {
+        const publishApi = api as unknown as PublishApi;
+        const closedCount = await closeSupersededPRs(publishApi, context.repo, activeGroupIds);
+        if (closedCount > 0) {
+          core.info(`dependa: auto-closed ${String(closedCount)} superseded PR(s).`);
+        }
+      } catch (error) {
+        // Auto-close is best-effort — don't fail the run if it errors.
+        core.warning(
+          `dependa: auto-close failed — ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
