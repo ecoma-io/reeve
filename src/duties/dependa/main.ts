@@ -585,11 +585,15 @@ export async function run(): Promise<void> {
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error));
   } finally {
-    if (settings !== null && authority !== null) {
-      const rosterStarved = warnIfStarved(settings.models, weather, false);
+    if (authority !== null) {
+      const rosterStarved =
+        settings !== null ? warnIfStarved(settings.models, weather, false) : false;
       const budgetSpent = budget.denied;
 
-      // Set outputs
+      // Set outputs — always set them when authority was resolved, even on
+      // early-return paths (e.g. capabilities not granted). Consumers parse
+      // these as JSON; an empty string would fail JSON.parse, so every exit
+      // path must produce valid JSON arrays and booleans.
       const proposed = groupResults.filter((r) => r.outcome !== "refused").map((r) => r.group.id);
       const refused = groupResults.filter((r) => r.outcome === "refused").map((r) => r.group.id);
       const prs = groupResults
@@ -607,7 +611,7 @@ export async function run(): Promise<void> {
       core.setOutput("budget-exhausted", String(budgetSpent));
 
       // Write job summary
-      const summary = summarize(groupResults, weather, settings.models, budgetSpent);
+      const summary = summarize(groupResults, weather, settings?.models ?? [], budgetSpent);
       await writeRunSummary(renderSummary(summary), weather);
     }
   }
