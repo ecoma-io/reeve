@@ -110,7 +110,7 @@ export interface SecurityAdvisory {
   /** The advisory identifier (CVE-2024-XXXX, GHSA-xxxx-xxxx-xxxx, etc.). */
   readonly id: string;
   /** The severity as classified by the issuing authority. */
-  readonly severity: "low" | "moderate" | "high" | "critical";
+  readonly severity: "low" | "medium" | "moderate" | "high" | "critical";
   /**
    * A one-line summary of what the vulnerability is.
    * Enclosed before any model sees it — evidence, never authority.
@@ -119,8 +119,17 @@ export interface SecurityAdvisory {
   /**
    * The version range that patches this vulnerability, in the ecosystem's
    * own grammar, or null when no patched version is known.
+   * For REST API advisories, this is derived from `first_patched_version`
+   * (e.g. ">=1.82.0").
    */
   readonly patchedVersions: string | null;
+  /**
+   * The version range affected by this vulnerability, or null when not
+   * provided by the API. Used to check whether a specific version is
+   * actually vulnerable — avoids marking a dependency as "security" when
+   * the current version is outside the affected range.
+   */
+  readonly vulnerableRange: string | null;
 }
 
 /**

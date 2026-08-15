@@ -275,16 +275,18 @@ function groupByPolicy(
   lockfilePaths: readonly string[],
 ): readonly ProposalGroup[] {
   switch (policy.grouping) {
-    case "single":
-      return [
-        {
-          id: "all",
-          ecosystem: null,
-          proposals: sorted(proposals),
-          security: false,
-          lockfilePaths,
-        },
-      ];
+    case "single": {
+      // Partition conflicts so mutually exclusive candidates for the same
+      // dependency never share a branch.
+      const partitions = partitionConflicts(sorted(proposals));
+      return partitions.map((props, idx) => ({
+        id: idx === 0 ? "all" : `all-${String(idx + 1)}`,
+        ecosystem: null,
+        proposals: props,
+        security: false,
+        lockfilePaths,
+      }));
+    }
 
     case "by-package":
       return proposals.map((p) => ({
@@ -305,21 +307,101 @@ function groupByPolicy(
           byEco.set(p.dependency.ecosystem, [p]);
         }
       }
-      return Array.from(byEco.entries()).map(([ecosystem, props]) => ({
-        id: ecosystem,
-        ecosystem,
-        proposals: sorted(props),
-        security: false,
-        lockfilePaths,
-      }));
+      // Partition conflicts within each ecosystem to prevent dual candidates
+      // from sharing a branch.
+      const groups: ProposalGroup[] = [];
+      for (const [ecosystem, props] of byEco.entries()) {
+        const partitions = partitionConflicts(sorted(props));
+        for (let idx = 0; idx < partitions.length; idx++) {
+          const idSuffix = idx === 0 ? "" : `-${String(idx + 1)}`;
+          const partition = partitions[idx] ?? [];
+          groups.push({
+            id: `${ecosystem}${idSuffix}`,
+            ecosystem,
+            proposals: partition,
+            security: false,
+            lockfilePaths,
+          });
+        }
+      }
+      return groups;
     }
   }
 }
 
-/** Stable group ID for a single-package group. */
+/**
+ * Partition proposals into sub-groups so that no two proposals in the same
+ * sub-group update the same dependency. This prevents mutually exclusive
+ * candidates (e.g. within-constraint and latest-available for the same
+ * package) from sharing a branch and producing conflicting file edits.
+ *
+ * Deterministic: same input order produces the same partitioning.
+ */
+function partitionConflicts(proposals: readonly UpdateProposal[]): readonly UpdateProposal[][] {
+  const buckets: UpdateProposal[][] = [];
+  const seen = new Map<string, number>(); // depKey → bucket index
+
+  for (const p of proposals) {
+    const key = `${p.dependency.ecosystem}::${p.dependency.name}`;
+    const existingIdx = seen.get(key);
+    if (existingIdx !== undefined && buckets[existingIdx] !== undefined) {
+      // Conflict — find the next available bucket or create a new one
+      let placed = false;
+      for (let i = existingIdx + 1; i < buckets.length; i++) {
+        const bucket = buckets[i];
+        if (bucket === undefined) continue;
+        const hasConflict = bucket.some(
+          (q) =>
+            q.dependency.ecosystem === p.dependency.ecosystem &&
+            q.dependency.name === p.dependency.name,
+        );
+        if (!hasConflict) {
+          bucket.push(p);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        const newBucket: UpdateProposal[] = [p];
+        buckets.push(newBucket);
+      }
+    } else {
+      if (buckets.length === 0) {
+        buckets.push([p]);
+      } else {
+        // Check all buckets for conflicts
+        let placed = false;
+        for (const bucket of buckets) {
+          const hasConflict = bucket.some(
+            (q) =>
+              q.dependency.ecosystem === p.dependency.ecosystem &&
+              q.dependency.name === p.dependency.name,
+          );
+          if (!hasConflict) {
+            bucket.push(p);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          buckets.push([p]);
+        }
+      }
+      seen.set(key, buckets.length - 1);
+    }
+  }
+
+  return buckets;
+}
+
+/** Build a unique package identifier for `by-package` grouping. Includes the
+ *  target version to prevent branch-name collisions when a dependency has
+ *  multiple candidates (e.g. within-constraint and latest-available). */
 function packageId(proposal: UpdateProposal): string {
   // Sanitise for use in branch names — replace / with -
-  return `${proposal.dependency.ecosystem}-${proposal.dependency.name.replace(/\//g, "-")}`;
+  const safeName = proposal.dependency.name.replace(/\//g, "-");
+  const safeTarget = proposal.targetVersion.replace(/[^a-zA-Z0-9._-]/g, "-");
+  return `${proposal.dependency.ecosystem}-${safeName}-${safeTarget}`;
 }
 
 /** Sort proposals by name, then by version (stable sort). */

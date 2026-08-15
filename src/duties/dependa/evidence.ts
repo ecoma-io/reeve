@@ -193,10 +193,17 @@ export function renderForPr(evidence: readonly Evidence[]): string {
 export function escapeMarkdown(text: string): string {
   return (
     text
+      // Defang reference-style images FIRST: ![alt][id] → alt [id]
+      // Must precede the link rule so `![` is not consumed by `[`.
+      .replace(/!\[([^\]]*)\]\[([^\]]*)\]/g, "$1 [$2]")
       // Defang Markdown images: ![alt](url) → alt (url)
       .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)")
-      // Defang Markdown links: [text](url) → text (url)
+      // Defang inline Markdown links: [text](url) → text (url)
       .replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)")
+      // Defang reference-style links: [text][id] → text [id]
+      .replace(/\[([^\]]*)\]\[([^\]]*)\]/g, "$1 [$2]")
+      // Strip reference definitions: [id]: url → [id]
+      .replace(/^\s*\[([^\]]+)\]\s*:\s*.+$/gm, "[$1]")
       // Escape angle brackets first — prevents both complete (<script>)
       // and incomplete (<script) HTML element injection
       .replace(/</g, "&lt;")

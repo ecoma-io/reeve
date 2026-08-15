@@ -28,7 +28,7 @@ export interface Semver {
 }
 
 /** The regex that matches a loose semver core. */
-const SEMVER_RE = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+](.+))?$/;
+const SEMVER_RE = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([^+]+))?(?:\+.+)?$/;
 
 /**
  * Count the number of version parts in a constraint string.
@@ -229,6 +229,10 @@ export function satisfies(version: Semver, constraint: string): boolean | null {
     // ^0 (1-part) locks the major: >=0.0.0, <1.0.0
     const partCount = countVersionParts(constraintBody);
     if (floor.major === 0) {
+      if (partCount === 1) {
+        // ^0 → major-locked: >=0.0.0, <1.0.0
+        return version.major === 0;
+      }
       if (floor.minor === 0 && partCount >= 3) {
         // ^0.0.3 → >=0.0.3, <0.0.4 (patch-locked)
         return version.major === 0 && version.minor === 0 && version.patch === floor.patch;
@@ -247,12 +251,12 @@ export function satisfies(version: Semver, constraint: string): boolean | null {
     return version.major === floor.major && version.minor === floor.minor;
   }
 
-  // Space-separated range: ">=1.2.3 <2.0.0"
-  // Must be checked before comparison operators — otherwise the leading
-  // ">=" in ">=1.2.3 <2.0.0" would match the comparison branch and
-  // fail to parse the whole string as a single constraint.
-  if (trimmed.includes(" ")) {
-    const parts = trimmed.split(/\s+/).filter((s) => s.length > 0);
+  // Comma-separated range: ">= 2.1.0, <= 3.0.0" (GitHub Advisory format).
+  // All conditions must hold — same semantics as space-separated.
+  // Must be checked before space-separated because commas often appear
+  // alongside spaces (e.g. ">= 2.1.0, <= 3.0.0").
+  if (trimmed.includes(",")) {
+    const parts = trimmed.split(/,\s*/).filter((s) => s.length > 0);
     for (const part of parts) {
       const result = satisfies(version, part);
       if (result !== true) return result;
@@ -260,24 +264,48 @@ export function satisfies(version: Semver, constraint: string): boolean | null {
     return true;
   }
 
-  // Comparison operators
-  if (trimmed.startsWith(">=")) {
-    const floor = parse(trimmed.slice(2));
+  // Space-separated range: ">=1.2.3 <2.0.0"
+  // Only treat as space-separated when the string contains at least one
+  // operator token — otherwise a single spaced constraint like "< 3.41.3"
+  // would split into ["<", "3.41.3"] and fail to parse either piece.
+  if (trimmed.includes(" ") && /[><=~^]/.test(trimmed)) {
+    const parts = trimmed.split(/\s+/).filter((s) => s.length > 0);
+    // If splitting produced multiple tokens that each start with an operator,
+    // it's a real space-separated range. Otherwise fall through to the
+    // comparison-operator branch which handles optional spaces.
+    const allOperatorPrefixed = parts.every((p) => /^[><=~^]/.test(p));
+    if (parts.length > 1 && allOperatorPrefixed) {
+      for (const part of parts) {
+        const result = satisfies(version, part);
+        if (result !== true) return result;
+      }
+      return true;
+    }
+  }
+
+  // Comparison operators — allow optional space between operator and version
+  // (e.g. ">= 1.2.3" as used by GitHub Advisory vulnerable_version_range)
+  const gteMatch = /^>=\s*(.+)$/.exec(trimmed);
+  if (gteMatch !== null) {
+    const floor = parse(gteMatch[1] ?? "");
     if (floor === null) return null;
     return gt(version, floor) || eq(version, floor);
   }
-  if (trimmed.startsWith(">")) {
-    const floor = parse(trimmed.slice(1));
-    if (floor === null) return null;
-    return gt(version, floor);
-  }
-  if (trimmed.startsWith("<=")) {
-    const ceiling = parse(trimmed.slice(2));
+  const lteMatch = /^<=\s*(.+)$/.exec(trimmed);
+  if (lteMatch !== null) {
+    const ceiling = parse(lteMatch[1] ?? "");
     if (ceiling === null) return null;
     return lt(version, ceiling) || eq(version, ceiling);
   }
-  if (trimmed.startsWith("<")) {
-    const ceiling = parse(trimmed.slice(1));
+  const gtMatch = /^>\s*(.+)$/.exec(trimmed);
+  if (gtMatch !== null) {
+    const floor = parse(gtMatch[1] ?? "");
+    if (floor === null) return null;
+    return gt(version, floor);
+  }
+  const ltMatch = /^<\s*(.+)$/.exec(trimmed);
+  if (ltMatch !== null) {
+    const ceiling = parse(ltMatch[1] ?? "");
     if (ceiling === null) return null;
     return lt(version, ceiling);
   }

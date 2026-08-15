@@ -205,21 +205,21 @@ describe("validateEdits — adversarial manifest corruption", () => {
 
   it("rejects Dockerfile with FROM in a comment only", () => {
     const result = validateEdits([edit("Dockerfile", "# FROM node:20\nRUN npm install")]);
-    // Our regex uses /^FROM\s/im which requires FROM at line start.
-    // A commented FROM does not match.
+    // The regex /^FROM[^\S\n]+\S+/im requires FROM at line start followed by
+    // horizontal whitespace and an image reference. A commented FROM does not match.
     expect(result.valid).toBe(false);
-    expect(result.failed[0]?.reason).toContain("no FROM instruction");
+    expect(result.failed[0]?.reason).toContain("no valid FROM instruction");
   });
 
   it("rejects workflow YAML with jobs hidden in a string", () => {
-    // "jobs:" must be a YAML key, not a string value. Our check only
-    // looks for the substring "jobs:" — a string containing "jobs:" passes.
-    // This is a known limitation (no YAML parser), but acceptable because
-    // the manager produces the content, not an attacker.
+    // "jobs:" must be a top-level YAML key (start of line, unindented).
+    // A string value containing "jobs:" does not match /^jobs\s*:/m because
+    // it is indented or quoted. The strengthened validator correctly rejects this.
     const result = validateEdits([
       edit(".github/workflows/ci.yml", 'name: CI\non: push\necho: "jobs: are cool"'),
     ]);
-    expect(result.valid).toBe(true); // "jobs:" substring present — passes structural check
+    expect(result.valid).toBe(false);
+    expect(result.failed[0]?.reason).toContain("no top-level jobs key");
   });
 
   it("rejects truncated JSON (mid-object)", () => {
@@ -238,10 +238,11 @@ describe("validateEdits — adversarial manifest corruption", () => {
 
   it("rejects Cargo.toml with brackets only in comments", () => {
     // If the only brackets are in comments, there are no real TOML headers.
-    // Our check just looks for "[" — it doesn't parse TOML comments.
-    // This is a known limitation.
+    // The strengthened validator requires a table header at the start of a
+    // line (^\\[...), so a commented-out "# [package]" no longer passes.
     const result = validateEdits([edit("Cargo.toml", "# [package]\nname = test")]);
-    expect(result.valid).toBe(true); // "[" substring present — passes structural check
+    expect(result.valid).toBe(false);
+    expect(result.failed[0]?.reason).toContain("no valid TOML table headers");
   });
 });
 

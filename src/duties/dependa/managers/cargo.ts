@@ -495,7 +495,7 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
       inSubTable = false;
     }
 
-    if (inTargetSection && !replaced) {
+    if (inTargetSection) {
       // Sub-table version: under [dependencies.serde], the line is just `version = "1.0"`
       if (inSubTable) {
         const versionMatch = /^version\s*=\s*"([^"]*)"/.exec(trimmed);
