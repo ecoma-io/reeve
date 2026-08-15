@@ -83,6 +83,24 @@ describe("sanitizeBranchSegment", () => {
   it("prefixes with 'branch' when result starts with dash", () => {
     expect(sanitizeBranchSegment("-leading-dash")).toBe("branch-leading-dash");
   });
+
+  it("collapses double dots (git rejects .. in ref names)", () => {
+    expect(sanitizeBranchSegment("v1..v2")).toBe("v1.v2");
+    expect(sanitizeBranchSegment("a...b")).toBe("a.b");
+  });
+
+  it("strips leading dots (git rejects components starting with .)", () => {
+    expect(sanitizeBranchSegment(".git")).toBe("git");
+    expect(sanitizeBranchSegment("..hidden")).toBe("hidden");
+  });
+
+  it("strips trailing .lock (git rejects ref names ending in .lock)", () => {
+    expect(sanitizeBranchSegment("package.lock")).toBe("package");
+  });
+
+  it("returns 'branch' for empty input (git rejects empty ref names)", () => {
+    expect(sanitizeBranchSegment("")).toBe("branch");
+  });
 });
 
 // ── buildPrTitle ─────────────────────────────────────────────────────────
@@ -185,6 +203,7 @@ describe("buildPrBody", () => {
             severity: "high",
             summary: "RCE",
             patchedVersions: ">=4.18.0",
+            vulnerableRange: null,
           },
         }),
       ],
@@ -192,6 +211,11 @@ describe("buildPrBody", () => {
     const body = buildPrBody(g);
     expect(body).toContain("CVE-2024-0001");
     expect(body).toContain("high");
+  });
+
+  it("does not include evidence section when no evidence", () => {
+    const body = buildPrBody(group());
+    expect(body).not.toContain("### Evidence");
   });
 
   it("includes evidence section when evidence exists", () => {
@@ -213,10 +237,30 @@ describe("buildPrBody", () => {
     expect(body).toContain("### Evidence");
   });
 
-  it("does not include evidence section when no evidence", () => {
-    const body = buildPrBody(group());
-    // No ### Evidence header when there's no evidence
-    expect(body).not.toContain("### Evidence");
+  it("defangs Markdown table injection from dependency names and versions", () => {
+    const g = group({
+      proposals: [
+        proposal({
+          dependency: {
+            ecosystem: "npm",
+            name: "evil|name\n| injected | row |",
+            constraint: "^1.0.0",
+            currentVersion: "1.0.0|old",
+            manifestPath: "package.json",
+            dev: false,
+            manager: "npm",
+          },
+          currentVersion: "1.0.0|old",
+          targetVersion: "2.0.0\n| injected |",
+        }),
+      ],
+    });
+
+    const body = buildPrBody(g);
+    expect(body).not.toContain("evil|name");
+    expect(body).not.toContain("1.0.0|old");
+    expect(body).not.toContain("\n| injected |");
+    expect(body).toContain("`evilname  injected  row `");
   });
 });
 
@@ -236,6 +280,16 @@ describe("publishGroup: D3 branch safety", () => {
             Promise.resolve({
               data: [{ sha: "abc", author: { login: "github-actions[bot]" }, committer: null }],
             }),
+          compareCommits: () =>
+            Promise.resolve({
+              data: {
+                ahead_by: 1,
+                behind_by: 0,
+                commits: [
+                  { sha: "abc", author: { login: "github-actions[bot]" }, committer: null },
+                ],
+              },
+            }),
         },
         git: {
           getRef: () => {
@@ -254,10 +308,10 @@ describe("publishGroup: D3 branch safety", () => {
     };
   }
 
-  it("refuses force-reset when listCommits fails with a non-404 API error", async () => {
+  it("refuses force-reset when compareCommits fails with a non-404 API error", async () => {
     const apiError = Object.assign(new Error("Internal Server Error"), { status: 500 });
     const base = baseApi();
-    base.rest.repos.listCommits = () => Promise.reject(apiError);
+    base.rest.repos.compareCommits = () => Promise.reject(apiError);
 
     const result = await publishGroup(base, AT, group(), false, true);
 
@@ -265,33 +319,72 @@ describe("publishGroup: D3 branch safety", () => {
     expect(result.pr).toBeNull();
   });
 
-  it("proceeds with force-reset when listCommits returns only bot-authored commits", async () => {
+  it("proceeds with force-reset when compareCommits returns only bot-authored branch-unique commits", async () => {
     const base = baseApi();
-    base.rest.repos.listCommits = () =>
+    base.rest.repos.compareCommits = () =>
       Promise.resolve({
-        data: [
-          { sha: "a1", author: { login: "github-actions[bot]" }, committer: null },
-          { sha: "b2", author: { login: "reeve[bot]" }, committer: null },
-        ],
+        data: {
+          ahead_by: 2,
+          behind_by: 0,
+          commits: [
+            { sha: "a1", author: { login: "github-actions[bot]" }, committer: null },
+            { sha: "b2", author: { login: "reeve[bot]" }, committer: null },
+          ],
+        },
       });
 
-    // Should not refuse — bot-only commits means safe to reset
+    // Should not refuse — bot-only branch-unique commits means safe to reset
     const result = await publishGroup(base, AT, group(), false, true);
     expect(result.outcome).not.toBe("refused");
   });
 
-  it("refuses force-reset when listCommits finds a human-authored commit", async () => {
+  it("refuses force-reset when compareCommits finds a human-authored branch-unique commit", async () => {
     const base = baseApi();
-    base.rest.repos.listCommits = () =>
+    base.rest.repos.compareCommits = () =>
       Promise.resolve({
-        data: [
-          { sha: "a1", author: { login: "github-actions[bot]" }, committer: null },
-          { sha: "b2", author: { login: "maintainer" }, committer: null },
-        ],
+        data: {
+          ahead_by: 2,
+          behind_by: 0,
+          commits: [
+            { sha: "a1", author: { login: "github-actions[bot]" }, committer: null },
+            { sha: "b2", author: { login: "maintainer" }, committer: null },
+          ],
+        },
       });
 
     const result = await publishGroup(base, AT, group(), false, true);
     expect(result.outcome).toBe("refused");
     expect(result.pr).toBeNull();
+  });
+
+  it("refuses force-reset when a branch-unique commit has unknown attribution (fail closed)", async () => {
+    const base = baseApi();
+    base.rest.repos.compareCommits = () =>
+      Promise.resolve({
+        data: {
+          ahead_by: 1,
+          behind_by: 0,
+          commits: [{ sha: "x1", author: null, committer: null }],
+        },
+      });
+
+    const result = await publishGroup(base, AT, group(), false, true);
+    expect(result.outcome).toBe("refused");
+    expect(result.pr).toBeNull();
+  });
+
+  it("proceeds with force-reset when compareCommits shows zero branch-unique commits", async () => {
+    const base = baseApi();
+    base.rest.repos.compareCommits = () =>
+      Promise.resolve({
+        data: {
+          ahead_by: 0,
+          behind_by: 5,
+          commits: [],
+        },
+      });
+
+    const result = await publishGroup(base, AT, group(), false, true);
+    expect(result.outcome).not.toBe("refused");
   });
 });

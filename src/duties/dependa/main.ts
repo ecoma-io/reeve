@@ -187,9 +187,6 @@ export async function run(): Promise<void> {
     const manifestContentCache = new Map<string, string>();
     // Track discovered manifest paths — only these are valid edit targets
     const discoveredManifestPaths = new Set<string>();
-    // Track accumulated edits per manifest so multiple proposals to the same
-    // file compose sequentially instead of each mutating the original independently.
-    const accumulatedEdits = new Map<string, string>();
 
     const readFile = async (path: string): Promise<string | null> => {
       const cached = manifestContentCache.get(path);
@@ -305,12 +302,21 @@ export async function run(): Promise<void> {
           `dependa: could not query advisories for \`${dep.name}\` — ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      const securityAdvisory = findRelevantAdvisory(advisories, dep.currentVersion);
 
       for (const targetVersion of candidates) {
         if (targetVersion === dep.currentVersion) continue;
 
-        // Determine update type with pin/digest awareness
+        // Determine update type with pin/digest awareness.
+        // Security is checked PER CANDIDATE: a candidate is "security" only when
+        // an advisory exists AND the current version is vulnerable AND the
+        // target version resolves or mitigates it. This avoids marking major
+        // updates as "security" when the vulnerability is already patched at
+        // the target, or when the update doesn't address the vulnerability.
+        const securityAdvisory = findSecurityAdvisoryFor(
+          advisories,
+          dep.currentVersion,
+          targetVersion,
+        );
         const isSecurity = securityAdvisory !== null;
         let updateType: UpdateType | null;
 
@@ -375,6 +381,7 @@ export async function run(): Promise<void> {
             },
             riskFacts.facts,
             enclosed?.block ?? "",
+            enclosed?.rule,
           );
 
           const rotation = await rotateModels(
@@ -394,13 +401,13 @@ export async function run(): Promise<void> {
         }
 
         // Compute file edits via the manager's applyUpdate.
-        // Use the accumulated content for this manifest so that multiple
-        // proposals editing the same file compose sequentially rather than
-        // each mutating the original independently (last-writer-wins bug).
+        // Always compute against the ORIGINAL manifest content (not accumulated).
+        // Per-group recomposition happens after grouping so that proposals in
+        // different groups never contaminate each other and ignore rules are
+        // evaluated before any edit is composed into a final file state.
         const edits: FileEdit[] = [];
         const manager = managers.get(dep.manager as ManagerId);
-        const manifestContent =
-          accumulatedEdits.get(dep.manifestPath) ?? manifestContentCache.get(dep.manifestPath);
+        const manifestContent = manifestContentCache.get(dep.manifestPath);
         if (manager !== undefined && manifestContent !== undefined) {
           const updatedContent = manager.applyUpdate(manifestContent, {
             dependency: dep,
@@ -415,7 +422,6 @@ export async function run(): Promise<void> {
             groupName: null,
           });
           if (updatedContent !== null) {
-            accumulatedEdits.set(dep.manifestPath, updatedContent);
             edits.push({
               path: dep.manifestPath,
               content: updatedContent,
@@ -516,7 +522,42 @@ export async function run(): Promise<void> {
 
       const admittedGroup: ProposalGroup = { ...group, proposals: admitted };
 
-      // 9b. VALIDATE — every edit must survive a round-trip check.
+      // 9b. RECOMPOSE — replay applyUpdate in group order so multiple edits
+      // to the same manifest are composed cumulatively. Each proposal's edit
+      // was computed against the ORIGINAL manifest content (step 4) so that
+      // ignore-rule evaluation and grouping happen before any edit touches a
+      // file. Recomposition here is the ONLY place where sequential edits are
+      // combined; without it, the last edit would overwrite earlier ones and
+      // only one dependency per file would survive.
+      const recomposedEditsByPath = new Map<string, string>();
+      for (const p of admitted) {
+        for (const edit of p.edits) {
+          const baseContent =
+            recomposedEditsByPath.get(edit.path) ?? manifestContentCache.get(edit.path);
+          if (baseContent === undefined) continue;
+          const manager = managers.get(p.dependency.manager as ManagerId);
+          if (manager === undefined) continue;
+          const nextContent = manager.applyUpdate(baseContent, {
+            ...p,
+            edits: [],
+            groupName: null,
+          });
+          if (nextContent !== null) {
+            recomposedEditsByPath.set(edit.path, nextContent);
+          }
+        }
+      }
+      // Replace each proposal's edits with the cumulative final content.
+      const recomposedProposals: UpdateProposal[] = admitted.map((p) => ({
+        ...p,
+        edits: p.edits.map((e) => {
+          const finalContent = recomposedEditsByPath.get(e.path);
+          return finalContent !== undefined ? { ...e, content: finalContent } : e;
+        }),
+      }));
+      Object.assign(admittedGroup, { proposals: recomposedProposals });
+
+      // 9c. VALIDATE — every edit must survive a round-trip check.
       // A failed validation prevents publication — this is a safety gate.
       const allEdits = admitted.flatMap((p) => p.edits);
       if (allEdits.length > 0) {
@@ -638,44 +679,117 @@ function notGranted(warrant: Warrant): string {
  * Returns the highest-severity relevant advisory, or null when none apply.
  * A failed advisory query degrades gracefully (no security evidence), per D12.
  */
-function findRelevantAdvisory(
+/**
+ * Find the most severe advisory that makes this update a security fix.
+ *
+ * A candidate is classified as "security" when:
+ * 1. An advisory exists for the dependency.
+ * 2. The CURRENT version is vulnerable (or we cannot determine it's safe).
+ * 3. The TARGET version resolves or mitigates the vulnerability (is patched,
+ *    or falls outside the vulnerable range).
+ *
+ * This avoids marking updates as "security" when:
+ * - The current version is already patched (not vulnerable).
+ * - The target version does not resolve the vulnerability (still vulnerable).
+ *
+ * When vulnerableRange and patchedVersions are both unavailable, an advisory
+ * matching the package is treated as relevant — conservative safety.
+ */
+function findSecurityAdvisoryFor(
   advisories: readonly SecurityAdvisory[],
   currentVersion: string,
+  targetVersion: string,
 ): SecurityAdvisory | null {
-  // When no advisories are returned (ecosystem not covered, network error,
-  // or genuinely no advisories), there is no security evidence.
   if (advisories.length === 0) return null;
 
-  // Severity ordering for picking the most relevant advisory
   const severityRank: ReadonlyMap<string, number> = new Map([
     ["critical", 4],
     ["high", 3],
+    ["medium", 2],
     ["moderate", 2],
     ["low", 1],
   ]);
 
   let best: SecurityAdvisory | null = null;
   let bestRank = 0;
-  for (const adv of advisories) {
-    // If patchedVersions is available and the current version satisfies it,
-    // the current version is already patched — this advisory is not relevant.
-    if (adv.patchedVersions !== null) {
-      const currentParsed = parse(currentVersion);
-      if (currentParsed !== null) {
-        const satisfied = satisfies(currentParsed, adv.patchedVersions);
-        if (satisfied === true) continue; // Already patched — not applicable
-      }
-    }
-    // When patchedVersions is null, we cannot determine relevance, so the
-    // advisory is conservatively included (evidence, never authority).
 
+  for (const adv of advisories) {
+    // Check whether the current version is affected by this advisory
+    const currentAffected = isVersionAffectedBy(adv, currentVersion);
+    // false → definitely not vulnerable, skip this advisory
+    if (currentAffected === false) continue;
+
+    // Check whether the target version resolves the vulnerability
+    const targetPatched = isVersionPatchedBy(adv, targetVersion);
+    // false → target is still vulnerable, this update doesn't fix it
+    if (targetPatched === false) continue;
+
+    // At this point: current is (possibly) affected AND target is (possibly) patched.
+    // This advisory qualifies as a security reason for this update.
     const rank = severityRank.get(adv.severity) ?? 0;
     if (rank > bestRank) {
       best = adv;
       bestRank = rank;
     }
   }
+
   return best;
+}
+
+/**
+ * Whether a version is affected by an advisory.
+ *
+ * Returns true/false/null based on available evidence. When no ranges are
+ * provided, returns null (unknown) — the caller decides how to handle
+ * uncertainty.
+ */
+function isVersionAffectedBy(advisory: SecurityAdvisory, version: string): boolean | null {
+  const parsed = parse(version);
+  if (parsed === null) return null;
+
+  // Prefer explicit vulnerable_range
+  if (advisory.vulnerableRange !== null) {
+    const result = satisfies(parsed, advisory.vulnerableRange);
+    if (result === true) return true;
+    if (result === false) return false;
+    // null means unparseable range — fall through to patched check
+  }
+
+  // If only patchedVersions is known: affected iff NOT patched
+  if (advisory.patchedVersions !== null) {
+    const patched = satisfies(parsed, advisory.patchedVersions);
+    if (patched === true) return false;
+    if (patched === false) return true;
+  }
+
+  // No determinable ranges — unknown
+  return null;
+}
+
+/**
+ * Whether a version is patched / outside the vulnerable range.
+ *
+ * Returns true/false/null. When no ranges are provided, returns null.
+ */
+function isVersionPatchedBy(advisory: SecurityAdvisory, version: string): boolean | null {
+  const parsed = parse(version);
+  if (parsed === null) return null;
+
+  // If patchedVersions is known, check directly
+  if (advisory.patchedVersions !== null) {
+    const result = satisfies(parsed, advisory.patchedVersions);
+    if (result === true) return true;
+    if (result === false) return false;
+  }
+
+  // If only vulnerable_range is known: patched iff NOT in vulnerable range
+  if (advisory.vulnerableRange !== null) {
+    const affected = satisfies(parsed, advisory.vulnerableRange);
+    if (affected === true) return false;
+    if (affected === false) return true;
+  }
+
+  return null;
 }
 
 /**

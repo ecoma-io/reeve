@@ -46,6 +46,23 @@ export interface PublishApi {
           readonly committer?: { readonly login?: string } | null;
         }[];
       }>;
+      compareCommits(params: {
+        owner: string;
+        repo: string;
+        base: string;
+        head: string;
+        per_page?: number;
+      }): Promise<{
+        data: {
+          readonly ahead_by: number;
+          readonly behind_by: number;
+          readonly commits: readonly {
+            readonly sha: string;
+            readonly author?: { readonly login?: string } | null;
+            readonly committer?: { readonly login?: string } | null;
+          }[];
+        };
+      }>;
     };
     readonly git: {
       getRef(params: {
@@ -116,11 +133,28 @@ export function sanitizeBranchSegment(id: string): string {
   // Replace `/` with `-` (branch names cannot contain `/` in a segment),
   // strip `@` entirely (it can form `@{` which git interprets as reflog),
   // then strip anything not in the allowed set.
-  const safe = id
+  let safe = id
     .replace(/\//g, "-")
     .replace(/@/g, "-")
     .replace(/[^a-zA-Z0-9._-]/g, "-");
-  return safe.startsWith("-") ? `branch${safe}` : safe;
+
+  // Collapse consecutive dots — git rejects `..` in ref names
+  safe = safe.replace(/\.{2,}/g, ".");
+
+  // Remove leading dot — git rejects components starting with `.`
+  safe = safe.replace(/^\.+/, "");
+
+  // Remove trailing .lock — git rejects ref names ending in `.lock`
+  if (safe.endsWith(".lock")) {
+    safe = safe.slice(0, -5);
+  }
+
+  // Prefix with 'branch' when result starts with `-` or is empty
+  if (safe.startsWith("-") || safe.length === 0) {
+    safe = `branch${safe}`;
+  }
+
+  return safe;
 }
 
 /** One proposal group's publish result. */
@@ -176,7 +210,7 @@ export async function publishGroup(
     repo: at.repo,
     state: "closed",
     head: `${at.owner}:${branchName}`,
-    per_page: 5,
+    per_page: 10,
   });
   const closedUnmerged = closedPrs.find((pr) => !pr.merged);
   if (closedUnmerged !== undefined) {
@@ -214,12 +248,17 @@ export async function publishGroup(
     // not authored by the bot. A human maintainer may have pushed edits to the
     // branch to test or refine the proposed update — those commits are
     // inviolable and must not be overwritten.
+    //
+    // Use compareCommits (base...head) to get only branch-unique commits —
+    // listCommits would return ALL reachable commits including main's, causing
+    // false refusals whenever main has any human-authored commit.
     try {
-      const { data: commits } = await api.rest.repos.listCommits({
+      const { data: comparison } = await api.rest.repos.compareCommits({
         owner: at.owner,
         repo: at.repo,
-        sha: branchName,
-        per_page: 10,
+        base: baseSha,
+        head: branchName,
+        per_page: 100,
       });
       const botAuthors = new Set([
         "github-actions[bot]",
@@ -227,9 +266,15 @@ export async function publishGroup(
         "dependabot[bot]",
         "reeve[bot]",
       ]);
-      const hasHumanCommit = commits.some((c) => {
+      const hasHumanCommit = comparison.commits.some((c) => {
         const login = c.author?.login ?? c.committer?.login;
-        return login !== undefined && !botAuthors.has(login);
+        if (login === undefined) {
+          // Unknown attribution — fail closed per D3. An unattributable
+          // commit might be human work with a misconfigured git identity,
+          // and resetting it would violate D3.
+          return true;
+        }
+        return !botAuthors.has(login);
       });
       if (hasHumanCommit) {
         core.info(
@@ -257,13 +302,28 @@ export async function publishGroup(
     // Reset the branch to the current base SHA — equivalent to rebasing.
     // This ensures the branch always reflects the latest default branch
     // and avoids conflicts from stale base.
-    await api.rest.git.updateRef({
-      owner: at.owner,
-      repo: at.repo,
-      ref: `heads/${branchName}`,
-      sha: baseSha,
-      force: true,
-    });
+    try {
+      await api.rest.git.updateRef({
+        owner: at.owner,
+        repo: at.repo,
+        ref: `heads/${branchName}`,
+        sha: baseSha,
+        force: true,
+      });
+    } catch (error) {
+      if (isMissing(error)) {
+        // Branch was deleted between getRef and updateRef — recreate it.
+        core.info(`dependa: branch \`${branchName}\` was deleted during publish — recreating.`);
+        await api.rest.git.createRef({
+          owner: at.owner,
+          repo: at.repo,
+          ref: `refs/heads/${branchName}`,
+          sha: baseSha,
+        });
+      } else {
+        throw error;
+      }
+    }
   }
 
   // Write each file edit from each proposal to the branch.
@@ -382,7 +442,11 @@ export function buildPrTitle(group: ProposalGroup): string {
   if (group.proposals.length === 1) {
     const p = group.proposals[0];
     if (p === undefined) return `${prefix}: update 1 dependency`;
-    return `${prefix}: update ${p.dependency.name} ${p.currentVersion} → ${p.targetVersion}`;
+    // Sanitise: strip newlines that would break the PR title format.
+    const safeName = p.dependency.name.replace(/\n/g, " ");
+    const safeCur = p.currentVersion.replace(/\n/g, " ");
+    const safeTgt = p.targetVersion.replace(/\n/g, " ");
+    return `${prefix}: update ${safeName} ${safeCur} → ${safeTgt}`;
   }
   return `${prefix}: update ${String(group.proposals.length)} dependencies (${group.ecosystem ?? "mixed"})`;
 }
@@ -411,7 +475,15 @@ export function buildPrBody(group: ProposalGroup): string {
         : p.risk.facts.isSecurity
           ? "security"
           : p.risk.facts.updateType;
-    return `| ${typeEmoji} \`${p.dependency.name}\` | \`${p.currentVersion}\` | \`${p.targetVersion}\` | \`${p.updateType}\`${devTag}${security} | ${riskCell} |`;
+    // Sanitise all untrusted content that flows into the Markdown table.
+    // Backticks alone don't prevent table-breaking: a dependency name or
+    // version containing `|` would add a column, and a newline would split
+    // the row. escapeMarkdown defangs links/images/HTML; we also strip
+    // pipe characters and newlines to keep the table structure intact.
+    const safeName = escapeMarkdown(p.dependency.name).replace(/\|/g, "").replace(/\n/g, " ");
+    const safeCurrent = escapeMarkdown(p.currentVersion).replace(/\|/g, "").replace(/\n/g, " ");
+    const safeTarget = escapeMarkdown(p.targetVersion).replace(/\|/g, "").replace(/\n/g, " ");
+    return `| ${typeEmoji} \`${safeName}\` | \`${safeCurrent}\` | \`${safeTarget}\` | \`${p.updateType}\`${devTag}${security} | ${riskCell} |`;
   });
 
   const evidenceSection = group.proposals

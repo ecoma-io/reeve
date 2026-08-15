@@ -30,6 +30,7 @@ describe("SecurityAdvisory type contract", () => {
       severity: "high",
       summary: "A vulnerability was found in the package",
       patchedVersions: ">=1.2.3",
+      vulnerableRange: null,
     };
     expect(advisory.id).toBe("GHSA-xxxx-xxxx-xxxx");
     expect(advisory.severity).toBe("high");
@@ -38,13 +39,20 @@ describe("SecurityAdvisory type contract", () => {
   });
 
   it("supports all severity levels", () => {
-    const severities: SecurityAdvisory["severity"][] = ["low", "moderate", "high", "critical"];
+    const severities: SecurityAdvisory["severity"][] = [
+      "low",
+      "medium",
+      "moderate",
+      "high",
+      "critical",
+    ];
     for (const severity of severities) {
       const advisory: SecurityAdvisory = {
         id: "GHSA-test-test-test",
         severity,
         summary: "test",
         patchedVersions: null,
+        vulnerableRange: null,
       };
       expect(advisory.severity).toBe(severity);
     }
@@ -53,9 +61,10 @@ describe("SecurityAdvisory type contract", () => {
   it("supports null patchedVersions", () => {
     const advisory: SecurityAdvisory = {
       id: "GHSA-test-test-test",
-      severity: "moderate",
+      severity: "medium",
       summary: "test",
       patchedVersions: null,
+      vulnerableRange: null,
     };
     expect(advisory.patchedVersions).toBeNull();
   });

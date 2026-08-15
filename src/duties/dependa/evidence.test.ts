@@ -67,6 +67,7 @@ describe("fromSecurityAdvisory", () => {
       severity: "high",
       summary: "Remote code execution vulnerability",
       patchedVersions: ">=2.0.0",
+      vulnerableRange: null,
     };
     const evidence = fromSecurityAdvisory(advisory);
     expect(evidence.kind).toBe("security-advisory");
@@ -84,6 +85,7 @@ describe("fromSecurityAdvisory", () => {
       severity: "moderate",
       summary: "Information disclosure",
       patchedVersions: null,
+      vulnerableRange: null,
     };
     const evidence = fromSecurityAdvisory(advisory);
     expect(evidence.content).not.toContain("Patched in:");
@@ -187,6 +189,7 @@ describe("gather", () => {
       severity: "critical",
       summary: "RCE",
       patchedVersions: ">=2.0.0",
+      vulnerableRange: null,
     };
 
     const evidence = gather([], advisory, new Map());
@@ -332,5 +335,56 @@ describe("escapeMarkdown", () => {
 
   it("leaves plain text untouched", () => {
     expect(escapeMarkdown("Hello world")).toBe("Hello world");
+  });
+
+  it("defangs reference-style links: [text][id] → text [id]", () => {
+    expect(escapeMarkdown("[click here][1]")).toBe("click here [1]");
+    expect(escapeMarkdown("[phish][ref]")).toBe("phish [ref]");
+  });
+
+  it("defangs reference-style images: ![alt][id] → alt [id]", () => {
+    expect(escapeMarkdown("![logo][1]")).toBe("logo [1]");
+    expect(escapeMarkdown("![tracking][img-ref]")).toBe("tracking [img-ref]");
+  });
+
+  it("strips reference definitions: [id]: url → [id]", () => {
+    expect(escapeMarkdown("[1]: https://evil.com/phish")).toBe("[1]");
+    expect(escapeMarkdown('[ref]:  https://evil.com  "Title"')).toBe("[ref]");
+  });
+
+  it("defangs mixed inline and reference-style links in one string", () => {
+    const input = "See [inline](https://a.com) and [ref][1].";
+    const result = escapeMarkdown(input);
+    expect(result).toBe("See inline (https://a.com) and ref [1].");
+    // No clickable links remain
+    expect(result).not.toMatch(/\]\(/);
+    expect(result).not.toMatch(/\]\[(?!.*\])/);
+  });
+
+  it("defangs reference-style images before they could be consumed by the link rule", () => {
+    // ![alt][id] must be caught by the image rule, not reduced to
+    // "alt [id]" by the link rule. Both produce safe output, but
+    // the image rule should fire first for semantic correctness.
+    const input = "![img][1]";
+    const result = escapeMarkdown(input);
+    expect(result).toBe("img [1]");
+    // Should not contain the ! prefix — that's only valid for images
+    expect(result).not.toContain("![");
+  });
+
+  it("handles empty alt text in images", () => {
+    expect(escapeMarkdown("![](https://evil.com/track)")).toBe(" (https://evil.com/track)");
+  });
+
+  it("handles nested brackets gracefully", () => {
+    // Unbalanced or deeply nested brackets should not crash
+    expect(() => escapeMarkdown("[[[broken")).not.toThrow();
+    expect(() => escapeMarkdown("![[[img")).not.toThrow();
+  });
+
+  it("defangs multiple reference definitions in a block", () => {
+    const input = "[1]: https://a.com\n[2]: https://b.com";
+    const result = escapeMarkdown(input);
+    expect(result).toBe("[1]\n[2]");
   });
 });

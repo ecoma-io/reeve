@@ -401,4 +401,44 @@ version = "1.0"
     expect(result).not.toBeNull();
     expect(result).toContain('version = "1.1"');
   });
+
+  it("updates dependency that appears in both [dependencies] and [dev-dependencies]", () => {
+    const content = `
+[package]
+name = "my-app"
+version = "0.1.0"
+
+[dependencies]
+serde = "1.0"
+
+[dev-dependencies]
+serde = "1.0"
+`;
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "cargo",
+        name: "serde",
+        constraint: "1.0",
+        currentVersion: "1.0",
+        manifestPath: "Cargo.toml",
+        dev: false,
+        manager: "cargo",
+      },
+      currentVersion: "1.0",
+      targetVersion: "1.1",
+      updateType: "minor",
+    });
+
+    expect(result).not.toBeNull();
+    // Both occurrences must be updated — not just the first one.
+    const lines = result!
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("serde ="));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe('serde = "1.1"');
+    expect(lines[1]).toBe('serde = "1.1"');
+  });
 });

@@ -51,13 +51,32 @@ describe("parse", () => {
     });
   });
 
-  it("parses pre-release with + build metadata (ignores build)", () => {
+  it("parses pre-release with + build metadata (strips build per SemVer 2.0.0 §10)", () => {
     expect(parse("1.2.3-beta.1+build")).toEqual({
       major: 1,
       minor: 2,
       patch: 3,
-      prerelease: "beta.1+build",
+      prerelease: "beta.1",
     });
+  });
+
+  it("parses version with only build metadata (no prerelease)", () => {
+    expect(parse("1.2.3+build.123")).toEqual({
+      major: 1,
+      minor: 2,
+      patch: 3,
+      prerelease: null,
+    });
+  });
+
+  it("build metadata does not affect precedence (SemVer 2.0.0 §10)", () => {
+    const withBuild = parse("1.2.3+build.123")!;
+    const withoutBuild = parse("1.2.3")!;
+    expect(compare(withBuild, withoutBuild)).toBe(0);
+  });
+
+  it("build metadata does not cause rollback classification", () => {
+    expect(classify("1.2.3", "1.2.3+build.123", false)).toBeNull();
   });
 
   it("returns null for non-version strings", () => {
@@ -425,6 +444,44 @@ describe("satisfies", () => {
     const v004 = parse("0.0.4")!;
     expect(satisfies(v003, "^0.0.3")).toBe(true);
     expect(satisfies(v004, "^0.0.3")).toBe(false); // Patch-locked for 3-part
+  });
+
+  it("caret range: ^0 is major-locked (1-part constraint)", () => {
+    const v000 = parse("0.0.0")!;
+    const v010 = parse("0.1.0")!;
+    const v090 = parse("0.9.9")!;
+    const v100 = parse("1.0.0")!;
+    expect(satisfies(v000, "^0")).toBe(true);
+    expect(satisfies(v010, "^0")).toBe(true);
+    expect(satisfies(v090, "^0")).toBe(true);
+    expect(satisfies(v100, "^0")).toBe(false);
+  });
+
+  // Comma-separated ranges (GitHub Advisory vulnerable_version_range)
+
+  it("comma-separated range: both conditions must hold", () => {
+    const v = parse("2.5.0")!;
+    expect(satisfies(v, ">= 2.1.0, <= 3.0.0")).toBe(true);
+    expect(satisfies(v, ">= 2.1.0, < 2.5.0")).toBe(false);
+  });
+
+  it("comma-separated range: matches when all conditions hold", () => {
+    const v = parse("4.0.0")!;
+    expect(satisfies(v, ">= 3.3.8, <= 4.5.5")).toBe(true);
+  });
+
+  it("comma-separated range: fails when outside floor", () => {
+    const v = parse("3.0.0")!;
+    expect(satisfies(v, ">= 3.3.8, <= 4.5.5")).toBe(false);
+  });
+
+  it("comma-separated range: works with < and <=", () => {
+    const v = parse("3.41.2")!;
+    expect(satisfies(v, "< 3.41.3")).toBe(true);
+    expect(satisfies(v, "<= 3.41.3")).toBe(true);
+    const v2 = parse("3.41.3")!;
+    expect(satisfies(v2, "< 3.41.3")).toBe(false);
+    expect(satisfies(v2, "<= 3.41.3")).toBe(true);
   });
 });
 

@@ -118,11 +118,15 @@ export function interpretationPrompt(
   proposal: UpdateProposal,
   facts: RiskFacts,
   enclosedEvidence: string,
+  enclosedRule?: string,
 ): string {
+  const ruleSection =
+    enclosedRule !== undefined && enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
     `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` ` +
       `from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
     "",
+    ...ruleSection,
     "Risk facts (deterministic, from version metadata):",
     `- Update type: ${facts.updateType}`,
     `- Major distance: ${String(facts.majorDistance)}`,

@@ -259,6 +259,7 @@ describe("evidence — adversarial content handling", () => {
       severity: "critical",
       summary: "x".repeat(10000),
       patchedVersions: ">=1.0.0",
+      vulnerableRange: null,
     };
 
     const evidence = fromSecurityAdvisory(advisory);

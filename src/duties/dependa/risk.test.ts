@@ -55,6 +55,7 @@ describe("computeFacts", () => {
       severity: "high",
       summary: "Remote code execution",
       patchedVersions: ">=2.0.0",
+      vulnerableRange: null,
     };
 
     const facts = computeFacts({
