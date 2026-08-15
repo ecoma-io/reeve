@@ -56,7 +56,7 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
 import { newAccumulator, remainingOf, reportNoSweep } from "../../core/sweep.js";
 import {
   dutyLanguages,
@@ -391,7 +391,16 @@ export async function run(): Promise<void> {
           }
         } else {
           // Default-branch write path: write state directly
-          await writeState(api, context.repo, provenancePath, state, stateSha);
+          const canWriteDefault = settings.permitted.includes("edit-file");
+
+          if (!canWriteDefault) {
+            core.notice(
+              "harmonise: provenance state cannot be written to the default branch " +
+                "because `edit-file` is not granted. State may become stale.",
+            );
+          } else {
+            await writeState(api, context.repo, provenancePath, state, stateSha);
+          }
         }
       } catch (error) {
         if (isCapacityError(error)) {
@@ -673,6 +682,7 @@ async function processGroup(
     }
 
     if (result.attempts.length === 0) {
+      failIfProtocolExhausted(settings.models, result.failures);
       core.warning(
         `harmonise: no admissible draft produced for ${locale} translation of ${group.id}`,
       );

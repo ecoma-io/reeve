@@ -15,7 +15,10 @@ One job Reeve does, shipped as its own action in its own subdirectory, sharing
 one core with every other duty.
 
 A duty is **a decision, plus the shape of its result**. It is not a program. The
-pipeline is the program, and it is the same pipeline for every duty.
+pipeline is the program, and it is the same pipeline for every duty that calls
+a model — `lifecycle` and `dependa` use the pipeline's stages differently, and
+`lifecycle` does not call a model at all, but every duty runs under the same
+authority model, the same capability enforcement, and the same dry-run guard.
 
 ```
 src/
@@ -61,9 +64,14 @@ the same code, running the same way, underneath every one of them.
 
 ## What a duty may never do
 
-**Talk to the outside world.** If a duty imports anything that fetches, reads the
-filesystem, or touches the GitHub API, the boundary broke. That is the test: not
-a style rule, a mechanical check you can run by reading the import list.
+**Talk to the outside world directly.** A duty goes through the core for
+everything the core provides: the GitHub API (through `forge.js`), the warrant
+(through `openAuthority`), and the provider (through the shared client). Some
+duties also read from the local checkout (corrections, guidance) or the Contents
+API (manifests, blobs), which the core does not gate — but these reads are of
+files the maintainer controls, not of untrusted input. The boundary that matters
+is the one between what the core validates (the verdict, the authority, the
+intersection) and what a duty decides on its own.
 
 **Decide its own authority.** A duty does not read the warrant file. It is handed
 what it may do, already parsed and already intersected with the workflow's input.

@@ -31892,6 +31892,18 @@ var UPDATE_TYPES = [
   "security"
 ];
 
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+  "harmonise",
+  "dependa"
+];
+var PLANNED = [];
+
 // src/core/warrant.ts
 var CAPABILITIES = [
   "label",
@@ -31932,6 +31944,25 @@ function isNotFound(error2) {
 }
 function parseWarrant(path, source) {
   const document2 = load(path, source);
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "capabilities"
+  ];
+  for (const key of Object.keys(document2)) {
+    if (!KNOWN_ROOT.includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+      );
+    }
+  }
   const version = document2.version;
   if (version !== VERSION7) {
     throw new Error(
@@ -32074,6 +32105,25 @@ function readLabels(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color"
+    ];
+    for (const key of Object.keys(fields)) {
+      if (!KNOWN_LABEL.includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
+        );
+      }
+    }
     const name = text(at, "name", fields.name, { required: true });
     if (seen.has(name.toLowerCase())) {
       throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
@@ -32647,6 +32697,11 @@ function readCapabilities(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` capabilities for \`${duty}\``;
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      throw new Error(
+        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+      );
+    }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(
@@ -33135,6 +33190,9 @@ function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
 function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
+function protocolExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+}
 function weatherFailure(model) {
   return {
     ok: false,
@@ -33464,6 +33522,16 @@ function warnIfStarved(models, weather, sweep) {
   const rosterStarved = starved(models, weather);
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted2 = protocolExhausted(models, failures);
+  if (exhausted2) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted2;
 }
 async function writeRunSummary(page2, weather) {
   await writeSummary(page2 + authSection(weather.authFailures));
@@ -34984,7 +35052,7 @@ ${numbered}`);
 }
 
 // src/duties/translate/engine.ts
-async function translateChunk(to, settings, stages, from, source, weather) {
+async function translateChunk(to, settings, stages, from, source, weather, onProtocolExhausted) {
   const drafted = await translate({
     provider: stages.draft,
     models: settings.models,
@@ -35003,6 +35071,9 @@ async function translateChunk(to, settings, stages, from, source, weather) {
     warning(
       `${to.code}: ${model(refused2.model)} was refused \u2014 ${refused2.score.reason ?? "unscored"}`
     );
+  }
+  if (drafted.attempts.length === 0) {
+    onProtocolExhausted?.(settings.models, drafted.failures);
   }
   const verdict = await judge2({
     provider: stages.judge,
@@ -35033,7 +35104,7 @@ async function translateChunk(to, settings, stages, from, source, weather) {
     votes: cast
   };
 }
-async function translateInto(to, settings, stages, from, source, weather) {
+async function translateInto(to, settings, stages, from, source, weather, onProtocolExhausted) {
   const pieces = chunks(source, settings.chunkChars);
   const results = [];
   for (const piece of pieces) {
@@ -35049,7 +35120,15 @@ async function translateInto(to, settings, stages, from, source, weather) {
       });
       continue;
     }
-    const outcome = await translateChunk(to, settings, stages, from, piece, weather);
+    const outcome = await translateChunk(
+      to,
+      settings,
+      stages,
+      from,
+      piece,
+      weather,
+      onProtocolExhausted
+    );
     if (outcome === null) return null;
     results.push(outcome);
   }
@@ -35837,7 +35916,7 @@ async function publish(thread, marker2, publication2) {
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
-async function translateText(what, body, thread, settings, stages, weather, meter, budget) {
+async function translateText(what, body, thread, settings, stages, weather, meter, budget, onProtocolExhausted) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -35889,7 +35968,8 @@ async function translateText(what, body, thread, settings, stages, weather, mete
       stages,
       detection.language,
       source,
-      weather
+      weather,
+      onProtocolExhausted
     );
     if (translated2 === null) {
       warning(`${what} ${to.code}: no model produced a translation this run.`);
@@ -35970,7 +36050,7 @@ ${assemble(official, marker, would)}`
     published: outcome.action === "published"
   };
 }
-async function translateReplies(api, at, settings, stages, looked, weather, meter, budget) {
+async function translateReplies(api, at, settings, stages, looked, weather, meter, budget, onProtocolExhausted) {
   const { replies, more } = await listReplies(api, at, {
     max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
     order: "newest"
@@ -35996,14 +36076,15 @@ async function translateReplies(api, at, settings, stages, looked, weather, mete
       stages,
       weather,
       meter,
-      budget
+      budget,
+      onProtocolExhausted
     );
     looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
-async function processThread(api, at, body, settings, stages, weather, meter, budget) {
+async function processThread(api, at, body, settings, stages, weather, meter, budget, onProtocolExhausted) {
   const thread = createThread(api, at);
   const translated = await translateText(
     `#${String(at.number)}`,
@@ -36013,10 +36094,21 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
     stages,
     weather,
     meter,
-    budget
+    budget,
+    onProtocolExhausted
   );
   const looked = [translated];
-  const replies = settings.replies ? await translateReplies(api, at, settings, stages, looked, weather, meter, budget) : 0;
+  const replies = settings.replies ? await translateReplies(
+    api,
+    at,
+    settings,
+    stages,
+    looked,
+    weather,
+    meter,
+    budget,
+    onProtocolExhausted
+  ) : 0;
   return { looked, translated, replies, ungranted: null };
 }
 
@@ -36122,7 +36214,8 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
         stages,
         weather,
         meter,
-        budget
+        budget,
+        failIfProtocolExhausted
       );
       return { number: thread.number, outcome: describeOutcome(result) };
     }
@@ -36179,7 +36272,17 @@ async function run() {
         result = skippedResult(number, notGranted(authority2.warrant));
       } else {
         const standing = await readStanding(api, at);
-        result = isReeveProposalPr(standing) ? skippedResult(number, RECURSION_GUARD_REASON) : await processThread(api, at, standing.body, settings, stages, weather, meter, budget);
+        result = isReeveProposalPr(standing) ? skippedResult(number, RECURSION_GUARD_REASON) : await processThread(
+          api,
+          at,
+          standing.body,
+          settings,
+          stages,
+          weather,
+          meter,
+          budget,
+          failIfProtocolExhausted
+        );
       }
       single = { number, result };
     }

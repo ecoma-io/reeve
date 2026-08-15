@@ -20,7 +20,7 @@
  * module that returns its failures lets the caller decide what is worth a
  * warning and what is ordinary rotation.
  *
- * **A third rule governs the rotation itself, not one request:** [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * **A third rule governs the rotation itself, not one request:** [D12](../../docs/doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
  * splits every failure into `kind`, and the two kinds do not fail the same way.
  * A `capacity` failure — 429, 5xx, a timeout, a socket that never connected —
  * is weather: `rotateModels` returns it like any other, the caller carries on,
@@ -109,7 +109,7 @@ export interface Failure {
    */
   readonly usage?: Usage | null;
   /**
-   * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)'s
+   * [D12](../../docs/doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)'s
    * distinction, decided once, here, so every caller reads the same answer
    * instead of re-deriving it from a reason string:
    *
@@ -694,7 +694,7 @@ export class AuthenticationFailure extends Error {
 /**
  * What this run has already learned about capacity, one model id at a time.
  *
- * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+ * [D12](../../docs/doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
  * says a model's capacity does not clear inside a run — not inside one call to
  * `rotateModels`, which was already true before this existed, but across every
  * call the run makes, including the ones a sweep makes for threads two, three
@@ -816,6 +816,27 @@ export function starved(models: readonly string[], weather: Weather): boolean {
 }
 
 /**
+ * True when every model on the roster failed for a non-capacity reason and
+ * nobody answered — a model id that does not exist, a body that would not
+ * parse, a field the provider rejected. These are configuration errors, not
+ * weather, and a run that cannot reach a single usable answer this way should
+ * not complete green.
+ *
+ * Called alongside `starved` at the point a duty knows its roster came back
+ * empty. `starved` catches the capacity case; this catches the protocol case.
+ */
+export function protocolExhausted(
+  models: readonly string[],
+  failures: readonly Failure[],
+): boolean {
+  return (
+    models.length > 0 &&
+    failures.length >= models.length &&
+    failures.every((f) => f.kind === "protocol")
+  );
+}
+
+/**
  * A grounded model, reported as the failure asking it again would produce.
  *
  * Exported for the one caller that keeps its own loop instead of going
@@ -865,7 +886,7 @@ export function reckon(failure: Failure, weather?: Weather): void {
 
 /**
  * The deferred half of the multi-endpoint amendment to
- * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration):
+ * [D12](../../docs/doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration):
  * call once, after a run has tried everything it is going to try. A
  * single-endpoint run never needs this — `reckon` already threw the moment
  * its one endpoint answered unauthenticated. A multi-endpoint run defers

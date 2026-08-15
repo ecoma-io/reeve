@@ -23,7 +23,7 @@
  *
  * **Capacity is weather here exactly as it is everywhere else in this
  * codebase** — see
- * [D12](../../docs/doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration).
+ * [D12](../../docs/doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration).
  * `isCapacityError` is imported rather than re-decided: the question "is this
  * worth ending the check over" has one answer, shared with `triage`'s
  * `propose.ts` and `lifecycle`'s sweep.

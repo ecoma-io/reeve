@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Language } from "../../core/languages.js";
-import { createWeather } from "../../core/provider.js";
+import { createWeather, type Failure } from "../../core/provider.js";
 import type { Score } from "../../core/score.js";
 
 import type { Translation } from "./draft.js";
@@ -237,6 +237,40 @@ describe("translateChunk", () => {
     await translateChunk(vietnamese, settings, stages, null, "source", createWeather());
 
     expect(core.warning).toHaveBeenCalledWith("vi: judge Panel — quota exceeded");
+  });
+
+  it("invokes the protocol-exhaustion callback with the exact models and failures when no draft survives", async () => {
+    const failures: Failure[] = [
+      { ok: false, model: "model-a", kind: "protocol", reason: "bad model id" },
+      { ok: false, model: "model-b", kind: "protocol", reason: "bad model id" },
+    ];
+    mockedTranslate.mockResolvedValue(translation({ attempts: [], failures }));
+    mockedJudge.mockResolvedValue({
+      winner: null,
+      decidedBy: "score",
+      votes: [],
+      failures: [],
+    });
+    const callback = vi.fn();
+
+    await translateChunk(vietnamese, settings, stages, null, "source", createWeather(), callback);
+
+    expect(callback).toHaveBeenCalledWith(settings.models, failures);
+  });
+
+  it("does not invoke the protocol-exhaustion callback when at least one draft survives", async () => {
+    mockedTranslate.mockResolvedValue(translation());
+    mockedJudge.mockResolvedValue({
+      winner: { model: "model-a", text: "bản dịch", score: perfectScore },
+      decidedBy: "score",
+      votes: [],
+      failures: [],
+    });
+    const callback = vi.fn();
+
+    await translateChunk(vietnamese, settings, stages, null, "source", createWeather(), callback);
+
+    expect(callback).not.toHaveBeenCalled();
   });
 });
 

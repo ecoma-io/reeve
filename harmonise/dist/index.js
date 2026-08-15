@@ -31815,6 +31815,18 @@ var UPDATE_TYPES = [
   "security"
 ];
 
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+  "harmonise",
+  "dependa"
+];
+var PLANNED = [];
+
 // src/core/warrant.ts
 var CAPABILITIES = [
   "label",
@@ -31855,6 +31867,25 @@ function isNotFound(error2) {
 }
 function parseWarrant(path, source) {
   const document = load(path, source);
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "capabilities"
+  ];
+  for (const key of Object.keys(document)) {
+    if (!KNOWN_ROOT.includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+      );
+    }
+  }
   const version = document.version;
   if (version !== VERSION7) {
     throw new Error(
@@ -31997,6 +32028,25 @@ function readLabels(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color"
+    ];
+    for (const key of Object.keys(fields)) {
+      if (!KNOWN_LABEL.includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
+        );
+      }
+    }
     const name = text(at, "name", fields.name, { required: true });
     if (seen.has(name.toLowerCase())) {
       throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
@@ -32570,6 +32620,11 @@ function readCapabilities(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` capabilities for \`${duty}\``;
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      throw new Error(
+        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+      );
+    }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(
@@ -33058,6 +33113,9 @@ function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
 function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
+function protocolExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+}
 function weatherFailure(model) {
   return {
     ok: false,
@@ -33355,6 +33413,16 @@ function warnIfStarved(models, weather, sweep) {
   const rosterStarved = starved(models, weather);
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted2 = protocolExhausted(models, failures);
+  if (exhausted2) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted2;
 }
 async function writeRunSummary(page, weather) {
   await writeSummary(page + authSection(weather.authFailures));
@@ -35207,7 +35275,14 @@ async function run() {
             }
           }
         } else {
-          await writeState(api, context2.repo, provenancePath, state, stateSha);
+          const canWriteDefault = settings.permitted.includes("edit-file");
+          if (!canWriteDefault) {
+            notice(
+              "harmonise: provenance state cannot be written to the default branch because `edit-file` is not granted. State may become stale."
+            );
+          } else {
+            await writeState(api, context2.repo, provenancePath, state, stateSha);
+          }
         }
       } catch (error2) {
         if (isCapacityError(error2)) {
@@ -35413,6 +35488,7 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       );
     }
     if (result.attempts.length === 0) {
+      failIfProtocolExhausted(settings.models, result.failures);
       warning(
         `harmonise: no admissible draft produced for ${locale} translation of ${group.id}`
       );

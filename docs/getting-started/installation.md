@@ -1,6 +1,6 @@
 # Installation
 
-_Get a first workflow running in five minutes. Prerequisites: None._
+_Get a first workflow running in five minutes. Prerequisites: a GitHub repository, an OpenAI-compatible API key with billing enabled, and the key stored as a repository secret._
 
 Adding a duty to a repository: the trigger, the permissions, the provider, and
 the version to pin.
@@ -10,6 +10,12 @@ the version to pin.
 > see [what `0.x` and `1.0` mean](../development/releasing.md#what-0x-and-10-mean-here).
 
 ## The five-minute version
+
+> [!IMPORTANT]
+> Running this workflow sends issue content to your configured model endpoint
+> and may incur charges. The example uses OpenAI's paid `gpt-5-mini` model.
+> See [Cost](../guides/cost.md) before your first run. Add `dry-run: true` to
+> rehearse the full pipeline without writing to GitHub.
 
 ```yaml
 name: Reeve
@@ -31,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -43,6 +50,31 @@ defines in code, built entirely from the labels and the label descriptions your
 repository already has, so a first run costs you nothing typed twice: `triage`
 may only `label`, against the taxonomy sitting in your repository settings
 already.
+
+> [!NOTE]
+> `actions/checkout` is required: Reeve reads your warrant file
+> (`.github/reeve.yml`) from the local checkout, not the GitHub API.
+> Without checkout, your warrant restrictions are silently bypassed.
+> At level 0 — no warrant file — this step can be omitted, but adding it
+> now costs nothing and prevents a silent misconfiguration later.
+
+### Which duty should I start with?
+
+| Duty         | Cost        | Best for                                                                                                           |
+| ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| **`triage`** | Low         | First duty. Labels issues from your existing taxonomy — no warrant file needed.                                    |
+| `translate`  | Low         | Multilingual repositories. Appends translated blocks to issue bodies.                                              |
+| `duplicate`  | Low         | High-volume issue trackers. Reports likely duplicates without acting by default.                                   |
+| `respond`    | Medium      | Drafts replies to issues from guidance files you write. Reports by default.                                        |
+| `lifecycle`  | **Zero**    | Stale-issue management. Calls no model — driven entirely by your warrant policy.                                   |
+| `harmonise`  | Medium      | Keeps translated files (README, docs) in sync with a source language.                                              |
+| `dependa`    | Medium–High | Dependency maintenance. Discovers updates, classifies risk, opens PRs. Can run without a model for discovery only. |
+
+**Start with `triage`.** It is the narrowest authority, the cheapest to run,
+and the one that needs nothing beyond a model key and the labels your
+repository already has. `lifecycle` is the only duty that costs nothing at all
+— it reads your policy and acts, with no model call — making it a good second
+duty for repositories that want stale-issue management without API spend.
 
 **This is [Stage 1](../doctrine/north-star.md#7-roadmap): no warrant needed, and no
 `.github/reeve.yml` either.** See [The warrant](../guides/warrant.md) for when a written
@@ -152,7 +184,7 @@ asked over it.
 **An auth failure behaves differently once there is more than one endpoint.**
 A single-endpoint run still fails red immediately on the first 401 or 403,
 exactly as
-[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
 has always described. Once `endpoints` names more than one, a 401 or 403 is
 recorded instead of thrown, and the run keeps going — one endpoint's wrong
 key says nothing about another endpoint's — failing red only at the end, and
@@ -233,10 +265,16 @@ on:
         description: Issue or pull request number
         required: true
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   reeve:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/translate@v0.1
         with:
           number: ${{ inputs.number }}
@@ -256,12 +294,21 @@ concerned — which is why duties carry their own capability inputs. **The token
 cannot express "labels only", so the duty has to.** See
 [The warrant](../guides/warrant.md).
 
-| You want                     | Grant                                                           |
-| ---------------------------- | --------------------------------------------------------------- |
-| Anything on issues           | `issues: write`                                                 |
-| Anything on pull requests    | `pull-requests: write`                                          |
-| Reading a taxonomy or memory | `contents: read`                                                |
-| Committing corrections back  | `contents: write` — opt in, see [warrant](../guides/warrant.md) |
+| You want                                                   | Grant                                                           |
+| ---------------------------------------------------------- | --------------------------------------------------------------- |
+| Anything on issues                                         | `issues: write`                                                 |
+| Anything on pull requests                                  | `pull-requests: write`                                          |
+| Reading manifests or blobs from the Contents API           | `contents: read`                                                |
+| Reading the warrant or corrections from the local checkout | No GitHub permission — `actions/checkout@v4` provides the files |
+| Committing corrections back                                | `contents: write` — opt in, see [warrant](../guides/warrant.md) |
+
+**`actions/checkout@v4` must run before any duty step.** Reeve reads the
+warrant file (`.github/reeve.yml`) from the local checkout, not the GitHub
+API. Without checkout, the runner has no repository files and your warrant
+restrictions are silently bypassed — the duty falls back to its implicit
+authority, which may be wider than what you wrote. At level 0 (no warrant
+file), checkout is not strictly required, but adding it now prevents a silent
+misconfiguration when you later add a warrant.
 
 The ambient `secrets.GITHUB_TOKEN` covers everything a duty does by default, and
 it is the `github-token` default. Pass something else only for the reason in the

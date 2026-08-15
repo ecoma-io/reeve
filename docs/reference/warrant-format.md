@@ -108,17 +108,17 @@ Schema only, here — everything sits under a `workspace:` sub-key:
 Full behavioural contract: [the `dependa` duty](duties/dependa.md).
 Schema only, here:
 
-| Field               | Required | What it does                                                                                                                                       |
-| ------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ecosystems`        | no       | Non-empty list of ecosystems to scan. One of `npm`, `github-actions`, `cargo`, `go`, `docker`. Default: all five.                                  |
-| `allowed-types`     | no       | Non-empty list of update types to propose. One of `patch`, `minor`, `major`, `pin`, `digest`, `rollback`, `security`. Default: all except `major`. |
-| `ignore`            | no       | List of ignore rules — see below.                                                                                                                  |
-| `grouping`          | no       | `by-ecosystem` (default), `by-package`, or `single`. How updates are grouped into PRs.                                                             |
-| `security-separate` | no       | Whether security updates get their own PR regardless of grouping. Default `true`.                                                                  |
-| `auto-approve`      | no       | Which update types may be auto-approved on the PR. One of `patch`, `minor`, `pin`, `digest`, `rollback`, `security`, or `none`. Default `minor`.   |
-| `auto-close`        | no       | Whether PRs for obsolete updates are auto-closed. Default `true`.                                                                                  |
-| `auto-rebase`       | no       | Whether PRs are auto-rebased when the target branch advances. Default `true`.                                                                      |
-| `schedule`          | no       | A duration shorthand (`7d`), a cron expression, or a mapping with `interval` or `cron`. Default: every run.                                        |
+| Field               | Required | What it does                                                                                                                                                       |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ecosystems`        | no       | List of ecosystems to scan. One of `npm`, `github-actions`, `cargo`, `go`, `docker`. Empty or absent = all known. Narrows the `ecosystems` input; cannot widen it. |
+| `allowed-types`     | no       | Non-empty list of update types to propose. One of `patch`, `minor`, `major`, `pin`, `digest`, `rollback`, `security`. Default: all except `major`.                 |
+| `ignore`            | no       | List of ignore rules — see below.                                                                                                                                  |
+| `grouping`          | no       | `by-ecosystem` (default), `by-package`, or `single`. How updates are grouped into PRs.                                                                             |
+| `security-separate` | no       | Whether security updates get their own PR regardless of grouping. Default `true`.                                                                                  |
+| `auto-approve`      | no       | Which update types may be auto-approved on the PR. One of `patch`, `minor`, `pin`, `digest`, `rollback`, `security`, or `none`. Default `minor`.                   |
+| `auto-close`        | no       | Whether PRs for obsolete updates are auto-closed. Default `false`. **Not yet implemented.**                                                                        |
+| `auto-rebase`       | no       | Whether PRs are auto-rebased when the target branch advances. Default `true`. **Not yet implemented.**                                                             |
+| `schedule`          | no       | A duration shorthand (`7d`), a cron expression, or a mapping with `interval` or `cron`. Default: every run.                                                        |
 
 **An ignore rule** (one entry of `ignore:`):
 

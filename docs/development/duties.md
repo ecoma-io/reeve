@@ -11,7 +11,7 @@ this page assumes it and covers the mechanics of actually adding one.
 
 ### 1. Earn it
 
-[D10](../doctrine/north-star.md#d10--a-duty-must-earn-its-place) is a strict gate and it
+[D10](../doctrine/north-star.md#d10-a-duty-must-earn-its-place) is a strict gate and it
 rejects most proposals on purpose. The work has to:
 
 1. **recur** — a maintainer does it repeatedly, not once;
@@ -25,7 +25,7 @@ If it fails (4) it might still be a good idea. It is not a good idea _here_, and
 
 ### 2. Write the evaluation first
 
-[D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation): a duty ships
+[D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation): a duty ships
 with a way to measure it or it does not ship. Write the fixture set before the
 duty, in at least two languages, and decide up front what number would make you
 withdraw the duty. See [evaluation](evaluation.md).

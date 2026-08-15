@@ -59,7 +59,7 @@ no egress past `base-url` and the GitHub API — binds an agent-mode run
 exactly as it binds an explicit one, and breaking one remains a breaking
 change regardless of what any `action.yml` says. `code.write` sits below
 even that, on
-[the permanent floor](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships):
+[the permanent floor](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships):
 not a compatibility promise that a major could renegotiate, a line no
 version may cross.
 

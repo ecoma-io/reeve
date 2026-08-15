@@ -72,6 +72,110 @@ Everything downstream is defined in terms of this file, so the fail-safe
 direction is stop, and it is the only place Reeve fails red over configuration
 rather than warning and continuing.
 
+## Climbing the ladder, step by step
+
+You are at level 0 when you first install any duty — no warrant file, no
+`.github/reeve.yml`. Every step from here is adding YAML to the same file,
+reviewed the same way.
+
+### Level 0 — No file
+
+No warrant needed. A duty runs with the narrowest implicit authority: `triage`
+may only `label`, `translate` may only `edit-body`, and so on — read straight
+from your repository's existing labels.
+
+```yaml
+# Your workflow — no warrant file needed
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ecoma-io/reeve/triage@v0.1
+        with:
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          models: gpt-5-mini
+```
+
+`actions/checkout` is included because Reeve reads the warrant from the local
+checkout. At level 0 there is no warrant file to read, so checkout is not
+strictly required — but adding it now prevents a silent misconfiguration when
+you add a warrant later.
+
+### Level 1 — Taxonomy only
+
+Write `.github/reeve.yml` with labels and no `capabilities:` block. A taxonomy
+sharpens what gets decided without touching what is allowed to act.
+
+```yaml
+# .github/reeve.yml
+version: 1
+labels:
+  - name: bug
+    description: >-
+      Something in a released version does not do what its documentation says it
+      does.
+    not: >-
+      A feature that was never built, or a question about how to use something.
+```
+
+No capabilities changed. `triage` still only labels, but now it sorts against
+your written definition of `bug` instead of the label description GitHub shows.
+
+### Level 2 — Capabilities
+
+Add a `capabilities:` block. **The moment it exists, enumeration is total:** a
+duty the block does not name is granted nothing at all, not its old default.
+
+```yaml
+# .github/reeve.yml
+version: 1
+labels:
+  - name: bug
+    description: Something broken in a released version.
+capabilities:
+  triage: [label, close, assign]
+  translate: [edit-body]
+```
+
+`duplicate`, `respond`, `lifecycle`, `harmonise`, and `dependa` are not named —
+they are granted nothing. If you want `duplicate` to comment, add it:
+
+```yaml
+capabilities:
+  triage: [label, close, assign]
+  translate: [edit-body]
+  duplicate: [comment]
+```
+
+### Level 3 — Top rung
+
+The highest-leverage behaviours: writing corrections back, answering strangers,
+running against a whole backlog. Each is opt-in through the same file.
+
+```yaml
+# .github/reeve.yml
+version: 1
+labels:
+  - name: bug
+    description: Something broken in a released version.
+capabilities:
+  triage: [label, close, assign, record]
+  translate: [edit-body]
+  duplicate: [comment]
+  respond: [comment]
+memory:
+  recall: 4
+```
+
+`record` writes human corrections to `.reeve/corrections/` so future runs learn
+from past decisions. `memory.recall` controls how many corrections the model
+sees. See [the dogfood guide](dogfood.md) for how this feedback loop works.
+
+Each level is a superset of the one before — add more YAML, never rewrite from
+scratch. Delete `.github/reeve.yml` and you return to level 0, not to no
+authority at all.
+
 ## Format
 
 ```yaml
@@ -315,7 +419,7 @@ These are not defaults. There is no input, no file key and no flag:
   still bounded by what the warrant names. A duty that was not granted `edit-file`
   cannot write one; a duty that was not granted `open-pr` cannot open one. The
   product boundary that moved was where the default sits, not where the
-  enforcement check runs. See [§9.1 of the north star](../doctrine/north-star.md#91--does-reeve-modify-repository-state-only-within-explicit-authority).
+  enforcement check runs. See [§9.1 of the north star](../doctrine/north-star.md#91-does-reeve-modify-repository-state-only-within-explicit-authority).
 
 The last one is a product boundary rather than a safety one, and it is argued in
 [the north star](../doctrine/north-star.md#8-non-goals).
@@ -394,6 +498,7 @@ jobs:
   record:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           number: ${{ github.event.issue.number }}

@@ -121,7 +121,7 @@ import { recallCorrections } from "../../core/recall.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
 import { ensureBranch, publishStatePr, type StateBranchApi } from "../../core/state-branch.js";
-import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
 import {
   newAccumulator as newCoreAccumulator,
   standingFromListing,
@@ -1039,6 +1039,10 @@ async function decide(
       : triaged.failures.length > 0 && triaged.verdict.labels.length === 0
         ? "every model failed"
         : null;
+
+  if (triaged.verdict.labels.length === 0) {
+    failIfProtocolExhausted(settings.models, triaged.failures);
+  }
 
   const verdict = triaged.verdict;
   const decided = {

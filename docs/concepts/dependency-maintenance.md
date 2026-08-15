@@ -13,7 +13,7 @@ maintainers have already stopped doing by hand, and that is harder on a
 project whose contributors do not share a language — because changelogs,
 release notes, and security advisories arrive in the ecosystem's dominant
 language, not in the project's own. It passes
-[D10](../doctrine/north-star.md#d10--a-duty-must-earn-its-place), and it
+[D10](../doctrine/north-star.md#d10-a-duty-must-earn-its-place), and it
 belongs in Reeve for the same reason every other duty does: the recurring
 work the maintainer stopped doing, done inside an authority they wrote down.
 
@@ -41,7 +41,7 @@ optionally calls a model, and it is advisory: a policy that gates on
 `updateType === "patch"` can rely on that fact without trusting anything
 the model said. The model may interpret evidence; it never grants permission.
 
-This is [D4](../doctrine/north-star.md#d4--the-work-is-priced-before-it-is-done)
+This is [D4](../doctrine/north-star.md#d4-the-work-is-priced-before-it-is-done)
 expressed as control flow: the expensive step runs last, and only when asked
 for. `drafts: 0` (the default) means zero model calls for the entire run.
 
@@ -88,7 +88,7 @@ dependency. All external content — package metadata, release notes, changelogs
 Each datasource produces a `ResolutionResult`: either `available` (with a list
 of releases), `not-found`, `temporarily-unavailable`, or `malformed-metadata`.
 A datasource that cannot reach its registry degrades gracefully —
-[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration):
+[D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration):
 a 429 or a timeout is weather, not a failure.
 
 ### The five datasources
@@ -188,7 +188,7 @@ Key policy controls:
 - **`schedule`**: How often dependa may run.
 
 The policy lives in the warrant because it answers "what may dependa do" — an
-authority question ([D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded)).
+authority question ([D2](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded)).
 The operational knobs (which ecosystems to scan, how many requests to spend,
 which paths to consider) stay on the workflow, because they shape _how_
 dependa works, not _what_ it is allowed to propose.

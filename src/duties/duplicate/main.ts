@@ -121,7 +121,7 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { warnIfStarved, writeRunSummary } from "../../core/summary.js";
+import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
 import {
   newAccumulator,
   standingFromListing,
@@ -633,6 +633,9 @@ async function decide(
   // Every model failing and an answer nobody could read are different
   // configurations with the same outcome, and reporting neither would read
   // as a judge that simply agreed with nothing.
+  if (judged.model === null) {
+    failIfProtocolExhausted(settings.models, judged.failures);
+  }
   const note =
     judged.unreadable !== null
       ? "the verdict did not parse"

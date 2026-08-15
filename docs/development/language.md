@@ -10,7 +10,7 @@ handling is measured, and what is still unresolved.
 
 ## Evaluation
 
-Because of [D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation),
+Because of [D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation),
 a duty's evaluation set is multilingual and its headline number is **the
 worst language it claims**, not the mean. An average hides exactly the
 failure this project exists to remove: the tool that works, on average,

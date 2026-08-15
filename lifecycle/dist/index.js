@@ -32668,6 +32668,18 @@ var UPDATE_TYPES = [
   "security"
 ];
 
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+  "harmonise",
+  "dependa"
+];
+var PLANNED = [];
+
 // src/core/warrant.ts
 var CAPABILITIES = [
   "label",
@@ -32708,6 +32720,25 @@ function isNotFound(error2) {
 }
 function parseWarrant(path, source) {
   const document2 = load(path, source);
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "capabilities"
+  ];
+  for (const key of Object.keys(document2)) {
+    if (!KNOWN_ROOT.includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+      );
+    }
+  }
   const version = document2.version;
   if (version !== VERSION7) {
     throw new Error(
@@ -32849,6 +32880,25 @@ function readLabels(path, raw) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
     }
     const fields = entry;
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color"
+    ];
+    for (const key of Object.keys(fields)) {
+      if (!KNOWN_LABEL.includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
+        );
+      }
+    }
     const name = text(at, "name", fields.name, { required: true });
     if (seen.has(name.toLowerCase())) {
       throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
@@ -33422,6 +33472,11 @@ function readCapabilities(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` capabilities for \`${duty}\``;
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      throw new Error(
+        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+      );
+    }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(

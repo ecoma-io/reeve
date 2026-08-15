@@ -139,8 +139,8 @@ inputs:
   apply:
     description: >-
       What this run may do, comma separated: any of `label`, `comment`,
-      `close`, `assign`, `record`, `propose`, or `none` for a run that
-      decides and touches nothing.
+      `close`, `assign`, `record`, `propose`, `open-pr`, or `none` for a
+      run that decides and touches nothing.
 
       The narrower of this and the warrant file wins, always. This is the
       workflow's half of the answer — useful for turning one effect off on one
