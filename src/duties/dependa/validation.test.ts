@@ -125,7 +125,22 @@ describe("validateEdits — cargo (Cargo.toml)", () => {
   it("rejects Cargo.toml without TOML headers", () => {
     const result = validateEdits([edit("Cargo.toml", "name = test")]);
     expect(result.valid).toBe(false);
-    expect(result.failed[0]?.reason).toContain("no TOML headers");
+    expect(result.failed[0]?.reason).toContain("no valid TOML table headers");
+  });
+
+  it("rejects Cargo.toml with stray bracket but no table header", () => {
+    // A lone "[" in content is not a valid TOML table header — the old
+    // weak validator would pass this, the new one rejects it.
+    const result = validateEdits([edit("Cargo.toml", 'name = "test" # [not a header')]);
+    expect(result.valid).toBe(false);
+    expect(result.failed[0]?.reason).toContain("no valid TOML table headers");
+  });
+
+  it("accepts Cargo.toml with array-of-tables syntax", () => {
+    const result = validateEdits([
+      edit("Cargo.toml", '[package]\nname = "test"\n[[bin]]\nname = "myapp"'),
+    ]);
+    expect(result.valid).toBe(true);
   });
 
   it("validates nested Cargo.toml", () => {
@@ -182,7 +197,17 @@ describe("validateEdits — github-actions (workflow files)", () => {
   it("rejects workflow file without jobs key", () => {
     const result = validateEdits([edit(".github/workflows/ci.yml", "name: CI\non: push")]);
     expect(result.valid).toBe(false);
-    expect(result.failed[0]?.reason).toContain("no jobs key");
+    expect(result.failed[0]?.reason).toContain("no top-level jobs key");
+  });
+
+  it("rejects workflow where 'jobs:' only appears in a comment", () => {
+    // The old substring check would pass this; the new regex requires
+    // jobs: at the start of a line (YAML top-level key, not commented out)
+    const result = validateEdits([
+      edit(".github/workflows/ci.yml", "name: CI\n# jobs: disabled\non: push"),
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.failed[0]?.reason).toContain("no top-level jobs key");
   });
 
   it("accepts .yaml extension", () => {
@@ -220,7 +245,22 @@ describe("validateEdits — docker (Dockerfile)", () => {
   it("rejects Dockerfile without FROM instruction", () => {
     const result = validateEdits([edit("Dockerfile", "RUN npm install")]);
     expect(result.valid).toBe(false);
-    expect(result.failed[0]?.reason).toContain("no FROM instruction");
+    expect(result.failed[0]?.reason).toContain("no valid FROM instruction");
+  });
+
+  it("rejects Dockerfile with FROM but no image reference", () => {
+    // "FROM " with nothing after it is invalid — the edit would produce a
+    // Dockerfile that fails to build. The old weak check (^FROM\s) passed it.
+    const result = validateEdits([edit("Dockerfile", "FROM \nRUN npm install")]);
+    expect(result.valid).toBe(false);
+    expect(result.failed[0]?.reason).toContain("no valid FROM instruction");
+  });
+
+  it("accepts multi-stage Dockerfile with FROM ... AS", () => {
+    const result = validateEdits([
+      edit("Dockerfile", "FROM node:20 AS builder\nRUN npm install\nFROM node:20-alpine"),
+    ]);
+    expect(result.valid).toBe(true);
   });
 
   it("accepts Dockerfile with lowercase FROM", () => {

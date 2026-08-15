@@ -207,9 +207,14 @@ function validateCargo(edit: FileEdit): string | null {
     return `Cargo.toml is empty after edit: ${edit.path}`;
   }
 
-  // Basic structural check: should still have TOML headers
-  if (!content.includes("[")) {
-    return `Cargo.toml has no TOML headers after edit: ${edit.path}`;
+  // Structural check: Cargo.toml is organised into TOML tables. Require at
+  // least one table header at the start of a line ([package], [dependencies],
+  // [workspace], [lib], ...). A stray "[" elsewhere in the content is not
+  // enough — an edit that strips all tables is corruption.
+  const tableHeader = /^\[[\t ]*[A-Za-z0-9_.-]+[\t ]*\]/m.test(content);
+  const arrayOfTables = /^\[\[[\t ]*[A-Za-z0-9_.-]+[\t ]*\]\]/m.test(content);
+  if (!tableHeader && !arrayOfTables) {
+    return `Cargo.toml has no valid TOML table headers after edit: ${edit.path}`;
   }
 
   return null;
@@ -249,9 +254,11 @@ function validateGithubActions(edit: FileEdit): string | null {
     return `workflow file is empty after edit: ${edit.path}`;
   }
 
-  // Should still have at least a "jobs:" key
-  if (!content.includes("jobs:")) {
-    return `workflow file has no jobs key after edit: ${edit.path}`;
+  // Should still have at least a top-level "jobs:" key. A substring match
+  // would pass commented-out lines or strings containing "jobs:". Require
+  // it at the start of a line (YAML top-level keys are unindented).
+  if (!/^jobs\s*:/m.test(content)) {
+    return `workflow file has no top-level jobs key after edit: ${edit.path}`;
   }
 
   return null;
@@ -268,9 +275,12 @@ function validateDocker(edit: FileEdit): string | null {
     return `Dockerfile is empty after edit: ${edit.path}`;
   }
 
-  // Should still have at least one FROM instruction
-  if (!/^FROM\s/im.test(content)) {
-    return `Dockerfile has no FROM instruction after edit: ${edit.path}`;
+  // Should still have at least one FROM instruction with an actual image
+  // reference. "FROM" alone or "FROM " (no image) is invalid — the edit
+  // would produce a Dockerfile that fails to build. Use [^\S\n] to match
+  // horizontal whitespace only so newlines don't bridge across lines.
+  if (!/^FROM[^\S\n]+\S+/im.test(content)) {
+    return `Dockerfile has no valid FROM instruction after edit: ${edit.path}`;
   }
 
   return null;
