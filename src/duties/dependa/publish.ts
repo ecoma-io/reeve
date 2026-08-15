@@ -238,13 +238,20 @@ export async function publishGroup(
         return { pr: null, outcome: "refused" };
       }
     } catch (error) {
-      if (!isMissing(error)) {
+      if (isMissing(error)) {
+        // The branch ref was readable moments ago but its commits are not —
+        // unusual, but not impossible (race with a concurrent delete). Proceed
+        // with the reset since the branch has no commits to protect.
+      } else {
+        // Could not verify whether human commits exist on the branch.
+        // Refusing the reset is the safe direction: a force-reset that
+        // overwrites a human maintainer's edits would violate D3, and an
+        // API failure is not evidence that no such commits exist.
         core.warning(
-          `dependa: could not check commits on \`${branchName}\` — ${error instanceof Error ? error.message : String(error)}. Proceeding with reset.`,
+          `dependa: could not check commits on \`${branchName}\` — ${error instanceof Error ? error.message : String(error)}. D3: refusing to force-reset without verification.`,
         );
+        return { pr: null, outcome: "refused" };
       }
-      // If we can't check commits (e.g. API error), we still proceed with the
-      // reset rather than blocking the run entirely. The D3 check is best-effort.
     }
 
     // Reset the branch to the current base SHA — equivalent to rebasing.
@@ -416,12 +423,18 @@ export function buildPrBody(group: ProposalGroup): string {
 
   const fp = fingerprint(group.id, group.proposals.map(summaryKey));
 
+  const lockfileNote =
+    group.lockfilePaths.length > 0
+      ? `\n\n> ⚠️ **Lockfile update required:** the following manifests have companion lockfiles that this PR does not regenerate. Run your package manager after merge (e.g. \`npm install\`) to update them.\n> ${group.lockfilePaths.map((p) => `\`${p}\``).join(", ")}\n`
+      : "";
+
   return (
     `## dependa update\n\n` +
     `| Dependency | From | To | Type | Risk |` +
     `\n|---|---|---|---|---|` +
     `\n${rows.join("\n")}` +
     (evidenceRendered.length > 0 ? `\n\n${evidenceRendered}` : "") +
+    lockfileNote +
     `\n\n---\n\n${MARKER.render(fp)}`
   );
 }

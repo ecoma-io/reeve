@@ -149,6 +149,29 @@ describe("markStale", () => {
     expect(doc.stale).toContain("vi");
     expect(doc.stale).toContain("zh");
   });
+
+  it("treats 'pending' synced SHA as stale (not conflict)", () => {
+    // "pending" means the locale was just synced by the bot but the real file SHA
+    // wasn't recorded yet. On the next run, the target file has a real SHA that
+    // differs from "pending" — this is NOT a human edit, just a SHA that hasn't
+    // been updated. It should be marked stale, not conflicting.
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+      ]),
+      sourceRevision: "old123",
+      synced: new Map([["vi", "pending"]]),
+      stale: [],
+      conflicts: [],
+    };
+
+    markStale(doc, "new456", new Map([["vi", "sha-vi-real"]]), "en");
+
+    expect(doc.stale).toContain("vi");
+    expect(doc.conflicts).toHaveLength(0);
+  });
 });
 
 describe("markSynced", () => {

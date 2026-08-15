@@ -393,6 +393,7 @@ async function runSweep(
             api,
             at,
             settings.correctionsDir,
+            stateBranch,
           );
       return { number: thread.number, outcome: describeOutcome(outcome, done) };
     },
@@ -617,6 +618,9 @@ export async function run(): Promise<void> {
       // a decision that could never be applied.
       let outcome: Outcome | null = null;
       let recordOutcome: RecordOutcome | null = null;
+      // Hoisted to this scope because it is also needed at the `act()` call
+      // after the authority/trigger branches close (line ~778).
+      const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : undefined;
       if (authority.warrant.unnamed("triage")) {
         outcome = notGranted(authority.warrant);
       } else {
@@ -642,7 +646,6 @@ export async function run(): Promise<void> {
           // When state-branch is set, open-pr must also be granted — the
           // branch-write path opens a draft PR, and recording without it would
           // commit corrections to a branch that nobody is asked to review.
-          const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : undefined;
           let canRecordToBranch = false;
           if (stateBranch !== undefined) {
             canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
@@ -774,6 +777,7 @@ export async function run(): Promise<void> {
               api,
               at,
               settings.correctionsDir,
+              stateBranch,
             );
         single = { number, outcome, done };
       }
@@ -1217,6 +1221,7 @@ async function act(
   contentsApi: ContentsApi,
   at: Location,
   correctionsPath: string,
+  stateBranch?: string,
 ): Promise<Done> {
   let labels: readonly string[] = [];
   let assigned: readonly string[] = [];
@@ -1253,6 +1258,7 @@ async function act(
       repoRelativePath(correctionsPath),
       `${at.owner}/${at.repo}`,
       at.number,
+      stateBranch,
     );
     if (gate.refuse) {
       if (gate.found) {

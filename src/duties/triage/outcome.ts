@@ -106,10 +106,11 @@ export interface CloseAttribution {
  * *which* bot or *what it claimed* — a project running a second bot that
  * also closes threads would otherwise be misattributed to this duty.
  *
- * Scanned newest-first among the replies `listReplies({order: "newest"})`
- * keeps, because a thread can carry more than one close-and-reopen cycle in
- * its history and the marker that matters is the one for the close this
- * reopen just reversed — the most recent one, not the first one found.
+ * Scanned from the end of the replies `listReplies({order: "newest"})` returns,
+ * because that function fetches the newest page of replies but presents them
+ * in chronological order (oldest at index 0). Iterating backward finds the
+ * most recent bot-authored marker first — the close this reopen just reversed,
+ * not an earlier close-and-reopen cycle.
  *
  * **Fails closed on any error, including a network failure reading replies.**
  * An unreadable comment section is not evidence that the close was Reeve's
@@ -272,14 +273,15 @@ export async function gateClose(
   path: string,
   repo: string,
   thread: number,
+  stateBranch?: string,
 ): Promise<Gate> {
-  const files = await listCorrectionFiles(contentsApi, at, path);
+  const files = await listCorrectionFiles(contentsApi, at, path, stateBranch);
   const unreadable: string[] = [];
 
   for (const file of files) {
     let read: { readonly text: string; readonly sha: string } | null;
     try {
-      read = await readContentsFile(contentsApi, at, file.path);
+      read = await readContentsFile(contentsApi, at, file.path, stateBranch);
     } catch (error) {
       if (!(error instanceof UnreadableContentsFile)) throw error;
       unreadable.push(file.path);

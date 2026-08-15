@@ -221,7 +221,7 @@ describe("publication", () => {
   });
 
   it("says the tail was dropped, rather than letting it look complete", () => {
-    expect(body({ truncated: true })).toContain("longer than this run's limit");
+    expect(body({ truncated: true })).toContain("longer than this run&#39;s limit");
   });
 
   it("stays quiet about length when the whole body was read", () => {

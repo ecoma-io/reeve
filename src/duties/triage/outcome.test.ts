@@ -539,4 +539,46 @@ describe("gateClose", () => {
       unreadable: ["corrections/2026-07.ndjson"],
     });
   });
+
+  it("passes stateBranch as ref when provided", async () => {
+    // Verify that gateClose threads the stateBranch parameter through to
+    // listCorrectionFiles and readContentsFile. A reversal recorded on the
+    // state branch must be found even when absent from the default branch.
+    const overruled = correction({ thread: 42, outcome: "overruled", duplicateOf: 7 });
+    const onBranch = { "corrections/2026-08.ndjson": `${formatCorrection(overruled)}\n` };
+    const onDefault = { "corrections/2026-08.ndjson": "" }; // empty on default branch
+    const branchApi = contentsOf(onBranch);
+    const defaultApi = contentsOf(onDefault);
+
+    // Build a ContentsApi that routes based on ref — when ref is the state
+    // branch, serve the reversal; when omitted (default branch), serve empty.
+    const routed: ContentsApi = {
+      rest: {
+        repos: {
+          getContent: (params: { owner: string; repo: string; path: string; ref?: string }) =>
+            params.ref === "reeve/state"
+              ? branchApi.rest.repos.getContent(params)
+              : defaultApi.rest.repos.getContent(params),
+          createOrUpdateFileContents: () => {
+            throw new Error("not used by outcome.ts");
+          },
+        },
+      },
+    };
+
+    // Without stateBranch — reads from default branch, finds nothing
+    const gateDefault = await gateClose(routed, AT, "corrections", "acme/widgets", 42);
+    expect(gateDefault).toEqual({ refuse: false, found: false, unreadable: [] });
+
+    // With stateBranch — reads from the state branch, finds the reversal
+    const gateBranch = await gateClose(
+      routed,
+      AT,
+      "corrections",
+      "acme/widgets",
+      42,
+      "reeve/state",
+    );
+    expect(gateBranch).toEqual({ refuse: true, found: true, unreadable: [] });
+  });
 });

@@ -157,6 +157,51 @@ jobs:
     expect(result.dependencies).toHaveLength(0);
   });
 
+  it("discovers reusable workflow references with paths", () => {
+    // Reusable workflows use: org/repo/.github/workflows/ci.yml@ref
+    const content = `
+jobs:
+  build:
+    uses: octo-org/example-repo/.github/workflows/ci.yml@v1
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("octo-org/example-repo/.github/workflows/ci.yml");
+    expect(result.dependencies[0]?.constraint).toBe("v1");
+    expect(result.dependencies[0]?.currentVersion).toBe("v1");
+  });
+
+  it("discovers reusable workflow with SHA reference", () => {
+    const sha = "a81bbbf8298c0fa03ea29cdc473d45769f953675";
+    const content = `
+jobs:
+  build:
+    uses: octo-org/example-repo/.github/workflows/ci.yml@${sha}
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("octo-org/example-repo/.github/workflows/ci.yml");
+    expect(result.dependencies[0]?.constraint).toBeNull(); // SHA = no constraint
+    expect(result.dependencies[0]?.currentVersion).toBe(sha);
+  });
+
+  it("deduplicates regular action and reusable workflow with same owner", () => {
+    // Same owner, different refs — should not deduplicate
+    const content = `
+jobs:
+  build:
+    uses: actions/checkout@v4
+  test:
+    uses: actions/example-repo/.github/workflows/ci.yml@v1
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    // Two different dependencies: actions/checkout and actions/example-repo/.github/workflows/ci.yml
+    expect(result.dependencies).toHaveLength(2);
+  });
+
   it("handles list marker prefix (- uses:)", () => {
     const content = `
 jobs:
@@ -338,5 +383,33 @@ jobs:
     });
 
     expect(result).toBeNull();
+  });
+
+  it("updates a reusable workflow tag reference", () => {
+    const content = `
+jobs:
+  build:
+    uses: octo-org/example-repo/.github/workflows/ci.yml@v1
+`;
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "github-actions",
+        name: "octo-org/example-repo/.github/workflows/ci.yml",
+        constraint: "v1",
+        currentVersion: "v1",
+        manifestPath: ".github/workflows/ci.yml",
+        dev: false,
+        manager: "github-actions",
+      },
+      currentVersion: "v1",
+      targetVersion: "v2",
+      updateType: "minor",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("octo-org/example-repo/.github/workflows/ci.yml@v2");
+    expect(result).not.toContain("@v1");
   });
 });

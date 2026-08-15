@@ -135,6 +135,77 @@ tokio = "1.0"
     expect(result.dependencies).toHaveLength(1);
     expect(result.dependencies[0]?.name).toBe("tokio");
   });
+
+  it("discovers dependencies from dotted sub-tables [dependencies.X]", () => {
+    const content = `
+[dependencies]
+serde = "1.0"
+
+[dependencies.tokio]
+version = "1.0"
+features = ["full"]
+`;
+
+    const result = manager.parse("Cargo.toml", content, null);
+    expect(result.dependencies).toHaveLength(2);
+    const tokio = result.dependencies.find((d) => d.name === "tokio");
+    expect(tokio).toBeDefined();
+    expect(tokio?.constraint).toBe("1.0");
+    expect(tokio?.dev).toBe(false);
+  });
+
+  it("discovers sub-table deps alongside dev-dependencies", () => {
+    const content = `
+[dependencies]
+serde = "1.0"
+
+[dev-dependencies.tokio]
+version = "1.0"
+`;
+
+    const result = manager.parse("Cargo.toml", content, null);
+    expect(result.dependencies).toHaveLength(2);
+    const tokio = result.dependencies.find((d) => d.name === "tokio");
+    expect(tokio).toBeDefined();
+    expect(tokio?.dev).toBe(true);
+  });
+
+  it("does not truncate at a dotted sub-table header", () => {
+    // Regression: extractTomlTable used to stop at \n[ which caught
+    // [dependencies.serde], dropping everything after it.
+    const content = `
+[dependencies]
+serde = "1.0"
+
+[dependencies.tokio]
+version = "1.0"
+
+[build-dependencies]
+cc = "1.0"
+`;
+
+    const result = manager.parse("Cargo.toml", content, null);
+    const depNames = result.dependencies.map((d) => d.name);
+    expect(depNames).toContain("serde");
+    expect(depNames).toContain("tokio");
+    const cc = result.dependencies.find((d) => d.name === "cc");
+    expect(cc).toBeDefined();
+    expect(cc?.ecosystem).toBe("cargo");
+  });
+
+  it("skips non-version keys in sub-tables", () => {
+    const content = `
+[dependencies.tokio]
+version = "1.0"
+features = ["full"]
+default-features = false
+`;
+
+    const result = manager.parse("Cargo.toml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("tokio");
+    expect(result.dependencies[0]?.constraint).toBe("1.0");
+  });
 });
 
 // ── applyUpdate ──────────────────────────────────────────────────────────
@@ -271,5 +342,63 @@ tokio = "1.0"
 
     expect(result).toContain("my-app");
     expect(result).toContain("tokio");
+  });
+
+  it("updates version in a dotted sub-table [dependencies.X]", () => {
+    const content = `
+[dependencies]
+serde = "1.0"
+
+[dependencies.tokio]
+version = "1.0.0"
+features = ["full"]
+`;
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "cargo",
+        name: "tokio",
+        constraint: "1.0.0",
+        currentVersion: "1.0.0",
+        manifestPath: "Cargo.toml",
+        dev: false,
+        manager: "cargo",
+      },
+      currentVersion: "1.0.0",
+      targetVersion: "1.1.0",
+      updateType: "minor",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain('version = "1.1.0"');
+    expect(result).toContain("features"); // preserves other sub-table keys
+    expect(result).toContain("serde"); // preserves sibling deps
+  });
+
+  it("updates version in [dev-dependencies.X] sub-table", () => {
+    const content = `
+[dev-dependencies.tokio]
+version = "1.0"
+`;
+
+    const result = manager.applyUpdate(content, {
+      ...baseProposal,
+      dependency: {
+        ecosystem: "cargo",
+        name: "tokio",
+        constraint: "1.0",
+        currentVersion: "1.0",
+        manifestPath: "Cargo.toml",
+        dev: true,
+        manager: "cargo",
+      },
+      currentVersion: "1.0",
+      targetVersion: "1.1",
+      updateType: "minor",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toContain('version = "1.1"');
   });
 });

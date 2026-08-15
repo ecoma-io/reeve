@@ -413,6 +413,12 @@ export interface ProposalGroup {
   readonly proposals: readonly UpdateProposal[];
   /** Whether this group is a security-only group (securitySeparate applied). */
   readonly security: boolean;
+  /**
+   * Manifest paths in this group that have companion lockfiles which dependa
+   * cannot regenerate. When non-empty, the PR body includes a note that
+   * lockfiles will need updating after merge (e.g. via CI `npm install`).
+   */
+  readonly lockfilePaths: readonly string[];
 }
 
 /**

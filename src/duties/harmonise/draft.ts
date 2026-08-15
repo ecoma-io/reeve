@@ -15,6 +15,7 @@
  */
 import * as core from "@actions/core";
 
+import { enclose } from "../../core/enclose.js";
 import type { Language } from "../../core/languages.js";
 import { chunks, isCodeOnly } from "../../core/markdown.js";
 import type { Completion, Failure, Provider, Weather } from "../../core/provider.js";
@@ -511,6 +512,9 @@ function buildMessages(
   const glossarySection = formatGlossary(glossary);
   const changes = semanticHunks.map((h) => `- ${h.description}`).join("\n");
 
+  const sourceFence = enclose("untrusted-source", sourceContent);
+  const targetFence = enclose("untrusted-target", targetContent);
+
   const userContent = `Source language: ${sourceLanguage.label}
 Target language: ${targetLanguage.label}
 
@@ -518,15 +522,18 @@ Semantic changes to propagate:
 ${changes}
 ${glossarySection ? `\n${glossarySection}\n` : ""}
 Source document (authoritative):
-${sourceContent}
+${sourceFence.block}
 
 Target locale's current translation:
-${targetContent}
+${targetFence.block}
 
 Produce the complete updated target translation incorporating only the semantic changes listed above.`;
 
   return [
-    { role: "system", content: DRAFT_SYSTEM_PROMPT },
+    {
+      role: "system",
+      content: [DRAFT_SYSTEM_PROMPT, "", sourceFence.rule, "", targetFence.rule].join("\n"),
+    },
     { role: "user", content: userContent },
   ];
 }

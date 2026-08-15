@@ -790,7 +790,7 @@ describe("the action contract", () => {
       readFile(join(ROOT, "src", "duties", "respond", "main.ts"), "utf8"),
       readFile(join(ROOT, "src", "core", "inputs.ts"), "utf8"),
     ]);
-    const readCoreFn = /export function readCore\(\)[^]*?\n}/.exec(shared)?.[0] ?? "";
+    const readCoreFn = /export function readCore\([^]*?\n}/.exec(shared)?.[0] ?? "";
     const threadNumberFn = /export function threadNumber\(\)[^]*?\n}/.exec(shared)?.[0] ?? "";
     return [
       ...new Set(

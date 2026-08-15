@@ -119,15 +119,16 @@ export interface ApiKeySpec {
  * it through {@link readShared}, which adds the three sweep inputs. Neither
  * one assembles a provider by hand.
  */
-export function readCore(): Core {
+export function readCore(options?: { modelsOptional?: boolean }): Core {
   const apiKey = core.getInput("api-key");
   // Registered before anything can log it. A `reason` from a provider quotes
   // the response body, and a gateway that echoes the request would otherwise
   // put the key in a public workflow log.
   if (apiKey.length > 0) core.setSecret(apiKey);
 
-  const roster = parseModels(core.getInput("models", { required: true }));
-  if (roster.models.length === 0) {
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(core.getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
     throw new Error("models: no entries. Expected at least one model id.");
   }
 

@@ -25,7 +25,7 @@
  * might treat it as instruction.
  */
 import { enclose, type Enclosed } from "../../core/enclose.js";
-import { mapProse } from "../../core/markdown.js";
+import { sanitize } from "../../core/sanitize.js";
 import type { Evidence, Release, SecurityAdvisory } from "./model.js";
 
 /** Evidence longer than this is truncated. */
@@ -206,7 +206,7 @@ export function escapeMarkdown(text: string): string {
 
 /** Sanitise evidence text — defang references and empty HTML comments. */
 function sanitise(text: string): string {
-  return mapProse(text, (prose: string) => prose);
+  return sanitize(text);
 }
 
 /** Cap evidence text to `MAX_EVIDENCE_CHARS`, with a truncation marker. */
