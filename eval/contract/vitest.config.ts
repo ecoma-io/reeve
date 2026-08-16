@@ -21,5 +21,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["./**/*.test.ts"],
+    // The integration suite rebuilds a duty bundle and runs its fixtures for
+    // every branch it asserts, and `eval all` now drives thirty fixtures — a
+    // single case can take tens of seconds. Slow by intent, as the suite's own
+    // doc comment says; the default 5s is not enough for a real run.
+    testTimeout: 180_000,
   },
 });

@@ -24,9 +24,12 @@ import { afterAll, describe, expect, it } from "vitest";
 const ROOT = resolve(import.meta.dirname, "../..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
 const LABELS = join(FIXTURES, "triage", "labels", ".expected.json");
+const VI_REPORT = join(FIXTURES, "triage", "vi-report", ".expected.json");
 
 /** The original labels fixture, so every mutation can be undone. */
 const ORIGINAL_LABELS = await readFile(LABELS, "utf8");
+/** The original multilingual fixture, so the misidentified mutation can be undone. */
+const ORIGINAL_VI_REPORT = await readFile(VI_REPORT, "utf8");
 
 const temp = await mkdtemp(join(tmpdir(), "reeve-exit-"));
 const scrubs: (() => Promise<void>)[] = [];
@@ -96,17 +99,43 @@ async function hideFixtures(duty: string, hiddenName: string): Promise<void> {
   });
 }
 
+/**
+ * Mutate the multilingual vi-report fixture so the run must come out `failed`:
+ * the thread is Vietnamese and detection identifies it as such, but the
+ * fixture's declared language is set to something it can never be — the strict
+ * language assertion, which is what makes a misidentified language `failed`
+ * rather than a `skipped` clean stop.
+ */
+async function makeMisidentified(): Promise<void> {
+  const doc = JSON.parse(ORIGINAL_VI_REPORT) as { expected: { language: string } };
+  doc.expected.language = "English";
+  await writeFile(VI_REPORT, JSON.stringify(doc, null, 2));
+  scrubs.push(async () => {
+    await writeFile(VI_REPORT, ORIGINAL_VI_REPORT);
+  });
+}
+
 describe("the eval runner's fail-closed exit code, end to end", () => {
   it("exits 0 when every fixture is a finding", async () => {
     const run = await evalDuty("all");
     expect(run.exit).toBe(0);
-    expect(run.out).toMatch(/finding 14 · failed 0 · skipped 0/);
+    // 12 triage + 11 respond + 7 harmonise = 30, multilingual fixtures included.
+    expect(run.out).toMatch(/finding 30 · failed 0 · skipped 0/);
   });
 
   it("exits 1 when a fixture is skipped — the clean-stop collapse", async () => {
     await makeUngranted();
     const run = await evalDuty("triage");
     expect(run.out).toMatch(/\[skipped\] triage\/labels/);
+    expect(run.exit).toBe(1);
+  });
+
+  it("exits 1 when a multilingual fixture's language is misidentified — failed, not skipped", async () => {
+    await makeMisidentified();
+    const run = await evalDuty("triage");
+    expect(run.out).toMatch(/\[failed[ ]*\] triage\/vi-report/);
+    expect(run.out).toMatch(/identified the thread as/);
+    expect(run.out).not.toMatch(/\[skipped\] triage\/vi-report/);
     expect(run.exit).toBe(1);
   });
 
