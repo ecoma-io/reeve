@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrackerApi } from "../core/forge.js";
 import { DUTIES } from "../refusal.js";
 
-import { diagnose, problems, type Report } from "./diagnose.js";
+import { diagnose, problems, type ProviderProbe, type Report } from "./diagnose.js";
 
 const AT = { owner: "ecoma-io", repo: "reeve" };
 
@@ -58,14 +58,36 @@ function failingApi(error: Error): TrackerApi {
 let scratch: string;
 let warrantPath: string;
 
+const probeFetch = vi.fn<typeof fetch>();
+
+/** A keyed, single-endpoint probe against a stub endpoint. */
+function keyedProbe(): ProviderProbe {
+  return {
+    baseUrl: "http://provider.test/v1",
+    apiKey: "probe-key",
+    requestTimeoutMs: 5_000,
+    models: ["probe-model"],
+    modelNames: new Map(),
+    endpoints: [],
+    apiKeys: [],
+  };
+}
+
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "reeve-doctor-"));
   warrantPath = join(scratch, "reeve.yml");
+  probeFetch.mockReset();
+  vi.stubGlobal("fetch", probeFetch);
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await rm(scratch, { recursive: true, force: true });
 });
+
+function probeJson(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), { status });
+}
 
 async function report(
   source: string,
@@ -110,16 +132,73 @@ describe("diagnose", () => {
 
   it("is green, and reports the narrowest authority, when the file is absent at the default path", async () => {
     const missing = join(scratch, "reeve.yml");
+    // A checkout marker, standing for the repository the runner checked out —
+    // the genuine level-0 absence is a file this repository never wrote, not a
+    // runner that never had the repository.
+    await writeFile(join(scratch, "README.md"), "some repository file");
     const result = await diagnose({
       api: labelsApi(["bug"]),
       at: AT,
       warrantPath: missing,
       defaultWarrantPath: missing,
       duty: null,
+      workspaceDir: scratch,
     });
 
     expect(problems(result)).toBe(0);
     expect(result.implicit).toBe(true);
+    expect(result.findings.some((finding) => finding.text.includes("narrowest authority"))).toBe(
+      true,
+    );
+    expect(result.findings.some((finding) => finding.text.includes("checkout"))).toBe(false);
+  });
+
+  it("is red when the file is absent at the default path but no checkout ever reached the workspace", async () => {
+    const missing = join(scratch, "reeve.yml");
+    await mkdir(join(scratch, "empty-workspace"));
+    const result = await diagnose({
+      api: labelsApi(["bug"]),
+      at: AT,
+      warrantPath: missing,
+      defaultWarrantPath: missing,
+      duty: null,
+      workspaceDir: join(scratch, "empty-workspace"),
+    });
+
+    expect(problems(result)).toBe(1);
+    expect(result.implicit).toBe(true);
+    expect(result.findings.some((finding) => finding.text.includes("actions/checkout"))).toBe(true);
+  });
+
+  it("is red when the file is absent at the default path and the workspace never existed at all", async () => {
+    const missing = join(scratch, "reeve.yml");
+    const result = await diagnose({
+      api: labelsApi(["bug"]),
+      at: AT,
+      warrantPath: missing,
+      defaultWarrantPath: missing,
+      duty: null,
+      workspaceDir: join(scratch, "no-such-workspace"),
+    });
+
+    expect(problems(result)).toBe(1);
+    expect(result.findings.some((finding) => finding.text.includes("actions/checkout"))).toBe(true);
+  });
+
+  it("is green on a genuine level-0 absence when the workspace holds a checkout", async () => {
+    const missing = join(scratch, "reeve.yml");
+    await mkdir(join(scratch, ".git"));
+    await writeFile(join(scratch, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const result = await diagnose({
+      api: labelsApi(["bug"]),
+      at: AT,
+      warrantPath: missing,
+      defaultWarrantPath: missing,
+      duty: null,
+      workspaceDir: scratch,
+    });
+
+    expect(problems(result)).toBe(0);
     expect(result.findings.some((finding) => finding.text.includes("narrowest authority"))).toBe(
       true,
     );
@@ -327,5 +406,104 @@ describe("diagnose", () => {
     expect(note?.text).not.toContain("`lifecycle`");
     expect(note?.text).not.toContain("`harmonise`");
     expect(note?.text).not.toContain("`dependa`");
+  });
+
+  describe("the provider probe", () => {
+    async function probed(
+      provider: ProviderProbe,
+      api: TrackerApi = labelsApi(["bug", "docs"]),
+      duty: string | null = null,
+    ): Promise<Report> {
+      await mkdir(join(scratch, ".git"));
+      await writeFile(join(scratch, ".git", "HEAD"), "ref: refs/heads/main\n");
+      return diagnose({
+        api,
+        at: AT,
+        warrantPath: warrantPath,
+        defaultWarrantPath: warrantPath,
+        duty,
+        provider,
+      });
+    }
+
+    it("is green when the probe sent no request at all for a keyless provider", async () => {
+      probeFetch.mockRejectedValue(
+        new Error("must not be called: keyless provider sends no probe"),
+      );
+      const result = await probed({ ...keyedProbe(), apiKey: "" });
+
+      expect(probeFetch).not.toHaveBeenCalled();
+      expect(problems(result)).toBe(0);
+      expect(result.findings.some((finding) => finding.text.includes("keyless"))).toBe(true);
+    });
+
+    it("is green, not red, when every configured model answers", async () => {
+      probeFetch.mockResolvedValueOnce(
+        probeJson({
+          choices: [{ message: { role: "assistant", content: "pong" }, finish_reason: "stop" }],
+        }),
+      );
+
+      const result = await probed(keyedProbe());
+
+      expect(probeFetch).toHaveBeenCalledTimes(1);
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("first configured model answered");
+    });
+
+    it("is green, never red, when the key is refused — weather, not authority", async () => {
+      probeFetch.mockResolvedValueOnce(probeJson({ error: { message: "bad key" } }, 401));
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("HTTP 401 or 403");
+      expect(note?.severity).toBe("green");
+    });
+
+    it("is green, never red, when the endpoint is unreachable — weather, not authority", async () => {
+      probeFetch.mockRejectedValueOnce(
+        Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      );
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("could not be reached");
+      expect(note?.severity).toBe("green");
+    });
+
+    it("is green, and names the models rotated past, when a model answers only after others fail", async () => {
+      probeFetch
+        .mockResolvedValueOnce(probeJson({ error: { message: "quota" } }, 429))
+        .mockResolvedValueOnce(
+          probeJson({
+            choices: [{ message: { role: "assistant", content: "pong" }, finish_reason: "stop" }],
+          }),
+        );
+
+      const result = await probed({
+        ...keyedProbe(),
+        models: ["a", "b"],
+        modelNames: new Map([["a", "A"]]),
+      });
+
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("first configured model answered");
+      expect(note?.text).toContain("rotated past before it");
+    });
+
+    it("reports a provider refusal without ever printing a key", async () => {
+      probeFetch.mockResolvedValueOnce(probeJson({ error: { message: "bad key" } }, 401));
+
+      const result = await probed(keyedProbe());
+
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
   });
 });

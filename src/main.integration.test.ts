@@ -15,7 +15,7 @@
  * this action never asks a model anything.
  */
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -164,7 +164,7 @@ async function runAction(
   }
 
   const child = spawn(process.execPath, [BUNDLE], {
-    cwd: ROOT,
+    cwd: extra.GITHUB_WORKSPACE ?? ROOT,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -293,5 +293,27 @@ describe("the root action", () => {
     expect(run.code).toBe(0);
     expect(run.summary).toContain("scoped to `lifecycle`.");
     expect(run.summary).not.toContain("| `triage` |");
+  });
+
+  it("is red, naming the missing checkout, when the workspace is empty and the warrant is absent at its default path", async () => {
+    // The runner that populates a workspace is `actions/checkout`; an empty
+    // workspace is a runner this repository's files never reached. The warrant
+    // is absent at its default path, so the report can only call this level 0
+    // if it mistakes "never checked out" for "this repository wrote no
+    // warrant" — the exact blind spot this finding closes.
+    const emptyWorkspace = join(scratch, "empty-workspace");
+    await mkdir(emptyWorkspace);
+
+    const run = await runAction(
+      stub,
+      { doctor: "true", warrant: ".github/reeve.yml" },
+      { GITHUB_WORKSPACE: emptyWorkspace },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.outputs.problems).toBe("1");
+    expect(run.summary).toContain("### Problems");
+    expect(run.summary).toContain("actions/checkout");
+    expect(run.summary).not.toContain("narrowest authority");
   });
 });

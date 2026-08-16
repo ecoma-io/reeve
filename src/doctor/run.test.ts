@@ -12,12 +12,22 @@ import { runDoctor } from "./run.js";
 // rather than only through a spawned bundle: the decisions here are the
 // normalisation of the `duty` input and the exact words of the failure.
 
+const PROVIDER_INPUTS = [
+  "base-url",
+  "api-key",
+  "models",
+  "request-timeout",
+  "endpoints",
+  "api-keys",
+];
+
 vi.mock("@actions/core", async (importOriginal) => ({
   ...(await importOriginal<typeof core>()),
   getInput: vi.fn((name: string) => {
     if (name === "github-token") return "token";
     if (name === "warrant") return ".github/reeve.yml";
     if (name === "duty") return "";
+    if (PROVIDER_INPUTS.includes(name)) return "";
     throw new Error(`unexpected input ${name}`);
   }),
   setOutput: vi.fn(),
@@ -67,7 +77,7 @@ describe("runDoctor", () => {
 
   it("passes a normalised duty through, so a scoped doctor run reads the spelling the user meant", async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) =>
-      name === "duty" ? "  Triage  " : "default",
+      name === "duty" ? "  Triage  " : name === "warrant" ? "default" : "",
     );
 
     await runDoctor();
@@ -83,7 +93,7 @@ describe("runDoctor", () => {
 
   it("turns a whitespace-only duty into no duty at all", async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) =>
-      name === "duty" ? "   \n  " : "default",
+      name === "duty" ? "   \n  " : name === "warrant" ? "default" : "",
     );
 
     await runDoctor();
