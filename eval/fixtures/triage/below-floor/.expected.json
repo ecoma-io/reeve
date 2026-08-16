@@ -1,0 +1,13 @@
+{
+  "description": "The verdict names `bug` but only at 0.5, under the 0.75 floor. Enforcement refuses, nothing is applied — but the run still reports `proposed`, which is how a maintainer tunes the floor. The tracker is untouched.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nduties:\n  triage: [label, comment]\n",
+  "verdict-over": {
+    "confidence": 0.5,
+    "rationale": "It regressed."
+  },
+  "expected": {
+    "screened-out": "",
+    "duplicate-of": null,
+    "applied-names": []
+  }
+}

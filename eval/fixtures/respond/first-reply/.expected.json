@@ -1,0 +1,13 @@
+{
+  "description": "A fresh unanswered thread, English, over the 0.75 floor. The draft scores 0.9, `comment` is granted, and the run posts the reply with the drafted text — the whole pipeline from thread read to posted comment.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nduties:\n  respond: [comment]\n",
+  "draft-over": {
+    "text": "Thanks for the report — we will persist the dark mode choice to local storage."
+  },
+  "expected": {
+    "patch": "Thanks for the report — we will persist the dark mode choice to local storage.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

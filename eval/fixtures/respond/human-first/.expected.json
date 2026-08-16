@@ -1,0 +1,9 @@
+{
+  "description": "A human already replied before this run looked at the thread. respond answers a thread once — the walk stops at the human reply, nothing is drafted, nothing is posted. This is a clean stop, reported as `skipped`, never confused with a reply that was drafted and withheld.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nduties:\n  respond: [comment]\n",
+  "already-answered": true,
+  "expected": {
+    "stopped-for": "human already replied",
+    "patch": null
+  }
+}
