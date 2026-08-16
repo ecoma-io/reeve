@@ -4,7 +4,7 @@
 # deliberately does not restate every input, because a copy is only free to
 # drift.
 #
-# A workflow names this directory: `uses: ecoma-io/reeve/respond@v0.1`.
+# A workflow names this directory: `uses: ecoma-io/reeve/respond@v0.6`.
 name: Reeve - respond
 description: Post a first reply to a newly opened issue, in the author's own language, grounded in what this project already knows — never over a human who got there first, and never without an explicit grant.
 author: ecoma.io

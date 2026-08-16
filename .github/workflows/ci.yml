@@ -32,6 +32,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The documented-uses-refs guard resolves `uses: …@<tag>` against real
+          # git tags, and the anchor guard walks every docs heading — both need
+          # the full history, not the default shallow clone.
+          fetch-depth: 0
 
       # Reads the pnpm version from `packageManager` in package.json, so the
       # runner uses the same pnpm a contributor's Corepack fetches.
@@ -77,6 +81,19 @@ jobs:
 
       - run: pnpm typecheck
       - run: pnpm test
+
+      # Resolves every `uses: ecoma-io/reeve/<duty>@<ref>` in README/docs
+      # against tags and bundles that actually exist — the release-time guard
+      # that keeps a broken pin like @v0.1 for a v0.6-only duty from reaching a
+      # first-contact user as a working example.
+      - name: Check documented uses refs
+        run: node tools/check-uses-refs.mjs
+
+      # Resolves every `(path#frag)` link in docs against the headings in the
+      # target file, using the same github-slugger GitHub renders with — a dead
+      # anchor fails CI instead of a reader's click.
+      - name: Check documentation anchors
+        run: node tools/check-anchors.mjs
 
       # The runner executes `dist/index.js` off the checked-out repository —
       # never `src/`, and never after an install. So the bundle is committed,

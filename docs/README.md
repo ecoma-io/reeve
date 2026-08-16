@@ -86,8 +86,9 @@ Seven duties ship — [`triage`](reference/duties/triage.md),
 dogfooded on this repository: `triage` and `translate` acting on real
 threads, `duplicate` and `respond` in report-only mode, writing verdicts to
 job summaries and touching nothing, `lifecycle` observing in dry-run,
-`harmonise` synchronising this repository's own README translations,
-`dependa` maintaining this repository's own dependencies.
+`harmonise` configured to watch `README.md` (the first translation is
+bootstrap-pending), and `dependa` maintaining this repository's own
+dependencies.
 See [Self-dogfood](guides/dogfood.md) for how the feedback loop works.
 
 ## Full index

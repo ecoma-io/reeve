@@ -2,7 +2,7 @@
 
 _The phases between today's explicit duties and a bounded agent runtime, each
 with what it delivers, what it guarantees, and what it deliberately does not
-yet do. Prerequisites: [North star](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships),
+yet do. Prerequisites: [North star](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships),
 [The agent runtime](agent-runtime.md)._
 
 > [!IMPORTANT]
@@ -69,7 +69,7 @@ same check tomorrow. **The duties are the capability set** — Agent Mode
 composes `triage`, `translate`, `duplicate`, `respond`, `lifecycle`,
 `harmonise` and `dependa`; it
 does not replace them, and a capability added later is added the way a duty
-is added today, by [earning its place](../doctrine/north-star.md#d10-a-duty-must-earn-its-place).
+is added today, by [earning its place](../doctrine/north-star.md#d10--a-duty-must-earn-its-place).
 
 ## Phase 0 — the ground · **standing, and finishing**
 
@@ -92,7 +92,7 @@ The warrant is the whole answer for authority, with total enumeration once a
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog
 under `sweep`, `since` and `limit`; weather is not failure, and a
 multi-endpoint roster rotates through providers and starves honestly
-([D12 and its amendment](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)).
+([D12 and its amendment](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)).
 Memory runs in both directions: corrections recorded as plain files in the
 consumer's repository, recalled across the language boundary through the
 pivot ([Stage 4](../doctrine/north-star.md#7-roadmap)).
@@ -159,18 +159,18 @@ page — and it is **unforced**: the 1.x warrant keeps working, unchanged,
 indefinitely. A repository with both files does not get a precedence rule;
 it gets a red run naming both, because two files that can disagree about
 authority is a configuration error, not a tie to break quietly
-([D5](../doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)).
+([D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible)).
 
 This phase depends on Phase 1 because `authority.yaml` is read by the
 kernel, and on the north star's amendment rule structurally: the doctrine
 half of this direction moved into
-[the north star](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships)
+[the north star](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships)
 first, in its own commit, before this page could describe the tree as more
 than a sketch.
 
 **Delivers:** the tree reader; the `authority.yaml` schema and its
 validation, refused-not-dropped like the warrant's
-([D2](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded));
+([D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded));
 the `forbidden:` floor enforced in code; the documented, mechanical warrant
 lift; the both-files-is-an-error check.
 
@@ -204,7 +204,7 @@ comment — it is a wrong plan, executed competently.
 **Delivers:** the loop runtime; the plan format; the Verify stage reading the
 idempotency markers publish already writes; the plan-and-refusal transcript
 on the summary; the agent's own evaluation set, written before the loop acts,
-per [D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation).
+per [D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation).
 
 **Compatibility:** opt-in by a new workflow line; every existing workflow is
 untouched. A repository that adds the agent workflow in this phase risks
@@ -221,13 +221,13 @@ verified before the next: effect performed, marker read back, plan and
 outcome compared. A step that cannot be verified stops the loop
 ([D5, applied to a loop](agent-runtime.md#the-loop)); a starved roster
 delivers what it verified and names the remainder
-([D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration));
+([D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration));
 every run terminates — there is no standing agent, only a job with an end.
 
 The gate into this phase is evidence, not appetite: the Phase 3 transcript
 corpus from this repository's own dogfooding, and the agent evaluation from
 Phase 3 showing plans that would have been correct — measured, per
-[D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation),
+[D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation),
 in the languages this project claims, not eyeballed in one.
 
 **Delivers:** the acting loop; per-run budget bounds (steps and requests,
@@ -243,7 +243,7 @@ no capability agent-only, explicit workflows unchanged, and everything
 
 **Deliberately not yet — and not ever:** `code.write`, in any phase,
 including this one. The floor is
-[permanent](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships),
+[permanent](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships),
 and Phase 4 completing does not begin an argument about it.
 
 ## Then `2.0`

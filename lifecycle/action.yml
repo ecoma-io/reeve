@@ -4,7 +4,7 @@
 # deliberately does not restate every input, because a copy is only free to
 # drift.
 #
-# A workflow names this directory: `uses: ecoma-io/reeve/lifecycle@v0.1`.
+# A workflow names this directory: `uses: ecoma-io/reeve/lifecycle@v0.6`.
 name: Reeve - lifecycle
 description: Runs a repository's own staleness policy — reminders, un-staling, and a final close as not planned — entirely from timestamps and labels, never a model.
 author: ecoma.io

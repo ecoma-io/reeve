@@ -55,14 +55,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/lifecycle@v0.1
+      - uses: ecoma-io/reeve/lifecycle@v0.6
         with:
           sweep: true
+          dry-run: true # safe first run — remove when you trust it
 ```
 
 A schedule is the natural trigger — there is no single event a clock check
-answers to the way a `labeled` event answers to `record`. Run it once against
-`dry-run: true` first: see [Rehearsing a run](../../guides/dry-run.md).
+answers to the way a `labeled` event answers to `record`. The example runs
+with `dry-run: true`; let it rehearse before a schedule can label or comment:
+see [Rehearsing a run](../../guides/dry-run.md).
 
 ## Required permissions
 
@@ -157,7 +159,7 @@ Every other duty in Reeve only adds. `lifecycle` un-stales: when a track's
 clock resets — a human came back — the step label **it applied itself**
 comes back off, but only if the label's own event history shows this duty's
 own actor put it there last. A label a person applied by hand is never
-touched; that is still [D3](../../doctrine/north-star.md#d3-the-humans-work-is-inviolable)
+touched; that is still [D3](../../doctrine/north-star.md#d3--the-humans-work-is-inviolable)
 in full. Naming a label as a track's clock-hand in the warrant is what
 declares it machine-managed state in the first place — a maintainer's own
 deliberate line in a reviewed file, which is the more considered of the two

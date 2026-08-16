@@ -32776,13 +32776,13 @@ function describe(value) {
   return "a value of a kind this file cannot hold";
 }
 
-// src/duties/duplicate/capabilities.ts
+// src/duties/dependa/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
-// src/duties/harmonise/capabilities.ts
+// src/duties/duplicate/capabilities.ts
 var DEFAULT_CAPABILITIES2 = [];
 
-// src/duties/dependa/capabilities.ts
+// src/duties/harmonise/capabilities.ts
 var DEFAULT_CAPABILITIES3 = [];
 
 // src/duties/lifecycle/capabilities.ts
@@ -32803,11 +32803,11 @@ var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", DEFAULT_CAPABILITIES6],
   ["triage", DEFAULT_CAPABILITIES7],
-  ["duplicate", DEFAULT_CAPABILITIES],
+  ["duplicate", DEFAULT_CAPABILITIES2],
   ["respond", DEFAULT_CAPABILITIES5],
   ["lifecycle", DEFAULT_CAPABILITIES4],
-  ["harmonise", DEFAULT_CAPABILITIES2],
-  ["dependa", DEFAULT_CAPABILITIES3]
+  ["harmonise", DEFAULT_CAPABILITIES3],
+  ["dependa", DEFAULT_CAPABILITIES]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", null],

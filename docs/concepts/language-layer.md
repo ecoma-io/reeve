@@ -3,7 +3,7 @@
 _Understand the three language roles and how detection reasons about them. Prerequisites: [Languages](../guides/languages.md)._
 
 This is the part of the core that the rest of the field does not have, and the
-reason [D1](../doctrine/north-star.md#d1-no-duty-is-english-only) is the first doctrine
+reason [D1](../doctrine/north-star.md#d1--no-duty-is-english-only) is the first doctrine
 rather than the tenth.
 
 The claim it has to make true: **a duty's decision must not get worse because
@@ -40,7 +40,7 @@ offline, free, deterministic, and identical on every re-run. Asking a model
 "what language is this?" as the _first_ move would mean paying per thread to
 answer a question a library already answers — and a language layer that costs a
 call per thread is the first thing a large repository turns off, which takes
-[D1](../doctrine/north-star.md#d1-no-duty-is-english-only) down with it.
+[D1](../doctrine/north-star.md#d1--no-duty-is-english-only) down with it.
 
 The second is that an open question to a model is not the same object as a
 closed one. "What language is this?" has no bounded answer set, so its result
@@ -53,7 +53,7 @@ anything uses it. `unknown` is what comes back when nothing decides — a real
 answer, not a default.
 
 It also has to be idempotent. A detector that returns a different answer on the
-second run turns [D9](../doctrine/north-star.md#d9-re-running-is-cheap-and-safe) into a
+second run turns [D9](../doctrine/north-star.md#d9--re-running-is-cheap-and-safe) into a
 lie, because the duty would produce different output for an unchanged thread.
 The free steps are idempotent by construction; the last step is bounded to the
 survivor set, so the worst it can do is disagree between two languages the

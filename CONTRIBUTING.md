@@ -131,7 +131,7 @@ This repository also runs its own duties on its own issues and pull requests —
 `.github/workflows/reeve-*.yml`, pointed at the working tree with
 `uses: ./translate` rather than at a tag, so a change is dogfooded on the pull
 request that makes it. The path is the duty's own directory for the same reason
-a consumer writes `ecoma-io/reeve/translate@v0.1`: the action at the root refuses.
+a consumer writes `ecoma-io/reeve/translate@v0.6`: the action at the root refuses.
 
 The provider comes from **organisation** secrets, which a maintainer sets, and
 they are named on two tiers because they change on two different schedules:

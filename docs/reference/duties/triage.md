@@ -62,10 +62,11 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
+          dry-run: true # safe first run — remove when you trust it
 ```
 
 No warrant needed to start: an absent `.github/reeve.yml` grants the
@@ -74,8 +75,9 @@ promises at level 0, built from the labels and label descriptions this
 repository already has. Write one when a rung below stops being enough:
 [The warrant](../../guides/warrant.md).
 
-Then run it with `dry-run: true` over a month of your own history before you let
-it label anything — see [Rehearsing a run](../../guides/dry-run.md).
+The example runs with `dry-run: true` — let it rehearse over a month of your
+own history before you let it label anything, then remove the flag. See
+[Rehearsing a run](../../guides/dry-run.md).
 
 ## Required permissions
 
@@ -177,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           number: ${{ github.event.issue.number }}
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -292,7 +294,7 @@ labels:
 
 ```yaml
 # .github/workflows/reeve-triage-frontend.yml — this area's own subset
-- uses: ecoma-io/reeve/triage@v0.1
+- uses: ecoma-io/reeve/triage@v0.6
   with:
     models: gpt-5-mini
     labels: frontend-bug

@@ -103,7 +103,7 @@ network, still nothing spent.
 between the survivors. Never to answer an open question.
 
 Detection is code, and steps 1–3 are free. That is not an optimisation; it is
-[doctrine](../doctrine/north-star.md#d1-no-duty-is-english-only). A language layer that
+[doctrine](../doctrine/north-star.md#d1--no-duty-is-english-only). A language layer that
 cost a model call per thread would be the first thing turned off on a large
 repository, and every duty above it would go back to being English-first.
 
@@ -161,7 +161,7 @@ the text it has. `translate` produces every configured language.
 
 A triage verdict must be as good in Vietnamese as in English. That is not a hope:
 the headline accuracy number for any duty is **the worst language, not the
-average** ([D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation)), so a
+average** ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)), so a
 duty that quietly degrades outside English fails its own gate.
 
 ## Configuring for a project with one maintainer language

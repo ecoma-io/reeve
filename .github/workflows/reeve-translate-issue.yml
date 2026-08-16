@@ -8,7 +8,7 @@ name: Issue translation
 # `./translate` rather than `./`, because a duty ships from its own directory
 # beside its own `action.yml` and the root listing is the one action here that
 # refuses to do anything. A workflow elsewhere writes the same path against a
-# tag: `uses: ecoma-io/reeve/translate@v0.1`.
+# tag: `uses: ecoma-io/reeve/translate@v0.6`.
 #
 # The provider is configured entirely through organisation secrets — including
 # the endpoint and the model ids, which are not credentials. That is deliberate:

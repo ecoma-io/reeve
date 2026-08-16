@@ -86,8 +86,20 @@ export async function queryAdvisories(
       return parseAdvisories(allAdvisories);
     }
 
+    // A 401/403 is this run's own token being refused — not weather. Silence
+    // here is the N1 failure mode: every advisory query fails and the run
+    // stays green. Throw a tagged error so dependa's caller treats it as
+    // configuration rather than a transient warning.
+    if (response.status === 401 || response.status === 403) {
+      const error = new Error(
+        `dependa: security advisory API refused this run's token (HTTP ${String(response.status)})`,
+      );
+      error.name = "AuthRefused";
+      throw error;
+    }
+
     if (!response.ok) {
-      // API error — degrade gracefully, return what we have so far
+      // Other API errors degrade gracefully — return what we have so far
       return parseAdvisories(allAdvisories);
     }
 

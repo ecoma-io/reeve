@@ -425,8 +425,8 @@ GitHub resolves actions in subdirectories, so consolidation does not cost
 callers their ergonomics:
 
 ```yaml
-- uses: ecoma-io/reeve/translate@v0.1
-- uses: ecoma-io/reeve/triage@v0.1
+- uses: ecoma-io/reeve/translate@v0.6
+- uses: ecoma-io/reeve/triage@v0.6
 ```
 
 One repository, one core, one version line — and no duty carrying inputs that
@@ -469,14 +469,14 @@ wrote for them on GitHub. `translate` may only `edit-body`.
 
 **Was done when:** a repository with no `.github/reeve.yml` gets its backlog
 sorted against its own labels by adding two lines of workflow — one
-`uses: ecoma-io/reeve/triage@v0.1`, a provider, and nothing else. It does: an
+`uses: ecoma-io/reeve/triage@v0.6`, a provider, and nothing else. It does: an
 absent warrant file builds the implicit taxonomy from the repository's own
 labels and their descriptions over the API, and caps capabilities at `label`
 and `edit-body` with nothing configurable about either.
 
 ### Stage 2 — Weather, and the sweep · **landed**
 
-[D12](#d12-capacity-is-weather-authority-is-configuration) stopped being a
+[D12](#d12--capacity-is-weather-authority-is-configuration) stopped being a
 paragraph and became behaviour: a 429, a 5xx or a timeout rotates to the next
 model and, when the list runs out, delivers what finished and warns naming the
 remainder, rather than failing red over conditions nobody configured. A 401 or
@@ -502,7 +502,7 @@ the same dogfooding the per-thread workflows already did for Stage 0.
 One `.github/reeve.yml` declaring the taxonomy and, once a maintainer writes a
 `duties:` block, what each duty may do. Per [the
 ladder](#3-the-ladder) and the corrected
-[D2](#d2-authority-is-granted-written-and-bounded), the whole-answer
+[D2](#d2--authority-is-granted-written-and-bounded), the whole-answer
 principle attaches to that block, not to the file's mere existence: a
 taxonomy-only warrant leaves every duty on its own default, and a
 `duties:` block, once written, grants a duty left out of it nothing at
@@ -664,7 +664,7 @@ that never opts in never notices
 **The principle that governs it: autonomy is not authority.** A repository
 agent that can decide what to do, but cannot decide what it is allowed to do.
 The half being added is judgement about _which_ granted thing to do next; the
-half that stays exactly where [D2](#d2-authority-is-granted-written-and-bounded)
+half that stays exactly where [D2](#d2--authority-is-granted-written-and-bounded)
 put it is what is granted at all. The Authority Kernel — the component that
 checks every candidate effect against the written grant before it runs — is
 not a new idea needing new trust: it is the warrant's own enforcement stage,
@@ -673,7 +673,7 @@ parsed file, extended to a loop that may propose several effects per run
 instead of one. A better model produces a better plan; it never produces a
 wider warrant.
 
-**[Settled question §9.1](#91-does-reeve-modify-repository-state-only-within-explicit-authority) stands in both
+**[Settled question §9.1](#91--does-reeve-modify-repository-state-only-within-explicit-authority) stands in both
 modes, unconditionally.** The authority-bounded invariant — Reeve modifies
 repository state only through explicit capabilities granted in the warrant —
 holds regardless of execution mode. No warrant key, no authority file, and no
@@ -768,10 +768,10 @@ it needs nothing an ordinary chat completion does not already give it. An
 embeddings approach needs an `/embeddings` endpoint, and that is precisely
 what the cheapest, keyless, IP-rate-limited providers are least likely to
 serve — which would make cross-language memory and `duplicate`, the flagship
-proof of [D1](#d1-no-duty-is-english-only), the one feature a free-tier
+proof of [D1](#d1--no-duty-is-english-only), the one feature a free-tier
 project cannot have. That contradicts
 [the non-goal](#8-non-goals) against anything provider-differentiated
-([D7](#d7-any-endpoint-including-the-free-ones)) as surely as if it called a
+([D7](#d7--any-endpoint-including-the-free-ones)) as surely as if it called a
 vendor's proprietary API directly.
 
 **This sits behind the existing retrieval seam, not in front of it:** a better
@@ -796,7 +796,7 @@ and guessing now would be worse than deciding later with evidence.
 4. **One run, many duties?** Several duties firing on the same event means
    several checkouts and several model bills. Batching is obvious and couples
    duties that are currently independent. _An answer now has a direction, not
-   yet code: [the 2.x line](#beyond-10-the-2x-line-direction-nothing-ships)
+   yet code: [the 2.x line](#beyond-10--the-2x-line--direction-nothing-ships)
    sequences several duties' capabilities inside one agent-mode run, while an
    explicit-mode run stays one duty per invocation. This question closes into
    [§9](#9-settled-questions) when that lands, not before._

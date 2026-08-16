@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -418,7 +418,7 @@ These are not defaults. There is no input, no file key and no flag:
   still bounded by what the warrant names. A duty that was not granted `edit-file`
   cannot write one; a duty that was not granted `open-pr` cannot open one. The
   product boundary that moved was where the default sits, not where the
-  enforcement check runs. See [§9.1 of the north star](../doctrine/north-star.md#91-does-reeve-modify-repository-state-only-within-explicit-authority).
+  enforcement check runs. See [§9.1 of the north star](../doctrine/north-star.md#91--does-reeve-modify-repository-state-only-within-explicit-authority).
 
 The last one is a product boundary rather than a safety one, and it is argued in
 [the north star](../doctrine/north-star.md#8-non-goals).
@@ -496,7 +496,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           number: ${{ github.event.issue.number }}
 ```
