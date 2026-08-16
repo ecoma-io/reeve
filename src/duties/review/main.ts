@@ -408,7 +408,11 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
-      posted: would,
+      // `commented` is false on a dry run — nothing was written — and the
+      // verdict table says the same ("nothing to post") beside the header
+      // that already announces the run wrote nothing. The rehearsal's
+      // disposition stays in the log.
+      posted: null,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
