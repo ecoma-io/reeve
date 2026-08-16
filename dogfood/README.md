@@ -27,9 +27,10 @@
 **Renovate** is the production system. It runs weekly (Monday before 6am UTC)
 and creates real dependency update PRs.
 
-**Dependa** runs in shadow mode (`apply: none`). It discovers what it would
-propose, but creates no branches, commits no files, and opens no PRs. Its
-findings are observations, not actions.
+**Dependa** runs in shadow mode — the warrant omits `dependa` from its
+`duties:` block, so no grant exists for it to act on. It discovers what it
+would propose, but creates no branches, commits no files, and opens no PRs.
+Its findings are observations, not actions.
 
 **The comparison** produces a machine-readable conformance dataset that
 classifies every discrepancy between what the two systems found.
@@ -157,8 +158,8 @@ verifies the expected classification for the fixture.
 2. **Token permissions**: The dogfood workflow declares `contents: read` and
    `pull-requests: read` only — least-privilege for a read-only observation.
 3. **Warrant enforcement**: The warrant at `.github/reeve.yml` deliberately
-   omits `dependa` from the `capabilities:` block. Even if someone changes
-   `apply` to `edit-file, open-pr`, dependa would refuse.
+   omits `dependa` from its `duties:` block, so no grant exists for the duty
+   to act on — even a manually granted capability list would refuse.
 4. **Branch protection**: The `main` branch requires CI checks and review.
 5. **No secrets exfiltration**: With `drafts: 0`, no data is sent to the
    LLM provider. The run is fully deterministic.

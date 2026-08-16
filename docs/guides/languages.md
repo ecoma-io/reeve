@@ -27,11 +27,14 @@ The design behind this is in
 [the language layer](../concepts/language-layer.md). This page is how you configure
 it.
 
-## `languages`
+## `languages:`
 
 ```yaml
-with:
-  languages: en, vi, zh
+# .github/reeve.yml
+languages:
+  - en
+  - vi
+  - zh
 ```
 
 **This is what to translate _into_, and it says nothing about what an author may
@@ -58,19 +61,23 @@ entirely when your candidates already separate, and it is how a draft that came
 back in the language it was supposed to leave gets thrown out before anything
 ranks it.
 
-### Where this lives: the input, or the warrant
+### Where this lives: the warrant, or a duty's own default
 
-The `languages` input above is [level 0 or level 1](../doctrine/north-star.md#3-the-ladder)
-of the ladder — nothing written down beyond the workflow itself, and it works
-exactly as this page describes for as long as that is all you configure.
+[The warrant](warrant.md) carries the list under its own `languages:` key,
+using the identical grammar — bare codes, or `code:Label:Script` spelled
+out. **Written there, it is the whole answer:** once the key exists in the
+file, each duty's own default list is not consulted at all — not blended
+with it, not a fallback for anything it left out — and the run says so once,
+rather than quietly picking one.
 
-[The warrant](warrant.md) can carry the same list under its own `languages:`
-key instead, using the identical grammar — bare codes, or `code:Label:Script`
-spelled out. **Once that key is written, it is the whole answer:** the
-`languages` input is not consulted at all, and the run says so once, naming
-both places, rather than quietly picking one. Leave the key out of the file
-and nothing changes — the input answers the question exactly as it always
-has, whether or not a warrant exists at all.
+Leave the key out and nothing changes: the duty's own documented default
+answers. `triage`, `translate`, `duplicate` and `respond` default to
+`en, vi, zh`; `harmonise` to `vi, zh`. An implicit warrant — no file at the
+default path — carries no languages of its own, for the same reason it
+carries no duties: there is nothing written down to read, so each duty's
+default answers there too. Writing the key with nothing under it is refused
+rather than read as leaving it out — an unfinished edit should fail loudly,
+not quietly hand the answer back to a default.
 
 ## How detection works, and what it costs
 
@@ -163,11 +170,12 @@ The common case: contributors write in several languages, maintainers all read
 one.
 
 ```yaml
-- uses: ecoma-io/reeve/translate@v0.1
-  with:
-    languages: en, vi, zh, ja
-    api-key: ${{ secrets.OPENAI_API_KEY }}
-    models: gpt-5-mini
+# .github/reeve.yml
+languages:
+  - en
+  - vi
+  - zh
+  - ja
 ```
 
 Every thread ends up carrying every language on that list except the one it was

@@ -33517,6 +33517,356 @@ function readPivot(raw) {
   return { language: record.language, title: record.title, excerpt: record.excerpt };
 }
 
+// src/core/publish.ts
+function assemble(official, marker2, publication2) {
+  return [
+    authorHalf(official),
+    marker2.render(publication2.fingerprint),
+    ...publication2.sections
+  ].join("\n\n");
+}
+
+// src/core/sanitize.ts
+var OPENER = "<!--";
+var CLOSER = "-->";
+var INERT = "<!---->";
+var REFERENCE = new RegExp(
+  [
+    String.raw`(https?://\S+|\]\([^\s)]*\))`,
+    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
+    String.raw`#(?:${INERT})?\d+`,
+    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
+  ].join("|"),
+  "gi"
+);
+function sanitize(markdown) {
+  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
+}
+function defangComments(prose) {
+  const lastCloser = prose.lastIndexOf(CLOSER);
+  let defanged = "";
+  let read3 = 0;
+  for (; ; ) {
+    const opener = prose.indexOf(OPENER, read3);
+    if (opener === -1) return defanged + prose.slice(read3);
+    defanged += prose.slice(read3, opener);
+    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
+    if (closer === -1) {
+      defanged += `<${INERT}!--`;
+      read3 = opener + OPENER.length;
+      continue;
+    }
+    defanged += emptied(prose.slice(opener + OPENER.length, closer));
+    read3 = closer + CLOSER.length;
+  }
+}
+var OPAQUE = /[^`~\\\n\r ]/g;
+function emptied(payload) {
+  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
+}
+function defangReferences(prose) {
+  return prose.replace(REFERENCE, (match, passthrough) => {
+    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
+    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
+  });
+}
+
+// src/core/pivot.ts
+async function translateToPivot(request2) {
+  const { provider, models, title, body, to, weather } = request2;
+  const messages = prompt(title, body, to);
+  const rotation = await rotateModels(
+    models,
+    (model) => answer(provider, model, messages),
+    weather
+  );
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
+  const draft2 = readAnswer(unwrapped(rotation.success.content));
+  if (draft2 === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft2.title), body: sanitize(draft2.body) },
+    failures: rotation.failures
+  };
+}
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the rendering was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function prompt(title, body, to) {
+  const enclosed = enclose("untrusted-thread", `${title}
+
+${body}`);
+  return [
+    {
+      role: "system",
+      content: [
+        `Translate the title and body of a GitHub thread into ${to.label} (${to.code}).`,
+        "Preserve Markdown formatting, code blocks and links exactly; translate prose only.",
+        "Answer with exactly one JSON object and nothing else, shaped like this:",
+        '{"title": "...", "body": "..."}',
+        "No preamble, no code fence around the JSON, no explanation before or after it.",
+        "",
+        enclosed.rule
+      ].join("\n")
+    },
+    { role: "user", content: enclosed.block }
+  ];
+}
+function unwrapped(answer3) {
+  const trimmed = answer3.trim();
+  const fence2 = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return fence2?.[1] ?? trimmed;
+}
+function readAnswer(text2) {
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch {
+    return null;
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw;
+  if (typeof record.title !== "string" || typeof record.body !== "string") return null;
+  if (record.title.trim().length === 0) return null;
+  return { title: record.title, body: record.body };
+}
+
+// src/core/recall.ts
+async function readStoreWarned(path) {
+  const store = await readStore(path);
+  for (const line of store.unreadable) {
+    warning(`corrections: ${line}`);
+  }
+  return store;
+}
+async function bridgeQueries(queries, bridge) {
+  const { rosters } = bridge;
+  const models = rosters.screenModels.length > 0 ? rosters.screenModels : rosters.models;
+  const names = rosters.screenModels.length > 0 ? rosters.screenNames : rosters.modelNames;
+  const pivot = await translateToPivot({
+    provider: bridge.provider,
+    models,
+    title: bridge.title,
+    body: bridge.body,
+    to: bridge.to,
+    weather: bridge.weather
+  });
+  for (const failure of pivot.failures) {
+    warning(`recall: ${shown(names, failure.model)} \u2014 ${failure.reason}`);
+  }
+  if (pivot.draft !== null) {
+    queries.push({
+      text: `${pivot.draft.title}
+${pivot.draft.body}`,
+      against: { pivot: bridge.to.code }
+    });
+  } else {
+    info(
+      "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
+    );
+  }
+}
+async function recallCorrections(request2) {
+  if (request2.count <= 0) {
+    info(
+      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
+    );
+    return { corrections: [], size: 0, crossLanguage: 0, read: false };
+  }
+  const store = await readStoreWarned(request2.path);
+  const memory = createMemory(store.corrections);
+  const queries = [{ text: `${request2.title}
+${request2.body}`, against: "own" }];
+  const own = request2.language?.code ?? null;
+  const bridge = request2.bridge;
+  if (bridge !== null && own !== null && store.corrections.some((correction) => correction.language !== own)) {
+    await bridgeQueries(queries, bridge);
+  }
+  const corrections = memory.recallAcrossQueries(queries, request2.count);
+  const crossLanguage = own === null ? 0 : corrections.filter(
+    (correction) => correction.language !== null && correction.language !== own
+  ).length;
+  return { corrections, size: memory.size, crossLanguage, read: true };
+}
+
+// src/core/spam.ts
+async function sift(request2) {
+  const { provider, models, weather } = request2;
+  if (models.length === 0) return { dropped: null, failures: [] };
+  const rotation = await rotateModels(
+    models,
+    (model) => provider.complete(model, prompt2(request2)),
+    weather
+  );
+  if (!rotation.success) return { dropped: null, failures: rotation.failures };
+  return { dropped: read(rotation.success.content), failures: rotation.failures };
+}
+function read(answer3) {
+  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer3);
+  if (said("spam") === said("off-topic")) return null;
+  if (said("spam")) {
+    return { reason: "spam", note: "the cheap pass read it as spam" };
+  }
+  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
+}
+function prompt2(request2) {
+  const { title, body, about } = request2;
+  const material = enclose("untrusted-thread", `TITLE: ${title}
+BODY:
+${body}`);
+  return [
+    {
+      role: "system",
+      content: [
+        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
+        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
+        "written report is worth attention.",
+        "",
+        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
+        "Answer with exactly one of these words and nothing else:",
+        "",
+        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
+        "- off-topic: a real request about something other than this repository.",
+        "- keep: anything else, including a report you cannot make sense of.",
+        "",
+        "When you are not sure, answer keep.",
+        "",
+        material.rule
+      ].join("\n")
+    },
+    { role: "user", content: material.block }
+  ];
+}
+
+// src/core/summary.ts
+function authSection(failures) {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
+  ].join("\n");
+}
+async function writeSummary(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
+    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
+    return;
+  }
+  try {
+    await summary.addRaw(markdown).write();
+  } catch (error2) {
+    warning(
+      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
+    );
+  }
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted2 = protocolExhausted(models, failures);
+  if (exhausted2) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted2;
+}
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
+}
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+var COUNT = new Intl.NumberFormat("en-US");
+function count(value) {
+  return COUNT.format(value);
+}
+function cell(text2) {
+  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function fence(text2) {
+  const runs = text2.match(/`+/g) ?? [];
+  const longest = runs.reduce((max, run2) => Math.max(max, run2.length), 0);
+  const ticks = "`".repeat(Math.max(3, longest + 1));
+  return [ticks, text2, ticks];
+}
+function cost(spent, name) {
+  const sum = total(spent);
+  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
+  const rows = spent.map((spend) => [
+    STAGE[spend.purpose],
+    cell(name(spend)),
+    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
+    count(spend.requests),
+    spend.failed === 0 ? "\u2014" : count(spend.failed),
+    count(spend.prompt),
+    count(spend.completion),
+    count(spend.prompt + spend.completion)
+  ]);
+  if (rows.length === 0) {
+    return [
+      "### Cost",
+      "",
+      "No model was asked anything this run \u2014 every decision was made by code."
+    ].join("\n");
+  }
+  rows.push([
+    "**Total**",
+    "",
+    ...multiEndpoint ? [""] : [],
+    `**${count(sum.requests)}**`,
+    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
+    `**${count(sum.prompt)}**`,
+    `**${count(sum.completion)}**`,
+    `**${count(sum.prompt + sum.completion)}**`
+  ]);
+  const lines = [
+    "### Cost",
+    "",
+    table(
+      [
+        "Stage",
+        "Model",
+        ...multiEndpoint ? ["Endpoint"] : [],
+        "Requests",
+        "Failed",
+        "Prompt",
+        "Completion",
+        "Tokens"
+      ],
+      rows
+    )
+  ];
+  if (sum.unreported > 0) {
+    lines.push(
+      "",
+      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
+    );
+  }
+  if (sum.failed > 0) {
+    lines.push(
+      "",
+      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
+    );
+  }
+  return lines.join("\n");
+}
+
 // src/core/warrant.ts
 import { readFile as readFile2 } from "node:fs/promises";
 var import_yaml = __toESM(require_dist2(), 1);
@@ -33595,12 +33945,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document2)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -33618,7 +33968,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document2.lifecycle);
   const propose = readPropose(path, document2.propose);
   const dependa = readDependa(path, document2.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document2.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -33640,7 +33990,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -33698,23 +34053,18 @@ async function openAuthority(path, api, at, duty) {
   const authority2 = await resolveAuthority(read3, path, api, at);
   return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
 }
-function resolveLanguages(warrant, rawInput) {
+function resolveLanguages(warrant, fallback) {
   if (warrant.languages !== null) {
     return {
       languages: warrant.languages,
-      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key \u2014 the file is the whole answer once that key is written.`
     };
   }
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
-    );
-  }
-  return { languages: parseLanguages(rawInput), notice: null };
+  return { languages: fallback, notice: null };
 }
-function dutyLanguages(warrant, denied, rawInput) {
+function dutyLanguages(warrant, denied, fallback) {
   if (denied) return [];
-  const resolution = resolveLanguages(warrant, rawInput);
+  const resolution = resolveLanguages(warrant, fallback);
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
@@ -33825,7 +34175,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -34351,25 +34701,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings2(at, duty, value);
     if (entries.length === 0) {
@@ -34476,6 +34835,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost2 = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost2;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -34486,392 +34882,6 @@ function describe(value) {
     return `\`${String(value)}\``;
   }
   return "a value of a kind this file cannot hold";
-}
-
-// src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
-}
-
-// src/core/publish.ts
-function assemble(official, marker2, publication2) {
-  return [
-    authorHalf(official),
-    marker2.render(publication2.fingerprint),
-    ...publication2.sections
-  ].join("\n\n");
-}
-
-// src/core/sanitize.ts
-var OPENER = "<!--";
-var CLOSER = "-->";
-var INERT = "<!---->";
-var REFERENCE = new RegExp(
-  [
-    String.raw`(https?://\S+|\]\([^\s)]*\))`,
-    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
-    String.raw`#(?:${INERT})?\d+`,
-    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
-  ].join("|"),
-  "gi"
-);
-function sanitize(markdown) {
-  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
-}
-function defangComments(prose) {
-  const lastCloser = prose.lastIndexOf(CLOSER);
-  let defanged = "";
-  let read3 = 0;
-  for (; ; ) {
-    const opener = prose.indexOf(OPENER, read3);
-    if (opener === -1) return defanged + prose.slice(read3);
-    defanged += prose.slice(read3, opener);
-    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
-    if (closer === -1) {
-      defanged += `<${INERT}!--`;
-      read3 = opener + OPENER.length;
-      continue;
-    }
-    defanged += emptied(prose.slice(opener + OPENER.length, closer));
-    read3 = closer + CLOSER.length;
-  }
-}
-var OPAQUE = /[^`~\\\n\r ]/g;
-function emptied(payload) {
-  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
-}
-function defangReferences(prose) {
-  return prose.replace(REFERENCE, (match, passthrough) => {
-    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
-    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
-  });
-}
-
-// src/core/pivot.ts
-async function translateToPivot(request2) {
-  const { provider, models, title, body, to, weather } = request2;
-  const messages = prompt(title, body, to);
-  const rotation = await rotateModels(
-    models,
-    (model) => answer(provider, model, messages),
-    weather
-  );
-  if (!rotation.success) return { draft: null, failures: rotation.failures };
-  const draft2 = readAnswer(unwrapped(rotation.success.content));
-  if (draft2 === null) return { draft: null, failures: rotation.failures };
-  return {
-    draft: { title: sanitize(draft2.title), body: sanitize(draft2.body) },
-    failures: rotation.failures
-  };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the rendering was cut off before it finished"
-    };
-  }
-  return completion;
-}
-function prompt(title, body, to) {
-  const enclosed = enclose("untrusted-thread", `${title}
-
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        `Translate the title and body of a GitHub thread into ${to.label} (${to.code}).`,
-        "Preserve Markdown formatting, code blocks and links exactly; translate prose only.",
-        "Answer with exactly one JSON object and nothing else, shaped like this:",
-        '{"title": "...", "body": "..."}',
-        "No preamble, no code fence around the JSON, no explanation before or after it.",
-        "",
-        enclosed.rule
-      ].join("\n")
-    },
-    { role: "user", content: enclosed.block }
-  ];
-}
-function unwrapped(answer3) {
-  const trimmed = answer3.trim();
-  const fence2 = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fence2?.[1] ?? trimmed;
-}
-function readAnswer(text2) {
-  let raw;
-  try {
-    raw = JSON.parse(text2);
-  } catch {
-    return null;
-  }
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw;
-  if (typeof record.title !== "string" || typeof record.body !== "string") return null;
-  if (record.title.trim().length === 0) return null;
-  return { title: record.title, body: record.body };
-}
-
-// src/core/recall.ts
-async function readStoreWarned(path) {
-  const store = await readStore(path);
-  for (const line of store.unreadable) {
-    warning(`corrections: ${line}`);
-  }
-  return store;
-}
-async function bridgeQueries(queries, bridge) {
-  const { rosters } = bridge;
-  const models = rosters.screenModels.length > 0 ? rosters.screenModels : rosters.models;
-  const names = rosters.screenModels.length > 0 ? rosters.screenNames : rosters.modelNames;
-  const pivot = await translateToPivot({
-    provider: bridge.provider,
-    models,
-    title: bridge.title,
-    body: bridge.body,
-    to: bridge.to,
-    weather: bridge.weather
-  });
-  for (const failure of pivot.failures) {
-    warning(`recall: ${shown(names, failure.model)} \u2014 ${failure.reason}`);
-  }
-  if (pivot.draft !== null) {
-    queries.push({
-      text: `${pivot.draft.title}
-${pivot.draft.body}`,
-      against: { pivot: bridge.to.code }
-    });
-  } else {
-    info(
-      "Cross-language recall could not translate this thread into the pivot language this run \u2014 recall used the thread's own language only."
-    );
-  }
-}
-async function recallCorrections(request2) {
-  if (request2.count <= 0) {
-    info(
-      "Recall is disabled (`memory.recall` is 0 or lower) \u2014 the corrections store was not read."
-    );
-    return { corrections: [], size: 0, crossLanguage: 0, read: false };
-  }
-  const store = await readStoreWarned(request2.path);
-  const memory = createMemory(store.corrections);
-  const queries = [{ text: `${request2.title}
-${request2.body}`, against: "own" }];
-  const own = request2.language?.code ?? null;
-  const bridge = request2.bridge;
-  if (bridge !== null && own !== null && store.corrections.some((correction) => correction.language !== own)) {
-    await bridgeQueries(queries, bridge);
-  }
-  const corrections = memory.recallAcrossQueries(queries, request2.count);
-  const crossLanguage = own === null ? 0 : corrections.filter(
-    (correction) => correction.language !== null && correction.language !== own
-  ).length;
-  return { corrections, size: memory.size, crossLanguage, read: true };
-}
-
-// src/core/spam.ts
-async function sift(request2) {
-  const { provider, models, weather } = request2;
-  if (models.length === 0) return { dropped: null, failures: [] };
-  const rotation = await rotateModels(
-    models,
-    (model) => provider.complete(model, prompt2(request2)),
-    weather
-  );
-  if (!rotation.success) return { dropped: null, failures: rotation.failures };
-  return { dropped: read(rotation.success.content), failures: rotation.failures };
-}
-function read(answer3) {
-  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer3);
-  if (said("spam") === said("off-topic")) return null;
-  if (said("spam")) {
-    return { reason: "spam", note: "the cheap pass read it as spam" };
-  }
-  return { reason: "off-topic", note: "the cheap pass read it as being about something else" };
-}
-function prompt2(request2) {
-  const { title, body, about } = request2;
-  const material = enclose("untrusted-thread", `TITLE: ${title}
-BODY:
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        "You decide whether an issue filed on a GitHub repository is worth a maintainer's",
-        "attention at all. This is not a judgment about quality \u2014 a short, blunt or badly",
-        "written report is worth attention.",
-        "",
-        ...about.length === 0 ? [] : [`This repository is: ${about}`, ""],
-        "Answer with exactly one of these words and nothing else:",
-        "",
-        "- spam: advertising, a scam, a link farm, or text with no relation to software.",
-        "- off-topic: a real request about something other than this repository.",
-        "- keep: anything else, including a report you cannot make sense of.",
-        "",
-        "When you are not sure, answer keep.",
-        "",
-        material.rule
-      ].join("\n")
-    },
-    { role: "user", content: material.block }
-  ];
-}
-
-// src/core/summary.ts
-function authSection(failures) {
-  if (failures.length === 0) return "";
-  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
-  return [
-    "",
-    "",
-    "### Endpoints that failed to authenticate",
-    "",
-    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
-  ].join("\n");
-}
-async function writeSummary(markdown) {
-  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
-    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
-    return;
-  }
-  try {
-    await summary.addRaw(markdown).write();
-  } catch (error2) {
-    warning(
-      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
-    );
-  }
-}
-function failIfProtocolExhausted(models, failures) {
-  const exhausted2 = protocolExhausted(models, failures);
-  if (exhausted2) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
-    setFailed(
-      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
-    );
-  }
-  return exhausted2;
-}
-async function writeRunSummary(page2, weather) {
-  await writeSummary(page2 + authSection(weather.authFailures));
-}
-function table(headers, rows) {
-  if (rows.length === 0) return "";
-  return [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.join(" | ")} |`)
-  ].join("\n");
-}
-var COUNT = new Intl.NumberFormat("en-US");
-function count(value) {
-  return COUNT.format(value);
-}
-function cell(text2) {
-  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function fence(text2) {
-  const runs = text2.match(/`+/g) ?? [];
-  const longest = runs.reduce((max, run2) => Math.max(max, run2.length), 0);
-  const ticks = "`".repeat(Math.max(3, longest + 1));
-  return [ticks, text2, ticks];
-}
-function cost(spent, name) {
-  const sum = total(spent);
-  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
-  const rows = spent.map((spend) => [
-    STAGE[spend.purpose],
-    cell(name(spend)),
-    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
-    count(spend.requests),
-    spend.failed === 0 ? "\u2014" : count(spend.failed),
-    count(spend.prompt),
-    count(spend.completion),
-    count(spend.prompt + spend.completion)
-  ]);
-  if (rows.length === 0) {
-    return [
-      "### Cost",
-      "",
-      "No model was asked anything this run \u2014 every decision was made by code."
-    ].join("\n");
-  }
-  rows.push([
-    "**Total**",
-    "",
-    ...multiEndpoint ? [""] : [],
-    `**${count(sum.requests)}**`,
-    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
-    `**${count(sum.prompt)}**`,
-    `**${count(sum.completion)}**`,
-    `**${count(sum.prompt + sum.completion)}**`
-  ]);
-  const lines = [
-    "### Cost",
-    "",
-    table(
-      [
-        "Stage",
-        "Model",
-        ...multiEndpoint ? ["Endpoint"] : [],
-        "Requests",
-        "Failed",
-        "Prompt",
-        "Completion",
-        "Tokens"
-      ],
-      rows
-    )
-  ];
-  if (sum.unreported > 0) {
-    lines.push(
-      "",
-      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
-    );
-  }
-  if (sum.failed > 0) {
-    lines.push(
-      "",
-      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
-    );
-  }
-  return lines.join("\n");
 }
 
 // src/duties/respond/draft.ts
@@ -35727,7 +35737,7 @@ function escapeHtml(text2) {
 
 // src/duties/respond/summary.ts
 function authority(run2) {
-  return `No \`${run2.warrant}\` \u2014 this duty found no warrant file. A first reply is the top rung of what Reeve may do, and it is granted nothing until a warrant explicitly names it: add \`capabilities: { respond: [comment] }\` to grant it.`;
+  return `No \`${run2.warrant}\` \u2014 this duty found no warrant file. A first reply is the top rung of what Reeve may do, and it is granted nothing until a warrant explicitly names it: add \`duties: { respond: [comment] }\` to grant it.`;
 }
 function summarize(run2) {
   if (run2.ungranted !== null) {
@@ -35755,7 +35765,6 @@ function summarize(run2) {
     "",
     ...run2.implicit ? [authority(run2), ""] : [],
     verdict(run2),
-    ...withheld(run2),
     ...chromeNote(run2),
     "",
     cost(
@@ -35821,20 +35830,12 @@ function outcome(run2) {
   if (run2.dryRun) return "dry run \u2014 nothing was written";
   return "not posted, for a reason this summary does not recognise";
 }
-function withheld(run2) {
-  if (run2.withheld.length === 0) return [];
-  return [
-    "",
-    ...run2.withheld.map(
-      (capability) => `\`apply\` asks for \`${capability}\`, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`
-    )
-  ];
-}
 
 // src/duties/respond/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
 // src/duties/respond/main.ts
+var DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 function readSettings() {
   const base = readCore();
   const panel = parseSeats(getInput("judge-models"));
@@ -35843,7 +35844,6 @@ function readSettings() {
     ...base,
     number: threadNumber(),
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", getInput("drafts")),
@@ -35897,12 +35897,7 @@ async function walkReplies(api, at, settled) {
   return null;
 }
 async function decide(api, at, warrant, settings, stages, weather) {
-  const { permitted, withheld: withheld2 } = narrowWarned(
-    warrant.granted("respond", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "respond",
-    warrant.path
-  );
+  const permitted = warrant.granted("respond", DEFAULT_CAPABILITIES);
   const settled = (over = {}) => ({
     note: null,
     language: null,
@@ -35910,7 +35905,6 @@ async function decide(api, at, warrant, settings, stages, weather) {
     confidence: null,
     published: false,
     permitted,
-    withheld: withheld2,
     ...over
   });
   const standing = await readStanding(api, at);
@@ -36080,7 +36074,7 @@ ${would}`);
   return settled({ language: responded.language, responded, confidence, published: true });
 }
 function notGranted(warrant) {
-  return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`respond\`; once that block exists it is the whole answer, so add \`respond: [comment]\` to it to grant a first reply (or remove the block to return to defaults, which is still nothing \u2014 see \`DEFAULT_CAPABILITIES\`).`;
+  return `\`${warrant.path}\`'s \`duties:\` block does not name \`respond\`; once that block exists it is the whole answer, so add \`respond: [comment]\` to it to grant a first reply (or remove the block to return to defaults, which is still nothing \u2014 see \`DEFAULT_CAPABILITIES\`).`;
 }
 async function run() {
   const meter = createMeter();
@@ -36103,7 +36097,7 @@ async function run() {
     const opened = await openAuthority(base.warrant, api, context2.repo, "respond");
     authority2 = opened.authority;
     const denied = opened.denied;
-    const languages = dutyLanguages(authority2.warrant, denied, getInput("languages"));
+    const languages = dutyLanguages(authority2.warrant, denied, DEFAULT_LANGUAGES);
     if (denied) {
       ungranted = notGranted(authority2.warrant);
       settings = { ...base, languages };
@@ -36147,7 +36141,6 @@ function page(settings, authority2, outcome2, ungranted, spent) {
     floor: settings.confidence,
     published: outcome2?.published ?? false,
     permitted: outcome2?.permitted ?? [],
-    withheld: outcome2?.withheld ?? [],
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

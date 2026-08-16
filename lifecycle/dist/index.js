@@ -32529,10 +32529,6 @@ function residue(text2) {
   return clean;
 }
 
-// src/core/warrant.ts
-import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
-
 // src/core/forge.ts
 function isBotAuthor(author) {
   return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
@@ -32656,6 +32652,142 @@ function createLifecycleEffects(api, at) {
   };
 }
 
+// src/core/inputs.ts
+function parseSince(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
+  }
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
+  );
+}
+function threadNumber() {
+  const configured = getInput("number");
+  if (configured.length > 0) return whole("number", configured);
+  const triggered = context2.issue.number;
+  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
+    throw new Error(
+      // Read from the environment rather than from `context.eventName`, which
+      // is typed as always present and is not: it is this variable.
+      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
+    );
+  }
+  return triggered;
+}
+function whole(name, raw) {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
+  }
+  return value;
+}
+function bounded(name, raw) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
+
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
+}
+
+// src/core/summary.ts
+async function writeSummary(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
+    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
+    return;
+  }
+  try {
+    await summary.addRaw(markdown).write();
+  } catch (error2) {
+    warning(
+      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
+    );
+  }
+}
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+var COUNT = new Intl.NumberFormat("en-US");
+function cell(text2) {
+  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+
+// src/core/warrant.ts
+import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
+
 // src/duties/dependa/model.ts
 var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
 var UPDATE_TYPES = [
@@ -32730,12 +32862,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document2)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -32753,7 +32885,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document2.lifecycle);
   const propose = readPropose(path, document2.propose);
   const dependa = readDependa(path, document2.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document2.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -32775,7 +32907,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -32931,7 +33068,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -33457,25 +33594,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
@@ -33582,6 +33728,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -33592,174 +33775,6 @@ function describe(value) {
     return `\`${String(value)}\``;
   }
   return "a value of a kind this file cannot hold";
-}
-
-// src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
-}
-
-// src/core/inputs.ts
-function parseSince(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
-  if (dateMatch) {
-    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new Error(`since: \`${raw}\` is not a real date.`);
-    }
-    return parsed;
-  }
-  const durationMatch = /^(\d+)d$/.exec(trimmed);
-  if (durationMatch) {
-    const days = Number(durationMatch[1]);
-    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
-    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
-  }
-  throw new Error(
-    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
-  );
-}
-function threadNumber() {
-  const configured = getInput("number");
-  if (configured.length > 0) return whole("number", configured);
-  const triggered = context2.issue.number;
-  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
-    throw new Error(
-      // Read from the environment rather than from `context.eventName`, which
-      // is typed as always present and is not: it is this variable.
-      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
-    );
-  }
-  return triggered;
-}
-function whole(name, raw) {
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
-  }
-  return value;
-}
-function bounded(name, raw) {
-  const trimmed = raw.trim();
-  if (trimmed.toLowerCase() === "none") return null;
-  const value = Number(trimmed);
-  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
-    throw new Error(
-      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
-    );
-  }
-  return value;
-}
-
-// src/core/marker.ts
-import { createHash } from "node:crypto";
-var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
-var SUFFIX = " -->";
-function markerFor(duty) {
-  if (!DUTY_NAME.test(duty)) {
-    throw new Error(
-      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
-    );
-  }
-  const prefix = `<!-- reeve:${duty} source=`;
-  return {
-    duty,
-    render(fingerprint2) {
-      return `${prefix}${fingerprint2}${SUFFIX}`;
-    },
-    split(body) {
-      const at = body.indexOf(prefix);
-      if (at === -1) return { official: authorHalf(body), fingerprint: null };
-      const from = at + prefix.length;
-      const to = body.indexOf(SUFFIX, from);
-      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
-      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
-    }
-  };
-}
-function authorHalf(text2) {
-  return text2.replace(/\s+$/u, "");
-}
-function fingerprint(text2, keys) {
-  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
-  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
-}
-var PROPOSE_MARKER = markerFor("propose");
-function isReeveProposalPr(thread) {
-  if (!thread.isPullRequest) return false;
-  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
-}
-
-// src/core/summary.ts
-async function writeSummary(markdown) {
-  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
-    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
-    return;
-  }
-  try {
-    await summary.addRaw(markdown).write();
-  } catch (error2) {
-    warning(
-      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
-    );
-  }
-}
-function table(headers, rows) {
-  if (rows.length === 0) return "";
-  return [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.join(" | ")} |`)
-  ].join("\n");
-}
-var COUNT = new Intl.NumberFormat("en-US");
-function cell(text2) {
-  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-
-// src/core/sweep.ts
-function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-function reportNoSweep() {
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
 }
 
 // src/duties/lifecycle/clock.ts
@@ -34493,15 +34508,11 @@ function verdict(outcome, done) {
 function renderRow(number, outcome, done) {
   return [`#${String(number)}`, cell(verdict(outcome, done))];
 }
-function withheldLine(warrantPath, withheld) {
-  if (withheld.length === 0) return "";
-  return `\`apply\` asks for ${withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${warrantPath}\` does not grant to lifecycle. The narrower of the two wins, always.`;
-}
 function chromeGap(outcome, done, dryRun) {
   if (dryRun || !done.commented) return "";
   return chromeFallbackNote([outcome.language]) ?? "";
 }
-function renderSweepPage(warrantPath, dryRun, results, ungranted, starved2 = false) {
+function renderSweepPage(dryRun, results, ungranted, starved2 = false) {
   if (ungranted !== null) {
     return `${["## Reeve \xB7 lifecycle \u2014 sweep", "", ungranted].join("\n").trimEnd()}
 `;
@@ -34520,20 +34531,16 @@ function renderSweepPage(warrantPath, dryRun, results, ungranted, starved2 = fal
     );
   }
   parts.push("", rendered.length === 0 ? "Nothing was processed this run." : rendered);
-  const gaps = /* @__PURE__ */ new Set();
   const chromeGaps = /* @__PURE__ */ new Set();
   for (const result of results) {
-    const line = withheldLine(warrantPath, result.outcome.withheld);
-    if (line.length > 0) gaps.add(line);
     const note = chromeGap(result.outcome, result.done, dryRun);
     if (note.length > 0) chromeGaps.add(note);
   }
-  for (const gap of gaps) parts.push("", gap);
   for (const note of chromeGaps) parts.push("", note);
   return `${parts.join("\n").trimEnd()}
 `;
 }
-function renderThreadPage(warrantPath, dryRun, number, outcome, done) {
+function renderThreadPage(dryRun, number, outcome, done) {
   const parts = [
     "## Reeve \xB7 lifecycle",
     "",
@@ -34552,8 +34559,6 @@ function renderThreadPage(warrantPath, dryRun, number, outcome, done) {
     for (const action of outcome.actions) {
       parts.push(`- \`${action.track.name}\`, step ${String(action.stepIndex + 1)}.`);
     }
-    const gap = withheldLine(warrantPath, outcome.withheld);
-    if (gap.length > 0) parts.push("", gap);
     const note = chromeGap(outcome, done, dryRun);
     if (note.length > 0) parts.push("", note);
   }
@@ -34642,17 +34647,15 @@ function readSettings() {
     token: getInput("github-token", { required: true }),
     number,
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     dryRun: getBooleanInput("dry-run"),
     sweep,
     since: parseSince(getInput("since")),
     limit: bounded("limit", getInput("limit"))
   };
 }
-function resolveThreadLanguages(warrant, rawInput) {
+function resolveThreadLanguages(warrant) {
   if (warrant.languages !== null) return warrant.languages;
-  const trimmed = rawInput.trim();
-  return trimmed.length === 0 ? [] : parseLanguages(trimmed);
+  return [];
 }
 function notGranted(reason) {
   return {
@@ -34661,7 +34664,6 @@ function notGranted(reason) {
     unstale: [],
     permanentlyExempt: null,
     permitted: [],
-    withheld: [],
     ungranted: reason
   };
 }
@@ -34686,7 +34688,7 @@ async function evaluateThread(api, authority, at, standing, settings, ctx) {
   }
   if (warrant.unnamed("lifecycle")) {
     return notGranted(
-      `\`${warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`; once that block exists it is the whole answer, so add \`lifecycle: [label, comment]\` to it (or remove the block to return to defaults).`
+      `\`${warrant.path}\`'s \`duties:\` block does not name \`lifecycle\`; once that block exists it is the whole answer, so add \`lifecycle: [label, comment]\` to it (or remove the block to return to defaults).`
     );
   }
   if (isReeveProposalPr(standing)) {
@@ -34741,7 +34743,6 @@ async function evaluateThread(api, authority, at, standing, settings, ctx) {
     unstale: decision.unstale,
     permanentlyExempt: decision.permanentlyExempt,
     permitted: ctx.permitted,
-    withheld: ctx.withheld,
     ungranted: null
   };
 }
@@ -34815,7 +34816,7 @@ async function runSweep(acc, api, authority, settings, ctx) {
     return;
   }
   if (authority.warrant.unnamed("lifecycle")) {
-    acc.ungranted = `\`${authority.warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`.`;
+    acc.ungranted = `\`${authority.warrant.path}\`'s \`duties:\` block does not name \`lifecycle\`.`;
     return;
   }
   const policy = authority.warrant.lifecycle;
@@ -34853,7 +34854,7 @@ async function run() {
     const base = readSettings();
     const api = getOctokit(base.token);
     const { authority } = await openAuthority(base.warrant, api, context2.repo, "lifecycle");
-    const languages = resolveThreadLanguages(authority.warrant, getInput("languages"));
+    const languages = resolveThreadLanguages(authority.warrant);
     settings = { ...base, languages };
     if (authority.warrant.lifecycle !== null) {
       const existingLabels = (await listRepositoryLabels(api, context2.repo)).map(
@@ -34871,14 +34872,9 @@ async function run() {
         `\`${authority.warrant.path}\` grants lifecycle ${grantedButUnused.map((capability) => `\`${capability}\``).join(", ")}, which this duty has no use for.`
       );
     }
-    const { permitted, withheld } = narrowWarned(
-      granted,
-      settings.apply,
-      "lifecycle",
-      settings.warrant
-    );
+    const permitted = granted;
     const ownLogin = await resolveOwnLogin(api);
-    const ctx = { permitted, withheld, ownLogin };
+    const ctx = { permitted, ownLogin };
     if (settings.sweep) {
       ranSweep = true;
       await runSweep(bulk, api, authority, settings, ctx);
@@ -34903,24 +34899,12 @@ async function run() {
       if (ranSweep) {
         report(bulk);
         await writeSummary(
-          renderSweepPage(
-            settings.warrant,
-            settings.dryRun,
-            bulk.results,
-            bulk.ungranted,
-            bulk.starvedRun
-          )
+          renderSweepPage(settings.dryRun, bulk.results, bulk.ungranted, bulk.starvedRun)
         );
       } else if (single !== null) {
         reportSingle(single.outcome, single.done);
         await writeSummary(
-          renderThreadPage(
-            settings.warrant,
-            settings.dryRun,
-            single.number,
-            single.outcome,
-            single.done
-          )
+          renderThreadPage(settings.dryRun, single.number, single.outcome, single.done)
         );
       }
     }

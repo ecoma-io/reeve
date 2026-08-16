@@ -62,51 +62,22 @@ inputs:
     required: false
     default: en
 
-  languages:
-    description: >-
-      The target locale codes this repository's documentation set is translated
-      into, comma or newline separated. `vi`, or `vi:Tiếng Việt`, or
-      `zh-Hans:简体中文:Hans` — the code alone is enough when the code is enough.
-
-      These are the locale-suffixed files (e.g. `docs/guide.vi.md`). The source
-      language is NOT included here — it is a separate input, because the source
-      language of committed documentation is a deliberate organisational choice,
-      not an incidental contributor preference.
-
-      Ignored once `warrant`'s own `languages:` key is written — the file is
-      the whole answer from there, and the run says once which of the two it
-      read.
-    required: false
-    default: vi, zh
-
   warrant:
     description: >-
       Where the permissions live. `edit-file` and `open-pr` are this duty's
       capabilities, and they are NOT granted by default — unlike `translate`'s
       `edit-body`, committing files and opening PRs is too much authority for
-      zero-config. Once a `capabilities:` block is written in this file, the
+      zero-config. Once a `duties:` block is written in this file, the
       enumeration is total: leaving `harmonise` out of it grants this duty
       nothing, and the run says so rather than guessing.
 
       Missing at this default path, there is no failure: the duty classifies
-      and reports without touching the repository, exactly as if `apply` were
-      `none`. Point this at a path of your own instead, and a file missing
-      there fails the run red, because naming a file that is not there is a
-      configuration mistake rather than an absence.
+      and reports without touching the repository, exactly as if the warrant
+      granted it nothing. Point this at a path of your own instead, and a file
+      missing there fails the run red, because naming a file that is not there
+      is a configuration mistake rather than an absence.
     required: false
     default: .github/reeve.yml
-
-  apply:
-    description: >-
-      What this run may do: `edit-file, open-pr`, or `none` for a run that
-      classifies, drafts and scores but never commits or opens a PR. The
-      narrower of this and the warrant file wins, always — the same double-gate
-      every other duty applies, with the same shape: classification and
-      drafting all run and spend whatever they were going to spend regardless
-      of this input, and only the write at the end is gated. `none` is a good
-      way to watch what a run would have changed before it is allowed to.
-    required: false
-    default: none
 
   drafts:
     description: >-

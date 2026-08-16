@@ -70,7 +70,7 @@ authority:
     - pull_request.merge
 ```
 
-`capabilities:` is the allowlist the warrant's `capabilities:` block already
+`capabilities:` is the allowlist the warrant's `duties:` block already
 is: what is absent is not granted, and once the block exists, enumeration is
 total — [D2's rule](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded),
 unchanged.
@@ -155,13 +155,13 @@ adjectives:
 - **Mechanical:** every key in a valid 1.x warrant has exactly one 2.x
   spelling, published as a table when Phase 2 lands. The shape of it today,
   at sketch precision: `version` maps to the tree's own version key;
-  `capabilities:` maps to `authority.capabilities` with per-duty grants
+  `duties:` maps to `authority.capabilities` with per-duty grants
   preserved; `labels:` — the taxonomy is an allowlist checked in code, so it
   is authority and it moves into `authority.yaml`, entries unchanged;
   `languages:` likewise — including its precedence:
   [written in the warrant, it is the whole answer](../guides/warrant.md#languages)
-  and the `languages` workflow input is ignored, and the lifted file keeps
-  exactly that relationship to the input. Prose that today has nowhere to
+  and each duty's own default is ignored, and the lifted file keeps
+  exactly that relationship to the defaults. Prose that today has nowhere to
   live (`not:` grew out of its string field) may _additionally_ expand into
   `duties/`, but the lift itself never requires it.
 - **Lossless:** nothing expressible in a 1.x warrant is inexpressible in

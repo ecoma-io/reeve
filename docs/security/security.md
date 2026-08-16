@@ -101,7 +101,7 @@ Suppose the injection succeeds completely — the model returns
 `security-cleared` and `close`. Then:
 
 - `security-cleared` is not in the warrant, so it is dropped in code.
-- `close` is not in `capabilities`, so nothing closes.
+- `close` is not in the warrant's `duties:` block, so nothing closes.
 - Both appear in `proposed`, so the attempt is _visible in the outputs_.
 
 The injection defences reduce how often a model is fooled. The warrant makes it

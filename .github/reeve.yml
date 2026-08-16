@@ -13,11 +13,11 @@
 
 version: 1
 
-# Labels and body edits act; comments are granted and not yet taken. The
-# `comment` grants below are one half of a gate the duties close from both
-# sides: this file says what a duty MAY do, and the workflow's own `apply`
-# says whether this repository lets it yet. Both dogfood workflows leave
-# `apply` at `none`, so `duplicate` and `respond` decide and write their
+# Labels and body edits act; comments are granted and not yet taken. This
+# file is the whole authority — the one place a duty is told what it may do,
+# and the workflows below run whatever this block grants, narrowed only by
+# their own `dry-run`. `duplicate` and `respond` are granted `comment` but
+# both dogfood workflows run `dry-run: true`, so they decide and write their
 # verdicts to the job summary without touching a thread — the read that
 # decides, some weeks of backlog from now, whether posting is switched on.
 # `assign` and `close` stay off entirely, which is the advice the docs give
@@ -34,7 +34,7 @@ version: 1
 # forward-compatibility but is skipped until `close` is added here. The
 # workflow starts in `dry-run: true` so a maintainer can observe what the
 # policy would do before allowing it to act.
-capabilities:
+duties:
   triage: [label, record]
   translate: [edit-body]
   duplicate: [comment]
@@ -127,8 +127,8 @@ memory:
 # a generous six-month window, because this project's backlog is small and
 # genuine issues should not be hurried. The `close` step is present for
 # forward-compatibility but will be skipped until `close` is added to the
-# lifecycle capabilities — a step whose capability is withheld by either half
-# of the double-gate is skipped whole, never partially applied.
+# lifecycle grant here — a step whose capability the file does not grant is
+# skipped whole, never partially applied.
 #
 # `exempt.labels` names `bug` and `enhancement` because those are maintainer
 # decisions, and a stale clock does not overrule a classification. The warrant

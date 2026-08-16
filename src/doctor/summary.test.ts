@@ -92,7 +92,7 @@ describe("summarize", () => {
     expect(page).toContain("### Effective authority");
     expect(page).toContain("| `triage` | `label` | this duty's own default |");
     expect(page).toContain(
-      "| `respond` | *(none)* | denied — the `capabilities:` block does not name it |",
+      "| `respond` | *(none)* | denied — the `duties:` block does not name it |",
     );
   });
 

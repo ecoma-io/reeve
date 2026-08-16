@@ -31853,12 +31853,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -31876,7 +31876,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document.lifecycle);
   const propose = readPropose(path, document.propose);
   const dependa = readDependa(path, document.dependa);
-  const { declared, granted: capabilities2 } = readCapabilities(path, document.capabilities);
+  const { declared, granted: capabilities2 } = readDuties(path, document.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -31898,7 +31898,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities2.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities2.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities2.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -32062,7 +32067,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -32588,25 +32593,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available2 = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available2.join(", ")}${closestHint(duty, available2)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
@@ -32713,6 +32727,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -32728,34 +32779,44 @@ function describe(value) {
 // src/duties/duplicate/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
+// src/duties/harmonise/capabilities.ts
+var DEFAULT_CAPABILITIES2 = [];
+
+// src/duties/dependa/capabilities.ts
+var DEFAULT_CAPABILITIES3 = [];
+
 // src/duties/lifecycle/capabilities.ts
-var DEFAULT_CAPABILITIES2 = ["label", "comment"];
+var DEFAULT_CAPABILITIES4 = ["label", "comment"];
 var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 
 // src/duties/respond/capabilities.ts
-var DEFAULT_CAPABILITIES3 = [];
+var DEFAULT_CAPABILITIES5 = [];
 
 // src/duties/translate/capabilities.ts
-var DEFAULT_CAPABILITIES4 = ["edit-body"];
+var DEFAULT_CAPABILITIES6 = ["edit-body"];
 
 // src/duties/triage/capabilities.ts
-var DEFAULT_CAPABILITIES5 = ["label"];
+var DEFAULT_CAPABILITIES7 = ["label"];
 
 // src/doctor/diagnose.ts
 var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
-  ["translate", DEFAULT_CAPABILITIES4],
-  ["triage", DEFAULT_CAPABILITIES5],
+  ["translate", DEFAULT_CAPABILITIES6],
+  ["triage", DEFAULT_CAPABILITIES7],
   ["duplicate", DEFAULT_CAPABILITIES],
-  ["respond", DEFAULT_CAPABILITIES3],
-  ["lifecycle", DEFAULT_CAPABILITIES2]
+  ["respond", DEFAULT_CAPABILITIES5],
+  ["lifecycle", DEFAULT_CAPABILITIES4],
+  ["harmonise", DEFAULT_CAPABILITIES2],
+  ["dependa", DEFAULT_CAPABILITIES3]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", null],
   ["triage", null],
   ["duplicate", null],
   ["respond", null],
-  ["lifecycle", LIFECYCLE_CAPABILITIES]
+  ["lifecycle", LIFECYCLE_CAPABILITIES],
+  ["harmonise", null],
+  ["dependa", null]
 ]);
 function problems(report) {
   return report.findings.filter((finding) => finding.severity === "red").length;
@@ -32944,7 +33005,7 @@ function capabilities(row) {
 }
 function note(row) {
   const parts = [];
-  if (row.denied) parts.push("denied \u2014 the `capabilities:` block does not name it");
+  if (row.denied) parts.push("denied \u2014 the `duties:` block does not name it");
   else if (row.isDefault) parts.push("this duty's own default");
   if (row.unused.length > 0) {
     const list = row.unused.map((capability) => `\`${capability}\``).join(", ");

@@ -52,7 +52,6 @@ function subject(over: Partial<Run> = {}): string {
     floor: 0.75,
     published: false,
     permitted: [],
-    withheld: [],
     spent: [],
     modelNames: new Map(),
     judgeNames: new Map(),
@@ -291,18 +290,6 @@ describe("the run summary", () => {
     expect(summary).toContain("| Outcome | posted |");
   });
 
-  it("names each capability `apply` asked for that the warrant did not grant", () => {
-    const summary = subject({ withheld: ["comment"] });
-
-    expect(summary).toContain(
-      "`apply` asks for `comment`, which `.github/reeve.yml` does not grant to this duty.",
-    );
-  });
-
-  it("says nothing about withheld capabilities when there were none", () => {
-    expect(subject({ withheld: [] })).not.toContain("does not grant");
-  });
-
   it("reports the spend per stage and per model", () => {
     const summary = subject({
       spent: [
@@ -346,7 +333,7 @@ describe("the run summary", () => {
   it("says why nothing was even attempted when a written block did not name this duty", () => {
     const summary = subject({
       ungranted:
-        "`.github/reeve.yml`'s `capabilities:` block does not name `respond`; once that block " +
+        "`.github/reeve.yml`'s `duties:` block does not name `respond`; once that block " +
         "exists it is the whole answer, so add `respond: [comment]` to it.",
     });
 

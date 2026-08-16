@@ -73,7 +73,7 @@ function capabilities(row: AuthorityRow): string {
 
 function note(row: AuthorityRow): string {
   const parts: string[] = [];
-  if (row.denied) parts.push("denied — the `capabilities:` block does not name it");
+  if (row.denied) parts.push("denied — the `duties:` block does not name it");
   else if (row.isDefault) parts.push("this duty's own default");
   if (row.unused.length > 0) {
     const list = row.unused.map((capability) => `\`${capability}\``).join(", ");

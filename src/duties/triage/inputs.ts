@@ -18,7 +18,7 @@
 import type { ApiKeySpec, EndpointSpec } from "../../core/inputs.js";
 import type { Language } from "../../core/languages.js";
 import type { Names } from "../../core/provider.js";
-import type { Capability, Label, Warrant } from "../../core/warrant.js";
+import type { Label, Warrant } from "../../core/warrant.js";
 
 export interface Settings {
   readonly token: string;
@@ -37,7 +37,6 @@ export interface Settings {
    * nothing. See `resolveTaxonomy`.
    */
   readonly taxonomy: readonly Label[];
-  readonly apply: readonly Capability[];
   readonly confidence: number;
   readonly correctionsDir: string;
   readonly about: string;

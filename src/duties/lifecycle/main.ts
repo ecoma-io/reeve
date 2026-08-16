@@ -7,7 +7,7 @@
  * label descriptions state a taxonomy. An absent `lifecycle:` key — whether
  * because the file never wrote one, or because there is no file at all — is
  * a green no-op naming the missing key, the same shape `notGranted` reports
- * for a `capabilities:` block that exists and simply does not name this
+ * for a `duties:` block that exists and simply does not name this
  * duty. Both are checked before a single thread is fetched.
  *
  * **No model call, anywhere in this duty.** `message.ts` explains why the
@@ -19,7 +19,7 @@
  * **A due step fires atomically, or not at all this run.** `act` below
  * checks every capability one step's action would need — `label` for its
  * `label:`, `comment` for its `say:`/close explanation, `close` for
- * `close: true` — against what `apply` and the warrant both grant, and skips
+ * `close: true` — against what the warrant grants, and skips
  * the whole step unless every one of them is permitted. Firing part of a
  * step (adding the label but not posting the marker that records it fired)
  * would leave a state neither this run nor the next could tell from a step
@@ -28,8 +28,8 @@
  *
  * **What this file no longer does, because `core/` does it for every duty
  * that needs it.** Opening the authority — warrant file or the implicit
- * one — and warning about withheld capabilities (`openAuthority`,
- * `narrowWarned`), and answering a sweep's two outputs at zero when this run
+ * one — and warning about withheld capabilities (`openAuthority`), and
+ * answering a sweep's two outputs at zero when this run
  * did not sweep (`reportNoSweep`). Both were near-copies in four or five
  * duties; both are now one tested module, called from here.
  *
@@ -45,7 +45,6 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { detectLanguage } from "../../core/detect.js";
-import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   createLifecycleEffects,
   isCapacityError,
@@ -56,7 +55,7 @@ import {
   type Standing,
 } from "../../core/forge.js";
 import { bounded, parseSince, threadNumber } from "../../core/inputs.js";
-import { parseLanguages, type Language } from "../../core/languages.js";
+import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr, markerFor } from "../../core/marker.js";
 import { writeSummary } from "../../core/summary.js";
 import {
@@ -95,7 +94,6 @@ interface Settings {
   readonly number: number | null;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  readonly apply: readonly Capability[];
   readonly dryRun: boolean;
   readonly sweep: boolean;
   readonly since: Date | null;
@@ -119,7 +117,6 @@ function readSettings(): Omit<Settings, "languages"> {
     token: core.getInput("github-token", { required: true }),
     number,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     dryRun: core.getBooleanInput("dry-run"),
     sweep,
     since: parseSince(core.getInput("since")),
@@ -128,16 +125,15 @@ function readSettings(): Omit<Settings, "languages"> {
 }
 
 /**
- * `languages:`/`languages` resolved leniently — unlike every other duty's
- * `resolveLanguages`, an unconfigured pair is not refused here, because a
+ * `languages:` resolved leniently — unlike every other duty's
+ * `resolveLanguages`, an unconfigured warrant is not refused here, because a
  * repository whose tracks all use the built-in English text or an explicit
- * `say:` map never had a reason to configure either. `[]` reads as English
+ * `say:` map never had a reason to configure one. `[]` reads as English
  * throughout `message.ts`.
  */
-function resolveThreadLanguages(warrant: Warrant, rawInput: string): readonly Language[] {
+function resolveThreadLanguages(warrant: Warrant): readonly Language[] {
   if (warrant.languages !== null) return warrant.languages;
-  const trimmed = rawInput.trim();
-  return trimmed.length === 0 ? [] : parseLanguages(trimmed);
+  return [];
 }
 
 interface Outcome {
@@ -146,8 +142,7 @@ interface Outcome {
   readonly unstale: readonly string[];
   readonly permanentlyExempt: string | null;
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
-  /** Why nothing was even evaluated — no `lifecycle:` policy, a `capabilities:` block that does not name this duty, or one of the hard pre-track skips (recursion guard, closed thread, unreadable creation date, `threads:` kind mismatch, draft exemption). `null` on every other path. */
+  /** Why nothing was even evaluated — no `lifecycle:` policy, a `duties:` block that does not name this duty, or one of the hard pre-track skips (recursion guard, closed thread, unreadable creation date, `threads:` kind mismatch, draft exemption). `null` on every other path. */
   readonly ungranted: string | null;
 }
 
@@ -158,7 +153,6 @@ function notGranted(reason: string): Outcome {
     unstale: [],
     permanentlyExempt: null,
     permitted: [],
-    withheld: [],
     ungranted: reason,
   };
 }
@@ -169,7 +163,7 @@ export interface Done {
   readonly commented: boolean;
   readonly closed: boolean;
   readonly unstaled: readonly string[];
-  /** Due steps this run recognised but could not act on — a capability the warrant or `apply` withheld. */
+  /** Due steps this run recognised but could not act on — a capability the warrant withheld. */
   readonly dueNotGranted: number;
 }
 
@@ -195,7 +189,6 @@ function threadKindAllowed(threads: LifecyclePolicy["threads"], isPullRequest: b
  */
 interface RunContext {
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   readonly ownLogin: string;
 }
 
@@ -217,7 +210,7 @@ async function evaluateThread(
   }
   if (warrant.unnamed("lifecycle")) {
     return notGranted(
-      `\`${warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`; once that block ` +
+      `\`${warrant.path}\`'s \`duties:\` block does not name \`lifecycle\`; once that block ` +
         "exists it is the whole answer, so add `lifecycle: [label, comment]` to it (or remove the " +
         "block to return to defaults).",
     );
@@ -295,7 +288,6 @@ async function evaluateThread(
     unstale: decision.unstale,
     permanentlyExempt: decision.permanentlyExempt,
     permitted: ctx.permitted,
-    withheld: ctx.withheld,
     ungranted: null,
   };
 }
@@ -432,7 +424,7 @@ async function runSweep(
     return;
   }
   if (authority.warrant.unnamed("lifecycle")) {
-    acc.ungranted = `\`${authority.warrant.path}\`'s \`capabilities:\` block does not name \`lifecycle\`.`;
+    acc.ungranted = `\`${authority.warrant.path}\`'s \`duties:\` block does not name \`lifecycle\`.`;
     return;
   }
 
@@ -499,11 +491,11 @@ export async function run(): Promise<void> {
     // `denied` is not read here: unlike the four duties that decide it once up
     // front, lifecycle asks `unnamed("lifecycle")` per thread inside
     // `evaluateThread`, because a sweep that is denied still has threads to
-    // report on. And `languages` is resolved leniently — an unconfigured pair
-    // is not refused here, it reads as English — so this is
+    // report on. And `languages` is resolved leniently — an unconfigured
+    // warrant is not refused here, it reads as English — so this is
     // `resolveThreadLanguages` rather than the strict `dutyLanguages`.
     const { authority } = await openAuthority(base.warrant, api, context.repo, "lifecycle");
-    const languages = resolveThreadLanguages(authority.warrant, core.getInput("languages"));
+    const languages = resolveThreadLanguages(authority.warrant);
     settings = { ...base, languages };
 
     // The label-existence rehearsal check runs before branching, so the
@@ -530,19 +522,14 @@ export async function run(): Promise<void> {
           "has no use for.",
       );
     }
-    const { permitted, withheld } = narrowWarned(
-      granted,
-      settings.apply,
-      "lifecycle",
-      settings.warrant,
-    );
+    const permitted = granted;
 
     // Resolved once per run and cached — the attribution gate every
     // un-staling decision reads needs to know who "our own actor" is before
     // it can tell a label we applied from one a human, or a different bot,
     // did.
     const ownLogin = await resolveOwnLogin(api);
-    const ctx: RunContext = { permitted, withheld, ownLogin };
+    const ctx: RunContext = { permitted, ownLogin };
 
     if (settings.sweep) {
       ranSweep = true;
@@ -571,24 +558,12 @@ export async function run(): Promise<void> {
       if (ranSweep) {
         report(bulk);
         await writeSummary(
-          renderSweepPage(
-            settings.warrant,
-            settings.dryRun,
-            bulk.results,
-            bulk.ungranted,
-            bulk.starvedRun,
-          ),
+          renderSweepPage(settings.dryRun, bulk.results, bulk.ungranted, bulk.starvedRun),
         );
       } else if (single !== null) {
         reportSingle(single.outcome, single.done);
         await writeSummary(
-          renderThreadPage(
-            settings.warrant,
-            settings.dryRun,
-            single.number,
-            single.outcome,
-            single.done,
-          ),
+          renderThreadPage(settings.dryRun, single.number, single.outcome, single.done),
         );
       }
     }

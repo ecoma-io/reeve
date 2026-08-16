@@ -8,10 +8,10 @@
  *
  * It is also the only place this duty's guardrails are exercised end to end.
  * Every one of them is a claim about what the action will not do to somebody's
- * repository — will not comment unless both the file and `apply` say so, will
- * not stack a second opinion under its own first one, will not act on a
- * verdict naming a thread the ranking never offered — and each is enforced in
- * a different module. A unit test can show `parseVerdict` refuses a number;
+ * repository — will not comment unless the warrant grants it, will not stack
+ * a second opinion under its own first one, will not act on a verdict naming
+ * a thread the ranking never offered — and each is enforced in a different
+ * module. A unit test can show `parseVerdict` refuses a number;
  * only this can show that nothing downstream published it anyway.
  *
  * Two collaborators are real and one is not. The bundle is real, rebuilt here
@@ -50,9 +50,10 @@ const VIETNAMESE_REPORT =
 /**
  * A warrant granting this duty its one capability. No `labels:` block — this
  * duty has no taxonomy to check names against, and an absent block is an empty
- * taxonomy rather than an error.
+ * taxonomy rather than an error. `languages:` is likewise absent, so detection
+ * reads this duty's documented default (`en, vi, zh`).
  */
-const WARRANT = ["version: 1", "capabilities:", "  duplicate: [comment]"].join("\n");
+const WARRANT = ["version: 1", "duties:", "  duplicate: [comment]"].join("\n");
 
 beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
@@ -356,9 +357,10 @@ interface Run {
 /**
  * One consumer's settings — deliberately not a copy of `action.yml`'s defaults,
  * which the runner supplies and this file never sees. A case names only what it
- * changes. `apply` stays at `none`: unlike triage there is no capability this
- * duty is granted for free, and report-only is the shape a repository gets
- * before it opts into anything.
+ * changes. The base warrant grants `comment`, and cases that care about the
+ * grant swap in a warrant that withholds it; `languages` is not an input at all
+ * — the warrant's own `languages:` key, or this duty's documented default
+ * (`en, vi, zh`), answers detection.
  */
 function baseInputs(stub: Stub, warrant: string): Record<string, string> {
   return {
@@ -367,9 +369,7 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "base-url": `${stub.url}/v1`,
     "api-key": "sk-stub-key",
     models: "stub-model",
-    languages: "en, vi",
     warrant,
-    apply: "none",
     confidence: "0.75",
     candidates: "5",
     "corpus-limit": "none",
@@ -475,7 +475,12 @@ afterEach(async () => {
 });
 
 describe("the action", () => {
-  it("reports the duplicate it found on every output, and touches nothing, on the default `apply: none`", async () => {
+  it("reports the duplicate it found on every output, and touches nothing, when the warrant grants it nothing", async () => {
+    // Unlike triage there is no capability this duty is granted for free —
+    // report-only is the shape a repository gets before it opts into anything,
+    // now spelled by a `duties:` block that drains `duplicate` on purpose.
+    await writeFile(warrantPath, ["version: 1", "duties:", "  duplicate: [none]"].join("\n"));
+
     const run = await runAction(stub);
 
     expect(run.code).toBe(0);
@@ -494,12 +499,12 @@ describe("the action", () => {
     });
     expect(run.summary).toContain("Proposed as a duplicate of #7.");
     expect(run.summary).toContain(
-      "Nothing was posted — `apply` does not name `comment`. `duplicate-of` and `score` still carry it.",
+      "Nothing was posted — the warrant does not grant `comment`. `duplicate-of` and `score` still carry it.",
     );
   });
 
-  it("posts the comment when both the file and the workflow allow it, and never posts it twice", async () => {
-    const first = await runAction(stub, { apply: "comment" });
+  it("posts the comment the warrant grants, and never posts it twice", async () => {
+    const first = await runAction(stub);
 
     expect(first.code).toBe(0);
     expect(first.outputs.commented).toBe("true");
@@ -513,7 +518,7 @@ describe("the action", () => {
     // comment always admits a model proposed this.
     expect(stub.effects.created[0]).toContain("Proposed by a model, not decided by a maintainer");
 
-    const again = await runAction(stub, { apply: "comment" });
+    const again = await runAction(stub);
 
     expect(again.code).toBe(0);
     // The identical rerun reached the identical fingerprint: nothing was
@@ -524,26 +529,29 @@ describe("the action", () => {
     expect(again.summary).toContain("Left its own previous comment unchanged");
   });
 
-  it("reports the duplicate but withholds the comment the file does not grant", async () => {
+  it("reports the duplicate but withholds the comment the warrant does not grant", async () => {
     // `[none]` is how a warrant grants nothing explicitly — a bare `[]` is
     // refused red as a probable mistake, which `warrant.test.ts` covers.
     await writeFile(warrantPath, WARRANT.replace("duplicate: [comment]", "duplicate: [none]"));
 
-    const run = await runAction(stub, { apply: "comment" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.effects.created).toEqual([]);
     expect(run.outputs["duplicate-of"]).toBe("7");
     expect(run.outputs.commented).toBe("false");
-    expect(run.log).toContain(
-      "`apply` asks for `comment`, which " + `\`${warrantPath}\` does not grant to duplicate`,
+    // The grant lives in the one place now: an explicit `[none]` is what asks
+    // for `comment` where the file gives nothing. `main.ts` names that file
+    // and that refusal in its own message — this case is about the conduit.
+    expect(run.summary).toContain(
+      "Nothing was posted — the warrant does not grant `comment`. `duplicate-of` and `score` still carry it.",
     );
   });
 
   it("grants duplicate nothing, spends no model call, and says why, when a written block does not name it", async () => {
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+    await writeFile(warrantPath, ["version: 1", "duties:", "  triage: [label]"].join("\n"));
 
-    const run = await runAction(stub, { apply: "comment" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.asked).toHaveLength(0);
@@ -551,7 +559,7 @@ describe("the action", () => {
     expect(run.outputs["duplicate-of"]).toBe("");
     expect(run.outputs.commented).toBe("false");
     expect(run.summary).toContain(
-      `\`${warrantPath}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block ` +
+      `\`${warrantPath}\`'s \`duties:\` block does not name \`duplicate\`; once that block ` +
         "exists it is the whole answer, so add `duplicate: [comment]` to it (or remove the block " +
         "to return to defaults).",
     );
@@ -604,7 +612,10 @@ describe("the action", () => {
     ];
     // `judging`'s default translation is prose no JSON parser reads — the
     // bridge fails to parse it and degrades, rather than failing the run.
+    // Report-only on purpose: nothing is posted whether or not the bridge
+    // succeeds, so the shape this guards is the decision itself.
     stub.answer = judging(verdict({ duplicate_of: 9 }));
+    await writeFile(warrantPath, ["version: 1", "duties:", "  duplicate: [none]"].join("\n"));
 
     const run = await runAction(stub);
 
@@ -651,7 +662,7 @@ describe("the action", () => {
   });
 
   it("changes nothing on a dry run, and reports what it would have done", async () => {
-    const run = await runAction(stub, { apply: "comment", "dry-run": "true" });
+    const run = await runAction(stub, { "dry-run": "true" });
 
     expect(run.code).toBe(0);
     expect(stub.effects.created).toEqual([]);
@@ -835,6 +846,9 @@ describe("the sweep", () => {
     // Processing #201, the corpus is every other open issue — #202 and #203 —
     // so the verdict names one of those.
     stub.answer = judging(verdict({ duplicate_of: 202 }));
+    // A `duties:` block that grants `duplicate` nothing is the report-only
+    // shape — the walk still decides and reports, and nothing is posted.
+    await writeFile(warrantPath, ["version: 1", "duties:", "  duplicate: [none]"].join("\n"));
 
     const run = await runAction(stub, sweepInputs({ since: "2026-01-01", limit: "1" }));
 
@@ -847,7 +861,7 @@ describe("the sweep", () => {
     expect(run.outputs.starved).toBe("false");
     expect(run.summary).toContain("| #201 |");
     expect(run.summary).not.toContain("| #203 |");
-    // `apply` stayed at `none`, so the verdict was reported, not posted.
+    // `[none]` grants nothing, so the verdict was reported, not posted.
     expect(run.summary).toContain("proposed #202, not applied");
     expect(stub.effects.created).toEqual([]);
   });
@@ -885,7 +899,7 @@ describe("the sweep", () => {
   });
 
   it("stops a sweep before listing anything when a written block does not name this duty", async () => {
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+    await writeFile(warrantPath, ["version: 1", "duties:", "  triage: [label]"].join("\n"));
     stub.issues = [candidate(301, "2026-01-10T00:00:00Z")];
 
     const run = await runAction(stub, sweepInputs());

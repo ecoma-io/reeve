@@ -45,7 +45,6 @@ export interface Run {
    */
   readonly published: boolean;
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   readonly spent: readonly Spend[];
   readonly modelNames: Names;
   readonly judgeNames: Names;
@@ -53,7 +52,7 @@ export interface Run {
   /** True when no warrant file existed and this ran on its own defaults — nothing. */
   readonly implicit: boolean;
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * simply does not name it. `null` on every ordinary run.
    */
   readonly ungranted: string | null;
@@ -64,7 +63,7 @@ export interface Run {
  *
  * Unlike triage's or translate's version of this sentence, there is no
  * default capability to point at — `respond` is the top rung, and the whole
- * design is that nothing short of an explicit `capabilities:` entry ever lets
+ * design is that nothing short of an explicit `duties:` entry ever lets
  * it post. So the honest sentence is not "ran on its defaults", it is "ran
  * with nothing granted", and that is true whether the warrant is missing
  * entirely or present but silent about `respond`.
@@ -73,7 +72,7 @@ function authority(run: Run): string {
   return (
     `No \`${run.warrant}\` — this duty found no warrant file. A first reply is the top ` +
     "rung of what Reeve may do, and it is granted nothing until a warrant explicitly " +
-    "names it: add `capabilities: { respond: [comment] }` to grant it."
+    "names it: add `duties: { respond: [comment] }` to grant it."
   );
 }
 
@@ -102,7 +101,6 @@ export function summarize(run: Run): string {
     "",
     ...(run.implicit ? [authority(run), ""] : []),
     verdict(run),
-    ...withheld(run),
     ...chromeNote(run),
     "",
     cost(run.spent, (spend) =>
@@ -118,8 +116,8 @@ export function summarize(run: Run): string {
  * one — see its own doc comment. `responded.languageCode` is the only code
  * this duty's chrome is ever keyed by, and `publish()`'s chrome only ever
  * renders on the one path that actually posts a comment — `run.published`,
- * never for a withheld draft (below the floor, `comment` not granted, an
- * empty draft) or a dry run, every one of which leaves the draft unread
+ * never for a withheld draft (below the floor, `comment` not granted,
+ * an empty draft) or a dry run, every one of which leaves the draft unread
  * anywhere the chrome-wrapped text would be.
  */
 function chromeNote(run: Run): readonly string[] {
@@ -153,7 +151,7 @@ function verdict(run: Run): string {
   // Shown here unless the thread itself already carries these exact words —
   // `published` is `true` only at the one place `main.ts` actually posts a
   // comment, never for a dry run, so every other outcome (below the floor,
-  // `comment` withheld, a dry run, or anything this summary's own `outcome`
+  // `comment` un-granted, a dry run, or anything this summary's own `outcome`
   // ladder does not recognise) leaves the draft unread anywhere else.
   // `respond-text` carries the same text for a workflow to route elsewhere,
   // but a job summary reader cannot see a step output — this page is the
@@ -213,16 +211,4 @@ function outcome(run: Run): string {
   // a state this ladder does not expect from `decide`. Named honestly rather
   // than defaulting to "posted", which `published` has already ruled out.
   return "not posted, for a reason this summary does not recognise";
-}
-
-function withheld(run: Run): string[] {
-  if (run.withheld.length === 0) return [];
-  return [
-    "",
-    ...run.withheld.map(
-      (capability) =>
-        `\`apply\` asks for \`${capability}\`, which \`${run.warrant}\` does not grant to this ` +
-        "duty. The narrower of the two wins, always.",
-    ),
-  ];
 }

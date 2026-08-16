@@ -88,25 +88,21 @@ indivisible GitHub scope, a token that can comment can also label, close and
 assign, which is why what this run may actually do is decided in code
 against the warrant file rather than by what the token can reach.
 
-**Warrant capability:** nothing else in Reeve needs this much ceremony, and
-that is deliberate. Both halves have to agree, and the narrower one wins:
+**Warrant grant:** nothing else in Reeve needs this much ceremony, and
+that is deliberate. The `duties:` block in the warrant is the whole
+authority:
 
 ```yaml
 # .github/reeve.yml
-capabilities:
+duties:
   respond: [comment]
 ```
 
-```yaml
-# the workflow
-with:
-  apply: comment
-```
-
-Leave either one silent about `respond` and the run drafts, reports, and
+Leave the block silent about `respond` and the run drafts, reports, and
 posts nothing — a real answer, not a misconfiguration, and the job summary
 says so. There is no smaller grant than `comment`; `respond` has exactly one
-capability to give. See [the capabilities table](../../guides/warrant.md#capabilities).
+capability to give. It needs `issues: write` on the token, and nothing on the
+workflow can widen the block. See [the duties table](../../guides/warrant.md#duties).
 
 ## Required inputs
 
@@ -128,9 +124,7 @@ Every input `respond/action.yml` declares.
 | `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that writes drafts.                                                                                 |
 | `judge-models`    | no       | _(empty)_                   | A panel that picks the best draft. Seats, not a fallback list — same grammar as [`translate`'s](translate.md#configuration).                                               |
 | `drafts`          | no       | `1`                         | Attempts per run, scored and judged. A first reply is worth more than one attempt.                                                                                         |
-| `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. The first named is the pivot for bridging a correction across a language gap.                                                        |
-| `warrant`         | no       | `.github/reeve.yml`         | Where `comment` is granted. A missing file grants `respond` nothing, same as one that is silent about it.                                                                  |
-| `apply`           | no       | `none`                      | `comment`, or `none`. The narrower of this and the warrant wins, always.                                                                                                   |
+| `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `comment` is granted here, under `duties:`. A missing file grants `respond` nothing, same as one that is silent about it.                      |
 | `confidence`      | no       | `0.75`                      | How sure the winning draft has to be before it is posted, between 0 and 1.                                                                                                 |
 | `guidance`        | no       | `.github/reeve-guidance.md` | A maintainer-authored file: tone, what this project never promises, where to point an unanswerable question.                                                               |
 | `screen-models`   | no       | _(empty)_                   | The spam/off-topic check, same one `triage` runs. Empty turns it off.                                                                                                      |
@@ -174,12 +168,12 @@ answers a person.
 
 Every output `respond/action.yml` declares.
 
-| Output         | Value                                                                                                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `responded`    | `true` when a reply was posted this run. `false` on every other path, including one that drafted an answer but the floor, the warrant, `apply`, or `dry-run` withheld it. |
-| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it. The reply, when there is one, is written in this language.         |
-| `respond-text` | The winning draft's own text, already sanitised, whether or not it was posted. Written on every run that reached a verdict. Empty on a run that stopped before drafting.  |
-| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                      |
+| Output         | Value                                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `responded`    | `true` when a reply was posted this run. `false` on every other path, including one that drafted an answer but the floor, the warrant, `dry-run`, or a code guard withheld it. |
+| `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it. The reply, when there is one, is written in this language.              |
+| `respond-text` | The winning draft's own text, already sanitised, whether or not it was posted. Written on every run that reached a verdict. Empty on a run that stopped before drafting.       |
+| `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                           |
 
 **`respond-text` is the output that matters most for a repository still
 tuning `confidence`.** It is populated on every run that reached a verdict,
@@ -233,7 +227,7 @@ See [Cost](../../guides/cost.md) for the full arithmetic.
   answered; reply to a comment, argue a point, or otherwise hold a
   conversation; answer over a human who got there first; answer a
   bot-opened issue or a thread the screen classified as spam or off-topic;
-  post without `comment` granted by both the warrant and `apply`; hide,
+  post without `comment` granted by the warrant; hide,
   soften, or make removable the machine-written notice. See
   [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 

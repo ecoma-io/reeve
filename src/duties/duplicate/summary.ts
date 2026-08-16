@@ -43,7 +43,7 @@ export interface PivotInfo {
 export interface Run {
   readonly thread: number;
   readonly dryRun: boolean;
-  /** Where the authority was read from, so a withheld capability can name the file. */
+  /** Where the authority was read from, so a refusal can name the file. */
   readonly warrant: string;
   /** The detected author language's display label, or null for `unknown`. */
   readonly language: string | null;
@@ -55,7 +55,7 @@ export interface Run {
    */
   readonly languageCode: string | null;
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * simply does not name it — distinct from every other reason nothing was
    * proposed, because here the judge was never asked.
    */
@@ -83,9 +83,8 @@ export interface Run {
    * no candidates worth naming.
    */
   readonly note: string | null;
-  /** What both the file and the workflow allow, and what only the workflow asked for. */
+  /** What the file grants — the sole authority, so the run's only `permitted` list. */
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   readonly done: Done;
   /** What the write step did, or null when no write was attempted at all. */
   readonly posted: Posted | null;
@@ -174,8 +173,8 @@ function verdict(run: Run): string {
       // sentence on the thread itself — `posted`/`replaced` outside a dry
       // run, the only two dispositions that actually wrote this rationale
       // where a reader can already see it. Every other disposition owes it
-      // here instead: `null` (`apply`/the warrant never let this write at
-      // all), `withheld` (B1's fail-closed refusal — nothing was written),
+      // here instead: `null` (the warrant never let this write at all),
+      // `withheld` (B1's fail-closed refusal — nothing was written),
       // and `unchanged` (this run reached the same fingerprint as a standing
       // comment, but a fingerprint covers the thread's own text and the
       // shortlist, not the rationale sentence — a rerun can carry a new one
@@ -186,9 +185,6 @@ function verdict(run: Run): string {
       if (!echoedOnThread) lines.push(...why(run));
     }
   }
-
-  const gap = withheld(run);
-  if (gap.length > 0) lines.push("", gap);
 
   return lines.join("\n");
 }
@@ -203,7 +199,7 @@ function verdict(run: Run): string {
  */
 function disposition(run: Run, duplicateOf: number): string {
   if (run.posted === null) {
-    return "Nothing was posted — `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
+    return "Nothing was posted — the warrant does not grant `comment`. `duplicate-of` and `score` still carry it.";
   }
 
   if (run.posted === "withheld") {
@@ -247,22 +243,6 @@ function disposition(run: Run, duplicateOf: number): string {
 function why(run: Run): string[] {
   if (run.rationale === null || run.rationale.length === 0) return [];
   return ["", `> ${run.rationale.replace(/\s+/g, " ").trim()}`];
-}
-
-/**
- * The capabilities the workflow asked for and the file does not grant.
- *
- * Not an error — the file is the authority — but a maintainer who wrote
- * `apply: comment` and got no comment would otherwise read a working action
- * as a broken one.
- */
-function withheld(run: Run): string {
-  if (run.withheld.length === 0) return "";
-
-  return (
-    `\`apply\` asks for ${run.withheld.map((capability) => `\`${capability}\``).join(", ")}, ` +
-    `which \`${run.warrant}\` does not grant to this duty. The narrower of the two wins, always.`
-  );
 }
 
 /**

@@ -33,7 +33,7 @@ its own domain:
 | 7   | **Risk interpretation** | Optional: model reads evidence, produces advisory risk level | Optional    |
 | 8   | **Group**               | Deterministic grouping by policy rule                        | No          |
 | 9   | **Policy**              | Match proposals against `dependa:` warrant key               | No          |
-| 10  | **Enforce**             | Check capabilities, narrow with `apply` input                | No          |
+| 10  | **Enforce**             | Check what the warrant's `duties:` block granted             | No          |
 | 11  | **Publish**             | Modify manifest files, open/update PRs                       | No          |
 
 Stages 1–6 and 8–11 are deterministic. Stage 7 is the only one that

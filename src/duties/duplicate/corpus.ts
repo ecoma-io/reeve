@@ -150,12 +150,12 @@ export async function listCorpus(
 /**
  * Whether at least one corpus candidate is written in the pivot language
  * specifically — not merely in some language other than the thread's own —
- * which is the fact `action.yml`'s own `languages` input promises triggers
- * the bridge, and the fact that makes `translateToPivot` worth a request. A
- * corpus that holds a candidate in a third configured language but none in
- * the pivot would still fail to match after the bridge ran, so checking
- * "not the thread's language" would spend a translation a same-language BM25
- * pass could never have used anyway.
+ * which is the fact the configured languages promise triggers the bridge, and
+ * the fact that makes `translateToPivot` worth a request. A corpus that holds
+ * a candidate in a third configured language but none in the pivot would
+ * still fail to match after the bridge ran, so checking "not the thread's
+ * language" would spend a translation a same-language BM25 pass could never
+ * have used anyway.
  *
  * Every check here is free: `detectLanguage` is called with no `pick`
  * argument, so it never reaches past script narrowing and the local

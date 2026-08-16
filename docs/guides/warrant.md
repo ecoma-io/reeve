@@ -15,11 +15,11 @@ and enforced against the file rather than against anything a model said.
 this file. Write nothing, and a duty runs at level 0 — the narrowest authority
 Reeve defines in code, built from the labels and the descriptions your
 repository already has, with nothing typed twice. Write `.github/reeve.yml`
-with a taxonomy and no `capabilities:` block, and every duty stays on that
+with a taxonomy and no `duties:` block, and every duty stays on that
 same narrow default — a taxonomy sharpens what gets decided, never what is
 allowed to act, and a taxonomy-only file is level 1 on its own, complete and
 worth stopping at for as long as it serves you. **Only once you write a
-`capabilities:` block does enumeration become total:** a duty the block does
+`duties:` block does enumeration become total:** a duty the block does
 not name is then granted nothing at all, not its old default, because once
 you begin enumerating who may act, the enumeration is the whole answer, and
 the file's mere existence never was. That block — with `owner` and
@@ -28,10 +28,10 @@ way, in the same file, for as long as you use Reeve.
 
 **Level 0 is [Stage 1](../doctrine/north-star.md#7-roadmap), landed: an absent warrant
 is an implicit authority, not a failed run.** The corrected reading of the
-`capabilities:` block above is [Stage 3](../doctrine/north-star.md#7-roadmap), also
-landed: a duty left out of an already-written `capabilities:` block is
-granted nothing at all, not its old default — [the capabilities reference
-below](#capabilities) is where that is spelled out in full.
+`duties:` block above is [Stage 3](../doctrine/north-star.md#7-roadmap), also
+landed: a duty left out of an already-written `duties:` block is
+granted nothing at all, not its old default — [the duties reference
+below](#duties) is where that is spelled out in full.
 
 The concept underneath this page — capabilities, the warrant, and the ladder
 as one model — is explained at a level above this page's how-to detail in
@@ -104,7 +104,7 @@ you add a warrant later.
 
 ### Level 1 — Taxonomy only
 
-Write `.github/reeve.yml` with labels and no `capabilities:` block. A taxonomy
+Write `.github/reeve.yml` with labels and no `duties:` block. A taxonomy
 sharpens what gets decided without touching what is allowed to act.
 
 ```yaml
@@ -119,12 +119,13 @@ labels:
       A feature that was never built, or a question about how to use something.
 ```
 
-No capabilities changed. `triage` still only labels, but now it sorts against
-your written definition of `bug` instead of the label description GitHub shows.
+No granted capabilities change. `triage` still only labels, but now it sorts
+against your written definition of `bug` instead of the label description
+GitHub shows.
 
-### Level 2 — Capabilities
+### Level 2 — Duties
 
-Add a `capabilities:` block. **The moment it exists, enumeration is total:** a
+Add a `duties:` block. **The moment it exists, enumeration is total:** a
 duty the block does not name is granted nothing at all, not its old default.
 
 ```yaml
@@ -133,7 +134,7 @@ version: 1
 labels:
   - name: bug
     description: Something broken in a released version.
-capabilities:
+duties:
   triage: [label, close, assign]
   translate: [edit-body]
 ```
@@ -142,7 +143,7 @@ capabilities:
 they are granted nothing. If you want `duplicate` to comment, add it:
 
 ```yaml
-capabilities:
+duties:
   triage: [label, close, assign]
   translate: [edit-body]
   duplicate: [comment]
@@ -159,7 +160,7 @@ version: 1
 labels:
   - name: bug
     description: Something broken in a released version.
-capabilities:
+duties:
   triage: [label, close, assign, record]
   translate: [edit-body]
   duplicate: [comment]
@@ -184,14 +185,15 @@ version: 1
 
 # What each duty may do to a thread. Absent means the duty's own default, which
 # is always the cheapest reversible action and nothing else.
-capabilities:
+duties:
   triage: [label]
   translate: [edit-body]
   duplicate: [comment]
 
-# What to translate into. Optional — leave it out and the `languages` input
-# on each duty answers this instead, exactly as it always has. Written here,
-# it is the whole answer: the input is ignored, and the run says so once.
+# What to translate into. Optional — leave it out and each duty's own
+# documented default answers, exactly as it always has. Written here,
+# it is the whole answer: the duty's default is ignored, and the run says
+# so once.
 languages:
   - en
   - vi
@@ -287,17 +289,17 @@ gets confused with most often. If you do not know which that is,
 turns on an English idiom does not survive contact with a report written in
 Vietnamese. Say what the boundary _is_, not what it sounds like.
 
-## Capabilities
+## Duties
 
 The second half of the warrant: not what the labels mean, but what a duty may do
-at all. [The full table](../reference/warrant-format.md#capabilities) — what each
-capability permits and its default — is in the reference; this section is the
+at all. [The full table](../reference/warrant-format.md#the-capabilities-table) — what each
+capability grants and its default — is in the reference; this section is the
 behaviour around it.
 
 **A duty left out of the block entirely keeps its own default, for as long as
-no `capabilities:` block exists at all** — that is level 1 of
+no `duties:` block exists at all** — that is level 1 of
 [the ladder](../doctrine/north-star.md#3-the-ladder), and a taxonomy-only warrant stays
-there for as long as that is all you want. Write a `capabilities:` block at
+there for as long as that is all you want. Write a `duties:` block at
 all, though, and enumeration becomes total: a duty you left out of it is
 granted nothing, not its old default, because naming who may act is the whole
 answer once you start. **This is [Stage 3](../doctrine/north-star.md#7-roadmap),
@@ -315,10 +317,18 @@ their report was not worth keeping open, and costs you a contributor.
 Turn the others on deliberately, one at a time, after a [`dry-run`](dry-run.md) on your own
 backlog told you what the rate actually is.
 
-**`duplicate` has no default at all — not even the cheapest one.** Its own
-`capabilities:` entry and its `apply` input both start at nothing, so posting
-a comment naming a suspected duplicate needs `duplicate: [comment]` written
-here **and** `apply: comment` on the workflow; either alone still leaves the
+**This file is the whole authority — the workflow adds nothing.** The action
+inputs handle how the runtime operates (`dry-run`, `number`, `limit`, and
+friends); they cannot grant a capability. A workflow can restrict what this
+block granted, never widen it. `duplicate`, `respond`, harness grants — every
+write this page lists comes out of this file alone. The narrower-of-the-two
+rule that used to sit between the file and each action's `apply` input no
+longer exists, because there is no second half of the gate to be narrower
+than.
+
+**`duplicate` has no default at all — not even the cheapest one.** Its
+`duties:` entry starts at nothing, so posting a comment naming a suspected
+duplicate needs `duplicate: [comment]` written here; anything else leaves the
 run reporting `duplicate-of` and `score` without touching the thread. See
 [the duty's own page](../reference/duties/duplicate.md) for why a claim about somebody
 else's report did not earn the same free default a label did.
@@ -327,15 +337,15 @@ else's report did not earn the same free default a label did.
 reversible version of "post a comment that reads as this project answering a
 stranger." So an absent warrant, or a written one that is simply silent about
 `respond`, grants it nothing — not `comment`, not anything — until
-`capabilities: { respond: [comment] }` names it explicitly. See [the
+`duties: { respond: [comment] }` names it explicitly. See [the
 `respond` duty](../reference/duties/respond.md#required-permissions).
 
 **Neither does `propose`.** It is `triage`'s own sweep-only capability, not a
 duty of its own — opening or updating one pull request that adds or retires
 taxonomy labels from a monorepo's own package layout, gated by evidence
 before it ever proposes a name. It needs `contents: write` and
-`pull-requests: write` on the token, `triage: [propose]` under
-`capabilities:`, and `propose` in `apply`, same as `record`. It is not
+`pull-requests: write` on the token, and `triage: [propose]` under
+`duties:`, same as `record`. It is not
 a self-amending authority: the file it changes is a pull request like any
 other, reviewed and merged by a person — no capability of Reeve's ever
 merges one. See [the `triage` duty's own page](../reference/duties/triage.md).
@@ -353,19 +363,10 @@ and says so in a notice — the state file still lands, just without the PR
 wrapping it. See [the `harmonise` duty](../reference/duties/harmonise.md) and
 [the `triage` duty](../reference/duties/triage.md).
 
-**A duty also takes an `apply` input, and the narrower of the two wins.** The
-file and the workflow are both reviewable, they can disagree, and the fail-safe
-direction is the intersection. A workflow can restrict what the file granted; it
-can never widen it.
-
-**`none` is not `dry-run`.** `none` is a permanent configuration for a repository
-that consumes the outputs itself and does its own applying. [`dry-run`](dry-run.md) is a
-rehearsal. They differ in intent, and outputs let a workflow tell them apart.
-
 ## Languages
 
-`languages:` is optional, and it moves one more thing off the workflow and
-into the file that is reviewed like code:
+`languages:` is optional, and it moves one more thing off each duty's default
+and into the file that is reviewed like code:
 
 ```yaml
 languages:
@@ -374,26 +375,24 @@ languages:
   - "zh-Hans:简体中文:Hans"
 ```
 
-The grammar is the same one the `languages` input has always used — a bare
+The grammar is the one every duty has always used — a bare
 code, or a spelled-out `code:Label:Script` with `+` between scripts for a
-language written in several — because this is the same list read from a
-different place, not a second format to learn. One YAML element is one entry,
-so a label with a comma in it needs no special care here, where the input's
-one-line form would read that comma as a separator. See
-[Languages](languages.md) for the full grammar and how detection uses it.
+language written in several. One YAML element is one entry.
+See [Languages](languages.md) for the full grammar and how detection uses it.
 
 **Written here, it is the whole answer.** Once `languages:` exists in the
-warrant, the `languages` input on `translate` and `triage` is not consulted
-at all — not blended with it, not a fallback for anything it left out — and
-the run says so once, naming both the file and the input, rather than
-silently picking one. Leave the key out and nothing changes: the input
-answers the question exactly as it always has. Writing the key with nothing
-under it is refused rather than read as leaving it out — an unfinished edit
-should fail loudly, not quietly hand the answer back to the input.
+warrant, each duty's own default list is not consulted at all — not blended
+with it, not a fallback for anything it left out — and the run says so once,
+rather than silently picking one. Leave the key out and nothing changes: the
+duty's documented default answers exactly as it always has. Writing the key
+with nothing under it is refused rather than read as leaving it out — an
+unfinished edit should fail loudly, not quietly hand the answer back to a
+default.
 
 An implicit warrant — no file at the default path — carries no languages of
-its own, for the same reason it carries no capabilities of its own: there is
-nothing written down to read. The input answers the question there too.
+its own, for the same reason it carries no duties of its own: there is
+nothing written down to read. Each duty's documented default answers there
+too.
 
 ## What no capability can ever turn on
 
@@ -445,7 +444,7 @@ No checkout happens for this — the commit goes through the Contents API — an
 a token without the scope fails the run the way any other authentication
 problem does, plainly. When `state-branch` is set and `open-pr` is also
 granted, the corrections are written to that branch and a draft PR is opened
-instead; see [the `open-pr` capability](#capabilities) above.
+instead; see [the duties section](#duties) above.
 
 **`record` also commits a human _reversal_ of Reeve's own action** — not only a
 human's forward decision. Two shapes:
@@ -456,9 +455,9 @@ human's forward decision. Two shapes:
   which is what lets a later prompt render it under a separate "a human
   undid one of Reeve's own actions" heading, structurally apart from an
   ordinary decision.
-- A thread Reeve closed as a duplicate, that a human then reopened. This needs
-  `apply` to also grant `close` — nothing records a reversal of a close this
-  installation never makes — and the workflow's trigger to include
+- A thread Reeve closed as a duplicate, that a human then reopened. This
+  needs the warrant to grant `close` — nothing records a reversal of a close
+  this installation never makes — and the workflow's trigger to include
   `reopened`. A reopen from the thread's own author is deliberately never
   recorded this way, even though an author has obvious standing over their own
   thread: an author's disagreement is not a maintainer's agreement. It is
@@ -468,16 +467,14 @@ human's forward decision. Two shapes:
 Either shape is checked, in code, on every close a duplicate verdict would
 otherwise make: see [What no capability can ever turn on](#what-no-capability-can-ever-turn-on).
 
-**`record` needs naming in both halves — this file and the workflow's
-`apply`.** [The narrower of the two wins](#capabilities) for `record` exactly
-as it does for `label` or `comment`, and granting it here alone is not
-enough: `apply` defaults to `label`, so an eligible event on a run whose file
-grants `record` but whose workflow does not name it re-triages the thread
-instead of recording it, and a `core.notice` on that run says so. Both halves
-need to agree:
+**`record` is granted by this file alone.** The `duties:` block in
+`.github/reeve.yml` is the whole authority — there is no second knob on the
+workflow to name `record` in. A run triggered on an eligible event records
+because the file grants it, and re-triages instead when the file does not.
+The workflow needs only the trigger; the grant lives in the file:
 
 ```yaml
-capabilities:
+duties:
   triage: [label, close, record]
 ```
 
@@ -502,7 +499,6 @@ jobs:
       - uses: ecoma-io/reeve/triage@v0.1
         with:
           number: ${{ github.event.issue.number }}
-          apply: label, close, record
 ```
 
 The `concurrency` group is what keeps two of this thread's events from racing
@@ -515,8 +511,9 @@ for the same pattern on the trigger that starts the run in the first place.
 See [the triage duty](../reference/duties/triage.md#configuration) for the full shape of this.
 
 **The pivot language is what makes the store cross-language.** By default it
-is the first language `triage` resolves — from `languages:` here, or from the
-`languages` input. Write `pivot:` in this file to name it instead:
+is the first language `triage` resolves — from `languages:` here, or from
+`triage`'s own documented default when the file is silent. Write `pivot:` in
+this file to name it instead:
 
 ```yaml
 pivot: en
@@ -557,7 +554,7 @@ write a `not` for every pair you watch it confuse.
 ```yaml
 version: 1
 
-capabilities:
+duties:
   triage: [label]
 
 labels:

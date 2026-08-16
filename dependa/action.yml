@@ -93,30 +93,17 @@ inputs:
       Where the permissions live. `edit-file` and `open-pr` are this duty's
       capabilities, and they are NOT granted by default — committing files
       and opening PRs is too much authority for zero-config. Once a
-      `capabilities:` block is written in this file, the enumeration is total:
+      `duties:` block is written in this file, the enumeration is total:
       leaving `dependa` out of it grants this duty nothing, and the run says
       so rather than guessing.
 
       Missing at this default path, there is no failure: the duty discovers
-      and classifies without touching the repository, exactly as if `apply`
-      were `none`. Point this at a path of your own instead, and a file missing
-      there fails the run red, because naming a file that is not there is a
-      configuration mistake rather than an absence.
+      and classifies without touching the repository, exactly as if the warrant
+      granted it nothing. Point this at a path of your own instead, and a file
+      missing there fails the run red, because naming a file that is not there
+      is a configuration mistake rather than an absence.
     required: false
     default: .github/reeve.yml
-
-  apply:
-    description: >-
-      What this run may do: `edit-file, open-pr`, or `none` for a run that
-      discovers, classifies, and groups but never commits or opens a PR. The
-      narrower of this and the warrant file wins, always — the same double-gate
-      every other duty applies, with the same shape: discovery and
-      classification all run and spend whatever they were going to spend
-      regardless of this input, and only the write at the end is gated. `none`
-      is a good way to watch what a run would have changed before it is allowed
-      to.
-    required: false
-    default: none
 
   ecosystems:
     description: >-

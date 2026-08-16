@@ -14,7 +14,7 @@
  *      happen before a single request: a taxonomy naming a renamed label would
  *      otherwise look exactly like a model that agreed with nothing.
  *   1a. **Stop, for a block that said nothing about this duty.** A written
- *      `capabilities:` block that does not name `triage` grants it nothing,
+ *      `duties:` block that does not name `triage` grants it nothing,
  *      deliberately, and no verdict downstream can change that — so the run
  *      stops here, before the thread is even fetched, and says why. See the
  *      short-circuit below `readWarrant` for the full argument.
@@ -30,7 +30,7 @@
  *      inside a boundary drawn for that call alone.
  *   7. **Verify.** In code, against the warrant file and the confidence floor.
  *      Never against the model's own account of what it was allowed to do.
- *   8. **Apply.** Only what the file and `apply` both permit.
+ *   8. **Apply.** Only what the file grants.
  *
  * **The free screen runs before language detection**, which is the one place
  * this file departs from the order the documentation draws. Detection can reach
@@ -41,7 +41,7 @@
  *
  * **The failure mode of this duty is doing nothing.** Every model failing, a
  * verdict that does not parse, a verdict under the floor, a thread that was
- * screened out and a `capabilities:` block that does not name this duty are all
+ * screened out and a `duties:` block that does not name this duty are all
  * green runs that applied nothing and said why. Only a warrant that does not
  * parse — an absent file at a path a consumer chose is one of these, an absent
  * file at the default is not — and a thread that cannot be read are
@@ -71,8 +71,8 @@
  * that needs it.** Reading the shared inputs (`readCore`), assembling the
  * provider client with its rotation, temperature and metering
  * (`assembleClient`), opening the authority — warrant file or the implicit
- * one — and warning about withheld capabilities (`openAuthority`,
- * `narrowWarned`), walking the backlog (`sweepThreads`), recalling
+ * one — and warning about withheld capabilities (`openAuthority`), walking
+ * the backlog (`sweepThreads`), recalling
  * corrections including the cross-language bridge (`recallCorrections`, and
  * `RECALLED` — the default every recalling duty now shares), and ending the
  * run (`warnIfStarved`, `writeRunSummary`). Each of those was a near-copy in
@@ -83,14 +83,7 @@ import { context, getOctokit } from "@actions/github";
 
 import { readAtlas, type AtlasApi } from "../../core/atlas.js";
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import {
-  enforceLabels,
-  narrow,
-  narrowWarned,
-  owners,
-  parseApply,
-  type Refusal,
-} from "../../core/enforce.js";
+import { enforceLabels, owners, type Refusal } from "../../core/enforce.js";
 import {
   createEffects,
   createRepositoryLabel,
@@ -146,7 +139,6 @@ import {
   describeRecordOutcome,
   labelChange,
   recordCorrection,
-  recordGrantedByFile,
   recordGrantedByRun,
   recordReversal,
   recordTrigger,
@@ -173,6 +165,10 @@ import {
 } from "./propose.js";
 import { NOTHING, triage, type Verdict } from "./verdict.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
+import { parseLanguages } from "../../core/languages.js";
+
+/** What detection reads when the warrant's `languages:` key is silent. */
+const DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 
 /**
  * One provider per stage, each counting its own requests.
@@ -198,7 +194,6 @@ export interface Outcome {
   readonly applied: readonly string[];
   readonly refused: readonly Refusal[];
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   /** Why there is no verdict, when there is none. */
   readonly note: string | null;
   /**
@@ -217,7 +212,7 @@ export interface Outcome {
   /** Repository labels the implicit warrant left out for carrying no description. */
   readonly excludedLabels: readonly string[];
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * exists and simply does not name it. `null` on every other path, including
    * the ordinary "nothing was applied" a low-confidence or refused verdict
    * produces — this is specifically the reason nothing was ever attempted.
@@ -262,12 +257,14 @@ function newAccumulator(): SweepAccumulator {
  * **`record` composes with `sweep` by replacing the loop's whole body, not by
  * running alongside it.** A single-thread run tells the two apart by the
  * triggering event — a label change is a correction, anything else is a
- * verdict — but a sweep has no such event per thread, only a warrant and an
- * `apply` that either grant `record` or do not. So the same test single-thread
- * mode uses at its own branch point (`recordGrantedByRun`) is made once here,
- * for the whole run: granted, every candidate is recorded as bulk-migrated
- * history; not granted, every candidate is triaged, exactly as before this
- * capability existed.
+ * verdict — but a sweep has no such event per thread, only a warrant and a
+ * `sweep-state`. So the same test single-thread mode uses at its own branch
+ * point (`recordGrantedByRun`) is made once here, for the whole run — and
+ * only when the sweep was deliberately scoped to a closed/all listing: bulk
+ * migration is a hand-run one-off (`sweep-state: all`), never what the
+ * scheduled `sweep-state: open` sweep does. Scoped that way, every candidate
+ * is recorded as bulk-migrated history; otherwise every candidate is triaged,
+ * exactly as before this capability existed.
  */
 async function runSweep(
   acc: SweepAccumulator,
@@ -283,8 +280,15 @@ async function runSweep(
   }
 
   const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
-  const { permitted } = narrow(grantedCapabilities, settings.apply);
-  const recording = recordGrantedByRun(permitted);
+  const permitted = grantedCapabilities;
+  // Bulk migration is a deliberate, hand-run one-off, not what a scheduled
+  // sweep does: the ordinary sweep (`sweep-state: open`) is an incremental
+  // label pass, so `record` composes with `sweep` only when the sweep was
+  // explicitly scoped to a closed/all listing — the `sweep-state: all` a
+  // maintainer writes by hand to import history. Gating it here keeps the
+  // weekly schedule labelling the backlog instead of silently writing
+  // corrections for every open thread.
+  const recording = recordGrantedByRun(permitted) && settings.sweepState !== "open";
   acc.recording = recording;
 
   // When state-branch is set, open-pr must also be granted — the branch-write
@@ -405,10 +409,9 @@ async function runSweep(
  * about one thread, so it runs once per sweep rather than inside
  * {@link runSweep}'s per-thread loop.
  *
- * Double-gated exactly like `record`: granted by the warrant's
- * `capabilities:` and named by the workflow's `apply`, narrower wins, with
- * the same asymmetric notice `record` already gives when the file grants it
- * and `apply` does not ask for it. A capacity error and an authentication
+ * Gated like every other capability: granted by the warrant's `duties:`
+ * block and nothing else — the file is the whole authority, so there is no
+ * second gate for `propose` to clear. A capacity error and an authentication
  * failure are both `runPropose`'s own business (D12) — this only logs what
  * it decided.
  */
@@ -426,22 +429,8 @@ async function runProposeSweep(
   authority: Authority,
   settings: Settings,
 ): Promise<ProposeReport | null> {
-  const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
-  if (!grantedCapabilities.includes("propose")) return null;
-
-  const { permitted } = narrow(grantedCapabilities, settings.apply);
-  if (!permitted.includes("propose")) {
-    core.notice(
-      `\`${authority.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep ` +
-        "did not propose anything. The narrower of the two wins — add `propose` to `apply` as well to " +
-        "enable it.",
-    );
-    return buildProposeReport({
-      notes: [
-        "`apply` does not name `propose`, so this sweep declined to propose anything this run.",
-      ],
-    });
-  }
+  const permitted = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  if (!permitted.includes("propose")) return null;
 
   // The two reads `runPropose`'s own capacity boundary cannot see, under the
   // same D12 classification it applies inside: capacity is weather, reported
@@ -530,7 +519,6 @@ function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
     screenModels: cheap.models,
     screenNames: cheap.names,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     confidence: fraction("confidence", core.getInput("confidence")),
     correctionsDir: core.getInput("corrections-dir", { required: true }),
     about: core.getInput("about"),
@@ -572,14 +560,13 @@ export async function run(): Promise<void> {
     // The authority first, and before anything is spent.
     const { authority, denied } = await openAuthority(base.warrant, api, context.repo, "triage");
 
-    // Only now, because whether the warrant or the input answers this is the
-    // authority's to decide — and once it does, `languages` is complete and
-    // `settings` can become the object every stage below already expects.
-    // Except when the same authority already denied this duty outright — that
-    // run is promised a green no-op, and red-failing it over a `languages`
-    // nobody configured would fail it over configuration it was never going
-    // to use.
-    const languages = dutyLanguages(authority.warrant, denied, core.getInput("languages"));
+    // Only now, because whether the warrant answers this is the authority's to
+    // decide — and once it does, `languages` is complete and `settings` can
+    // become the object every stage below already expects. Except when the same
+    // authority already denied this duty outright — that run is promised a
+    // green no-op, and red-failing it over a `languages` nobody configured
+    // would fail it over configuration it was never going to use.
+    const languages = dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES);
 
     // Same warrant-wins, input-falls-back pattern as `languages` above, on the
     // one field the spam screen reads and nothing else does.
@@ -611,7 +598,7 @@ export async function run(): Promise<void> {
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context.repo, number };
 
-      // A written `capabilities:` block that does not name `triage` grants it
+      // A written `duties:` block that does not name `triage` grants it
       // nothing, and no verdict this run could reach changes that — so this
       // sits here, as early as the answer is already certain, and before the
       // thread, the taxonomy check, or a single model call spends anything on
@@ -635,13 +622,13 @@ export async function run(): Promise<void> {
           outcome = recursionGuardOutcome();
         } else {
           // `record` takes a labelled/unlabelled event or a reopen, from a
-          // human, and only when both the file and the workflow's `apply`
-          // grant it — the same narrowing every other capability goes through.
-          // Every other event, or the capability simply not granted, is
-          // today's behaviour: a verdict, not a recording.
+          // human, and only when the file grants it — the same single
+          // authority every other capability goes through. Every other event,
+          // or the capability simply not granted, is today's behaviour: a
+          // verdict, not a recording.
           const trigger = recordTrigger();
           const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
-          const { permitted } = narrow(grantedCapabilities, settings.apply);
+          const permitted = grantedCapabilities;
 
           // When state-branch is set, open-pr must also be granted — the
           // branch-write path opens a draft PR, and recording without it would
@@ -686,22 +673,6 @@ export async function run(): Promise<void> {
               ),
               permitted,
               settings.dryRun,
-            );
-          }
-
-          // The file grants `record` but `apply` narrowed it away — the one
-          // direction `withheld` (used inside `decide` below) does not already
-          // cover, so a maintainer who granted it in the file and stopped there
-          // does not get a silent full re-triage with nothing explaining why.
-          if (
-            trigger.eligible &&
-            recordGrantedByFile(grantedCapabilities) &&
-            !recordGrantedByRun(permitted)
-          ) {
-            core.notice(
-              `\`${authority.warrant.path}\` grants \`record\`, but \`apply\` does not name it, ` +
-                "so this event was triaged instead of recorded. The narrower of the two wins — " +
-                "add `record` to `apply` as well to record it instead.",
             );
           }
 
@@ -796,10 +767,9 @@ export async function run(): Promise<void> {
       // whether corrections went to the branch in the first place. When it
       // was not, corrections went to the default branch and there is no
       // branch PR to open.
-      const prPermitted = narrow(
-        authority.warrant.granted("triage", DEFAULT_CAPABILITIES),
-        settings.apply,
-      ).permitted.includes("open-pr");
+      const prPermitted = authority.warrant
+        .granted("triage", DEFAULT_CAPABILITIES)
+        .includes("open-pr");
 
       const correctionsRecorded = settings.sweep
         ? bulk !== null && bulk.recording && bulk.results.length > 0
@@ -904,12 +874,7 @@ async function decide(
     );
   }
 
-  const { permitted, withheld } = narrowWarned(
-    warrant.granted("triage", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "triage",
-    warrant.path,
-  );
+  const permitted = warrant.granted("triage", DEFAULT_CAPABILITIES);
 
   /** A run that stopped early: no verdict, and the guardrails still reported. */
   const stopped = (screened: Outcome["screenedOut"], language: string | null): Outcome => ({
@@ -919,7 +884,6 @@ async function decide(
     applied: [],
     refused: [],
     permitted,
-    withheld,
     note: null,
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: authority.implicit,
@@ -1050,7 +1014,6 @@ async function decide(
     screenedOut: null,
     verdict,
     permitted,
-    withheld,
     note,
     memory: { size: memorySize, recalled: recalled.length, pivotRecalled },
     implicit: authority.implicit,
@@ -1077,8 +1040,8 @@ async function decide(
 
   return {
     ...decided,
-    // Narrowed here rather than at apply time, so `labels` reports what this run
-    // may do and a rehearsal rehearses the same narrowing a real run has.
+    // Checked here rather than at apply time, so `labels` reports what this run
+    // may do and a rehearsal rehearses the same gate a real run has.
     applied: permitted.includes("label") ? decision.applied : [],
     refused: decision.refused,
   };
@@ -1127,11 +1090,11 @@ async function createMissingLabels(
 /**
  * The gate in front of {@link createMissingLabels}: a taxonomy entry marked
  * `create: true` is a human-merged instruction, but creating it is still a
- * repository mutation — `apply: none`/a `capabilities:` block that narrows
- * `label` away, and `dry-run: true`, both mean "not this run," the same as
- * they mean for every other write this duty makes. Silent about neither: a
- * withheld or rehearsed creation still says so, rather than looking like the
- * taxonomy had nothing missing.
+ * repository mutation — a `duties:` block that does not grant `label`, and
+ * `dry-run: true`, both mean "not this run," the same as they mean for every
+ * other write this duty makes. Silent about neither: a denied or rehearsed
+ * creation still says so, rather than looking like the taxonomy had nothing
+ * missing.
  */
 async function resolveMissingLabels(
   api: TrackerApi,
@@ -1173,7 +1136,6 @@ function recursionGuardOutcome(): Outcome {
     applied: [],
     refused: [],
     permitted: [],
-    withheld: [],
     note: null,
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: false,
@@ -1190,13 +1152,12 @@ function notGranted(warrant: Warrant): Outcome {
     applied: [],
     refused: [],
     permitted: [],
-    withheld: [],
     note: null,
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: false,
     excludedLabels: [],
     ungranted:
-      `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block ` +
+      `\`${warrant.path}\`'s \`duties:\` block does not name \`triage\`; once that block ` +
       "exists it is the whole answer, so add `triage: [label]` to it (or remove the block to " +
       "return to defaults).",
   };
@@ -1211,8 +1172,8 @@ function notGranted(warrant: Warrant): Outcome {
  *
  * **The hard gate.** A `close`-permitted verdict naming a `duplicateOf` is
  * not enough on its own to close a thread — `gateClose` gets the last word,
- * checked here in code, after everything upstream (the model, `enforce`,
- * `narrow`) has already agreed a close would otherwise be allowed. A model's
+ * checked here in code, after everything upstream (the model, `enforce`) has
+ * already agreed a close would otherwise be allowed. A model's
  * own answer cannot talk this refusal down, which is the entire property
  * `recall`'s prompt-side examples cannot provide by themselves: recall is
  * advice, this is enforcement. See `gateClose`'s own doc comment for what it

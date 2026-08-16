@@ -30,7 +30,6 @@ function run(over: Partial<Run> = {}): Run {
     refused: [],
     duplicateOf: null,
     permitted: ["label"],
-    withheld: [],
     done: { labels: ["bug"], commented: false, assigned: [], closed: false },
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     note: null,
@@ -164,7 +163,7 @@ describe("summarize", () => {
     const page = summarize(run({ duplicateOf: 12 }));
 
     expect(page).toContain("possible duplicate of #12");
-    expect(page).toContain("`apply` does not name `close`");
+    expect(page).toContain("the warrant does not grant `close`");
   });
 
   it("says so when it did close one", () => {
@@ -189,29 +188,6 @@ describe("summarize", () => {
 
   it("says nothing about other effects when there were none", () => {
     expect(summarize(run())).not.toContain("Also:");
-  });
-
-  it("names the capabilities the workflow asked for and the file does not grant", () => {
-    // Not an error — the file is the authority — but a maintainer who wrote
-    // `apply: label, comment` and got no comment would otherwise read a working
-    // action as a broken one.
-    const page = summarize(run({ permitted: ["label"], withheld: ["comment", "close"] }));
-
-    expect(page).toContain("`apply` asks for `comment`, `close`");
-    expect(page).toContain("`.github/reeve.yml` does not grant to this duty");
-  });
-
-  it("says the same thing on a run the screen stopped", () => {
-    // The gap between what was asked for and what is granted is a configuration
-    // fact, and it is true whether or not the run reached a model.
-    const page = summarize(
-      run({
-        screenedOut: { reason: "empty", note: "the thread carries no text to work from" },
-        withheld: ["comment"],
-      }),
-    );
-
-    expect(page).toContain("`apply` asks for `comment`");
   });
 
   it("bills the cheap roster and the expensive one as separate rows", () => {
@@ -266,7 +242,7 @@ describe("summarize", () => {
     const page = summarize(
       run({
         ungranted:
-          "`.github/reeve.yml`'s `capabilities:` block does not name `triage`; once that " +
+          "`.github/reeve.yml`'s `duties:` block does not name `triage`; once that " +
           "block exists it is the whole answer, so add `triage: [label]` to it (or remove " +
           "the block to return to defaults).",
         proposed: [],
@@ -511,7 +487,7 @@ describe("summarizeSweep", () => {
     const page = summarizeSweep(
       sweep({
         ungranted:
-          "`.github/reeve.yml`'s `capabilities:` block does not name `triage`; once that " +
+          "`.github/reeve.yml`'s `duties:` block does not name `triage`; once that " +
           "block exists it is the whole answer, so add `triage: [label]` to it (or remove " +
           "the block to return to defaults).",
       }),

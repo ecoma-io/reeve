@@ -11,7 +11,7 @@
  *      repository's own label descriptions, when the file is simply absent at
  *      the default path.
  *   1a. **Stop, for a block that said nothing about this duty.** A written
- *      `capabilities:` block that does not name `duplicate` grants it nothing,
+ *      `duties:` block that does not name `duplicate` grants it nothing,
  *      and no verdict downstream changes that — so a single-thread run stops
  *      before the thread is even fetched, and a sweep stops before it lists
  *      the backlog. See `notGranted` for the full argument, which is the same
@@ -35,13 +35,13 @@
  *      genuinely the same problem — a judged question, not a lexical one.
  *   7. **Verify.** The confidence floor, in code, never against the model's
  *      own account of how sure it was.
- *   8. **Apply.** Only `comment`, only when both the file and `apply` grant
- *      it, and only as a find-and-replace under this duty's own marker —
- *      never a second opinion stacked under the first.
+ *   8. **Apply.** Only `comment`, only when the file grants it — and only as
+ *      a find-and-replace under this duty's own marker, never a second
+ *      opinion stacked under the first.
  *
  * **The failure mode of this duty is doing nothing.** No candidate in the
  * corpus, every model failing, a verdict that does not parse, a verdict under
- * the floor and a `capabilities:` block that does not name `duplicate` are
+ * the floor and a `duties:` block that does not name `duplicate` are
  * all green runs that proposed nothing and said why. `duplicate-of` and
  * `score` still answer on every path — a workflow reading them does not need
  * to know which of those reasons produced the empty one.
@@ -75,8 +75,8 @@
  * that needs it.** Reading the shared inputs (`readCore`), assembling the
  * provider client with its rotation, temperature and metering
  * (`assembleClient`), opening the authority — warrant file or the implicit
- * one — and warning about withheld capabilities (`openAuthority`,
- * `narrowWarned`), walking the backlog (`sweepThreads`), resolving the pivot
+ * one — and warning about withheld capabilities (`openAuthority`), walking
+ * the backlog (`sweepThreads`), resolving the pivot
  * language (`pivotOrNone`), and ending the run (`warnIfStarved`,
  * `writeRunSummary`, and `reportNoSweep` in `outputs.ts`). Each of those was
  * a near-copy in four or five duties; each is now one tested module, called
@@ -90,7 +90,6 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
-import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   listOpenThreads,
   readStanding,
@@ -107,7 +106,10 @@ import {
   type ApiKeySpec,
   type EndpointSpec,
 } from "../../core/inputs.js";
-import type { Language } from "../../core/languages.js";
+import { type Language, parseLanguages } from "../../core/languages.js";
+
+/** What detection reads when the warrant's `languages:` key is silent. */
+const DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 import { isReeveProposalPr } from "../../core/marker.js";
 import { createMeter } from "../../core/meter.js";
 import { translateToPivot } from "../../core/pivot.js";
@@ -161,7 +163,6 @@ export interface Settings {
   readonly modelNames: Names;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  readonly apply: readonly Capability[];
   /** The floor a verdict's own confidence has to clear before it is applied. */
   readonly confidence: number;
   /** How many BM25-ranked candidates reach the judge. */
@@ -197,7 +198,6 @@ function readSettings(): Omit<Settings, "languages"> {
   return {
     ...shared,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     confidence: fraction("confidence", core.getInput("confidence")),
     candidates: whole("candidates", core.getInput("candidates")),
     corpusLimit: bounded("corpus-limit", core.getInput("corpus-limit")),
@@ -244,7 +244,6 @@ export interface Outcome {
   /** The BM25 score that put the proposed candidate in front of the judge. 0 when there is no proposal. */
   readonly lexicalScore: number;
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   /** Why there is no verdict, when there is none. */
   readonly note: string | null;
   readonly rank: RankInfo;
@@ -262,7 +261,7 @@ export interface Outcome {
    */
   readonly rationale: string | null;
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * exists and simply does not name it. `null` on every other path.
    */
   readonly ungranted: string | null;
@@ -388,7 +387,7 @@ export async function run(): Promise<void> {
 
     settings = {
       ...base,
-      languages: dutyLanguages(authority.warrant, denied, core.getInput("languages")),
+      languages: dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES),
     };
 
     if (settings.sweep) {
@@ -401,7 +400,7 @@ export async function run(): Promise<void> {
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context.repo, number };
 
-      // A written `capabilities:` block that does not name `duplicate` grants
+      // A written `duties:` block that does not name `duplicate` grants
       // it nothing, and no verdict this run could reach changes that — so
       // this sits here, before the thread or a single model call spends
       // anything on a decision that could never be applied. `denied` was
@@ -497,12 +496,7 @@ async function decide(
     );
   }
 
-  const { permitted, withheld } = narrowWarned(
-    warrant.granted("duplicate", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "duplicate",
-    warrant.path,
-  );
+  const permitted = warrant.granted("duplicate", DEFAULT_CAPABILITIES);
 
   /**
    * A run that reached no proposal: the guardrails still reported, nothing
@@ -533,7 +527,6 @@ async function decide(
     confidence,
     lexicalScore: 0,
     permitted,
-    withheld,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
@@ -696,7 +689,6 @@ async function decide(
     confidence: verdict.confidence,
     lexicalScore: match.lexicalScore,
     permitted,
-    withheld,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
@@ -721,7 +713,6 @@ function notGranted(warrant: Warrant): Outcome {
     confidence: 0,
     lexicalScore: 0,
     permitted: [],
-    withheld: [],
     note: null,
     rank: { corpusSize: 0, offered: 0 },
     pivot: { used: false, note: null },
@@ -729,7 +720,7 @@ function notGranted(warrant: Warrant): Outcome {
     fingerprint: null,
     rationale: null,
     ungranted:
-      `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block ` +
+      `\`${warrant.path}\`'s \`duties:\` block does not name \`duplicate\`; once that block ` +
       "exists it is the whole answer, so add `duplicate: [comment]` to it (or remove the block to " +
       "return to defaults).",
   };
@@ -748,7 +739,6 @@ function recursionGuardOutcome(): Outcome {
     confidence: 0,
     lexicalScore: 0,
     permitted: [],
-    withheld: [],
     note: null,
     rank: { corpusSize: 0, offered: 0 },
     pivot: { used: false, note: null },
@@ -762,9 +752,8 @@ function recursionGuardOutcome(): Outcome {
 
 /**
  * The one function here that writes to the tracker — a single find-and-
- * replace under this duty's own marker, guarded by the intersection of what
- * the warrant grants and what `apply` asks for. Not reached at all under
- * `dry-run`.
+ * replace under this duty's own marker, guarded by what the warrant grants.
+ * Not reached at all under `dry-run`.
  *
  * **`close` is never read out of `outcome.permitted` here, on purpose, even
  * though `Api`'s `issues.update` could carry `state: "closed"` and `close` is

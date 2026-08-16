@@ -94,15 +94,15 @@ at level 0: writing the file changes what gets decided, not what is allowed to
 act. Nothing about authority moves until a maintainer says so explicitly,
 which is the next rung, not this one.
 
-**Level 2 — tuning authority.** Per-duty `capabilities:`, a label's `owner:`,
+**Level 2 — tuning authority.** Per-duty `duties:`, a label's `owner:`,
 its `exclusive_with:`, and — since [Stage 3](#7-roadmap) landed —
 `languages:`, all move into the warrant, reviewed the same way the taxonomy
 is. **The
-`capabilities:` block is where enumeration starts, and once it exists it is
+`duties:` block is where enumeration starts, and once it exists it is
 total:** a duty the block does not name is granted nothing at all — not its
 old default, not a smaller version of it. It runs, decides nothing, and says
 so in its own summary, rather than silently keeping the authority it held
-before the block was written. Writing `capabilities:` is therefore not
+before the block was written. Writing `duties:` is therefore not
 additive to a taxonomy-only warrant; from the moment that key exists, every
 duty's authority is read out of it, and a duty a maintainer forgot to list
 there is a duty switched off, whether or not that was the intention. This is
@@ -131,7 +131,7 @@ way at every level, is what makes climbing the ladder something a `git diff`
 can show a reviewer, rather than something a support thread has to explain.
 
 This reshapes how [D2](#d2-authority-is-granted-written-and-bounded) reads: a
-`capabilities:` block, once written, is not an optional tightening of a duty's
+`duties:` block, once written, is not an optional tightening of a duty's
 own defaults — it is the entire surface for what any duty may do — and the
 absence of that block, whether because there is no file at all or because the
 file stops at a taxonomy, is itself a stated, narrow authority rather than an
@@ -142,7 +142,7 @@ undoes the ladder.** The warrant is authority: what a duty is permitted to do
 _to the repository_ — which label, which comment, which close, which write.
 It is reviewed the way code is, because it grants power, and it is the one
 file [D2](#d2-authority-is-granted-written-and-bounded) makes the whole
-answer once a `capabilities:` block exists. An input on the workflow is not
+answer once a `duties:` block exists. An input on the workflow is not
 that. It is how a duty already holding its authority is asked to operate —
 how many threads a sweep considers, how long one request is allowed to run,
 which endpoint carries a model, how much of a body gets read before it is
@@ -214,23 +214,23 @@ language do not ship until they are honest in several.
 Reeve does what the warrant names and nothing else. The check is in code,
 against the file — never against the model's own claim about what it was
 permitted to do. An unnamed label is not applied. A duty enumerated out of an
-existing `capabilities:` block is granted nothing.
+existing `duties:` block is granted nothing.
 
 **Absence, silence, and enumeration are three different questions, and they
 get three different answers.** No warrant file at all is read as the
 narrowest authority Reeve defines in code — [level 0 of the
 ladder](#3-the-ladder): `triage` may only `label`, against the repository's
 own existing labels, and `translate` may only `edit-body`. A warrant that
-exists but carries no `capabilities:` block leaves every duty on that same
+exists but carries no `duties:` block leaves every duty on that same
 narrow default — a taxonomy written to sharpen a verdict is not a claim about
 who may act, and a taxonomy-only file is a complete, working [level
 1](#3-the-ladder) configuration in its own right, not a half-finished [level
-2](#3-the-ladder) one. Only once a `capabilities:` block exists does
+2](#3-the-ladder) one. Only once a `duties:` block exists does
 enumeration become total: a duty the block does not name is granted nothing —
 not its old default, not a smaller version of it — because **once a
 maintainer begins enumerating who may act, the enumeration is the whole
 answer, and the file's mere existence is not.** Writing the first entry into
-`capabilities:` therefore does not add to what a taxonomy-only warrant already
+`duties:` therefore does not add to what a taxonomy-only warrant already
 granted; from that point on every duty's authority is read out of the block,
 and a duty left out of it is a duty switched off, whether or not that was the
 intention.
@@ -500,29 +500,30 @@ the same dogfooding the per-thread workflows already did for Stage 0.
 ### Stage 3 — The warrant is the whole answer · **landed**
 
 One `.github/reeve.yml` declaring the taxonomy and, once a maintainer writes a
-`capabilities:` block, what each duty may do. Per [the
+`duties:` block, what each duty may do. Per [the
 ladder](#3-the-ladder) and the corrected
 [D2](#d2-authority-is-granted-written-and-bounded), the whole-answer
 principle attaches to that block, not to the file's mere existence: a
 taxonomy-only warrant leaves every duty on its own default, and a
-`capabilities:` block, once written, grants a duty left out of it nothing at
+`duties:` block, once written, grants a duty left out of it nothing at
 all. `translate` now reads the file exactly as `triage` always has, and
 `languages:` moved in alongside the taxonomy — landing as a breaking change on
 a `0.x` minor, per
 [what that means here](../development/releasing.md#what-0x-and-10-mean-here).
 
 **Standing:** the file is parsed, the taxonomy is an allowlist checked in code
-against the parsed file, capabilities are granted per duty, and the narrower
-of the file and the workflow wins. Both duties take their authority from
-nowhere else. Once a `capabilities:` block is written, enumeration is total —
+against the parsed file, and capabilities are granted per duty — from the
+warrant alone. No action input grants a capability, and the workflow's `when`
+is the only say it has over what a run does; the warrant is the whole
+authority. Once a `duties:` block is written, enumeration is total —
 a duty the block does not name is granted nothing at all, not its old
 default, and says so in its own run report rather than guessing at a reason;
 a taxonomy-only warrant, or no warrant at all, leaves every duty on its own
 default exactly as [the ladder](#3-the-ladder) describes, which is the gap
 this stage closed. `languages:`, once written in the file, is the whole
-answer for what `translate` produces and what `triage` detects against; the
-per-duty `languages` input still answers the question when the file stays
-silent on it, and a run says once, by name, which of the two it read.
+answer for what `translate` produces and what `triage` detects against; when
+the file stays silent on it, each duty's own documented default answers, and
+a run says once, by name, which of the two it read.
 Detection itself — the free script-narrowing and profile steps that resolve
 an author's language before any duty asks for it — was already core state
 before this stage and did not have to change
@@ -574,9 +575,9 @@ retrieval already runs on, bridges the query through the pivot only when the
 corpus actually holds a candidate the thread's own language would not reach,
 and asks a judge to confirm or refuse the top candidates against the exact
 shortlist it was shown — an answer naming anything outside that shortlist is
-refused the same as one that failed to parse. Off in both halves by default:
+refused the same as one that failed to parse. Off by default on purpose:
 posting the one comment it may ever write needs `duplicate: [comment]` in the
-warrant **and** `apply: comment` on the workflow, because a wrong duplicate is
+warrant's `duties:` block, because a wrong duplicate is
 a claim about somebody else's report, not a label one click undoes. `respond`
 has landed too — see [the duty's own page](../reference/duties/respond.md). It
 writes the first reply itself, once, in the thread's own language, and never

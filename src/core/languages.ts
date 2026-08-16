@@ -1,16 +1,16 @@
 /**
- * The `languages` input, parsed.
+ * The configured languages, parsed.
  *
  * **These are the languages to translate _into_, and that is the whole of what
- * the input says.** It is not a declaration of what an author is allowed to
+ * the list says.** It is not a declaration of what an author is allowed to
  * write in: a thread arrives in whatever language its author thinks in, and one
  * written in none of these is translated into all of them. What the list
  * decides is the output.
  *
  * This is also the whole of what Reeve knows about languages. There is no
  * table of "supported" languages anywhere in this repository and there must not
- * become one: a rule that cannot be derived from what a consumer wrote in their
- * workflow file — or from the runtime's own Unicode and CLDR data — is a rule
+ * become one: a rule that cannot be derived from what a consumer wrote in the
+ * warrant file — or from the runtime's own Unicode and CLDR data — is a rule
  * that serves whoever wrote it and nobody else.
  */
 import { deriveLanguage } from "./derive.js";

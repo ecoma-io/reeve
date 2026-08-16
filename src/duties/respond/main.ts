@@ -13,7 +13,7 @@
  * The order:
  *
  *   1. Read the warrant, or build the implicit one, exactly as every other
- *      duty does. A `capabilities:` block that does not name `respond` is
+ *      duty does. A `duties:` block that does not name `respond` is
  *      checked here, once, before a single request — the summary says why,
  *      and the run is green.
  *   2. Read the thread. An issue opened by a bot is not answered — replying
@@ -36,7 +36,7 @@
  *   6. Recall the nearest corrections this project has already made, bridged
  *      across languages through the pivot the same way triage does.
  *   7. Draft, judge, and compare the winner's confidence against the floor.
- *   8. Post — unless the floor, the double gate (`apply` and the warrant
+ *   8. Post — unless the floor or the warrant's own grant
  *      both have to grant `comment`), or `dry-run` withholds it. The draft
  *      itself is always reported on `respond-text`, whether or not it was
  *      posted, so a repository can route it to review instead.
@@ -55,8 +55,8 @@
  * that needs it.** Reading the shared inputs (`readCore`), assembling the
  * provider client with its rotation, temperature and metering
  * (`assembleClient`), opening the authority — warrant file or the implicit
- * one — and warning about withheld capabilities (`openAuthority`,
- * `narrowWarned`), recalling corrections including the cross-language bridge
+ * one — and warning about withheld capabilities (`openAuthority`), recalling
+ * corrections including the cross-language bridge
  * (`recallCorrections`, and `RECALLED`), and writing the page with the
  * endpoints that refused a key (`writeRunSummary`). Each of those was a
  * near-copy in four or five duties; each is now one tested module, called
@@ -75,11 +75,13 @@ import { context, getOctokit } from "@actions/github";
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { createEffects, listReplies, readStanding, type Location } from "../../core/forge.js";
 import { bounded, fraction, readCore, threadNumber, whole, type Core } from "../../core/inputs.js";
-import { type Language } from "../../core/languages.js";
+import { type Language, parseLanguages } from "../../core/languages.js";
+
+/** What detection reads when the warrant's `languages:` key is silent. */
+const DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 import { isReeveProposalPr } from "../../core/marker.js";
 import { RECALLED } from "../../core/memory.js";
 import { createMeter } from "../../core/meter.js";
-import { narrowWarned, parseApply } from "../../core/enforce.js";
 import {
   assembleClient,
   createWeather,
@@ -125,8 +127,6 @@ interface Settings extends Core {
   /** The languages this run reads. Resolved from the warrant or the input — see `resolveLanguages`. */
   readonly languages: readonly Language[];
   readonly warrant: string;
-  /** What this run may do, from the `apply` input alone — narrowed against the warrant per run. */
-  readonly apply: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   readonly judgeNames: Names;
   readonly drafts: number;
@@ -169,7 +169,6 @@ function readSettings(): Omit<Settings, "languages"> {
     ...base,
     number: threadNumber(),
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
@@ -201,7 +200,6 @@ interface Outcome {
   readonly confidence: number | null;
   readonly published: boolean;
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
 }
 
 /** What {@link settled} lets a call site override — everything else is `decide`'s own default. */
@@ -288,21 +286,16 @@ async function decide(
   stages: Stages,
   weather: Weather,
 ): Promise<Outcome> {
-  const { permitted, withheld } = narrowWarned(
-    warrant.granted("respond", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "respond",
-    warrant.path,
-  );
+  const permitted = warrant.granted("respond", DEFAULT_CAPABILITIES);
 
   /**
    * Every one of this duty's thirteen `Outcome`-shaped returns goes through
    * here — the six early guards below that stop before a draft exists, the
    * six post-draft returns further down that stop with one already written,
    * and the one return that actually posts. All thirteen share `permitted`/
-   * `withheld` (`narrow` decides both once, above, for the whole run) and the
-   * same five defaults; each call site overrides only the fields that one
-   * case actually differs by.
+   * `permitted` (decided once, above, for the whole run) and the same five
+   * defaults; each call site overrides only the fields that one case actually
+   * differs by.
    */
   const settled = (over: Settled = {}): Outcome => ({
     note: null,
@@ -311,7 +304,6 @@ async function decide(
     confidence: null,
     published: false,
     permitted,
-    withheld,
     ...over,
   });
 
@@ -551,7 +543,7 @@ async function decide(
 
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`respond\`; once that block exists ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`respond\`; once that block exists ` +
     "it is the whole answer, so add `respond: [comment]` to it to grant a first reply (or remove " +
     "the block to return to defaults, which is still nothing — see `DEFAULT_CAPABILITIES`)."
   );
@@ -587,12 +579,11 @@ export async function run(): Promise<void> {
     authority = opened.authority;
 
     // A duty the warrant does not name spends nothing deciding what to say,
-    // including the request `resolveLanguages` might otherwise need to make
-    // sense of a `languages` input a repository that never intended to grant
-    // this duty anything may never have configured at all — which is exactly
-    // what `dutyLanguages` returns `[]` for rather than resolving.
+    // including resolving a `languages` a repository that never intended to
+    // grant this duty anything may never have configured at all — which is
+    // exactly what `dutyLanguages` returns `[]` for rather than resolving.
     const denied = opened.denied;
-    const languages = dutyLanguages(authority.warrant, denied, core.getInput("languages"));
+    const languages = dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES);
     if (denied) {
       ungranted = notGranted(authority.warrant);
       settings = { ...base, languages };
@@ -655,7 +646,6 @@ function page(
     floor: settings.confidence,
     published: outcome?.published ?? false,
     permitted: outcome?.permitted ?? [],
-    withheld: outcome?.withheld ?? [],
     spent,
     modelNames: settings.modelNames,
     judgeNames: settings.judgeNames,

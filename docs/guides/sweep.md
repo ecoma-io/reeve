@@ -149,34 +149,36 @@ whatever you are willing to spend finding out what it costs.
 ## Bulk migration: `record` composed with `sweep`
 
 Triage-only, and the one place `sweep` changes what a run is allowed to do
-rather than only how much of it looks for work. Grant `record` in both the
-warrant and `apply` on a `sweep` run, and the backlog walk stops triaging and
-starts importing instead — every candidate's standing labels are written to
-the corrections store as history, the same shape a single labelled event
-records, but attributed to `"sweep"` rather than to whoever last touched the
-label:
+rather than only how much of it looks for work. Grant `record` in the
+warrant and scope a `sweep` to `closed` or `all`, and the backlog walk stops
+triaging and starts importing instead — every candidate's standing labels are
+written to the corrections store as history, the same shape a single labelled
+event records, but attributed to `"sweep"` rather than to whoever last
+touched the label:
 
 ```yaml
 with:
   sweep: true
   sweep-state: all
   limit: 500
-  apply: record
 ```
 
 ```yaml
 # .github/reeve.yml
-capabilities:
-  triage: [record]
+duties:
+  triage: [label, record]
 ```
 
-`sweep-state` is what makes this worth having: an ordinary sweep only ever
-lists `open` threads, because triaging a thread nobody is going to look at
-again is wasted work. Bulk migration is the opposite case — the decisions
-worth importing are exactly the ones a maintainer already closed the book on
-— so `sweep-state: closed` or `sweep-state: all` reaches those too. It is a
-filter on what the listing fetches, nothing more; the taxonomy and the
-capabilities that bound an ordinary sweep bound this one identically.
+The `sweep-state` is what makes this worth having, and what scopes the mode:
+an ordinary sweep only ever lists `open` threads — the scheduled
+`record`-granted sweep labels the backlog and never imports it — because
+triaging a thread nobody is going to look at again is wasted work. Bulk
+migration is the opposite case — the decisions worth importing are exactly
+the ones a maintainer already closed the book on — so `sweep-state: closed` or
+`sweep-state: all` reaches those too. It is a filter on what the listing
+fetches, nothing more; the taxonomy and the capabilities that bound an
+ordinary sweep bound this one identically, and only a sweep scoped away from
+`open` composes `record` at all.
 
 A candidate carrying none of the taxonomy's labels is skipped — there is
 nothing on it to import — and every other guardrail applies exactly as it

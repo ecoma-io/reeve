@@ -86,8 +86,8 @@ safer run — it is an unbounded one. Fix the YAML.
 ```
 
 Usually a rename. The error names both sides on purpose: the alternative is a
-verdict whose labels are all silently dropped at the apply stage, which looks
-exactly like a model that never agreed with anything.
+verdict whose labels are all silently dropped when the effects are written,
+which looks exactly like a model that never agreed with anything.
 
 ### The thread cannot be read
 

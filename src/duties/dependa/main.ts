@@ -5,7 +5,7 @@
  *
  *   1. Read the warrant — or, missing one at the default path, build the
  *      implicit warrant. Resolve the dependa policy.
- *   1a. A written `capabilities:` block that does not name `dependa` is
+ *   1a. A written `duties:` block that does not name `dependa` is
  *      checked here, once — the duty does nothing, and the run is green.
  *   2. Discover dependency manifests by scanning the file tree.
  *   3. Parse each manifest with its ecosystem's manager.
@@ -30,7 +30,6 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrowWarned } from "../../core/enforce.js";
 import { isCapacityError, type Location, readContentsFile } from "../../core/forge.js";
 import { createMeter } from "../../core/meter.js";
 import { assembleClient, createWeather, rotateModels, settleAuth } from "../../core/provider.js";
@@ -125,12 +124,7 @@ export async function run(): Promise<void> {
       return;
     }
 
-    const { permitted } = narrowWarned(
-      authority.warrant.granted("dependa", DEFAULT_CAPABILITIES),
-      base.apply,
-      "dependa",
-      base.warrant,
-    );
+    const permitted = authority.warrant.granted("dependa", DEFAULT_CAPABILITIES);
 
     settings = { ...base, permitted };
 
@@ -683,7 +677,7 @@ export async function run(): Promise<void> {
  */
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`dependa\`; once that block ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`dependa\`; once that block ` +
     "exists it is the whole answer, so add `dependa: [edit-file, open-pr]` to it " +
     "(or remove the block to return to defaults)."
   );

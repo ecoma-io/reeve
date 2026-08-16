@@ -16,7 +16,7 @@
  * label without `create: true`, a warrant that does not parse, a token
  * GitHub's own labels endpoint refuses — every one of those is a condition
  * that stops a real run the same way. A duty denied everything by a written
- * `capabilities:` block that simply does not name it is not one of these: a
+ * `duties:` block that simply does not name it is not one of these: a
  * duty finding out its file has no opinion of it is a real, designed answer
  * (see `unnamed`'s own doc comment in `core/warrant.ts`), not a failure, and
  * it is reported as such — in the authority table, not among the findings.
@@ -40,6 +40,8 @@ import {
   type Warrant,
 } from "../core/warrant.js";
 import { DEFAULT_CAPABILITIES as DUPLICATE_DEFAULTS } from "../duties/duplicate/capabilities.js";
+import { DEFAULT_CAPABILITIES as HARMONISE_DEFAULTS } from "../duties/harmonise/capabilities.js";
+import { DEFAULT_CAPABILITIES as DEPENDA_DEFAULTS } from "../duties/dependa/capabilities.js";
 import {
   DEFAULT_CAPABILITIES as LIFECYCLE_DEFAULTS,
   LIFECYCLE_CAPABILITIES,
@@ -67,6 +69,8 @@ const DEFAULTS_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["duplicate", DUPLICATE_DEFAULTS],
   ["respond", RESPOND_DEFAULTS],
   ["lifecycle", LIFECYCLE_DEFAULTS],
+  ["harmonise", HARMONISE_DEFAULTS],
+  ["dependa", DEPENDA_DEFAULTS],
 ]);
 
 /**
@@ -83,6 +87,8 @@ const LADDER_BY_DUTY: ReadonlyMap<string, readonly Capability[] | null> = new Ma
   ["duplicate", null],
   ["respond", null],
   ["lifecycle", LIFECYCLE_CAPABILITIES],
+  ["harmonise", null],
+  ["dependa", null],
 ]);
 
 /** Whether a finding stops a real run (`red`) or describes a healthy or weather condition (`green`). */
@@ -104,7 +110,7 @@ export interface AuthorityRow {
    * raw say-so. Empty when `denied`.
    */
   readonly granted: readonly Capability[];
-  /** True when a written `capabilities:` block exists and does not name this duty. */
+  /** True when a written `duties:` block exists and does not name this duty. */
   readonly denied: boolean;
   /** True when `granted` is exactly this duty's own built-in default (see `DEFAULTS_BY_DUTY`). */
   readonly isDefault: boolean;
@@ -258,7 +264,7 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
   // a single place. `isDefault` alone is deliberately the only test: a duty
   // `warrant.unnamed` denies is a different, separate fact, already visible
   // in its own row (`denied: true`), and never belongs in this note — a
-  // written `capabilities:` block that leaves a duty out denies it, it does
+  // written `duties:` block that leaves a duty out denies it, it does
   // not default it (see `unnamed`'s own doc comment in `core/warrant.ts`).
   const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
   if (defaulted.length > 0) {

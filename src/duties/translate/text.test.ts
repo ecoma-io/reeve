@@ -51,7 +51,7 @@ function settingsWith(overrides: Partial<Settings> = {}): Settings {
     modelNames: new Map(),
     languages: [english, vietnamese],
     warrant: "",
-    apply: [],
+
     permitted: ["edit-body"],
     judges: [["judge-a"]],
     judgeNames: new Map(),
