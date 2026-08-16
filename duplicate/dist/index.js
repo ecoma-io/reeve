@@ -32995,10 +32995,6 @@ function residue(text2) {
   return clean;
 }
 
-// src/core/warrant.ts
-import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
-
 // src/core/forge.ts
 function isBotAuthor(author) {
   return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
@@ -33078,6 +33074,524 @@ async function listOpenThreads(api, at, since, state = "open", maxPages) {
   return listed;
 }
 
+// src/core/inputs.ts
+function readCore(options) {
+  const apiKey = getInput("api-key");
+  if (apiKey.length > 0) setSecret(apiKey);
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
+    throw new Error("models: no entries. Expected at least one model id.");
+  }
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+  return {
+    token: getInput("github-token", { required: true }),
+    models: roster.models,
+    modelNames: roster.names,
+    baseUrl: getInput("base-url", { required: true }),
+    apiKey,
+    dryRun: getBooleanInput("dry-run"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
+    temperature: parseTemperature(getInput("temperature"))
+  };
+}
+function readShared() {
+  const sweep = getBooleanInput("sweep");
+  const configuredNumber = getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
+    );
+  }
+  return {
+    ...readCore(),
+    number: sweep ? null : threadNumber(),
+    sweep,
+    since: parseSince(getInput("since")),
+    limit: bounded("limit", getInput("limit"))
+  };
+}
+function parseEndpoints(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return parseList(raw).map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) {
+      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
+    }
+    const alias = entry.slice(0, at).trim();
+    const rest = entry.slice(at + 1).trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
+      throw new Error(
+        `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
+      );
+    }
+    if (alias === "default") {
+      throw new Error(
+        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
+      );
+    }
+    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
+    if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
+    let timeoutMs = null;
+    for (const token of rest2) {
+      const match = /^timeout=(.+)$/.exec(token);
+      if (!match) {
+        throw new Error(
+          `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
+        );
+      }
+      const [, duration = ""] = match;
+      if (timeoutMs !== null) {
+        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
+      }
+      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
+    }
+    return { alias, baseUrl: url, timeoutMs };
+  });
+}
+function parseApiKeys(raw) {
+  const entries = parseList(raw);
+  for (const entry of entries) {
+    const at = entry.indexOf("=");
+    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
+    if (value.length > 0) setSecret(value);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return entries.map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
+    const alias = entry.slice(0, at).trim();
+    const key = entry.slice(at + 1).trim();
+    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
+    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    return { alias, key };
+  });
+}
+function checkApiKeysDeclared(endpoints, apiKeys) {
+  for (const { alias } of apiKeys) {
+    if (!endpoints.some((endpoint2) => endpoint2.alias === alias)) {
+      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
+    }
+  }
+}
+function parseTimeout(name, raw) {
+  const trimmed = raw.trim();
+  const match = /^(\d+)(s|m)$/.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
+    );
+  }
+  const [, digits, unit] = match;
+  const value = Number(digits);
+  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
+  const ms = unit === "m" ? value * 6e4 : value * 1e3;
+  if (ms > 2147483647) {
+    throw new Error(
+      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
+    );
+  }
+  return ms;
+}
+function parseTemperature(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return void 0;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 2) {
+    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
+  }
+  return value;
+}
+function parseSince(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
+  }
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
+  );
+}
+function threadNumber() {
+  const configured = getInput("number");
+  if (configured.length > 0) return whole("number", configured);
+  const triggered = context2.issue.number;
+  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
+    throw new Error(
+      // Read from the environment rather than from `context.eventName`, which
+      // is typed as always present and is not: it is this variable.
+      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
+    );
+  }
+  return triggered;
+}
+function whole(name, raw) {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
+  }
+  return value;
+}
+function bounded(name, raw) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
+function fraction(name, raw) {
+  const value = Number(raw.trim());
+  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
+  }
+  return value;
+}
+
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
+}
+
+// src/core/sanitize.ts
+var OPENER = "<!--";
+var CLOSER = "-->";
+var INERT = "<!---->";
+var REFERENCE = new RegExp(
+  [
+    String.raw`(https?://\S+|\]\([^\s)]*\))`,
+    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
+    String.raw`#(?:${INERT})?\d+`,
+    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
+  ].join("|"),
+  "gi"
+);
+function sanitize(markdown) {
+  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
+}
+function defangComments(prose) {
+  const lastCloser = prose.lastIndexOf(CLOSER);
+  let defanged = "";
+  let read = 0;
+  for (; ; ) {
+    const opener = prose.indexOf(OPENER, read);
+    if (opener === -1) return defanged + prose.slice(read);
+    defanged += prose.slice(read, opener);
+    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
+    if (closer === -1) {
+      defanged += `<${INERT}!--`;
+      read = opener + OPENER.length;
+      continue;
+    }
+    defanged += emptied(prose.slice(opener + OPENER.length, closer));
+    read = closer + CLOSER.length;
+  }
+}
+var OPAQUE = /[^`~\\\n\r ]/g;
+function emptied(payload) {
+  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
+}
+function defangReferences(prose) {
+  return prose.replace(REFERENCE, (match, passthrough) => {
+    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
+    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
+  });
+}
+
+// src/core/pivot.ts
+async function translateToPivot(request2) {
+  const { provider, models, title, body, to, weather } = request2;
+  const messages = prompt(title, body, to);
+  const rotation = await rotateModels(
+    models,
+    (model) => answer(provider, model, messages),
+    weather
+  );
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
+  const draft = readAnswer(unwrapped(rotation.success.content));
+  if (draft === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures
+  };
+}
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the rendering was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function prompt(title, body, to) {
+  const enclosed = enclose("untrusted-thread", `${title}
+
+${body}`);
+  return [
+    {
+      role: "system",
+      content: [
+        `Translate the title and body of a GitHub thread into ${to.label} (${to.code}).`,
+        "Preserve Markdown formatting, code blocks and links exactly; translate prose only.",
+        "Answer with exactly one JSON object and nothing else, shaped like this:",
+        '{"title": "...", "body": "..."}',
+        "No preamble, no code fence around the JSON, no explanation before or after it.",
+        "",
+        enclosed.rule
+      ].join("\n")
+    },
+    { role: "user", content: enclosed.block }
+  ];
+}
+function unwrapped(answer3) {
+  const trimmed = answer3.trim();
+  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return fence?.[1] ?? trimmed;
+}
+function readAnswer(text2) {
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch {
+    return null;
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw;
+  if (typeof record.title !== "string" || typeof record.body !== "string") return null;
+  if (record.title.trim().length === 0) return null;
+  return { title: record.title, body: record.body };
+}
+
+// src/core/summary.ts
+function authSection(failures) {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
+  ].join("\n");
+}
+async function writeSummary(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
+    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
+    return;
+  }
+  try {
+    await summary.addRaw(markdown).write();
+  } catch (error2) {
+    warning(
+      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
+    );
+  }
+}
+function starvedWarning(sweep) {
+  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
+}
+function warnIfStarved(models, weather, sweep) {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted = protocolExhausted(models, failures);
+  if (exhausted) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted;
+}
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
+}
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+var COUNT = new Intl.NumberFormat("en-US");
+function count(value) {
+  return COUNT.format(value);
+}
+function cell(text2) {
+  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function cost(spent, name) {
+  const sum = total(spent);
+  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
+  const rows = spent.map((spend) => [
+    STAGE[spend.purpose],
+    cell(name(spend)),
+    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
+    count(spend.requests),
+    spend.failed === 0 ? "\u2014" : count(spend.failed),
+    count(spend.prompt),
+    count(spend.completion),
+    count(spend.prompt + spend.completion)
+  ]);
+  if (rows.length === 0) {
+    return [
+      "### Cost",
+      "",
+      "No model was asked anything this run \u2014 every decision was made by code."
+    ].join("\n");
+  }
+  rows.push([
+    "**Total**",
+    "",
+    ...multiEndpoint ? [""] : [],
+    `**${count(sum.requests)}**`,
+    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
+    `**${count(sum.prompt)}**`,
+    `**${count(sum.completion)}**`,
+    `**${count(sum.prompt + sum.completion)}**`
+  ]);
+  const lines = [
+    "### Cost",
+    "",
+    table(
+      [
+        "Stage",
+        "Model",
+        ...multiEndpoint ? ["Endpoint"] : [],
+        "Requests",
+        "Failed",
+        "Prompt",
+        "Completion",
+        "Tokens"
+      ],
+      rows
+    )
+  ];
+  if (sum.unreported > 0) {
+    lines.push(
+      "",
+      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
+    );
+  }
+  if (sum.failed > 0) {
+    lines.push(
+      "",
+      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
+    );
+  }
+  return lines.join("\n");
+}
+
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function standingFromListing(thread) {
+  return {
+    title: thread.title,
+    body: thread.body,
+    labels: thread.labels,
+    closed: false,
+    author: { login: "", isBot: false },
+    milestone: null,
+    assignees: [],
+    createdAt: thread.createdAt,
+    isPullRequest: thread.isPullRequest
+  };
+}
+async function sweepThreads(acc, candidates, settings, weather, hooks) {
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (hooks.alreadyDone?.(thread) === true) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    if (hooks.exhausted?.() === true) break;
+    const row = await hooks.processOne(thread);
+    if (row === null) acc.skipped += 1;
+    else acc.results.push(row);
+    hooks.afterEach?.();
+  }
+}
+
+// src/core/warrant.ts
+import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
+
 // src/duties/dependa/model.ts
 var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
 var UPDATE_TYPES = [
@@ -33152,12 +33666,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document2)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -33175,7 +33689,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document2.lifecycle);
   const propose = readPropose(path, document2.propose);
   const dependa = readDependa(path, document2.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document2.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -33197,7 +33711,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -33255,23 +33774,18 @@ async function openAuthority(path, api, at, duty) {
   const authority = await resolveAuthority(read, path, api, at);
   return { authority, denied: authority.warrant.unnamed(duty) };
 }
-function resolveLanguages(warrant, rawInput) {
+function resolveLanguages(warrant, fallback) {
   if (warrant.languages !== null) {
     return {
       languages: warrant.languages,
-      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key \u2014 the file is the whole answer once that key is written.`
     };
   }
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
-    );
-  }
-  return { languages: parseLanguages(rawInput), notice: null };
+  return { languages: fallback, notice: null };
 }
-function dutyLanguages(warrant, denied, rawInput) {
+function dutyLanguages(warrant, denied, fallback) {
   if (denied) return [];
-  const resolution = resolveLanguages(warrant, rawInput);
+  const resolution = resolveLanguages(warrant, fallback);
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
@@ -33373,7 +33887,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -33899,25 +34413,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
@@ -34024,6 +34547,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost2 = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost2;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -34034,556 +34594,6 @@ function describe(value) {
     return `\`${String(value)}\``;
   }
   return "a value of a kind this file cannot hold";
-}
-
-// src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
-}
-
-// src/core/inputs.ts
-function readCore(options) {
-  const apiKey = getInput("api-key");
-  if (apiKey.length > 0) setSecret(apiKey);
-  const modelsRequired = options?.modelsOptional !== true;
-  const roster = parseModels(getInput("models", { required: modelsRequired }));
-  if (modelsRequired && roster.models.length === 0) {
-    throw new Error("models: no entries. Expected at least one model id.");
-  }
-  const endpoints = parseEndpoints(getInput("endpoints"));
-  const apiKeys = parseApiKeys(getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
-  return {
-    token: getInput("github-token", { required: true }),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: getBooleanInput("dry-run"),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
-    temperature: parseTemperature(getInput("temperature"))
-  };
-}
-function readShared() {
-  const sweep = getBooleanInput("sweep");
-  const configuredNumber = getInput("number");
-  if (sweep && configuredNumber.length > 0) {
-    throw new Error(
-      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
-    );
-  }
-  return {
-    ...readCore(),
-    number: sweep ? null : threadNumber(),
-    sweep,
-    since: parseSince(getInput("since")),
-    limit: bounded("limit", getInput("limit"))
-  };
-}
-function parseEndpoints(raw) {
-  const seen = /* @__PURE__ */ new Set();
-  return parseList(raw).map((entry) => {
-    const at = entry.indexOf("=");
-    if (at === -1) {
-      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
-    }
-    const alias = entry.slice(0, at).trim();
-    const rest = entry.slice(at + 1).trim();
-    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
-      throw new Error(
-        `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
-      );
-    }
-    if (alias === "default") {
-      throw new Error(
-        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
-      );
-    }
-    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
-    seen.add(alias);
-    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
-    if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
-    let timeoutMs = null;
-    for (const token of rest2) {
-      const match = /^timeout=(.+)$/.exec(token);
-      if (!match) {
-        throw new Error(
-          `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
-        );
-      }
-      const [, duration = ""] = match;
-      if (timeoutMs !== null) {
-        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
-      }
-      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
-    }
-    return { alias, baseUrl: url, timeoutMs };
-  });
-}
-function parseApiKeys(raw) {
-  const entries = parseList(raw);
-  for (const entry of entries) {
-    const at = entry.indexOf("=");
-    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
-    if (value.length > 0) setSecret(value);
-  }
-  const seen = /* @__PURE__ */ new Set();
-  return entries.map((entry) => {
-    const at = entry.indexOf("=");
-    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
-    const alias = entry.slice(0, at).trim();
-    const key = entry.slice(at + 1).trim();
-    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
-    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
-    seen.add(alias);
-    return { alias, key };
-  });
-}
-function checkApiKeysDeclared(endpoints, apiKeys) {
-  for (const { alias } of apiKeys) {
-    if (!endpoints.some((endpoint2) => endpoint2.alias === alias)) {
-      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
-    }
-  }
-}
-function parseTimeout(name, raw) {
-  const trimmed = raw.trim();
-  const match = /^(\d+)(s|m)$/.exec(trimmed);
-  if (!match) {
-    throw new Error(
-      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
-    );
-  }
-  const [, digits, unit] = match;
-  const value = Number(digits);
-  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
-  const ms = unit === "m" ? value * 6e4 : value * 1e3;
-  if (ms > 2147483647) {
-    throw new Error(
-      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
-    );
-  }
-  return ms;
-}
-function parseTemperature(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return void 0;
-  const value = Number(trimmed);
-  if (!Number.isFinite(value) || value < 0 || value > 2) {
-    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
-  }
-  return value;
-}
-function parseSince(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
-  if (dateMatch) {
-    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new Error(`since: \`${raw}\` is not a real date.`);
-    }
-    return parsed;
-  }
-  const durationMatch = /^(\d+)d$/.exec(trimmed);
-  if (durationMatch) {
-    const days = Number(durationMatch[1]);
-    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
-    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
-  }
-  throw new Error(
-    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
-  );
-}
-function threadNumber() {
-  const configured = getInput("number");
-  if (configured.length > 0) return whole("number", configured);
-  const triggered = context2.issue.number;
-  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
-    throw new Error(
-      // Read from the environment rather than from `context.eventName`, which
-      // is typed as always present and is not: it is this variable.
-      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
-    );
-  }
-  return triggered;
-}
-function whole(name, raw) {
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
-  }
-  return value;
-}
-function bounded(name, raw) {
-  const trimmed = raw.trim();
-  if (trimmed.toLowerCase() === "none") return null;
-  const value = Number(trimmed);
-  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
-    throw new Error(
-      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
-    );
-  }
-  return value;
-}
-function fraction(name, raw) {
-  const value = Number(raw.trim());
-  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
-  }
-  return value;
-}
-
-// src/core/marker.ts
-import { createHash } from "node:crypto";
-var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
-var SUFFIX = " -->";
-function markerFor(duty) {
-  if (!DUTY_NAME.test(duty)) {
-    throw new Error(
-      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
-    );
-  }
-  const prefix = `<!-- reeve:${duty} source=`;
-  return {
-    duty,
-    render(fingerprint2) {
-      return `${prefix}${fingerprint2}${SUFFIX}`;
-    },
-    split(body) {
-      const at = body.indexOf(prefix);
-      if (at === -1) return { official: authorHalf(body), fingerprint: null };
-      const from = at + prefix.length;
-      const to = body.indexOf(SUFFIX, from);
-      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
-      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
-    }
-  };
-}
-function authorHalf(text2) {
-  return text2.replace(/\s+$/u, "");
-}
-function fingerprint(text2, keys) {
-  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
-  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
-}
-var PROPOSE_MARKER = markerFor("propose");
-function isReeveProposalPr(thread) {
-  if (!thread.isPullRequest) return false;
-  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
-}
-
-// src/core/sanitize.ts
-var OPENER = "<!--";
-var CLOSER = "-->";
-var INERT = "<!---->";
-var REFERENCE = new RegExp(
-  [
-    String.raw`(https?://\S+|\]\([^\s)]*\))`,
-    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
-    String.raw`#(?:${INERT})?\d+`,
-    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
-  ].join("|"),
-  "gi"
-);
-function sanitize(markdown) {
-  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
-}
-function defangComments(prose) {
-  const lastCloser = prose.lastIndexOf(CLOSER);
-  let defanged = "";
-  let read = 0;
-  for (; ; ) {
-    const opener = prose.indexOf(OPENER, read);
-    if (opener === -1) return defanged + prose.slice(read);
-    defanged += prose.slice(read, opener);
-    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
-    if (closer === -1) {
-      defanged += `<${INERT}!--`;
-      read = opener + OPENER.length;
-      continue;
-    }
-    defanged += emptied(prose.slice(opener + OPENER.length, closer));
-    read = closer + CLOSER.length;
-  }
-}
-var OPAQUE = /[^`~\\\n\r ]/g;
-function emptied(payload) {
-  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
-}
-function defangReferences(prose) {
-  return prose.replace(REFERENCE, (match, passthrough) => {
-    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
-    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
-  });
-}
-
-// src/core/pivot.ts
-async function translateToPivot(request2) {
-  const { provider, models, title, body, to, weather } = request2;
-  const messages = prompt(title, body, to);
-  const rotation = await rotateModels(
-    models,
-    (model) => answer(provider, model, messages),
-    weather
-  );
-  if (!rotation.success) return { draft: null, failures: rotation.failures };
-  const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return { draft: null, failures: rotation.failures };
-  return {
-    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
-    failures: rotation.failures
-  };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the rendering was cut off before it finished"
-    };
-  }
-  return completion;
-}
-function prompt(title, body, to) {
-  const enclosed = enclose("untrusted-thread", `${title}
-
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        `Translate the title and body of a GitHub thread into ${to.label} (${to.code}).`,
-        "Preserve Markdown formatting, code blocks and links exactly; translate prose only.",
-        "Answer with exactly one JSON object and nothing else, shaped like this:",
-        '{"title": "...", "body": "..."}',
-        "No preamble, no code fence around the JSON, no explanation before or after it.",
-        "",
-        enclosed.rule
-      ].join("\n")
-    },
-    { role: "user", content: enclosed.block }
-  ];
-}
-function unwrapped(answer3) {
-  const trimmed = answer3.trim();
-  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fence?.[1] ?? trimmed;
-}
-function readAnswer(text2) {
-  let raw;
-  try {
-    raw = JSON.parse(text2);
-  } catch {
-    return null;
-  }
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw;
-  if (typeof record.title !== "string" || typeof record.body !== "string") return null;
-  if (record.title.trim().length === 0) return null;
-  return { title: record.title, body: record.body };
-}
-
-// src/core/summary.ts
-function authSection(failures) {
-  if (failures.length === 0) return "";
-  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
-  return [
-    "",
-    "",
-    "### Endpoints that failed to authenticate",
-    "",
-    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
-  ].join("\n");
-}
-async function writeSummary(markdown) {
-  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
-    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
-    return;
-  }
-  try {
-    await summary.addRaw(markdown).write();
-  } catch (error2) {
-    warning(
-      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
-    );
-  }
-}
-function starvedWarning(sweep) {
-  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
-}
-function warnIfStarved(models, weather, sweep) {
-  const rosterStarved = starved(models, weather);
-  if (rosterStarved) warning(starvedWarning(sweep));
-  return rosterStarved;
-}
-function failIfProtocolExhausted(models, failures) {
-  const exhausted = protocolExhausted(models, failures);
-  if (exhausted) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
-    setFailed(
-      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
-    );
-  }
-  return exhausted;
-}
-async function writeRunSummary(page2, weather) {
-  await writeSummary(page2 + authSection(weather.authFailures));
-}
-function table(headers, rows) {
-  if (rows.length === 0) return "";
-  return [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.join(" | ")} |`)
-  ].join("\n");
-}
-var COUNT = new Intl.NumberFormat("en-US");
-function count(value) {
-  return COUNT.format(value);
-}
-function cell(text2) {
-  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function cost(spent, name) {
-  const sum = total(spent);
-  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
-  const rows = spent.map((spend) => [
-    STAGE[spend.purpose],
-    cell(name(spend)),
-    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
-    count(spend.requests),
-    spend.failed === 0 ? "\u2014" : count(spend.failed),
-    count(spend.prompt),
-    count(spend.completion),
-    count(spend.prompt + spend.completion)
-  ]);
-  if (rows.length === 0) {
-    return [
-      "### Cost",
-      "",
-      "No model was asked anything this run \u2014 every decision was made by code."
-    ].join("\n");
-  }
-  rows.push([
-    "**Total**",
-    "",
-    ...multiEndpoint ? [""] : [],
-    `**${count(sum.requests)}**`,
-    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
-    `**${count(sum.prompt)}**`,
-    `**${count(sum.completion)}**`,
-    `**${count(sum.prompt + sum.completion)}**`
-  ]);
-  const lines = [
-    "### Cost",
-    "",
-    table(
-      [
-        "Stage",
-        "Model",
-        ...multiEndpoint ? ["Endpoint"] : [],
-        "Requests",
-        "Failed",
-        "Prompt",
-        "Completion",
-        "Tokens"
-      ],
-      rows
-    )
-  ];
-  if (sum.unreported > 0) {
-    lines.push(
-      "",
-      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
-    );
-  }
-  if (sum.failed > 0) {
-    lines.push(
-      "",
-      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
-    );
-  }
-  return lines.join("\n");
-}
-
-// src/core/sweep.ts
-function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-function reportNoSweep() {
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
-function standingFromListing(thread) {
-  return {
-    title: thread.title,
-    body: thread.body,
-    labels: thread.labels,
-    closed: false,
-    author: { login: "", isBot: false },
-    milestone: null,
-    assignees: [],
-    createdAt: thread.createdAt,
-    isPullRequest: thread.isPullRequest
-  };
-}
-async function sweepThreads(acc, candidates, settings, weather, hooks) {
-  acc.candidates = candidates.length;
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (hooks.alreadyDone?.(thread) === true) {
-      acc.skipped += 1;
-      continue;
-    }
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-    if (hooks.exhausted?.() === true) break;
-    const row = await hooks.processOne(thread);
-    if (row === null) acc.skipped += 1;
-    else acc.results.push(row);
-    hooks.afterEach?.();
-  }
 }
 
 // src/core/memory.ts
@@ -35257,13 +35267,11 @@ function verdict(run2) {
       if (!echoedOnThread) lines.push(...why(run2));
     }
   }
-  const gap = withheld(run2);
-  if (gap.length > 0) lines.push("", gap);
   return lines.join("\n");
 }
 function disposition(run2, duplicateOf) {
   if (run2.posted === null) {
-    return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
+    return "Nothing was posted \u2014 the warrant does not grant `comment`. `duplicate-of` and `score` still carry it.";
   }
   if (run2.posted === "withheld") {
     return `Nothing was posted \u2014 this thread carries more comments than one run reads, and none of the ones read were this duty's own, so whether it already commented could not actually be told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so this run left the thread alone rather than guess.`;
@@ -35274,10 +35282,6 @@ function disposition(run2, duplicateOf) {
 function why(run2) {
   if (run2.rationale === null || run2.rationale.length === 0) return [];
   return ["", `> ${run2.rationale.replace(/\s+/g, " ").trim()}`];
-}
-function withheld(run2) {
-  if (run2.withheld.length === 0) return "";
-  return `\`apply\` asks for ${run2.withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`;
 }
 function summarizeSweep(run2) {
   if (run2.ungranted !== null) {
@@ -35344,7 +35348,6 @@ function page(settings, thread, outcome, done, posted, spent) {
     pivot: outcome.pivot,
     note: outcome.note,
     permitted: outcome.permitted,
-    withheld: outcome.withheld,
     rationale: outcome.rationale,
     done,
     posted,
@@ -35626,12 +35629,12 @@ function excerpt2(body) {
 var DEFAULT_CAPABILITIES = [];
 
 // src/duties/duplicate/main.ts
+var DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 function readSettings() {
   const shared = readShared();
   return {
     ...shared,
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     confidence: fraction("confidence", getInput("confidence")),
     candidates: whole("candidates", getInput("candidates")),
     corpusLimit: bounded("corpus-limit", getInput("corpus-limit")),
@@ -35712,7 +35715,7 @@ async function run() {
     const { authority, denied } = await openAuthority(base.warrant, api, context2.repo, "duplicate");
     settings = {
       ...base,
-      languages: dutyLanguages(authority.warrant, denied, getInput("languages"))
+      languages: dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES)
     };
     if (settings.sweep) {
       bulk = newAccumulator();
@@ -35762,19 +35765,13 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
       `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\`, or set it to \`none\`, to read the rest.`
     );
   }
-  const { permitted, withheld: withheld2 } = narrowWarned(
-    warrant.granted("duplicate", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "duplicate",
-    warrant.path
-  );
+  const permitted = warrant.granted("duplicate", DEFAULT_CAPABILITIES);
   const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence) => ({
     language: language2,
     duplicateOf: null,
     confidence,
     lexicalScore: 0,
     permitted,
-    withheld: withheld2,
     note: note2,
     rank: rankInfo2,
     pivot: pivotInfo2,
@@ -35894,7 +35891,6 @@ ${body}`,
     confidence: verdict2.confidence,
     lexicalScore: match.lexicalScore,
     permitted,
-    withheld: withheld2,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
@@ -35911,14 +35907,13 @@ function notGranted(warrant) {
     confidence: 0,
     lexicalScore: 0,
     permitted: [],
-    withheld: [],
     note: null,
     rank: { corpusSize: 0, offered: 0 },
     pivot: { used: false, note: null },
     proposal: null,
     fingerprint: null,
     rationale: null,
-    ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
+    ungranted: `\`${warrant.path}\`'s \`duties:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
   };
 }
 function recursionGuardOutcome() {
@@ -35928,7 +35923,6 @@ function recursionGuardOutcome() {
     confidence: 0,
     lexicalScore: 0,
     permitted: [],
-    withheld: [],
     note: null,
     rank: { corpusSize: 0, offered: 0 },
     pivot: { used: false, note: null },

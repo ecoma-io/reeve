@@ -33611,12 +33611,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document2)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -33634,7 +33634,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document2.lifecycle);
   const propose = readPropose(path, document2.propose);
   const dependa = readDependa(path, document2.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document2.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -33656,7 +33656,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -33727,23 +33732,18 @@ async function openAuthority(path, api, at, duty) {
   const authority2 = await resolveAuthority(read2, path, api, at);
   return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
 }
-function resolveLanguages(warrant, rawInput) {
+function resolveLanguages(warrant, fallback) {
   if (warrant.languages !== null) {
     return {
       languages: warrant.languages,
-      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key \u2014 the file is the whole answer once that key is written.`
     };
   }
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
-    );
-  }
-  return { languages: parseLanguages(rawInput), notice: null };
+  return { languages: fallback, notice: null };
 }
-function dutyLanguages(warrant, denied, rawInput) {
+function dutyLanguages(warrant, denied, fallback) {
   if (denied) return [];
-  const resolution = resolveLanguages(warrant, rawInput);
+  const resolution = resolveLanguages(warrant, fallback);
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
@@ -33854,7 +33854,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -34380,25 +34380,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
@@ -34505,6 +34514,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost2 = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost2;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -34518,40 +34564,6 @@ function describe(value) {
 }
 
 // src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
-}
 function enforceLabels(path, taxonomy, proposed, onThread, confidence, floor) {
   const byName = new Map(taxonomy.map((label) => [label.name, label]));
   const applied = [];
@@ -35975,9 +35987,6 @@ function labelChange() {
   if (label === void 0 || label.length === 0) return null;
   return { label, action: payload.action };
 }
-function recordGrantedByFile(grantedCapabilities) {
-  return grantedCapabilities.includes("record");
-}
 function recordGrantedByRun(permitted) {
   return permitted.includes("record");
 }
@@ -36272,13 +36281,13 @@ function verdict(run2) {
   if (run2.duplicateOf !== null) {
     lines.push(
       "",
-      `Reported as a possible duplicate of #${String(run2.duplicateOf)}` + (run2.done.closed ? ", and closed." : ". Nothing was done about it \u2014 `apply` does not name `close`.")
+      `Reported as a possible duplicate of #${String(run2.duplicateOf)}` + (run2.done.closed ? ", and closed." : ". Nothing was done about it \u2014 the warrant does not grant `close`.")
     );
   }
   return lines.join("\n");
 }
 function decisions(run2) {
-  if (run2.screenedOut !== null || run2.ungranted !== null) return withheld(run2);
+  if (run2.screenedOut !== null || run2.ungranted !== null) return "";
   const refusals = new Map(run2.refused.map((refusal) => [refusal.what, refusal.why]));
   const rows = run2.proposed.map((name) => {
     const why = refusals.get(name);
@@ -36306,13 +36315,7 @@ function decisions(run2) {
   if (actions.length > 0) {
     parts.push("", `Also${run2.dryRun ? " would have" : ""}: ${actions.join(", ")}.`);
   }
-  const gap = withheld(run2);
-  if (gap.length > 0) parts.push("", gap);
   return parts.join("\n");
-}
-function withheld(run2) {
-  if (run2.withheld.length === 0) return "";
-  return `\`apply\` asks for ${run2.withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`;
 }
 function summarizeSweep(run2) {
   if (run2.ungranted !== null) {
@@ -36427,7 +36430,6 @@ function page(settings, thread, outcome, done, spent) {
     refused: outcome.refused,
     duplicateOf: outcome.verdict.duplicateOf,
     permitted: outcome.permitted,
-    withheld: outcome.withheld,
     done,
     memory: outcome.memory,
     note: outcome.note,
@@ -37213,6 +37215,7 @@ function describe2(label) {
 var DEFAULT_CAPABILITIES = ["label"];
 
 // src/duties/triage/main.ts
+var DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 function newAccumulator2() {
   return { ...newAccumulator(), recording: false };
 }
@@ -37222,7 +37225,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
     return;
   }
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
-  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  const permitted = grantedCapabilities;
   const recording = recordGrantedByRun(permitted);
   acc.recording = recording;
   const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : void 0;
@@ -37306,16 +37309,9 @@ var EVIDENCE_LISTING_MAX_PAGES = 10;
 async function runProposeSweep(api, authority2, settings) {
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
   if (!grantedCapabilities.includes("propose")) return null;
-  const { permitted } = narrow(grantedCapabilities, settings.apply);
+  const permitted = grantedCapabilities;
   if (!permitted.includes("propose")) {
-    notice(
-      `\`${authority2.warrant.path}\` grants \`propose\`, but \`apply\` does not name it, so this sweep did not propose anything. The narrower of the two wins \u2014 add \`propose\` to \`apply\` as well to enable it.`
-    );
-    return report2({
-      notes: [
-        "`apply` does not name `propose`, so this sweep declined to propose anything this run."
-      ]
-    });
+    return null;
   }
   let atlas;
   let openIssues;
@@ -37371,7 +37367,6 @@ function readSettings() {
     screenModels: cheap.models,
     screenNames: cheap.names,
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     confidence: fraction("confidence", getInput("confidence")),
     correctionsDir: getInput("corrections-dir", { required: true }),
     about: getInput("about"),
@@ -37399,7 +37394,7 @@ async function run() {
     const api = getOctokit(base.token);
     const stages = client.stages;
     const { authority: authority2, denied } = await openAuthority(base.warrant, api, context2.repo, "triage");
-    const languages = dutyLanguages(authority2.warrant, denied, getInput("languages"));
+    const languages = dutyLanguages(authority2.warrant, denied, DEFAULT_LANGUAGES);
     const about = resolveAbout(authority2.warrant, base.about);
     if (about.notice !== null) notice(about.notice);
     const taxonomy = denied ? [] : resolveTaxonomy(authority2.warrant, getInput("labels"));
@@ -37429,7 +37424,7 @@ async function run() {
         } else {
           const trigger = recordTrigger();
           const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
-          const { permitted } = narrow(grantedCapabilities, settings.apply);
+          const permitted = grantedCapabilities;
           let canRecordToBranch = false;
           if (stateBranch !== void 0) {
             canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");
@@ -37453,11 +37448,6 @@ async function run() {
               ),
               permitted,
               settings.dryRun
-            );
-          }
-          if (trigger.eligible && recordGrantedByFile(grantedCapabilities) && !recordGrantedByRun(permitted)) {
-            notice(
-              `\`${authority2.warrant.path}\` grants \`record\`, but \`apply\` does not name it, so this event was triaged instead of recorded. The narrower of the two wins \u2014 add \`record\` to \`apply\` as well to record it instead.`
             );
           }
           if (trigger.reason !== "" && recordGrantedByRun(permitted)) {
@@ -37526,10 +37516,7 @@ async function run() {
     }
     const branchForPr = settings.stateBranch !== "" ? settings.stateBranch : void 0;
     if (branchForPr !== void 0 && !settings.dryRun) {
-      const prPermitted = narrow(
-        authority2.warrant.granted("triage", DEFAULT_CAPABILITIES),
-        settings.apply
-      ).permitted.includes("open-pr");
+      const prPermitted = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES).includes("open-pr");
       const correctionsRecorded = settings.sweep ? bulk !== null && bulk.recording && bulk.results.length > 0 : recorded !== null;
       if (prPermitted && correctionsRecorded) {
         try {
@@ -37604,12 +37591,7 @@ async function decide(authority2, standing, settings, stages, weather) {
       `Only the first ${String(limit)} characters of the body were read. Raise \`max-body-chars\` to read the rest.`
     );
   }
-  const { permitted, withheld: withheld2 } = narrowWarned(
-    warrant.granted("triage", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "triage",
-    warrant.path
-  );
+  const permitted = warrant.granted("triage", DEFAULT_CAPABILITIES);
   const stopped = (screened, language2) => ({
     language: language2,
     screenedOut: screened,
@@ -37617,7 +37599,6 @@ async function decide(authority2, standing, settings, stages, weather) {
     applied: [],
     refused: [],
     permitted,
-    withheld: withheld2,
     note: null,
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: authority2.implicit,
@@ -37719,7 +37700,6 @@ async function decide(authority2, standing, settings, stages, weather) {
     screenedOut: null,
     verdict: verdict2,
     permitted,
-    withheld: withheld2,
     note,
     memory: { size: memorySize, recalled: recalled.length, pivotRecalled },
     implicit: authority2.implicit,
@@ -37739,8 +37719,8 @@ async function decide(authority2, standing, settings, stages, weather) {
   }
   return {
     ...decided,
-    // Narrowed here rather than at apply time, so `labels` reports what this run
-    // may do and a rehearsal rehearses the same narrowing a real run has.
+    // Checked here rather than at apply time, so `labels` reports what this run
+    // may do and a rehearsal rehearses the same gate a real run has.
     applied: permitted.includes("label") ? decision.applied : [],
     refused: decision.refused
   };
@@ -37784,7 +37764,6 @@ function recursionGuardOutcome() {
     applied: [],
     refused: [],
     permitted: [],
-    withheld: [],
     note: null,
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: false,
@@ -37800,12 +37779,11 @@ function notGranted(warrant) {
     applied: [],
     refused: [],
     permitted: [],
-    withheld: [],
     note: null,
     memory: { size: 0, recalled: 0, pivotRecalled: 0 },
     implicit: false,
     excludedLabels: [],
-    ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block exists it is the whole answer, so add \`triage: [label]\` to it (or remove the block to return to defaults).`
+    ungranted: `\`${warrant.path}\`'s \`duties:\` block does not name \`triage\`; once that block exists it is the whole answer, so add \`triage: [label]\` to it (or remove the block to return to defaults).`
   };
 }
 async function act(effects, warrant, outcome, contentsApi, at, correctionsPath, stateBranch) {

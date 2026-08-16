@@ -31575,10 +31575,6 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
-// src/core/warrant.ts
-import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
-
 // src/core/forge.ts
 var LABEL_PAGE = 100;
 var LABEL_PAGES = 10;
@@ -31649,6 +31645,440 @@ var UnreadableContentsFile = class extends Error {
   }
 };
 
+// src/core/meter.ts
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
+// src/core/list.ts
+function parseList(raw) {
+  return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
+// src/core/provider.ts
+var DEFAULT_TIMEOUT_MS = 12e4;
+var EXCERPT_CHARS = 200;
+function parseModels(raw) {
+  const models = [];
+  const names = /* @__PURE__ */ new Map();
+  for (const entry of parseList(raw)) {
+    const { ids, name } = split(entry);
+    if (ids.includes("|")) {
+      throw new Error(
+        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+      );
+    }
+    const id = ids.trim();
+    if (id.length === 0 || models.includes(id)) continue;
+    models.push(id);
+    if (name !== null) names.set(id, name);
+  }
+  return { models, names };
+}
+function split(entry) {
+  const at = entry.indexOf("=");
+  if (at === -1) return { ids: entry, name: null };
+  const name = entry.slice(at + 1).trim();
+  return { ids: entry.slice(0, at), name: name.length > 0 ? name : null };
+}
+function createProvider(config) {
+  const endpoint2 = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const headers = { "content-type": "application/json" };
+  if (config.apiKey.length > 0) headers.authorization = `Bearer ${config.apiKey}`;
+  return {
+    async complete(model, messages, options) {
+      const body = JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        ...options?.temperature === void 0 ? {} : { temperature: options.temperature }
+      });
+      let response;
+      try {
+        response = await fetch(endpoint2, {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+      } catch (error2) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          ...isTimeout(error2) ? {} : { transport: true },
+          reason: describeRequestError(error2, timeoutMs)
+        };
+      }
+      let text2;
+      try {
+        text2 = await response.text();
+      } catch (error2) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
+        };
+      }
+      return readCompletion(model, response.status, text2);
+    }
+  };
+}
+function splitEndpointAlias(model, aliases) {
+  const at = model.lastIndexOf("@");
+  if (at === -1) return { id: model, alias: null };
+  const alias = model.slice(at + 1);
+  if (!aliases.has(alias)) return { id: model, alias: null };
+  return { id: model.slice(0, at), alias };
+}
+function createRoutedProvider(endpoints) {
+  const aliases = new Set(
+    endpoints.flatMap((endpoint2) => endpoint2.alias === null ? [] : [endpoint2.alias])
+  );
+  const byAlias = new Map(
+    endpoints.map((endpoint2) => [
+      endpoint2.alias,
+      createProvider({
+        baseUrl: endpoint2.baseUrl,
+        apiKey: endpoint2.apiKey,
+        timeoutMs: endpoint2.timeoutMs
+      })
+    ])
+  );
+  return {
+    async complete(model, messages, options) {
+      const { id, alias } = splitEndpointAlias(model, aliases);
+      const provider = byAlias.get(alias);
+      if (provider === void 0) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "protocol",
+          endpoint: alias,
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+        };
+      }
+      const completion = await provider.complete(id, messages, options);
+      return { ...completion, model, endpoint: alias };
+    }
+  };
+}
+function resolveEndpoints(shared) {
+  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
+  return [
+    {
+      alias: null,
+      baseUrl: shared.baseUrl,
+      apiKey: shared.apiKey,
+      timeoutMs: shared.requestTimeoutMs
+    },
+    ...shared.endpoints.map((endpoint2) => ({
+      alias: endpoint2.alias,
+      baseUrl: endpoint2.baseUrl,
+      apiKey: keyed.get(endpoint2.alias) ?? "",
+      timeoutMs: endpoint2.timeoutMs ?? shared.requestTimeoutMs
+    }))
+  ];
+}
+function assembleClient(shared, meter, purposes, extraRosters = []) {
+  const weather = createWeather(new Set(shared.endpoints.map((endpoint2) => endpoint2.alias)), [
+    ...shared.models,
+    ...extraRosters.flat()
+  ]);
+  const provider = createRoutedProvider(resolveEndpoints(shared));
+  return {
+    weather,
+    provider,
+    stages: Object.fromEntries(
+      purposes.map((purpose) => [purpose, metered(provider, meter, purpose, shared.temperature)])
+    )
+  };
+}
+function readCompletion(model, status, text2) {
+  const at = `HTTP ${String(status)}`;
+  const kind = classifyStatus(status);
+  let payload;
+  try {
+    payload = JSON.parse(text2);
+  } catch {
+    return {
+      ok: false,
+      model,
+      usage: null,
+      kind,
+      reason: `${at}: body was not JSON \u2014 ${excerpt(text2)}`
+    };
+  }
+  const usage = readUsage(payload);
+  const reported = readErrorMessage(payload);
+  if (reported !== null) return { ok: false, model, usage, kind, reason: `${at}: ${reported}` };
+  if (status < 200 || status >= 300) {
+    return { ok: false, model, usage, kind, reason: `${at}: ${excerpt(text2)}` };
+  }
+  const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
+  if (choice === null) {
+    return {
+      ok: false,
+      model,
+      usage,
+      kind,
+      reason: `${at}: no choices in the response \u2014 ${excerpt(text2)}`
+    };
+  }
+  const content = asRecord(choice.message)?.content;
+  if (typeof content !== "string") {
+    return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
+  }
+  if (content.trim().length === 0) {
+    return { ok: false, model, usage, kind, reason: `${at}: answered with empty content` };
+  }
+  const finishReason = choice.finish_reason;
+  return {
+    ok: true,
+    model,
+    usage,
+    content,
+    finishReason: typeof finishReason === "string" ? finishReason : null
+  };
+}
+function classifyStatus(status) {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429 || status >= 500 && status < 600) return "capacity";
+  return "protocol";
+}
+function readUsage(payload) {
+  const usage = asRecord(asRecord(payload)?.usage);
+  if (usage === null) return null;
+  const prompt = asCount(usage.prompt_tokens);
+  const completion = asCount(usage.completion_tokens);
+  if (prompt === null && completion === null) return null;
+  return { prompt: prompt ?? 0, completion: completion ?? 0 };
+}
+function asCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
+}
+var AuthenticationFailure = class extends Error {
+  failure;
+  constructor(failure) {
+    super(`${failure.model}: ${failure.reason}`);
+    this.name = "AuthenticationFailure";
+    this.failure = failure;
+  }
+};
+function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
+  const order = [];
+  const dead = /* @__PURE__ */ new Set();
+  const deadEndpoints = /* @__PURE__ */ new Set();
+  const universe = models === void 0 || models.length === 0 ? /* @__PURE__ */ new Set([null, ...aliases]) : new Set(models.map((model) => splitEndpointAlias(model, aliases).alias));
+  const authFailed = /* @__PURE__ */ new Map();
+  return {
+    grounded: (model) => {
+      const { alias } = splitEndpointAlias(model, aliases);
+      return dead.has(model) || deadEndpoints.has(alias);
+    },
+    ground: (model) => {
+      if (dead.has(model)) return;
+      dead.add(model);
+      order.push(model);
+    },
+    groundEndpoint: (alias) => deadEndpoints.add(alias),
+    get starved() {
+      return order;
+    },
+    multiEndpoint: aliases.size > 0,
+    failAuth: (alias, failure) => {
+      deadEndpoints.add(alias);
+      if (!authFailed.has(alias)) authFailed.set(alias, failure);
+    },
+    get authExhausted() {
+      return [...universe].every((alias) => authFailed.has(alias));
+    },
+    get authFailures() {
+      return [...authFailed.values()];
+    }
+  };
+}
+function starved(models, weather) {
+  return models.length > 0 && models.every((model) => weather.grounded(model));
+}
+function protocolExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+}
+function weatherFailure(model) {
+  return {
+    ok: false,
+    model,
+    kind: "capacity",
+    usage: null,
+    reason: "already rotated past for capacity earlier in this run \u2014 a provider's limit does not clear inside one job, so it was not asked again"
+  };
+}
+function reckon(failure, weather) {
+  if (failure.kind === "auth") {
+    if (weather?.multiEndpoint === true) {
+      weather.failAuth(failure.endpoint ?? null, failure);
+      return;
+    }
+    throw new AuthenticationFailure(failure);
+  }
+  if (failure.kind === "capacity") {
+    if (failure.transport === true) weather?.groundEndpoint(failure.endpoint ?? null);
+    else weather?.ground(failure.model);
+  }
+}
+function settleAuth(weather) {
+  if (!weather.multiEndpoint || !weather.authExhausted) return;
+  const [first] = weather.authFailures;
+  if (first !== void 0) throw new AuthenticationFailure(first);
+}
+async function rotateModels(models, attempt, weather) {
+  const failures = [];
+  for (const model of models) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
+    const completion = await attempt(model);
+    if (completion.ok) return { success: completion, failures };
+    reckon(completion, weather);
+    failures.push(completion);
+  }
+  return { success: null, failures };
+}
+function isTimeout(error2) {
+  return error2 instanceof Error && error2.name === "TimeoutError";
+}
+function describeRequestError(error2, timeoutMs) {
+  if (isTimeout(error2)) {
+    return `request timed out after ${String(timeoutMs)}ms`;
+  }
+  return `request failed \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`;
+}
+function readErrorMessage(payload) {
+  const error2 = asRecord(payload)?.error;
+  if (typeof error2 === "string") return error2.trim().length > 0 ? error2 : null;
+  const reported = asRecord(error2);
+  if (reported === null || Object.keys(reported).length === 0) return null;
+  const message = reported.message;
+  return typeof message === "string" && message.trim().length > 0 ? message : `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
+}
+function asRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function asArray(value) {
+  return Array.isArray(value) ? value : null;
+}
+function excerpt(text2) {
+  const flat = text2.replace(/\s+/g, " ").trim();
+  if (flat.length === 0) return "the body was empty";
+  return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}\u2026`;
+}
+
+// src/core/summary.ts
+function authSection(failures) {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
+  ].join("\n");
+}
+async function writeSummary(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
+    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
+    return;
+  }
+  try {
+    await summary.addRaw(markdown).write();
+  } catch (error2) {
+    warning(
+      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
+    );
+  }
+}
+function starvedWarning(sweep) {
+  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
+}
+function warnIfStarved(models, weather, sweep) {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted = protocolExhausted(models, failures);
+  if (exhausted) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted;
+}
+async function writeRunSummary(page, weather) {
+  await writeSummary(page + authSection(weather.authFailures));
+}
+var COUNT = new Intl.NumberFormat("en-US");
+
+// src/core/warrant.ts
+import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
+
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
 var matchers = /* @__PURE__ */ new Map();
@@ -31706,11 +32136,6 @@ function labelOf(code) {
   }
   if (name === void 0 || name.length === 0) return null;
   return name.toLowerCase() === code.toLowerCase() ? null : name;
-}
-
-// src/core/list.ts
-function parseList(raw) {
-  return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
 // src/core/languages.ts
@@ -31850,12 +32275,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -31873,7 +32298,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document.lifecycle);
   const propose = readPropose(path, document.propose);
   const dependa = readDependa(path, document.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -31895,7 +32320,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -32032,7 +32462,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -32558,25 +32988,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
@@ -32683,6 +33122,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance2 = levenshtein(raw, key);
+    if (distance2 > bestDistance) continue;
+    if (distance2 < bestDistance) {
+      bestDistance = distance2;
+      best.clear();
+    }
+    best.set(distance2, [...best.get(distance2) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -32694,467 +33170,6 @@ function describe(value) {
   }
   return "a value of a kind this file cannot hold";
 }
-
-// src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
-}
-
-// src/core/meter.ts
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose, temperature) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(
-        model,
-        messages,
-        temperature === void 0 ? options : { temperature, ...options }
-      );
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
-}
-
-// src/core/provider.ts
-var DEFAULT_TIMEOUT_MS = 12e4;
-var EXCERPT_CHARS = 200;
-function parseModels(raw) {
-  const models = [];
-  const names = /* @__PURE__ */ new Map();
-  for (const entry of parseList(raw)) {
-    const { ids, name } = split(entry);
-    if (ids.includes("|")) {
-      throw new Error(
-        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
-      );
-    }
-    const id = ids.trim();
-    if (id.length === 0 || models.includes(id)) continue;
-    models.push(id);
-    if (name !== null) names.set(id, name);
-  }
-  return { models, names };
-}
-function split(entry) {
-  const at = entry.indexOf("=");
-  if (at === -1) return { ids: entry, name: null };
-  const name = entry.slice(at + 1).trim();
-  return { ids: entry.slice(0, at), name: name.length > 0 ? name : null };
-}
-function createProvider(config) {
-  const endpoint2 = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
-  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const headers = { "content-type": "application/json" };
-  if (config.apiKey.length > 0) headers.authorization = `Bearer ${config.apiKey}`;
-  return {
-    async complete(model, messages, options) {
-      const body = JSON.stringify({
-        model,
-        messages,
-        stream: false,
-        ...options?.temperature === void 0 ? {} : { temperature: options.temperature }
-      });
-      let response;
-      try {
-        response = await fetch(endpoint2, {
-          method: "POST",
-          headers,
-          body,
-          signal: AbortSignal.timeout(timeoutMs)
-        });
-      } catch (error2) {
-        return {
-          ok: false,
-          model,
-          usage: null,
-          kind: "capacity",
-          ...isTimeout(error2) ? {} : { transport: true },
-          reason: describeRequestError(error2, timeoutMs)
-        };
-      }
-      let text2;
-      try {
-        text2 = await response.text();
-      } catch (error2) {
-        return {
-          ok: false,
-          model,
-          usage: null,
-          kind: "capacity",
-          reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
-        };
-      }
-      return readCompletion(model, response.status, text2);
-    }
-  };
-}
-function splitEndpointAlias(model, aliases) {
-  const at = model.lastIndexOf("@");
-  if (at === -1) return { id: model, alias: null };
-  const alias = model.slice(at + 1);
-  if (!aliases.has(alias)) return { id: model, alias: null };
-  return { id: model.slice(0, at), alias };
-}
-function createRoutedProvider(endpoints) {
-  const aliases = new Set(
-    endpoints.flatMap((endpoint2) => endpoint2.alias === null ? [] : [endpoint2.alias])
-  );
-  const byAlias = new Map(
-    endpoints.map((endpoint2) => [
-      endpoint2.alias,
-      createProvider({
-        baseUrl: endpoint2.baseUrl,
-        apiKey: endpoint2.apiKey,
-        timeoutMs: endpoint2.timeoutMs
-      })
-    ])
-  );
-  return {
-    async complete(model, messages, options) {
-      const { id, alias } = splitEndpointAlias(model, aliases);
-      const provider = byAlias.get(alias);
-      if (provider === void 0) {
-        return {
-          ok: false,
-          model,
-          usage: null,
-          kind: "protocol",
-          endpoint: alias,
-          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
-        };
-      }
-      const completion = await provider.complete(id, messages, options);
-      return { ...completion, model, endpoint: alias };
-    }
-  };
-}
-function resolveEndpoints(shared) {
-  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
-  return [
-    {
-      alias: null,
-      baseUrl: shared.baseUrl,
-      apiKey: shared.apiKey,
-      timeoutMs: shared.requestTimeoutMs
-    },
-    ...shared.endpoints.map((endpoint2) => ({
-      alias: endpoint2.alias,
-      baseUrl: endpoint2.baseUrl,
-      apiKey: keyed.get(endpoint2.alias) ?? "",
-      timeoutMs: endpoint2.timeoutMs ?? shared.requestTimeoutMs
-    }))
-  ];
-}
-function assembleClient(shared, meter, purposes, extraRosters = []) {
-  const weather = createWeather(new Set(shared.endpoints.map((endpoint2) => endpoint2.alias)), [
-    ...shared.models,
-    ...extraRosters.flat()
-  ]);
-  const provider = createRoutedProvider(resolveEndpoints(shared));
-  return {
-    weather,
-    provider,
-    stages: Object.fromEntries(
-      purposes.map((purpose) => [purpose, metered(provider, meter, purpose, shared.temperature)])
-    )
-  };
-}
-function readCompletion(model, status, text2) {
-  const at = `HTTP ${String(status)}`;
-  const kind = classifyStatus(status);
-  let payload;
-  try {
-    payload = JSON.parse(text2);
-  } catch {
-    return {
-      ok: false,
-      model,
-      usage: null,
-      kind,
-      reason: `${at}: body was not JSON \u2014 ${excerpt(text2)}`
-    };
-  }
-  const usage = readUsage(payload);
-  const reported = readErrorMessage(payload);
-  if (reported !== null) return { ok: false, model, usage, kind, reason: `${at}: ${reported}` };
-  if (status < 200 || status >= 300) {
-    return { ok: false, model, usage, kind, reason: `${at}: ${excerpt(text2)}` };
-  }
-  const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
-  if (choice === null) {
-    return {
-      ok: false,
-      model,
-      usage,
-      kind,
-      reason: `${at}: no choices in the response \u2014 ${excerpt(text2)}`
-    };
-  }
-  const content = asRecord(choice.message)?.content;
-  if (typeof content !== "string") {
-    return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
-  }
-  if (content.trim().length === 0) {
-    return { ok: false, model, usage, kind, reason: `${at}: answered with empty content` };
-  }
-  const finishReason = choice.finish_reason;
-  return {
-    ok: true,
-    model,
-    usage,
-    content,
-    finishReason: typeof finishReason === "string" ? finishReason : null
-  };
-}
-function classifyStatus(status) {
-  if (status === 401 || status === 403) return "auth";
-  if (status === 429 || status >= 500 && status < 600) return "capacity";
-  return "protocol";
-}
-function readUsage(payload) {
-  const usage = asRecord(asRecord(payload)?.usage);
-  if (usage === null) return null;
-  const prompt = asCount(usage.prompt_tokens);
-  const completion = asCount(usage.completion_tokens);
-  if (prompt === null && completion === null) return null;
-  return { prompt: prompt ?? 0, completion: completion ?? 0 };
-}
-function asCount(value) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
-}
-var AuthenticationFailure = class extends Error {
-  failure;
-  constructor(failure) {
-    super(`${failure.model}: ${failure.reason}`);
-    this.name = "AuthenticationFailure";
-    this.failure = failure;
-  }
-};
-function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
-  const order = [];
-  const dead = /* @__PURE__ */ new Set();
-  const deadEndpoints = /* @__PURE__ */ new Set();
-  const universe = models === void 0 || models.length === 0 ? /* @__PURE__ */ new Set([null, ...aliases]) : new Set(models.map((model) => splitEndpointAlias(model, aliases).alias));
-  const authFailed = /* @__PURE__ */ new Map();
-  return {
-    grounded: (model) => {
-      const { alias } = splitEndpointAlias(model, aliases);
-      return dead.has(model) || deadEndpoints.has(alias);
-    },
-    ground: (model) => {
-      if (dead.has(model)) return;
-      dead.add(model);
-      order.push(model);
-    },
-    groundEndpoint: (alias) => deadEndpoints.add(alias),
-    get starved() {
-      return order;
-    },
-    multiEndpoint: aliases.size > 0,
-    failAuth: (alias, failure) => {
-      deadEndpoints.add(alias);
-      if (!authFailed.has(alias)) authFailed.set(alias, failure);
-    },
-    get authExhausted() {
-      return [...universe].every((alias) => authFailed.has(alias));
-    },
-    get authFailures() {
-      return [...authFailed.values()];
-    }
-  };
-}
-function starved(models, weather) {
-  return models.length > 0 && models.every((model) => weather.grounded(model));
-}
-function protocolExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
-}
-function weatherFailure(model) {
-  return {
-    ok: false,
-    model,
-    kind: "capacity",
-    usage: null,
-    reason: "already rotated past for capacity earlier in this run \u2014 a provider's limit does not clear inside one job, so it was not asked again"
-  };
-}
-function reckon(failure, weather) {
-  if (failure.kind === "auth") {
-    if (weather?.multiEndpoint === true) {
-      weather.failAuth(failure.endpoint ?? null, failure);
-      return;
-    }
-    throw new AuthenticationFailure(failure);
-  }
-  if (failure.kind === "capacity") {
-    if (failure.transport === true) weather?.groundEndpoint(failure.endpoint ?? null);
-    else weather?.ground(failure.model);
-  }
-}
-function settleAuth(weather) {
-  if (!weather.multiEndpoint || !weather.authExhausted) return;
-  const [first] = weather.authFailures;
-  if (first !== void 0) throw new AuthenticationFailure(first);
-}
-async function rotateModels(models, attempt, weather) {
-  const failures = [];
-  for (const model of models) {
-    if (weather?.grounded(model) === true) {
-      failures.push(weatherFailure(model));
-      continue;
-    }
-    const completion = await attempt(model);
-    if (completion.ok) return { success: completion, failures };
-    reckon(completion, weather);
-    failures.push(completion);
-  }
-  return { success: null, failures };
-}
-function isTimeout(error2) {
-  return error2 instanceof Error && error2.name === "TimeoutError";
-}
-function describeRequestError(error2, timeoutMs) {
-  if (isTimeout(error2)) {
-    return `request timed out after ${String(timeoutMs)}ms`;
-  }
-  return `request failed \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`;
-}
-function readErrorMessage(payload) {
-  const error2 = asRecord(payload)?.error;
-  if (typeof error2 === "string") return error2.trim().length > 0 ? error2 : null;
-  const reported = asRecord(error2);
-  if (reported === null || Object.keys(reported).length === 0) return null;
-  const message = reported.message;
-  return typeof message === "string" && message.trim().length > 0 ? message : `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
-}
-function asRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
-}
-function asArray(value) {
-  return Array.isArray(value) ? value : null;
-}
-function excerpt(text2) {
-  const flat = text2.replace(/\s+/g, " ").trim();
-  if (flat.length === 0) return "the body was empty";
-  return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}\u2026`;
-}
-
-// src/core/summary.ts
-function authSection(failures) {
-  if (failures.length === 0) return "";
-  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
-  return [
-    "",
-    "",
-    "### Endpoints that failed to authenticate",
-    "",
-    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
-  ].join("\n");
-}
-async function writeSummary(markdown) {
-  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
-    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
-    return;
-  }
-  try {
-    await summary.addRaw(markdown).write();
-  } catch (error2) {
-    warning(
-      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
-    );
-  }
-}
-function starvedWarning(sweep) {
-  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
-}
-function warnIfStarved(models, weather, sweep) {
-  const rosterStarved = starved(models, weather);
-  if (rosterStarved) warning(starvedWarning(sweep));
-  return rosterStarved;
-}
-function failIfProtocolExhausted(models, failures) {
-  const exhausted = protocolExhausted(models, failures);
-  if (exhausted) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
-    setFailed(
-      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
-    );
-  }
-  return exhausted;
-}
-async function writeRunSummary(page, weather) {
-  await writeSummary(page + authSection(weather.authFailures));
-}
-var COUNT = new Intl.NumberFormat("en-US");
 
 // src/duties/dependa/budget.ts
 function createBudget() {
@@ -34563,7 +34578,6 @@ function readSettings() {
   return {
     ...coreInputs,
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     ecosystems: parseEcosystems(getInput("ecosystems")),
     drafts: counted("drafts", getInput("drafts")),
     dryRun: getBooleanInput("dry-run"),
@@ -36756,12 +36770,7 @@ async function run() {
       settleAuth(weather);
       return;
     }
-    const { permitted } = narrowWarned(
-      authority.warrant.granted("dependa", DEFAULT_CAPABILITIES),
-      base.apply,
-      "dependa",
-      base.warrant
-    );
+    const permitted = authority.warrant.granted("dependa", DEFAULT_CAPABILITIES);
     settings = { ...base, permitted };
     const warrantPolicy = authority.warrant.dependa ?? null;
     const policy = resolvePolicy(warrantPolicy, base.ecosystems);
@@ -37165,7 +37174,7 @@ async function run() {
   }
 }
 function notGranted(warrant) {
-  return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`dependa\`; once that block exists it is the whole answer, so add \`dependa: [edit-file, open-pr]\` to it (or remove the block to return to defaults).`;
+  return `\`${warrant.path}\`'s \`duties:\` block does not name \`dependa\`; once that block exists it is the whole answer, so add \`dependa: [edit-file, open-pr]\` to it (or remove the block to return to defaults).`;
 }
 function findSecurityAdvisoryFor(advisories, currentVersion, targetVersion) {
   if (advisories.length === 0) return null;
