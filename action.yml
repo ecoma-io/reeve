@@ -66,9 +66,9 @@ inputs:
       reached this runner: `doctor: true` reports the narrowest authority
       this build knows — labelling only, from this repository's own label
       descriptions, leaving out any label GitHub has no description for.
-      Without a checkout, the absence is reported red, naming `actions/
-      checkout` as the missing step. Point this at a path of your own
-      instead, and a file missing there is reported red, because naming a
+      Without a checkout, the absence is reported red, naming
+      `actions/checkout` as the missing step. Point this at a path of your
+      own instead, and a file missing there is reported red, because naming a
       file that is not there is a configuration mistake rather than an
       absence. A file that exists but does not parse is always reported red,
       wherever it lives. Unused when `doctor` is `false`.
