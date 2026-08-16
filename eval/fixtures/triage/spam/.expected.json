@@ -1,0 +1,9 @@
+{
+  "description": "Advertising is not owed a label. The cheap screen answers `spam`, the run stops cleanly with a screened-out output, and the tracker is untouched — a thread that should go nowhere writes nowhere. The screen-models roster is wired so the spam call is actually made.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: question\n    description: Asks for help or guidance.\nduties:\n  triage: [label, comment]\n",
+  "screen-models": true,
+  "expected": {
+    "screened-out": "spam",
+    "applied-names": []
+  }
+}

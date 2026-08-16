@@ -10,3 +10,7 @@ This guide walks you through setting up Reeve in your repository.
 ## Installation
 
 Add the workflow file to your repository and configure the duty you need.
+
+## Configuration
+
+Choose which duties to enable and write the warrant file.

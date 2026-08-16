@@ -1,0 +1,9 @@
+{
+  "description": "Spam is not owed a courteous first reply — a first-reply bot that answers spam is a spam amplifier. The cheap screen answers `spam`, the run stops cleanly with a screened-out output, no draft is written, and nothing is posted.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nduties:\n  respond: [comment]\n",
+  "screen-models": true,
+  "expected": {
+    "stopped-for": "spam",
+    "patch": null
+  }
+}
