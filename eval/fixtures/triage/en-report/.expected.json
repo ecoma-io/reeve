@@ -1,0 +1,26 @@
+{
+  "description": "A real report in English, the exact same report the vietnamese, japanese and spanish fixtures carry, told in the pipeline's home language. Detection identifies it as English by profile, the verdict names `bug` over the floor, and the warrant grants `label` and `comment` — so the pipeline treats the English thread exactly like the non-English ones in this matrix, and the fixture pins the baseline a misidentification would corrupt.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\nduties:\n  triage: [label, comment]\n",
+  "thread": {
+    "title": "Dark mode is not saved after reloading the page",
+    "body": "Dark mode is not saved after reloading the page. I checked the settings but it always returns to the default every time I open the page. Please fix this."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "The setting is not persisted across page reloads."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "English",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "description": "A real report in Indonesian scoped to the [bug, docs] taxonomy, and the one fixture that makes the provider-based identification step actually run. Indonesian is written in Latin script, so script narrowing keeps every Latin candidate; the profile step's bundled data does not cover the language, so the question reaches the model, which answers `id`. The fixture scripts `detect: id` — a setUp that lets a misidentifying model answer break this fixture as `failed`, exactly the fail-closed direction the strict language assertion exists for.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\n  - id\nduties:\n  triage: [label, comment]\n",
+  "detect": "id",
+  "thread": {
+    "title": "Mode gelap tidak tersimpan setelah memuat ulang halaman",
+    "body": "Mode gelap tidak tersimpan setelah memuat ulang halaman. Saya sudah memeriksa pengaturan namun pengaturan kembali ke nilai bawaan setiap kali membuka halaman. Mohon perbaikannya."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "Pengaturan tidak disimpan setelah halaman dimuat ulang."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "Indonesia",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

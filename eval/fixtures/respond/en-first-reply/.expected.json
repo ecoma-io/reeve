@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in English, the same report the other fixtures carry, told in the pipeline's home language. Detection identifies it as English by profile, the draft answers in English, `comment` is granted, and the run posts the first reply — the baseline the whole multilingual matrix is compared against.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "Dark mode is not saved after reloading the page",
+    "body": "Dark mode is not saved after reloading the page. I checked the settings but it always returns to the default every time I open the page. Please fix this."
+  },
+  "draft-over": {
+    "text": "Thanks for the report — we will persist the dark mode choice to local storage so it survives a page reload."
+  },
+  "expected": {
+    "language": "English",
+    "patch": "Thanks for the report — we will persist the dark mode choice to local storage so it survives a page reload.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

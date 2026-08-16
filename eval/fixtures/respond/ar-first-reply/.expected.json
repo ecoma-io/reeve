@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in Arabic over the 0.75 floor — the right-to-left language of this matrix. The thread is written entirely in the Arabic script, so detection resolves Arabic by script narrowing alone, on a thread no Latin-letter rule could have anticipated. The draft answers in Arabic and `comment` is granted — the run posts an Arabic first reply to an Arabic thread, end to end.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\n  - ar\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "لا يتم حفظ الوضع الداكن عند إعادة تحميل الصفحة",
+    "body": "لا يتم حفظ الوضع الداكن بعد إعادة تحميل الصفحة. لقد تحققت من الإعدادات لكن الوضع يعود إلى الحالة الافتراضية في كل مرة أفتح فيها الصفحة. آمل أن يتم إصلاح هذا قريباً."
+  },
+  "draft-over": {
+    "text": "شكراً على البلاغ — سنقوم بحفظ اختيار الوضع الداكن في التخزين المحلي حتى لا يفقد عند إعادة تحميل الصفحة."
+  },
+  "expected": {
+    "language": "العربية",
+    "patch": "شكراً على البلاغ — سنقوم بحفظ اختيار الوضع الداكن في التخزين المحلي حتى لا يفقد عند إعادة تحميل الصفحة.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

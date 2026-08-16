@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in Japanese over the 0.75 floor. The warrant configures `languages: [en, vi, zh, ja]`; detection resolves Japanese by profile among [zh, ja]. The draft answers in the thread's language — Japanese — so the published first reply is a Japanese reply to a Japanese thread. `comment` is granted and the run posts it.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\n  - ja\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "ページを再読み込みするとダークモードが保存されません",
+    "body": "ページを再読み込みするとダークモードの設定が保存されません。設定画面で確認しましたが、ページを開くたびに初期状態に戻ってしまいます。早急に修正していただきたいです。"
+  },
+  "draft-over": {
+    "text": "ご報告ありがとうございます。ダークモードの設定をローカルストレージに保存するよう修正しますので、ページを再読み込みしても消えなくなります。"
+  },
+  "expected": {
+    "language": "日本語",
+    "patch": "ご報告ありがとうございます。ダークモードの設定をローカルストレージに保存するよう修正しますので、ページを再読み込みしても消えなくなります。",
+    "effects": {
+      "commented": true
+    }
+  }
+}

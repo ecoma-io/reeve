@@ -1,0 +1,26 @@
+{
+  "description": "A real report in Portuguese scoped to the [bug, docs] taxonomy. The warrant configures `languages: [en, vi, zh, pt]`; detection resolves Portuguese by profile among three Latin candidates. The verdict names `bug` over the floor, and the warrant grants `label` and `comment` — triage applied end to end on a Romance-language thread.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\n  - pt\nduties:\n  triage: [label, comment]\n",
+  "thread": {
+    "title": "O modo escuro não é salvo ao recarregar a página",
+    "body": "O modo escuro não é salvo depois de recarregar a página. Verifiquei as configurações, mas ele sempre volta ao padrão quando abro a página novamente. Gostaria que isso fosse corrigido."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "A configuração não é mantida após recarregar a página."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "português",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "A real report in Arabic scoped to the [bug, docs] taxonomy — the right-to-left, structurally-different language of this matrix. The thread is written entirely in the Arabic script, so script narrowing collapses the candidates to Arabic alone and detection resolves without a profile lookup or a model call, on a thread no Latin-letter rule could ever have anticipated. The verdict names `bug` over the floor, the warrant grants `label` and `comment`, and the run exercises the whole triage pipeline on an RTL thread.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\n  - ar\nduties:\n  triage: [label, comment]\n",
+  "thread": {
+    "title": "لا يتم حفظ الوضع الداكن عند إعادة تحميل الصفحة",
+    "body": "لا يتم حفظ الوضع الداكن بعد إعادة تحميل الصفحة. لقد تحققت من الإعدادات لكن الوضع يعود إلى الحالة الافتراضية في كل مرة أفتح فيها الصفحة. آمل أن يتم إصلاح هذا قريباً."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "لا يتم حفظ الإعداد عند إعادة تحميل الصفحة."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "العربية",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

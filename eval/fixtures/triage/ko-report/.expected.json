@@ -1,0 +1,26 @@
+{
+  "description": "A real report in Korean scoped to the [bug, docs] taxonomy — the structurally-different language of this matrix. Hangul is the thread's script and no Han character appears anywhere in it, so script narrowing collapses the candidates to Korean alone and detection resolves without a profile lookup or a model call. The verdict names `bug` over the floor, the warrant grants `label` and `comment`, and the run exercises the whole triage pipeline on a Hangul-only thread.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\n  - ko\nduties:\n  triage: [label, comment]\n",
+  "thread": {
+    "title": "페이지를 다시 로드하면 다크 모드가 저장되지 않습니다",
+    "body": "페이지를 다시 로드하면 다크 모드 설정이 저장되지 않습니다. 설정을 확인해 보았지만 페이지를 열 때마다 기본 상태로 돌아갑니다. 빨리 수정해 주시기 바랍니다."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "페이지를 새로 고칠 때마다 설정이 초기화됩니다."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "한국어",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

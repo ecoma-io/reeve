@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in Vietnamese over the 0.75 floor. The warrant configures `languages: [en, vi, zh]`, detection identifies the thread as Tiếng Việt by profile, and the draft answers in the thread's language — the reply text is Vietnamese, matching the language the draft prompt named. `comment` is granted, so the run posts the first reply: the whole pipeline from a Vietnamese thread to a Vietnamese first reply.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "Chế độ tối không được lưu sau khi tải lại trang",
+    "body": "Ứng dụng không lưu cài đặt chế độ tối sau khi tải lại trang. Tôi đã kiểm tra trong phần cài đặt nhưng mỗi lần mở lại trang thì nó lại quay về mặc định. Mong được khắc phục sớm."
+  },
+  "draft-over": {
+    "text": "Cảm ơn bạn đã báo cáo — chúng tôi sẽ lưu lựa chọn chế độ tối vào bộ nhớ cục bộ để nó không bị mất khi tải lại trang."
+  },
+  "expected": {
+    "language": "Tiếng Việt",
+    "patch": "Cảm ơn bạn đã báo cáo — chúng tôi sẽ lưu lựa chọn chế độ tối vào bộ nhớ cục bộ để nó không bị mất khi tải lại trang.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

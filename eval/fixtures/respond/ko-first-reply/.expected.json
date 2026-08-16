@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in Korean over the 0.75 floor — the structurally-different language of this matrix. The thread is Hangul-only, so detection resolves Korean by script narrowing alone, with no profile lookup and no model call. The draft answers in Korean and `comment` is granted — the run posts a Korean first reply to a Korean thread, end to end.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\n  - ko\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "페이지를 다시 로드하면 다크 모드가 저장되지 않습니다",
+    "body": "페이지를 다시 로드하면 다크 모드 설정이 저장되지 않습니다. 설정을 확인해 보았지만 페이지를 열 때마다 기본 상태로 돌아갑니다. 빨리 수정해 주시기 바랍니다."
+  },
+  "draft-over": {
+    "text": "신고해 주셔서 감사합니다. 다크 모드 선택을 로컬 저장소에 저장하도록 수정하겠습니다. 페이지를 다시 로드해도 설정이 유지됩니다."
+  },
+  "expected": {
+    "language": "한국어",
+    "patch": "신고해 주셔서 감사합니다. 다크 모드 선택을 로컬 저장소에 저장하도록 수정하겠습니다. 페이지를 다시 로드해도 설정이 유지됩니다.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

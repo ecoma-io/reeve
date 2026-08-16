@@ -1,0 +1,26 @@
+{
+  "description": "A real report in Vietnamese, scoped to the [bug, docs] taxonomy. The warrant configures `languages: [en, vi, zh]`, detection identifies the thread as Tiếng Việt by profile, and the verdict names `bug` over the floor. The warrant grants `label` and `comment`, so the run applies the label and posts the triaged comment — the whole triage pipeline on a non-English thread.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\nduties:\n  triage: [label, comment]\n",
+  "thread": {
+    "title": "Chế độ tối không được lưu sau khi tải lại trang",
+    "body": "Ứng dụng không lưu cài đặt chế độ tối sau khi tải lại trang. Tôi đã kiểm tra trong phần cài đặt nhưng mỗi lần mở lại trang thì nó lại quay về mặc định. Mong được khắc phục sớm."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "Cài đặt không được lưu qua mỗi lần tải lại trang."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "Tiếng Việt",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

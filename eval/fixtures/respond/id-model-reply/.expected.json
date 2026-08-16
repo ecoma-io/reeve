@@ -1,0 +1,19 @@
+{
+  "description": "A fresh unanswered thread in Indonesian over the 0.75 floor, and the respond fixture that makes the provider-based identification step actually run. Indonesian is Latin script, so script narrowing keeps every Latin candidate; the profile step's bundled data does not cover it, so the question reaches the model, which answers `id` (scripted — a misidentifying answer breaks this fixture `failed`). The draft answers in Indonesian and `comment` is granted — the run posts an Indonesian first reply to an Indonesian thread, where the language was identified by the provider rather than by code.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\n  - id\nduties:\n  respond: [comment]\n",
+  "detect": "id",
+  "thread": {
+    "title": "Mode gelap tidak tersimpan setelah memuat ulang halaman",
+    "body": "Mode gelap tidak tersimpan setelah memuat ulang halaman. Saya sudah memeriksa pengaturan namun pengaturan kembali ke nilai bawaan setiap kali membuka halaman. Mohon perbaikannya."
+  },
+  "draft-over": {
+    "text": "Terima kasih atas laporannya — kami akan menyimpan pilihan mode gelap ke penyimpanan lokal agar tidak hilang setelah memuat ulang halaman."
+  },
+  "expected": {
+    "language": "Indonesia",
+    "patch": "Terima kasih atas laporannya — kami akan menyimpan pilihan mode gelap ke penyimpanan lokal agar tidak hilang setelah memuat ulang halaman.",
+    "effects": {
+      "commented": true
+    }
+  }
+}
