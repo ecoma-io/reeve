@@ -4,9 +4,8 @@
  * The question a maintainer opens this page with is never "what did it apply" —
  * that is visible on the thread. It is "why is that different from what I
  * expected", and every answer to that is a thing the run refused: a label the
- * warrant does not name, a verdict under the floor, a capability the workflow
- * asked for and the file does not grant. So the refusals are the body of this
- * report and the applied labels are one line at the top of it.
+ * warrant does not name, a verdict under the floor. So the refusals are the
+ * body of this report and the applied labels are one line at the top of it.
  *
  * The cost table is the core's, because a bill is not a duty's business. What is
  * here is only what is about triage.
@@ -41,9 +40,8 @@ export interface Run {
   readonly applied: readonly string[];
   readonly refused: readonly Refusal[];
   readonly duplicateOf: number | null;
-  /** What both the file and the workflow allow, and what only the workflow asked for. */
+  /** What the file grants — the sole authority, so the run's only `permitted` list. */
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   readonly done: Done;
   /**
    * How large the store was, how much of it reached the prompt, and how many
@@ -68,7 +66,7 @@ export interface Run {
   /** Repository labels the implicit warrant left out for carrying no description. */
   readonly excludedLabels: readonly string[];
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * simply does not name it — distinct from every other reason nothing was
    * applied, because here nothing was even attempted.
    */
@@ -236,7 +234,7 @@ function verdict(run: Run): string {
       `Reported as a possible duplicate of #${String(run.duplicateOf)}` +
         (run.done.closed
           ? ", and closed."
-          : ". Nothing was done about it — `apply` does not name `close`."),
+          : ". Nothing was done about it — the warrant does not grant `close`."),
     );
   }
 
@@ -251,7 +249,7 @@ function verdict(run: Run): string {
  * a reader can see which guardrail it was.
  */
 function decisions(run: Run): string {
-  if (run.screenedOut !== null || run.ungranted !== null) return withheld(run);
+  if (run.screenedOut !== null || run.ungranted !== null) return "";
 
   const refusals = new Map(run.refused.map((refusal) => [refusal.what, refusal.why]));
   const rows = run.proposed.map((name) => {
@@ -291,26 +289,7 @@ function decisions(run: Run): string {
     parts.push("", `Also${run.dryRun ? " would have" : ""}: ${actions.join(", ")}.`);
   }
 
-  const gap = withheld(run);
-  if (gap.length > 0) parts.push("", gap);
-
   return parts.join("\n");
-}
-
-/**
- * The capabilities the workflow asked for and the file does not grant.
- *
- * Not an error — the file is the authority — but a maintainer who wrote
- * `apply: label, comment` and got no comment would otherwise read a working
- * action as a broken one.
- */
-function withheld(run: Run): string {
-  if (run.withheld.length === 0) return "";
-
-  return (
-    `\`apply\` asks for ${run.withheld.map((capability) => `\`${capability}\``).join(", ")}, ` +
-    `which \`${run.warrant}\` does not grant to this duty. The narrower of the two wins, always.`
-  );
 }
 
 /**

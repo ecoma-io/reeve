@@ -66,7 +66,7 @@ const WARRANT = [
   "          after: 14d",
   "  exempt:",
   "    labels: [pinned]",
-  "capabilities:",
+  "duties:",
   "  lifecycle: [label, comment, close]",
 ].join("\n");
 
@@ -96,7 +96,7 @@ const TWO_TRACK_WARRANT = [
   "  exempt:",
   "    labels: [pinned]",
   "    comments: 1",
-  "capabilities:",
+  "duties:",
   "  lifecycle: [label, comment, close]",
 ].join("\n");
 
@@ -428,8 +428,6 @@ function baseInputs(warrant: string): Record<string, string> {
     "github-token": "stub-token",
     number: "42",
     warrant,
-    apply: "label, comment, close",
-    languages: "",
     "dry-run": "false",
     sweep: "false",
     since: "",

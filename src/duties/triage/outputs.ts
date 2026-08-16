@@ -163,7 +163,6 @@ export function page(
     refused: outcome.refused,
     duplicateOf: outcome.verdict.duplicateOf,
     permitted: outcome.permitted,
-    withheld: outcome.withheld,
     done,
     memory: outcome.memory,
     note: outcome.note,

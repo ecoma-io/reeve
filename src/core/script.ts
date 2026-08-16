@@ -2,7 +2,7 @@
  * Unicode script membership — the one thing about a language a duty can
  * decide without asking anything.
  *
- * The `languages` input names a script per language, and every rule built on
+ * The configured languages name a script per language, and every rule built on
  * that name is answered by the runtime's own Unicode tables rather than by a
  * list kept here. A list would be a copy of Unicode that goes stale on the next
  * Node release, and it would also be the place a contributor is tempted to add
@@ -79,7 +79,7 @@ export function isScriptName(script: string): boolean {
  * carry a script the target does not use?" without this module ever knowing
  * that `Latn` and `Latin` name the same thing. Comparing the names would have
  * to know, and would be wrong for the consumer who spelled it both ways across
- * their `languages` input.
+ * their configured languages.
  */
 export function containsScript(
   text: string,

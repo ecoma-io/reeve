@@ -35,7 +35,6 @@ import {
   describeRecordOutcome,
   labelChange,
   recordCorrection,
-  recordGrantedByFile,
   recordGrantedByRun,
   recordReversal,
   recordTrigger,
@@ -147,16 +146,10 @@ describe("labelChange", () => {
   });
 });
 
-describe("recordGrantedByFile", () => {
-  it("is true only when the file's own grant includes `record`", () => {
-    expect(recordGrantedByFile(["label", "record"])).toBe(true);
-    expect(recordGrantedByFile(["label"])).toBe(false);
-  });
-});
-
 describe("recordGrantedByRun", () => {
-  it("is true only when this run's own `apply` includes `record`", () => {
+  it("is true only when the warrant's grant includes `record`", () => {
     expect(recordGrantedByRun(["record"])).toBe(true);
+    expect(recordGrantedByRun(["label"])).toBe(false);
     expect(recordGrantedByRun([])).toBe(false);
   });
 });
@@ -255,7 +248,6 @@ function settingsOf(over: Partial<Settings> = {}): Settings {
     languages: [],
     warrant: ".github/reeve.yml",
     taxonomy: [labelOf({ name: "bug" }), labelOf({ name: "docs" })],
-    apply: ["label", "record"],
     confidence: 0.75,
     correctionsDir: "corrections",
     about: "",

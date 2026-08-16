@@ -16,6 +16,6 @@ import type { Capability } from "../../core/warrant.js";
  * or `edit-body`. At level 0, with no warrant file at all, this must NOT be
  * granted implicitly. A maintainer who wants `harmonise` to open sync PRs
  * must write `harmonise: [edit-file, open-pr]` in the warrant's
- * `capabilities:` block.
+ * `duties:` block.
  */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = [];

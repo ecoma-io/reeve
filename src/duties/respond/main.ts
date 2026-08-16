@@ -13,7 +13,7 @@
  * The order:
  *
  *   1. Read the warrant, or build the implicit one, exactly as every other
- *      duty does. A `capabilities:` block that does not name `respond` is
+ *      duty does. A `duties:` block that does not name `respond` is
  *      checked here, once, before a single request — the summary says why,
  *      and the run is green.
  *   2. Read the thread. An issue opened by a bot is not answered — replying
@@ -543,7 +543,7 @@ async function decide(
 
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`respond\`; once that block exists ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`respond\`; once that block exists ` +
     "it is the whole answer, so add `respond: [comment]` to it to grant a first reply (or remove " +
     "the block to return to defaults, which is still nothing — see `DEFAULT_CAPABILITIES`)."
   );

@@ -207,7 +207,7 @@ describe("the run summary", () => {
 
     expect(summary).toContain(
       "No `.github/reeve.yml` — this duty found no warrant file, and ran on its own " +
-        "defaults (`edit-body`, and whatever `languages` was configured).",
+        "defaults (`edit-body`, and whatever languages were configured).",
     );
   });
 

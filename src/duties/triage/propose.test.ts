@@ -314,7 +314,7 @@ describe("applyChangeSet", () => {
     "    description: Web work.\n" +
     "    paths:\n" +
     "      - apps/web\n" +
-    "capabilities:\n" +
+    "duties:\n" +
     "  triage: [label]\n";
 
   it("returns null when there is no labels: block", () => {
@@ -348,7 +348,7 @@ describe("applyChangeSet", () => {
       },
     ];
     const edited = applyChangeSet(SOURCE, entries) ?? "";
-    expect(edited).toContain("capabilities:\n  triage: [label]");
+    expect(edited).toContain("duties:\n  triage: [label]");
   });
 
   it("removes a retired item's whole span", () => {

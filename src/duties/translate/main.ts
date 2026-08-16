@@ -133,9 +133,8 @@ type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
  * What `translate` translates into when the warrant's `languages:` key is
- * silent — the same list the action's `languages` input used to default to,
- * now the duty's own documented default, resolved when nothing in the warrant
- * has an opinion.
+ * silent — the duty's own documented default, resolved when nothing in the
+ * warrant has an opinion.
  */
 const DEFAULT_LANGUAGES: readonly Language[] = parseLanguages("en, vi, zh");
 
@@ -236,7 +235,7 @@ function readAttribution(): Attribution {
  */
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`translate\`; once that block ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`translate\`; once that block ` +
     "exists it is the whole answer, so add `translate: [edit-body]` to it (or remove the block " +
     "to return to defaults)."
   );

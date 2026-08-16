@@ -6,7 +6,7 @@
  * or `edit-body`. At level 0, with no warrant file at all, this must NOT be
  * granted implicitly. A maintainer who wants `dependa` to open dependency
  * update PRs must write `dependa: [edit-file, open-pr]` in the warrant's
- * `capabilities:` block.
+ * `duties:` block.
  *
  * Pulled out of `main.ts` so it can be read without running the duty —
  * see `harmonise/capabilities.ts` for the same pattern and its reason.

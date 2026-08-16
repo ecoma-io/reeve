@@ -24,7 +24,6 @@ function outcome(over: Partial<OutcomeSummary> = {}): OutcomeSummary {
     unstale: [],
     permanentlyExempt: null,
     permitted: ["label", "comment"],
-    withheld: [],
     ungranted: null,
     ...over,
   };
@@ -74,19 +73,18 @@ describe("renderRow", () => {
 
 describe("renderSweepPage", () => {
   it("renders just the ungranted reason when the whole sweep was ungranted", () => {
-    const page = renderSweepPage(".github/reeve.yml", false, [], "no lifecycle: key");
+    const page = renderSweepPage(false, [], "no lifecycle: key");
     expect(page).toContain("no lifecycle: key");
     expect(page).not.toContain("Processed");
   });
 
   it("says nothing was processed when results is empty and nothing is ungranted", () => {
-    const page = renderSweepPage(".github/reeve.yml", false, [], null);
+    const page = renderSweepPage(false, [], null);
     expect(page).toContain("Nothing was processed this run.");
   });
 
   it("renders one row per thread", () => {
     const page = renderSweepPage(
-      ".github/reeve.yml",
       false,
       [
         { number: 1, outcome: outcome(), done: NOTHING_DONE },
@@ -100,27 +98,13 @@ describe("renderSweepPage", () => {
   });
 
   it("mentions a dry run", () => {
-    const page = renderSweepPage(".github/reeve.yml", true, [], null);
+    const page = renderSweepPage(true, [], null);
     expect(page).toContain("Dry run");
-  });
-
-  it("reports a withheld capability at most once even when several threads share it", () => {
-    const page = renderSweepPage(
-      ".github/reeve.yml",
-      false,
-      [
-        { number: 1, outcome: outcome({ withheld: ["close"] }), done: NOTHING_DONE },
-        { number: 2, outcome: outcome({ withheld: ["close"] }), done: NOTHING_DONE },
-      ],
-      null,
-    );
-    expect(page.match(/does not grant to lifecycle/g)).toHaveLength(1);
   });
 
   it("reports a chrome fallback at most once even when several threads share it", () => {
     const done: DoneSummary = { ...NOTHING_DONE, commented: true };
     const page = renderSweepPage(
-      ".github/reeve.yml",
       false,
       [
         { number: 1, outcome: outcome({ language: "la" }), done },
@@ -133,7 +117,6 @@ describe("renderSweepPage", () => {
 
   it("says nothing about a chrome fallback when no thread in the sweep actually commented", () => {
     const page = renderSweepPage(
-      ".github/reeve.yml",
       false,
       [{ number: 1, outcome: outcome({ language: "la" }), done: NOTHING_DONE }],
       null,
@@ -146,7 +129,6 @@ describe("renderSweepPage", () => {
     // summary, never read as a completed sweep — everything above the line
     // was done, the rest is still there for the next run.
     const page = renderSweepPage(
-      ".github/reeve.yml",
       false,
       [{ number: 1, outcome: outcome(), done: NOTHING_DONE }],
       null,
@@ -165,84 +147,43 @@ describe("renderSweepPage", () => {
 
 describe("renderThreadPage", () => {
   it("names the thread number and a dry run", () => {
-    const page = renderThreadPage(".github/reeve.yml", true, 42, outcome(), NOTHING_DONE);
+    const page = renderThreadPage(true, 42, outcome(), NOTHING_DONE);
     expect(page).toContain("Thread #42");
     expect(page).toContain("dry run");
   });
 
   it("lists each due action's track and step", () => {
     const action = { track: track({ name: "stale" }), stepIndex: 1 };
-    const page = renderThreadPage(
-      ".github/reeve.yml",
-      false,
-      42,
-      outcome({ actions: [action] }),
-      NOTHING_DONE,
-    );
+    const page = renderThreadPage(false, 42, outcome({ actions: [action] }), NOTHING_DONE);
     expect(page).toContain("`stale`, step 2.");
   });
 
-  it("shows the withheld line when a capability is missing", () => {
-    const page = renderThreadPage(
-      ".github/reeve.yml",
-      false,
-      42,
-      outcome({ withheld: ["close"] }),
-      NOTHING_DONE,
-    );
-    expect(page).toContain("does not grant to lifecycle");
-  });
-
   it("omits language and action detail when the thread was never evaluated", () => {
-    const page = renderThreadPage(
-      ".github/reeve.yml",
-      false,
-      42,
-      outcome({ ungranted: "no policy" }),
-      NOTHING_DONE,
-    );
+    const page = renderThreadPage(false, 42, outcome({ ungranted: "no policy" }), NOTHING_DONE);
     expect(page).not.toContain("Author language");
   });
 
   const COMMENTED: DoneSummary = { ...NOTHING_DONE, commented: true };
 
   it("says nothing about a chrome fallback for a comment in a language chrome covers", () => {
-    const page = renderThreadPage(".github/reeve.yml", false, 42, outcome(), COMMENTED);
+    const page = renderThreadPage(false, 42, outcome(), COMMENTED);
     expect(page).not.toContain("no translation for");
   });
 
   it("notes a chrome fallback once for a comment in a language chrome has no row for", () => {
-    const page = renderThreadPage(
-      ".github/reeve.yml",
-      false,
-      42,
-      outcome({ language: "la" }),
-      COMMENTED,
-    );
+    const page = renderThreadPage(false, 42, outcome({ language: "la" }), COMMENTED);
     expect(page).toContain("`la`");
     expect(page).toContain("no translation for");
     expect(page.match(/`la`/g)).toHaveLength(1);
   });
 
   it("says nothing about a chrome fallback when nothing was actually commented", () => {
-    const page = renderThreadPage(
-      ".github/reeve.yml",
-      false,
-      42,
-      outcome({ language: "la" }),
-      NOTHING_DONE,
-    );
+    const page = renderThreadPage(false, 42, outcome({ language: "la" }), NOTHING_DONE);
     expect(page).not.toContain("no translation for");
   });
 
   it("says nothing about a chrome fallback on a dry run, since nothing was actually posted", () => {
-    const page = renderThreadPage(
-      ".github/reeve.yml",
-      true,
-      42,
-      outcome({ language: "la" }),
-      COMMENTED,
-    );
+    const page = renderThreadPage(true, 42, outcome({ language: "la" }), COMMENTED);
     expect(page).not.toContain("no translation for");
   });
 });

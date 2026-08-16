@@ -45,7 +45,7 @@ const AT = { owner: "ecoma-io", repo: "reeve" };
 const FULL = `
 version: 1
 
-capabilities:
+duties:
   triage: [label, comment]
   translate: [edit-body]
 
@@ -143,9 +143,9 @@ describe("version", () => {
 
 describe("labels", () => {
   it("treats an absent taxonomy as an empty one", () => {
-    // A repository that wrote a warrant only to configure capabilities is a
+    // A repository that wrote a warrant only to configure duties is a
     // configuration, not a mistake. The duty that needs a taxonomy says so.
-    expect(warrant("version: 1\ncapabilities:\n  triage: [label]\n").labels).toEqual([]);
+    expect(warrant("version: 1\nduties:\n  triage: [label]\n").labels).toEqual([]);
   });
 
   it("refuses a taxonomy that is not a list", () => {
@@ -276,7 +276,7 @@ describe("confidence", () => {
   });
 });
 
-describe("capabilities", () => {
+describe("duties", () => {
   it("reads what a duty was granted", () => {
     expect(warrant(FULL).granted("triage", ["label"])).toEqual(["label", "comment"]);
   });
@@ -288,57 +288,55 @@ describe("capabilities", () => {
   });
 
   it("distinguishes an explicit `none` from an absent entry", () => {
-    const source = `version: 1\ncapabilities:\n  triage: [none]\n`;
+    const source = `version: 1\nduties:\n  triage: [none]\n`;
     expect(warrant(source).granted("triage", ["label"])).toEqual([]);
   });
 
   it("drops a repeated capability rather than granting it twice", () => {
-    const source = `version: 1\ncapabilities:\n  triage: [label, label]\n`;
+    const source = `version: 1\nduties:\n  triage: [label, label]\n`;
     expect(warrant(source).granted("triage", [])).toEqual(["label"]);
   });
 
   it("refuses a misspelling rather than silently granting nothing", () => {
     // A silently ignored `lablel` is a bug a maintainer discovers months later
     // as an absence, which is the hardest kind to notice.
-    const source = `version: 1\ncapabilities:\n  triage: [lablel]\n`;
+    const source = `version: 1\nduties:\n  triage: [lablel]\n`;
     expect(() => warrant(source)).toThrow(/names `lablel`, which is not something a duty/);
   });
 
   it("refuses an unknown duty rather than silently creating a dead grant", () => {
-    const source = `version: 1\ncapabilities:\n  traige: [label]\n`;
+    const source = `version: 1\nduties:\n  traige: [label]\n`;
     expect(() => warrant(source)).toThrow(/names `traige`, which is not a known duty/);
   });
 
   it("refuses an empty list, which is what a half-finished edit leaves behind", () => {
-    const source = `version: 1\ncapabilities:\n  triage: []\n`;
+    const source = `version: 1\nduties:\n  triage: []\n`;
     expect(() => warrant(source)).toThrow(/is empty\. Use `\[none\]`/);
   });
 
   it("refuses `none` mixed with a real capability, which says two things at once", () => {
-    const source = `version: 1\ncapabilities:\n  triage: [none, label]\n`;
+    const source = `version: 1\nduties:\n  triage: [none, label]\n`;
     expect(() => warrant(source)).toThrow(/names `none`/);
   });
 
-  it("refuses a capabilities block that is not a mapping", () => {
-    expect(() => warrant("version: 1\ncapabilities: [label]\n")).toThrow(
-      /`capabilities` as a list/,
-    );
+  it("refuses a duties block that is not a mapping", () => {
+    expect(() => warrant("version: 1\nduties: [label]\n")).toThrow(/`duties` as a list/);
   });
 
   it("grants nothing to a duty a written block does not name, not even the fallback", () => {
-    // Once a maintainer has written `capabilities:`, it is taken as the whole
+    // Once a maintainer has written `duties:`, it is taken as the whole
     // roster of who may act. A name it forgot is refused everything, not
     // handed the default it would have kept had the block never existed.
     expect(warrant(FULL).granted("close-stale", ["comment"])).toEqual([]);
   });
 
-  it("grants a duty its own default when the file has no capabilities block at all", () => {
+  it("grants a duty its own default when the file has no duties block at all", () => {
     // A taxonomy-only file is a legitimate configuration and must keep
     // working exactly as it did before this distinction existed.
     expect(warrant(MINIMAL).granted("close-stale", ["comment"])).toEqual(["comment"]);
   });
 
-  it("does not mark a duty unnamed when there is no capabilities block at all", () => {
+  it("does not mark a duty unnamed when there is no duties block at all", () => {
     expect(warrant(MINIMAL).unnamed("triage")).toBe(false);
   });
 
@@ -349,27 +347,27 @@ describe("capabilities", () => {
   it("does not mark a duty unnamed when the block names it, even as `none`", () => {
     // `[none]` is a decision about the duty, not silence about it — `unnamed`
     // has to tell those two "nothing" apart even though `granted` cannot.
-    const source = "version: 1\ncapabilities:\n  triage: [none]\n";
+    const source = "version: 1\nduties:\n  triage: [none]\n";
     expect(warrant(source).unnamed("triage")).toBe(false);
     expect(warrant(source).granted("triage", ["label"])).toEqual([]);
   });
 
   it("marks every duty unnamed when the block is written but empty", () => {
-    // `capabilities: {}` is a block that exists and answers nothing — the
+    // `duties: {}` is a block that exists and answers nothing — the
     // question was asked, and every duty is refused for want of an answer.
-    const source = "version: 1\ncapabilities: {}\n";
+    const source = "version: 1\nduties: {}\n";
     expect(warrant(source).unnamed("triage")).toBe(true);
     expect(warrant(source).granted("triage", ["label"])).toEqual([]);
   });
 
-  it("refuses a bare `capabilities:` key, which is a half-finished edit rather than a decision", () => {
+  it("refuses a bare `duties:` key, which is a half-finished edit rather than a decision", () => {
     // YAML reads a key with nothing under it as `null`, and every sibling key
     // refuses that same shape — `languages:`, `memory:`, `lifecycle:`,
     // `pivot:`. Reading it as "no block at all" would silently keep the
     // widest default while the maintainer believed they had started writing
     // a restriction.
-    expect(() => warrant("version: 1\ncapabilities:\n")).toThrow(
-      /writes `capabilities:` with nothing under it/,
+    expect(() => warrant("version: 1\nduties:\n")).toThrow(
+      /writes `duties:` with nothing under it/,
     );
   });
 });
@@ -530,7 +528,7 @@ describe("openAuthority", () => {
   }
 
   it("reads a written warrant, and never asks the forge for labels", async () => {
-    await writeFile(DEFAULT_WARRANT_PATH, `${MINIMAL}capabilities:\n  triage: [label]\n`);
+    await writeFile(DEFAULT_WARRANT_PATH, `${MINIMAL}duties:\n  triage: [label]\n`);
     const api = labelsApi(["bug"]);
 
     const opened = await openAuthority(DEFAULT_WARRANT_PATH, api, AT, "triage");
@@ -540,11 +538,11 @@ describe("openAuthority", () => {
     expect(vi.mocked(api.rest.issues.listLabelsForRepo)).not.toHaveBeenCalled();
   });
 
-  it("reports a duty a written `capabilities:` block never named as denied", async () => {
+  it("reports a duty a written `duties:` block never named as denied", async () => {
     // The block is the total enumeration, so silence about `translate` is a
     // refusal rather than an omission — and deciding it here, once, is what
     // lets a run spend nothing on a duty it was never granted.
-    await writeFile(DEFAULT_WARRANT_PATH, `${MINIMAL}capabilities:\n  triage: [label]\n`);
+    await writeFile(DEFAULT_WARRANT_PATH, `${MINIMAL}duties:\n  triage: [label]\n`);
 
     const opened = await openAuthority(DEFAULT_WARRANT_PATH, labelsApi(["bug"]), AT, "translate");
 
@@ -1328,7 +1326,7 @@ describe("implicitWarrant", () => {
     expect(excluded).toEqual(["triage", "blank"]);
   });
 
-  it("grants a duty its own fallback, since no capabilities block was ever written", () => {
+  it("grants a duty its own fallback, since no duties block was ever written", () => {
     const { warrant } = implicitWarrant(PATH, []);
     expect(warrant.granted("triage", ["label"])).toEqual(["label"]);
     expect(warrant.unnamed("triage")).toBe(false);

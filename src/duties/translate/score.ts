@@ -72,9 +72,9 @@ export interface Draft {
    *
    * Needed because a script that has leaked into a draft can only be named
    * against a script somebody asked for. Reeve derives its rules from the
-   * `languages` input and nowhere else — there is no list of scripts in this
-   * repository, deliberately, and inventing one would be the special-casing the
-   * whole design avoids.
+   * configured languages and nowhere else — there is no list of scripts in
+   * this repository, deliberately, and inventing one would be the
+   * special-casing the whole design avoids.
    */
   readonly languages: readonly Language[];
 }

@@ -213,19 +213,16 @@ export async function translateText(
 
   // Guarded here and nowhere earlier: detection, drafting and judging all ran
   // and all spent whatever they were going to spend, exactly as they would
-  // under an `apply: none` narrowing — a capability the warrant or `apply`
-  // withheld is a reason not to write, not a reason not to have decided.
+  // under a bare-grant warrant — a capability the file withheld is a reason
+  // not to write, not a reason not to have decided.
   if (!settings.permitted.includes("edit-body")) {
     // The note reaches the summary and the sweep's outcome column, so a
-    // reader can tell a write the double-gate blocked from a run where no
+    // reader can tell a write the warrant blocked from a run where no
     // draft survived — the two look identical once `posted` is emptied. Only
     // set when something was actually withheld: with no drafts, "no draft
-    // survived" is the true story whatever `apply` and the warrant say.
-    //
-    // Named generically rather than blaming one half — `apply: none` and a
-    // warrant that never named `translate` both land here the same way, and
-    // the upfront `withheld` warning above is where the specific one, if
-    // there is one, was already said.
+    // survived" is the true story whatever the warrant says. A warrant that
+    // never granted `edit-body` is the whole story — there is no second gate
+    // to blame half of.
     if (posted.length > 0) {
       core.warning(
         `${what}: \`edit-body\` is not permitted this run, so ` +
@@ -362,7 +359,7 @@ export interface ThreadResult {
   readonly translated: Report;
   readonly replies: number;
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * simply does not name it — `null` on every path that reached `decide`'s
    * translate equivalent at all, including one that translated nothing for
    * an ordinary reason.

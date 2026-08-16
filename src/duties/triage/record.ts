@@ -6,9 +6,9 @@
  * carries a maintainer's decision, and this module's job is turning that
  * event into a `Correction`, not asking a model to reproduce it. `main.ts`'s
  * `run()` is still the one place that decides whether `record` applies at
- * all — `recordGrantedByFile`/`recordGrantedByRun` are the two halves of
- * that gate, kept here so both wear a name rather than a repeated
- * `.includes("record")` and a paragraph explaining it at every call site.
+ * all — `recordGrantedByRun` is that gate, kept here so it wears a name
+ * rather than a repeated `.includes("record")` and a paragraph explaining it
+ * at every call site.
  */
 import * as core from "@actions/core";
 import { context } from "@actions/github";
@@ -116,26 +116,11 @@ export function labelChange(): {
 }
 
 /**
- * Whether `.github/reeve.yml` (or the implicit warrant) grants `record` at
- * all — the file's own half of the gate `run()` checks before recording
- * anything. The other half is `recordGrantedByRun`: a run needs both, because
- * the file and the workflow's `apply` each withhold `record` independently,
- * and the two are worth telling apart — a file grant `apply` narrowed away is
- * a different maintainer mistake than a file that never granted it at all.
- *
- * That first mistake is the common one: `apply` defaults to `label` alone, so
- * a maintainer who grants `record` only in the file — and never adds it to
- * the workflow's own `apply` input — gets nothing recorded, silently, until
- * `recordGrantedByRun`'s half of the gate is understood too.
- */
-export function recordGrantedByFile(grantedCapabilities: readonly Capability[]): boolean {
-  return grantedCapabilities.includes("record");
-}
-
-/**
- * Whether this run's own `apply` — the file's grant narrowed by the input, as
- * `narrow` computes it — still includes `record`. See `recordGrantedByFile`
- * for the other half of the gate.
+ * Whether the warrant grants `record` — the file is the whole authority, so
+ * one check answers for both the file and the run, and the name says "by the
+ * run" because the gate was once split between the file and the workflow's
+ * `apply` input. With no input left to widen or narrow the grant, the two
+ * halves are one, and this is it.
  */
 export function recordGrantedByRun(permitted: readonly Capability[]): boolean {
   return permitted.includes("record");

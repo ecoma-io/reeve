@@ -14,7 +14,7 @@
  *      happen before a single request: a taxonomy naming a renamed label would
  *      otherwise look exactly like a model that agreed with nothing.
  *   1a. **Stop, for a block that said nothing about this duty.** A written
- *      `capabilities:` block that does not name `triage` grants it nothing,
+ *      `duties:` block that does not name `triage` grants it nothing,
  *      deliberately, and no verdict downstream can change that — so the run
  *      stops here, before the thread is even fetched, and says why. See the
  *      short-circuit below `readWarrant` for the full argument.
@@ -41,7 +41,7 @@
  *
  * **The failure mode of this duty is doing nothing.** Every model failing, a
  * verdict that does not parse, a verdict under the floor, a thread that was
- * screened out and a `capabilities:` block that does not name this duty are all
+ * screened out and a `duties:` block that does not name this duty are all
  * green runs that applied nothing and said why. Only a warrant that does not
  * parse — an absent file at a path a consumer chose is one of these, an absent
  * file at the default is not — and a thread that cannot be read are
@@ -212,7 +212,7 @@ export interface Outcome {
   /** Repository labels the implicit warrant left out for carrying no description. */
   readonly excludedLabels: readonly string[];
   /**
-   * Why this duty was granted nothing, when a written `capabilities:` block
+   * Why this duty was granted nothing, when a written `duties:` block
    * exists and simply does not name it. `null` on every other path, including
    * the ordinary "nothing was applied" a low-confidence or refused verdict
    * produces — this is specifically the reason nothing was ever attempted.
@@ -594,7 +594,7 @@ export async function run(): Promise<void> {
       if (number === null) throw new Error("number: required outside `sweep`.");
       const at = { ...context.repo, number };
 
-      // A written `capabilities:` block that does not name `triage` grants it
+      // A written `duties:` block that does not name `triage` grants it
       // nothing, and no verdict this run could reach changes that — so this
       // sits here, as early as the answer is already certain, and before the
       // thread, the taxonomy check, or a single model call spends anything on
@@ -1153,7 +1153,7 @@ function notGranted(warrant: Warrant): Outcome {
     implicit: false,
     excludedLabels: [],
     ungranted:
-      `\`${warrant.path}\`'s \`capabilities:\` block does not name \`triage\`; once that block ` +
+      `\`${warrant.path}\`'s \`duties:\` block does not name \`triage\`; once that block ` +
       "exists it is the whole answer, so add `triage: [label]` to it (or remove the block to " +
       "return to defaults).",
   };

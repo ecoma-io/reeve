@@ -19,7 +19,7 @@ const TAXONOMY =
   "  - name: docs\n" +
   "    description: Documentation is wrong or missing.\n";
 
-const WITH_CAPABILITIES = `${TAXONOMY}capabilities:\n  triage: [label]\n`;
+const WITH_DUTIES = `${TAXONOMY}duties:\n  triage: [label]\n`;
 
 const WITH_LIFECYCLE =
   TAXONOMY +
@@ -247,8 +247,8 @@ describe("diagnose", () => {
     });
   });
 
-  it("marks a duty denied when a written `capabilities:` block does not name it", async () => {
-    const result = await report(WITH_CAPABILITIES, labelsApi(["bug", "docs"]));
+  it("marks a duty denied when a written `duties:` block does not name it", async () => {
+    const result = await report(WITH_DUTIES, labelsApi(["bug", "docs"]));
 
     const respond = result.authority.find((row) => row.duty === "respond");
     expect(respond).toEqual({
@@ -270,7 +270,7 @@ describe("diagnose", () => {
   });
 
   it("narrows lifecycle's granted capabilities to its own ladder, and notes what was filtered", async () => {
-    const source = `${TAXONOMY}capabilities:\n  lifecycle: [label, comment, edit-body]\n`;
+    const source = `${TAXONOMY}duties:\n  lifecycle: [label, comment, edit-body]\n`;
     const result = await report(source, labelsApi(["bug", "docs"]));
 
     const lifecycle = result.authority.find((row) => row.duty === "lifecycle");
@@ -284,7 +284,7 @@ describe("diagnose", () => {
   });
 
   it("leaves `unused` empty when the warrant grants nothing outside a duty's own ladder", async () => {
-    const source = `${TAXONOMY}capabilities:\n  lifecycle: [label]\n`;
+    const source = `${TAXONOMY}duties:\n  lifecycle: [label]\n`;
     const result = await report(source, labelsApi(["bug", "docs"]));
 
     const lifecycle = result.authority.find((row) => row.duty === "lifecycle");
@@ -313,17 +313,19 @@ describe("diagnose", () => {
   });
 
   it("leaves a duty a written block denies out of the default note — denied is not default", async () => {
-    const result = await report(WITH_CAPABILITIES, labelsApi(["bug", "docs"]));
+    const result = await report(WITH_DUTIES, labelsApi(["bug", "docs"]));
 
     const note = result.findings.find((finding) => finding.text.includes("built-in default"));
     // `triage` is named with exactly its own default (`[label]`), so it is
     // still `isDefault: true` and belongs in the note. `respond` and the
-    // other three duties this block does not name are `denied: true` — a
+    // other duties this block does not name are `denied: true` — a
     // real, designed answer, not a default, so they must not appear here.
     expect(note?.text).toContain("`triage`");
     expect(note?.text).not.toContain("`respond`");
     expect(note?.text).not.toContain("`duplicate`");
     expect(note?.text).not.toContain("`translate`");
     expect(note?.text).not.toContain("`lifecycle`");
+    expect(note?.text).not.toContain("`harmonise`");
+    expect(note?.text).not.toContain("`dependa`");
   });
 });

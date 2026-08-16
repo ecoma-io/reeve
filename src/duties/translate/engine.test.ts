@@ -33,7 +33,7 @@ const settings: Settings = {
   modelNames: new Map([["model-a", "Careful"]]),
   languages: [english, vietnamese],
   warrant: "",
-  apply: [],
+
   permitted: [],
   judges: [["judge-a"]],
   judgeNames: new Map([["judge-a", "Panel"]]),

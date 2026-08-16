@@ -4,9 +4,10 @@
  * Everything below is orchestration. The pipeline:
  *
  *   1. Read the warrant — or, missing one at the default path, build the
- *      implicit warrant. `languages` comes from whichever of the warrant's
- *      own `languages:` key and the `languages` input answers it.
- *   1a. A written `capabilities:` block that does not name `harmonise` is
+ *      implicit warrant. `languages` comes from the warrant's own
+ *      `languages:` key, or this duty's documented default when the file is
+ *      silent.
+ *   1a. A written `duties:` block that does not name `harmonise` is
  *      checked here, once — the duty does nothing, and the run is green.
  *   2. Discover document groups by scanning for locale suffix files.
  *   3. Read the provenance state file.
@@ -148,7 +149,7 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
  */
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`harmonise\`; once that block ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`harmonise\`; once that block ` +
     "exists it is the whole answer, so add `harmonise: [edit-file, open-pr]` to it " +
     "(or remove the block to return to defaults)."
   );

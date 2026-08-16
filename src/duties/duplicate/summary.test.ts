@@ -21,7 +21,6 @@ function run(over: Partial<Run> = {}): Run {
     pivot: { used: false, note: null },
     note: null,
     permitted: ["comment"],
-    withheld: [],
     done: { commented: true },
     posted: "posted",
     spent: [],
@@ -153,7 +152,7 @@ describe("summarize", () => {
     expect(page).toContain("> Both describe the same login failure on Safari.");
   });
 
-  it("shows the rationale when nothing was posted because `apply` did not grant `comment`", () => {
+  it("shows the rationale when nothing was posted because the warrant did not grant `comment`", () => {
     const page = summarize(
       run({ posted: null, rationale: "Both describe the same login failure on Safari." }),
     );
@@ -279,18 +278,11 @@ describe("summarize", () => {
     expect(page).not.toMatch(/^Posted|^Replaced|^Left its own/m);
   });
 
-  it("says nothing was posted when comment was not asked for", () => {
+  it("says nothing was posted when comment was not granted", () => {
     const page = summarize(run({ posted: null }));
 
-    expect(page).toContain("Nothing was posted — `apply` does not name `comment`");
+    expect(page).toContain("Nothing was posted — the warrant does not grant `comment`");
     expect(page).toContain("`duplicate-of` and `score` still carry it");
-  });
-
-  it("names the capabilities the workflow asked for and the file does not grant", () => {
-    const page = summarize(run({ permitted: [], withheld: ["comment"] }));
-
-    expect(page).toContain("`apply` asks for `comment`");
-    expect(page).toContain("`.github/reeve.yml` does not grant to this duty");
   });
 
   it("reports a pivot note when the cross-language bridge was used", () => {
@@ -339,7 +331,7 @@ describe("summarize", () => {
     const page = summarize(
       run({
         ungranted:
-          "`.github/reeve.yml`'s `capabilities:` block does not name `duplicate`; once that " +
+          "`.github/reeve.yml`'s `duties:` block does not name `duplicate`; once that " +
           "block exists it is the whole answer, so add `duplicate: [comment]` to it (or remove " +
           "the block to return to defaults).",
         duplicateOf: null,
@@ -425,7 +417,7 @@ describe("summarizeSweep", () => {
     const page = summarizeSweep(
       sweep({
         ungranted:
-          "`.github/reeve.yml`'s `capabilities:` block does not name `duplicate`; once that " +
+          "`.github/reeve.yml`'s `duties:` block does not name `duplicate`; once that " +
           "block exists it is the whole answer, so add `duplicate: [comment]` to it (or remove " +
           "the block to return to defaults).",
       }),

@@ -70,7 +70,7 @@ import { DUTIES, PLANNED } from "../refusal.js";
  * write` on the token rather than `issues: write`. It has no duty default and
  * cannot be implied by an implicit warrant: writing to the store is a
  * project's decision to keep a memory at all, and only an explicit
- * `capabilities:` block can make it.
+ * `duties:` block can make it.
  *
  * `edit-file` and `open-pr` are qualitatively different again. They give a
  * duty the ability to write repository files and open pull requests — changes
@@ -253,11 +253,11 @@ export interface Warrant {
    * at all.
    *
    * `null` is deliberately not the same thing as an empty list — an empty
-   * `languages:` is refused by `parseLanguages` the same way an empty
-   * `languages` input already is, because a maintainer who wrote the key at
+   * `languages:` is refused by `parseLanguages` the same way an empty key
+   * already is, because a maintainer who wrote the key at
    * all meant something by it. `null` is what lets `resolveLanguages` below
    * tell "this file is silent" from "this file already answered", before it
-   * has any reason to look at the `languages` input.
+   * has any reason to look at the duty's own default.
    */
   readonly languages: readonly Language[] | null;
   /**
@@ -302,7 +302,7 @@ export interface Warrant {
    * dependa duty's own no-implicit-policy floor, the same pattern
    * `lifecycle` follows. When absent, dependa runs with its own
    * conservative defaults. Written with nothing under it is refused,
-   * the same half-finished-edit shape `lifecycle:`/`capabilities:` refuse.
+   * the same half-finished-edit shape `lifecycle:`/`duties:` refuse.
    */
   readonly dependa: DependaPolicy | null;
   /**
@@ -594,7 +594,7 @@ export interface Implicit {
  * things only a written warrant can say, because none of them can be
  * recovered honestly from a label alone.
  *
- * No `capabilities:` block was ever written, because there is no file, so
+ * No `duties:` block was ever written, because there is no file, so
  * `granted` hands back whatever `fallback` the caller offers — which is what
  * every duty already reaches for when a warrant is silent about it, and here
  * is the whole reason this function does not need to know a single duty's
@@ -708,7 +708,7 @@ export const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 export interface Opened {
   readonly authority: Authority;
   /**
-   * True when a written `capabilities:` block never named this duty at all —
+   * True when a written `duties:` block never named this duty at all —
    * decided once per run, before anything is spent, because no verdict
    * downstream can change it.
    */
@@ -806,8 +806,8 @@ export function dutyLanguages(
 
 /**
  * The pivot language corrections are bridged through, resolved against the
- * final list of configured languages — whichever of `languages:` or the
- * `languages` input answered that.
+ * final list of configured languages — the warrant's `languages:` key, or
+ * the duty's documented default when the file is silent.
  *
  * The warrant's `pivot:` wins outright when written, refused if it names a
  * language that is not in `languages` — a pivot nothing translates into or
@@ -1002,7 +1002,7 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
   if (raw === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one ` +
-        "language, or delete the key to leave the `languages` input in charge.",
+        "language, or delete the key to leave each duty's own default in charge.",
     );
   }
   if (!Array.isArray(raw)) {
@@ -1029,10 +1029,10 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
 /**
  * The `pivot:` key: a language code, or `null` when the file never wrote one.
  *
- * Not resolved against the final `languages` list here — that list may still
- * come from the `languages` input rather than this file, and `readWarrant`
- * runs before either duty has decided which. `resolvePivot` does that once
- * the caller has the real list in hand.
+ * Not resolved against the final `languages` list here — that list may come
+ * from the warrant's own `languages:` key or from each duty's documented
+ * default, and `readWarrant` runs before any duty has decided which.
+ * `resolvePivot` does that once the caller has the real list in hand.
  *
  * `pivot:` with nothing under it parses as YAML `null`, which is refused
  * rather than read as absence — the same distinction `readLanguages` draws:
@@ -1054,7 +1054,7 @@ function readPivot(path: string, raw: unknown): string | null {
  * default in charge — see {@link Warrant.memory}. Present, `recall` is
  * required: a block with nothing in it — including `memory:` written with
  * nothing under it, which parses as YAML `null` — is the same half-finished-
- * edit shape `capabilities:` and `languages:` both refuse rather than guess
+ * edit shape `duties:` and `languages:` both refuse rather than guess
  * at.
  */
 function readMemory(path: string, raw: unknown): MemorySettings | null {
@@ -1095,7 +1095,7 @@ function readAbout(path: string, raw: unknown): string | null {
 /**
  * The `lifecycle:` key. Absent entirely is `null` — see {@link Warrant.lifecycle}'s
  * no-implicit-policy doc comment. Written with nothing under it is refused,
- * the same half-finished-edit shape `memory:`/`capabilities:` both refuse.
+ * the same half-finished-edit shape `memory:`/`duties:` both refuse.
  */
 function readLifecycle(path: string, raw: unknown): LifecyclePolicy | null {
   if (raw === undefined) return null;
@@ -1372,7 +1372,7 @@ function readLifecycleOverrides(path: string, raw: unknown): readonly LifecycleO
  * The `dependa:` key. Absent entirely is `null` — dependa runs with its own
  * conservative defaults, the same pattern `lifecycle` follows. Written with
  * nothing under it is refused, the same half-finished-edit shape
- * `lifecycle:`/`capabilities:` both refuse rather than guess at.
+ * `lifecycle:`/`duties:` both refuse rather than guess at.
  */
 function readDependa(path: string, raw: unknown): DependaPolicy | null {
   if (raw === undefined) return null;
