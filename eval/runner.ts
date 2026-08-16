@@ -52,6 +52,10 @@ import type { RespondScenario } from "./drivers/respond.ts";
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
 import type { Line } from "./exit-code.ts";
+// The language dimension of a fixture, decided apart from its effects — a
+// declared language that was misidentified makes the run `failed`, never a
+// clean stop. See `./language.ts`.
+import { languageLine } from "./language.ts";
 
 const exec = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, "..");
@@ -358,6 +362,11 @@ function triageLine(
   const finding = effectsMatch && screenedMatch && duplicateMatch && namesMatch;
   const detail = `screened="${screened}" duplicate="${duplicate}" applied=${JSON.stringify(applied)}`;
 
+  // The language dimension wins over both: a thread the pipeline identified as
+  // the wrong language was handled wrong, and that can never be a clean stop.
+  const language = languageLine(fixture, expected.language, run.outputs.language ?? "");
+  if (language !== null) return language;
+
   if (finding) {
     const detailText =
       expected.effects === undefined
@@ -472,6 +481,12 @@ function respondLine(
       : expected.patch.trim() === patch.trim();
 
   const finding = commentedMatch && stoppedMatch && patchMatch;
+
+  // The language dimension wins over both: a thread the pipeline identified as
+  // the wrong language was handled wrong, and that can never be a clean stop.
+  const language = languageLine(fixture, expected.language, run.outputs.language ?? "");
+  if (language !== null) return language;
+
   if (finding) {
     const detailText =
       commented && wantedCommented

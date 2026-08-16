@@ -92,6 +92,13 @@ export interface FixtureExpected {
   readonly "verdict-over"?: Record<string, unknown>;
   /** The thread to serve, when a fixture is not the default report. */
   readonly thread?: Pick<Thread, "title" | "body">;
+  /**
+   * The language code detection must answer when it reaches the model — a
+   * thread in a language the profile data does not cover (e.g. one outside the
+   * bundled sixty) is handed to the model, and this scripts its answer.
+   * Defaults to `en`.
+   */
+  readonly detect?: string;
   readonly expected?: FixtureAssertions;
 }
 
@@ -100,6 +107,12 @@ export interface FixtureAssertions {
   readonly "screened-out"?: string;
   readonly "duplicate-of"?: number | null;
   readonly "applied-names"?: readonly string[];
+  /**
+   * The language the thread must have been identified as — the label of the
+   * language the run's `language` output carries. Declaring one makes a run
+   * that identified the thread as anything else `failed`, never `skipped`.
+   */
+  readonly language?: string;
   readonly effects?: Pick<TrackerEffect, "applied" | "commented" | "assigned" | "closed">;
 }
 
@@ -149,7 +162,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Triag
       doc["screen-models"] === true && (screened === "spam" || screened === "off-topic")
         ? screened
         : "keep",
-    detect: "en",
+    detect: doc.detect ?? "en",
     inputs: {
       ...(doc["screen-models"] === true ? { "screen-models": "stub-screen" } : {}),
     },

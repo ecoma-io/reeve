@@ -78,6 +78,12 @@ export interface RespondFixture {
   readonly "draft-over"?: Record<string, unknown>;
   /** The thread to serve, when a fixture is not the default report. */
   readonly thread?: Pick<RespondThread, "title" | "body">;
+  /**
+   * The language code detection must answer when it reaches the model — a
+   * thread in a language the profile data does not cover is handed to the
+   * model, and this scripts its answer. Defaults to `en`.
+   */
+  readonly detect?: string;
   readonly expected?: RespondAssertions;
 }
 
@@ -85,6 +91,12 @@ export interface RespondFixture {
 export interface RespondAssertions {
   /** What the summary verdict page must say the run stopped for. */
   readonly "stopped-for"?: string;
+  /**
+   * The language the thread must have been identified as — the label of the
+   * language the run's `language` output carries. Declaring one makes a run
+   * that identified the thread as anything else `failed`, never `skipped`.
+   */
+  readonly language?: string;
   readonly effects?: Pick<RespondEffect, "commented">;
   /** The reply text expected, or null for a run that stopped without drafting. */
   readonly patch?: string | null;
@@ -212,7 +224,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Respo
       (assertions["stopped-for"] === "spam" || assertions["stopped-for"] === "off-topic")
         ? assertions["stopped-for"]
         : "keep",
-    detect: "en",
+    detect: fixture.detect ?? "en",
     reply: replyOf(fixture["draft-over"] ?? {}),
     alreadyAnswered: fixture["already-answered"] === true,
     ...(fixture["screen-models"] === true ? { inputs: { "screen-models": "stub-screen" } } : {}),
