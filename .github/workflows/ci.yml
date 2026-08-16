@@ -82,6 +82,19 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # The eval contract suite pins the post-1.0 duties contract and the
+      # fail-closed exit-code gate (`test:contract` drives the real `pnpm eval`
+      # across every outcome branch). The root vitest config discovers only
+      # `src/**`, so `pnpm test` does not reach it — it must run here.
+      - run: pnpm test:contract
+
+      # The dogfood gate itself: a fixture run must exit 0 only when every
+      # outcome was a finding and none failed or skipped. Run in CI so the
+      # fail-closed rule is exercised on every push, not only when someone
+      # runs it by hand.
+      - name: Run the eval gate
+        run: pnpm eval all
+
       # Resolves every `uses: ecoma-io/reeve/<duty>@<ref>` in README/docs
       # against tags and bundles that actually exist — the release-time guard
       # that keeps a broken pin like @v0.1 for a v0.6-only duty from reaching a
