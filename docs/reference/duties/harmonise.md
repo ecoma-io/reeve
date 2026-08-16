@@ -81,7 +81,7 @@ does what it promises once the warrant names the capability. The minimal
 warrant that makes the workflow above work:
 
 ```yaml
-capabilities:
+duties:
   harmonise: [edit-file, open-pr]
 ```
 
