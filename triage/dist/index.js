@@ -33068,7 +33068,8 @@ var STAGE = {
   triage: "Triage",
   pivot: "Pivot translation",
   duplicate: "Duplicate check",
-  risk: "Risk assessment"
+  risk: "Risk assessment",
+  review: "Review"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();
@@ -33557,7 +33558,8 @@ var DUTIES = [
   "respond",
   "lifecycle",
   "harmonise",
-  "dependa"
+  "dependa",
+  "review"
 ];
 var PLANNED = [];
 

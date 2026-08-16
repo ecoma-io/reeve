@@ -35719,6 +35719,8 @@ async function decide(api, at, warrant, settings, stages, weather) {
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    shown: [],
+    skipped: [],
     permitted,
     ...over
   });
@@ -35818,6 +35820,9 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const final = reconcile([...deterministic, ...raw], previous);
   const confidence = reviewed.verdict.confidence;
   const next = remember(final, pr.headSha, previous);
+  const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
+  const belowFloor = verdictMeasured && confidence < settings.confidence;
+  const silentNoVerdict = bounded2.shown.length > 0 && !verdictMeasured && final.length === 0;
   if (!permitted.includes("comment")) {
     warning(
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`
@@ -35828,7 +35833,39 @@ async function decide(api, at, warrant, settings, stages, weather) {
       findings: final,
       confidence,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
-      rulesPath: rulesLabel(settings)
+      rulesPath: rulesLabel(settings),
+      shown: bounded2.shown,
+      skipped: bounded2.skipped
+    });
+  }
+  if (belowFloor) {
+    info(
+      `#${String(at.number)}: review confidence ${confidence.toFixed(2)} is below the ${settings.confidence.toFixed(2)} floor, so this run's review was not posted.`
+    );
+    return settled({
+      ...settledBase,
+      language: language?.code ?? null,
+      findings: final,
+      confidence,
+      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      rulesPath: rulesLabel(settings),
+      shown: bounded2.shown,
+      skipped: bounded2.skipped
+    });
+  }
+  if (silentNoVerdict) {
+    info(
+      `#${String(at.number)}: no readable verdict and no deterministic findings \u2014 nothing was posted, so a diff nobody reviewed is not stamped all-clear.`
+    );
+    return settled({
+      ...settledBase,
+      language: language?.code ?? null,
+      findings: final,
+      confidence,
+      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      rulesPath: rulesLabel(settings),
+      shown: bounded2.shown,
+      skipped: bounded2.skipped
     });
   }
   const publication = {
@@ -35847,7 +35884,9 @@ ${would}`);
       confidence,
       posted: would,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
-      rulesPath: rulesLabel(settings)
+      rulesPath: rulesLabel(settings),
+      shown: bounded2.shown,
+      skipped: bounded2.skipped
     });
   }
   const posted = await postOrReplace(api, at, publication);
@@ -35859,7 +35898,9 @@ ${would}`);
     confidence,
     posted,
     malformedAnswers: reviewed.unreadable === null ? 0 : 1,
-    rulesPath: rulesLabel(settings)
+    rulesPath: rulesLabel(settings),
+    shown: bounded2.shown,
+    skipped: bounded2.skipped
   });
 }
 function wrapPr(api) {
@@ -35949,8 +35990,8 @@ function page(settings, authority2, outcome, ungranted, spent) {
     headSha: outcome?.headSha ?? "",
     note: outcome?.note ?? null,
     previousSha: "",
-    shown: [],
-    skipped: [],
+    shown: outcome?.shown ?? [],
+    skipped: outcome?.skipped ?? [],
     findings: outcome?.findings ?? [],
     confidence: outcome?.confidence ?? null,
     posted: outcome?.posted ?? null,

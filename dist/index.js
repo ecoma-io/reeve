@@ -32040,7 +32040,8 @@ var DUTIES = [
   "respond",
   "lifecycle",
   "harmonise",
-  "dependa"
+  "dependa",
+  "review"
 ];
 var PLANNED = [];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
@@ -33519,7 +33520,8 @@ async function writeExplain(leaf) {
         ["respond", "`ecoma-io/reeve/respond@<ref>`"],
         ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
         ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
-        ["dependa", "`ecoma-io/reeve/dependa@<ref>`"]
+        ["dependa", "`ecoma-io/reeve/dependa@<ref>`"],
+        ["review", "`ecoma-io/reeve/review@<ref>`"]
       ]
     ),
     ""

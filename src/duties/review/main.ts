@@ -336,6 +336,13 @@ async function decide(
   // pre-checks, which are certain by construction and need no confidence floor.
   const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
+  // An all-clear no model stood behind. The diff had files to show and the
+  // model that was asked never delivered a readable verdict — a capacity
+  // failure, or an injection-shaped answer. Posting the empty chrome then
+  // would print "No issues to report" about a diff nobody actually reviewed,
+  // which is precisely the false all-clear an injected pull request is best
+  // served by. Withhold instead; the job summary still says what happened.
+  const silentNoVerdict = bounded.shown.length > 0 && !verdictMeasured && final.length === 0;
 
   if (!permitted.includes("comment")) {
     core.warning(
@@ -357,6 +364,23 @@ async function decide(
     core.info(
       `#${String(at.number)}: review confidence ${confidence.toFixed(2)} is below the ` +
         `${settings.confidence.toFixed(2)} floor, so this run's review was not posted.`,
+    );
+    return settled({
+      ...settledBase,
+      language: language?.code ?? null,
+      findings: final,
+      confidence,
+      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      rulesPath: rulesLabel(settings),
+      shown: bounded.shown,
+      skipped: bounded.skipped,
+    });
+  }
+
+  if (silentNoVerdict) {
+    core.info(
+      `#${String(at.number)}: no readable verdict and no deterministic findings — ` +
+        "nothing was posted, so a diff nobody reviewed is not stamped all-clear.",
     );
     return settled({
       ...settledBase,
