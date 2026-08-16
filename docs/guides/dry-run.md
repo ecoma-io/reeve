@@ -32,7 +32,7 @@ removed.
 **Before you write a warrant.** See how the implicit, level-0 taxonomy sorts
 your actual backlog before deciding whether a written one earns its keep.
 
-**Before you turn on a capability.** [The warrant](warrant.md#capabilities)
+**Before you turn on a capability.** [The warrant](warrant.md#duties)
 starts every duty at its cheapest, most reversible default. `dry-run` is how
 you watch what a wider capability — `comment`, `close`, `assign` — would have
 done before you grant it.
@@ -42,10 +42,10 @@ single-thread run can, over the whole backlog `sweep` would otherwise touch —
 the cheapest way to find out what a four-thousand-issue backlog actually
 costs before committing to it.
 
-**`dry-run` is not `none`.** [`none`](warrant.md#capabilities) is a permanent
-configuration for a repository that reads Reeve's outputs and applies them
-itself. `dry-run` is a rehearsal you turn off once you trust what you saw. The
-outputs let a workflow tell the two apart.
+A run that never writes anything at all — a permanent setup for a repository
+that reads Reeve's outputs and applies them itself — skips the duty in the
+warrant's `duties:` block instead. `dry-run` is a rehearsal you turn off once
+you trust what you saw.
 
 ---
 

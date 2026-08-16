@@ -33,7 +33,7 @@ to disagree.
    granted `label` creates it rather than failing. Missing and not
    creatable is red.
 3. **What each duty would effectively be granted.** The same
-   `capabilities:` block a real run reads, rendered as one row per duty:
+   `duties:` block a real run reads, rendered as one row per duty:
    what it grants, whether that is the duty's own built-in default, and
    whether a written block simply leaves the duty unnamed — denied
    everything, which is a real, designed answer and not a finding.
@@ -92,8 +92,8 @@ The job summary is the primary surface — a `### Problems` section (red
 findings, or "nothing here would refuse a duty at runtime"), a `### Notes`
 section (everything green: defaults in play, labels that will be created,
 capacity the check could not reach), and an `### Effective authority` table,
-one row per duty, the same shape [the warrant guide's capabilities
-table](warrant.md#capabilities) describes in prose.
+one row per duty, the same shape [the warrant guide's duties
+section](warrant.md#duties) describes in prose.
 
 The `problems` output is the number for a workflow to act on: how many
 findings were red, `0` when the configuration is healthy. It is unset when
