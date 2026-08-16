@@ -157,8 +157,8 @@ Schema only, here:
 | `open-pr`   | Open or update a draft PR for state files, when `state-branch` is set. Required alongside the duty's own write capability (`record` for `triage`, `edit-file` for `harmonise` and `dependa`) to write state to a branch instead of the default branch. Needs `pull-requests: write` on the token. | off                          |
 | `edit-file` | Write or modify a file in the repository, through the Contents API. Used by `harmonise` (translated documentation) and `dependa` (dependency manifests and lockfiles). Needs `contents: write` on the token. Must be granted alongside `open-pr` when `state-branch` is set.                      | off                          |
 
-`duplicate` and `respond` are the two exceptions with no default at all — not
-even the cheapest one. See [Duties](../guides/warrant.md#duties)
+`duplicate`, `respond`, and `review` are the three exceptions with no default
+at all — not even the cheapest one. See [Duties](../guides/warrant.md#duties)
 for why.
 
 ## Validation

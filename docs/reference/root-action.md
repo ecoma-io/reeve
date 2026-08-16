@@ -44,7 +44,7 @@ so a workflow can name the one it wants — see
 [one repository, several actions](../development/architecture.md#one-repository-several-actions).
 That split leaves a hazard: `uses: ecoma-io/reeve@v0.6` is the obvious thing
 for a consumer to write, it resolves, and it would otherwise run nothing.
-The root is the listing that answers who it is — the seven leaf actions and
+The root is the listing that answers who it is — the eight leaf actions and
 what each runs — before it refuses. `doctor` lives on the same listing
 because a maintainer reaching for `uses: ecoma-io/reeve@v0.6` is very often
 the same maintainer who wants to know whether their configuration would work
@@ -89,6 +89,7 @@ and a run of a leaf is the only thing that ever performs a duty.
 | lifecycle | `ecoma-io/reeve/lifecycle@v0.6` |
 | harmonise | `ecoma-io/reeve/harmonise@v0.6` |
 | dependa   | `ecoma-io/reeve/dependa@v0.6`   |
+| review    | `ecoma-io/reeve/review@v0.6`    |
 
 Each row links to the duty's own reference page
 (`docs/reference/duties/*.md`), which is the single source for what the duty

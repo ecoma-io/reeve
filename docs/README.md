@@ -76,19 +76,21 @@ section true. Where a document describes something not yet built, it says so
 in that section rather than in a global disclaimer you would have to
 remember.
 
-Seven duties ship — [`triage`](reference/duties/triage.md),
+Eight duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
 [`duplicate`](reference/duties/duplicate.md),
 [`respond`](reference/duties/respond.md),
 [`lifecycle`](reference/duties/lifecycle.md),
-[`harmonise`](reference/duties/harmonise.md), and
-[`dependa`](reference/duties/dependa.md) — and all seven are
-dogfooded on this repository: `triage` and `translate` acting on real
-threads, `duplicate` and `respond` in report-only mode, writing verdicts to
-job summaries and touching nothing, `lifecycle` observing in dry-run,
+[`harmonise`](reference/duties/harmonise.md),
+[`dependa`](reference/duties/dependa.md), and
+[`review`](reference/duties/review.md) — seven dogfooded on this repository
+via their own workflows: `triage` and `translate` acting on real threads,
+`duplicate` and `respond` in report-only mode, writing verdicts to job
+summaries and touching nothing, `lifecycle` observing in dry-run,
 `harmonise` configured to watch `README.md` (the first translation is
 bootstrap-pending), and `dependa` maintaining this repository's own
-dependencies.
+dependencies. `review` is the newest: its whole duty is driven end to end by
+its own integration suite against a stub API.
 See [Self-dogfood](guides/dogfood.md) for how the feedback loop works.
 
 ## Full index
@@ -119,6 +121,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`reference/duties/lifecycle.md`](reference/duties/lifecycle.md)           | reference                | Full contract for the lifecycle duty.                                             |
 | [`reference/duties/harmonise.md`](reference/duties/harmonise.md)           | reference                | Full contract for the harmonise duty.                                             |
 | [`reference/duties/dependa.md`](reference/duties/dependa.md)               | reference                | Full contract for the dependa duty.                                               |
+| [`reference/duties/review.md`](reference/duties/review.md)                 | reference                | Full contract for the review duty.                                                |
 | [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
 | [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
 | [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action and its `doctor: true` diagnostic mode.     |

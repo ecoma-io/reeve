@@ -35,7 +35,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Reeve is being assembled, not announced.** It is on a `0.x` line: seven
+> **Reeve is being assembled, not announced.** It is on a `0.x` line: eight
 > duties ship, dogfooded on this repository as they land — `duplicate` and
 > `respond` in report-only mode, writing verdicts to job summaries and touching
 > nothing — and the rest of [the roadmap](docs/doctrine/north-star.md#7-roadmap) is
@@ -148,15 +148,16 @@ core — the provider client and its fallback, the language layer, several
 drafts filtered by deterministic scoring, the sanitiser, the allowlist, the
 state kept as files in your repository — and differs only in what it decides:
 
-| Duty        | What it does                                                                                                                                                                                                | Reference                                       |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `triage`    | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has.                                                                                    | [Reference](docs/reference/duties/triage.md)    |
-| `translate` | Puts every issue and pull request in every language your project reads — in the thread's own body, marked as the version that counts.                                                                       | [Reference](docs/reference/duties/translate.md) |
-| `duplicate` | Finds the thread that already reported this — across the language it was reported in. Top rung: opt-in, never on by accident.                                                                               | [Reference](docs/reference/duties/duplicate.md) |
-| `respond`   | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Top rung: granted nothing until a warrant names it.                                | [Reference](docs/reference/duties/respond.md)   |
-| `lifecycle` | Runs your own staleness policy — reminders, un-staling, and a final close as not planned — from timestamps and labels alone. No model is ever called.                                                       | [Reference](docs/reference/duties/lifecycle.md) |
-| `harmonise` | Synchronises your documentation across languages and formats — translating README files and keeping them current as the source changes. Report-only at level 0 — needs `capabilities:` in a warrant to act. | [Reference](docs/reference/duties/harmonise.md) |
-| `dependa`   | Maintains your dependencies — discovers updates, assesses risk, and opens reviewable PRs within the authority you granted. Report-only at level 0 — needs `capabilities:` in a warrant to act.              | [Reference](docs/reference/duties/dependa.md)   |
+| Duty        | What it does                                                                                                                                                                                                                                  | Reference                                       |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `triage`    | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has.                                                                                                                      | [Reference](docs/reference/duties/triage.md)    |
+| `translate` | Puts every issue and pull request in every language your project reads — in the thread's own body, marked as the version that counts.                                                                                                         | [Reference](docs/reference/duties/translate.md) |
+| `duplicate` | Finds the thread that already reported this — across the language it was reported in. Top rung: opt-in, never on by accident.                                                                                                                 | [Reference](docs/reference/duties/duplicate.md) |
+| `respond`   | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Top rung: granted nothing until a warrant names it.                                                                  | [Reference](docs/reference/duties/respond.md)   |
+| `lifecycle` | Runs your own staleness policy — reminders, un-staling, and a final close as not planned — from timestamps and labels alone. No model is ever called.                                                                                         | [Reference](docs/reference/duties/lifecycle.md) |
+| `harmonise` | Synchronises your documentation across languages and formats — translating README files and keeping them current as the source changes. Report-only at level 0 — needs `capabilities:` in a warrant to act.                                   | [Reference](docs/reference/duties/harmonise.md) |
+| `dependa`   | Maintains your dependencies — discovers updates, assesses risk, and opens reviewable PRs within the authority you granted. Report-only at level 0 — needs `capabilities:` in a warrant to act.                                                | [Reference](docs/reference/duties/dependa.md)   |
+| `review`    | Reviews a pull request — deterministic pre-checks plus one model pass, reported as a single owned comment that tracks its findings across `synchronize` events instead of reposting them. Top rung: granted nothing until a warrant names it. | [Reference](docs/reference/duties/review.md)    |
 
 What comes after them is decided by one test, and it is a strict one: the work
 has to recur, be uniformly expensive today, already be work a maintainer stopped

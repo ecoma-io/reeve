@@ -28,15 +28,16 @@ deterministic scoring, a language layer that knows who wrote in what and who
 reads in what, a sanitiser that assumes the thread is hostile, an allowlist
 checked in code, and state kept as plain files in the user's own repository.
 
-| Duty        | Status | Does                                                                             |
-| ----------- | ------ | -------------------------------------------------------------------------------- |
-| `triage`    | ships  | Sorts the backlog against a taxonomy the project wrote.                          |
-| `translate` | ships  | Puts every issue and pull request in the languages the project reads.            |
-| `duplicate` | ships  | Finds the thread that already asked this — across the language it was asked in.  |
-| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.      |
-| `lifecycle` | ships  | Runs the staleness policy the project wrote — from timestamps and labels alone.  |
-| `harmonise` | ships  | Synchronises documentation across languages and formats.                         |
-| `dependa`   | ships  | Maintains dependencies — discovers updates, assesses risk, opens reviewable PRs. |
+| Duty        | Status | Does                                                                                                                             |
+| ----------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `triage`    | ships  | Sorts the backlog against a taxonomy the project wrote.                                                                          |
+| `translate` | ships  | Puts every issue and pull request in the languages the project reads.                                                            |
+| `duplicate` | ships  | Finds the thread that already asked this — across the language it was asked in.                                                  |
+| `respond`   | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.                                                      |
+| `lifecycle` | ships  | Runs the staleness policy the project wrote — from timestamps and labels alone.                                                  |
+| `harmonise` | ships  | Synchronises documentation across languages and formats.                                                                         |
+| `dependa`   | ships  | Maintains dependencies — discovers updates, assesses risk, opens reviewable PRs.                                                 |
+| `review`    | ships  | Reviews a pull request once — deterministic pre-checks plus one model pass, kept as one owned comment across synchronize events. |
 
 ## 2. The end state
 
@@ -110,11 +111,11 @@ where a maintainer turns on the capability that was cheapest-but-not-safest by
 default, having watched a `dry-run` say what the rate actually is first.
 
 **Level 3 — the full office.** Sweep and backfill, memory's write path, and
-the `duplicate` and `respond` duties. The sweep's own switches — `sweep`,
-`since`, `limit` — are workflow inputs, not warrant keys, exactly as §3's
-closing paragraph draws that line; they sit at this rung because a scheduled
-sweep multiplies whatever the warrant already grants across a whole backlog,
-not because turning them on grants anything by itself.
+the `duplicate`, `respond` and `review` duties. The sweep's own switches —
+`sweep`, `since`, `limit` — are workflow inputs, not warrant keys, exactly as
+§3's closing paragraph draws that line; they sit at this rung because a
+scheduled sweep multiplies whatever the warrant already grants across a whole
+backlog, not because turning them on grants anything by itself.
 Every one of these is opt-in, and every one sits at the top rung on purpose:
 they are the inputs and the duties that touch the most — a correction
 committed to the repository, a sweep across the whole backlog, an answer sent
@@ -411,14 +412,16 @@ reeve/
 │   ├── respond/
 │   ├── lifecycle/
 │   ├── harmonise/
-│   └── dependa/
+│   ├── dependa/
+│   └── review/
 ├── translate/action.yml      thin per-duty action contracts
 ├── triage/action.yml
 ├── duplicate/action.yml
 ├── respond/action.yml
 ├── lifecycle/action.yml
 ├── harmonise/action.yml
-└── dependa/action.yml
+├── dependa/action.yml
+└── review/action.yml
 ```
 
 GitHub resolves actions in subdirectories, so consolidation does not cost
@@ -617,6 +620,29 @@ evidence, never as authority, and is enclosed before it reaches any model.
 **Done when:** a maintainer can point at a dependency update PR that was
 discovered, assessed, and opened entirely by Reeve, within the authority the
 warrant granted.
+
+### Stage 5c — Pull request review · **landed**
+
+`review` — the useful half of what a review bot does, without the part that
+makes review bots noise. It answers a pull request with exactly one comment,
+idempotent under its marker, that tracks its findings across `synchronize`
+events instead of reposting them — `created`, `persists`, `changed`, `resolved`
+and `reopened`, the same ladder a human review leaves — and it never becomes a
+coding agent. Like `duplicate` and `respond` before it, `review` is granted
+nothing by default: `DEFAULT_CAPABILITIES` is empty, so nothing short of an
+explicit `review: [comment]` in the warrant ever lets it write. Deterministic
+pre-checks (an ignore list, generated-file suffixes, blocked phrases, and the
+repository's own named rules) fire before any model is asked, the model's
+findings are admitted only when the diff can prove them, and a truncated or
+unparseable answer is discarded rather than read best-effort.
+
+**Standing:** landed — see [the duty's own page](../reference/duties/review.md).
+The comment renders the repository's rules and the diff, never edits code,
+and the machine-written notice is unconditional.
+
+**Done when:** a maintainer can point at a pull request that was reviewed once
+— findings tracked, not reposted — within the authority the warrant granted,
+with the review comment visibly written by a model.
 
 ### Stage 6 — The number
 
