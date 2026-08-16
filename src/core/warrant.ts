@@ -308,36 +308,37 @@ export interface Warrant {
   /**
    * What this duty was granted.
    *
-   * Three shapes, not two. No `capabilities:` block at all means the file
-   * never turned its mind to the question, so the duty keeps `fallback` — its
-   * own idea of the least it should be trusted with, which is what a consumer
-   * who has only written a taxonomy expects, unchanged from before this block
-   * existed. A block that exists and does name `duty` means exactly what it
-   * lists, including the empty list `[none]` spells deliberately. A block
-   * that exists and does *not* name `duty` is the shape new here: once a
-   * maintainer has written the block, it is taken as the complete roster of
-   * who may act, so a name missing from it is refused everything rather than
-   * handed the default it would have had before the block was written —
-   * enumerating who may act is a decision, and a duty the enumeration forgot
-   * is not the same thing as a duty nobody had decided about. See `unnamed`,
-   * which is how a caller tells that shape apart from an explicit `[none]`
-   * before either reaches this method.
+   * The `duties:` block is the whole answer, and it has three shapes. No
+   * `duties:` block at all means the file never turned its mind to the
+   * question, so the duty keeps `fallback` — its own idea of the least it
+   * should be trusted with, which is what a consumer who has only written a
+   * taxonomy expects. A block that exists and names `duty` as a list means
+   * exactly what it lists, `[none]` granting nothing deliberately. A block
+   * that exists and names `duty` as `true` means the duty's own documented
+   * default — the same `fallback` — written out by a maintainer who wants the
+   * duty on without restating its grant.
    *
-   * The default belongs to the duty rather than to this module: only `triage`
-   * knows that its cheapest reversible action is a label.
+   * Once the block exists, it is the complete roster of who may act: a name
+   * missing from it is refused everything rather than handed the default it
+   * would have had before the block was written — enumerating who may act is
+   * a decision, and a duty the enumeration forgot is not the same thing as a
+   * duty nobody had decided about. `unnamed` is how a caller tells that shape
+   * apart from an explicit `[none]` or `false` before either reaches this
+   * method.
    */
   granted(duty: string, fallback: readonly Capability[]): readonly Capability[];
   /**
-   * True when the file wrote a `capabilities:` block and that block does not
+   * True when the file wrote a `duties:` block and that block does not
    * mention `duty` by name.
    *
    * Distinct from an absent block, which leaves the duty its own default, and
-   * distinct from the duty being named `[none]`, which is a decision about it
-   * rather than silence about it — `granted` alone cannot tell those two
-   * "nothing" apart, because both return the same empty list. This is the
-   * call that can, and it exists so a duty can stop before spending an
-   * expensive model call on a verdict that could never be applied: once the
-   * block exists and does not name it, no verdict changes the answer.
+   * distinct from the duty being named `[none]` or `false`, which is a
+   * decision about it rather than silence about it — `granted` alone cannot
+   * tell those two "nothing" apart, because both return the same empty list.
+   * This is the call that can, and it exists so a duty can stop before
+   * spending an expensive model call on a verdict that could never be
+   * applied: once the block exists and does not name it, no verdict changes
+   * the answer.
    */
   unnamed(duty: string): boolean;
   /** The entry for a name, or undefined. Case-sensitive, as GitHub applies them. */
@@ -409,13 +410,16 @@ export function parseWarrant(path: string, source: string): Warrant {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities",
+    "duties",
   ] as const;
   for (const key of Object.keys(document)) {
     if (!(KNOWN_ROOT as readonly string[]).includes(key)) {
+      // `capabilities` names the pre-1.0 shape this key replaced; a typo gets
+      // the nearest valid spellings pointed at, not a wall of every key the
+      // format knows.
       throw new Error(
         `warrant: \`${path}\` has an unrecognized key \`${key}\`. ` +
-          `Expected any of ${KNOWN_ROOT.join(", ")}.`,
+          `Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`,
       );
     }
   }
@@ -438,7 +442,7 @@ export function parseWarrant(path: string, source: string): Warrant {
   const lifecycle = readLifecycle(path, document.lifecycle);
   const propose = readPropose(path, document.propose);
   const dependa = readDependa(path, document.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document.duties);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
   // than being resolved against a partly-built map.
@@ -466,7 +470,14 @@ export function parseWarrant(path: string, source: string): Warrant {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      // `duties: { triage: true }` spells the duty's own documented default
+      // out — which is `fallback`, known only to the calling duty.
+      if (raw === "default") return fallback;
+      if (raw !== undefined) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
   };
@@ -1661,50 +1672,80 @@ function optionalWholeNumber(at: string, key: string, raw: unknown, min: number)
 /** Whether the block existed at all, and what it named if it did. */
 interface Capabilities {
   /**
-   * True the moment `capabilities:` is present in the file, even as an empty
+   * True the moment `duties:` is present in the file, even as an empty
    * mapping — `declared` is about whether the question was asked, not about
    * how it was answered. `granted`'s fallback behaviour, and `unnamed`'s
    * whole existence, both turn on this rather than on whether any duty in
    * particular was named.
    */
   readonly declared: boolean;
-  readonly granted: ReadonlyMap<string, readonly Capability[]>;
+  /**
+   * A duty's grant. The special string `"default"` marks `duties: { duty:
+   * true }` — the duty's own documented fallback, resolved against the
+   * `fallback` argument `granted` is handed. Every other value is the exact
+   * list written, `[]` for `[none]`/`false`.
+   */
+  readonly granted: ReadonlyMap<string, readonly Capability[] | "default">;
 }
 
 /**
- * The capability block: which duty may do what.
+ * The `duties:` block: which duty may do what — the whole authority, and the
+ * only place it lives.
+ *
+ * Two shapes a duty entry may take. A list (`triage: [label, record]`) is an
+ * exact grant. `true` means "this duty's own documented default" — the same
+ * fallback an absent block hands the duty, written out by a maintainer who
+ * wants the duty on without restating its grant; the defaults are the
+ * `capabilities.ts` each duty ships (`DEFAULT_CAPABILITIES`), consulted by
+ * doctor and documented per duty, never magic. `false` disables the duty
+ * while the block still enumerates it — a decision, not an omission.
  *
  * `[none]` is the way to grant nothing explicitly, and it has to be explicit —
  * an empty list is the shape a half-finished edit leaves behind, and reading it
  * as "grant nothing" would make a mistake indistinguishable from a decision.
  */
-function readCapabilities(path: string, raw: unknown): Capabilities {
-  const granted = new Map<string, readonly Capability[]>();
+function readDuties(path: string, raw: unknown): Capabilities {
+  const granted = new Map<string, readonly Capability[] | "default">();
   if (raw === undefined) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. ` +
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. ` +
         "Use `[none]` to grant nothing, write the mapping, or remove the key " +
         "to keep every duty's own default.",
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, ` +
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, ` +
         "expected a mapping of duty to what it may do.",
     );
   }
 
   for (const [duty, value] of Object.entries(raw as Record<string, unknown>)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
 
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. ` +
-          `Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`,
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. ` +
+          `Expected any of ${available.join(", ")}${closestHint(duty, available)}.`,
       );
     }
 
+    // `true` — the duty's own documented default, spelled out. `false` — the
+    // duty explicitly disabled. Both are decisions, distinct from the entry
+    // never having been written.
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
+    }
+
+    // An explicit list, `[none]` included. A bare capability is one entry —
+    // `triage: label` is what somebody writes when there is one of them.
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(
@@ -1876,6 +1917,59 @@ function rejectUnknownKeys(
       throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
     }
   }
+}
+
+/**
+ * The valid spellings nearest to what was written, for a "did you mean" hint.
+ *
+ * A small Levenshtein distance, capped so a hint never suggests something
+ * unrelated: `capabilties` (one transposition) suggests `capabilities`; a key
+ * that is nothing like any valid one gets no hint at all and the plain
+ * expected-list error instead.
+ */
+function closestKeys(raw: string, known: readonly string[]): readonly string[] {
+  const best = new Map<number, string[]>();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...(best.get(distance) ?? []), key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+
+/** The `closestKeys` hint, already worded for an error message, or empty. */
+function closestHint(raw: string, known: readonly string[]): string {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0
+    ? ""
+    : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+
+/** Classic Levenshtein, bounded and good enough for spelling hints. */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  let prev = new Array<number>(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array<number>(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] =
+        Math.min(
+          prev[j] ?? Number.POSITIVE_INFINITY,
+          current[j - 1] ?? Number.POSITIVE_INFINITY,
+          prev[j - 1] ?? Number.POSITIVE_INFINITY,
+        ) + cost;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
 }
 
 /** What a wrong value is, for a message that helps rather than quotes YAML at somebody. */

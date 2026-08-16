@@ -1,20 +1,12 @@
-import * as core from "@actions/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { enforceLabels, narrow, narrowWarned, owners, parseApply } from "./enforce.js";
+import { enforceLabels, owners } from "./enforce.js";
 import { parseWarrant, type Warrant } from "./warrant.js";
 
 // Nothing is mocked, and nothing here can be: every function in this module is
 // a decision about a parsed file and a list of strings. That is the point of
 // the stage — it is the one place a verdict stops being a suggestion, so it is
 // the one place that must be decidable without a network.
-//
-// `core.warning` is the exception, and only because it is not a decision: it
-// is an effect on the runner, and `narrowWarned` exists precisely to own it.
-vi.mock("@actions/core", async (importOriginal) => ({
-  ...(await importOriginal<typeof core>()),
-  warning: vi.fn(),
-}));
 
 /** The path a warrant is quoted by, everywhere a message names one. */
 const PATH = ".github/reeve.yml";
@@ -48,110 +40,6 @@ function decide(
 ) {
   return enforceLabels(w.path, w.labels, proposed, onThread, confidence, floor);
 }
-
-describe("parseApply", () => {
-  it("reads a list in the order it was written", () => {
-    expect(parseApply("label, comment")).toEqual(["label", "comment"]);
-  });
-
-  it("reads a newline-separated list, which is how a workflow file writes a long one", () => {
-    expect(parseApply("label\ncomment\n")).toEqual(["label", "comment"]);
-  });
-
-  it("reads `none` as granting nothing", () => {
-    expect(parseApply("none")).toEqual([]);
-  });
-
-  it("ignores case and surrounding space", () => {
-    expect(parseApply("  Label ,  CLOSE ")).toEqual(["label", "close"]);
-  });
-
-  it("grants a repeated capability once", () => {
-    expect(parseApply("label,label")).toEqual(["label"]);
-  });
-
-  it("refuses a misspelling rather than silently granting nothing", () => {
-    // `GITHUB_TOKEN` cannot express "labels but not comments", so this list is
-    // one of the two things standing between a verdict and the tracker. A bug a
-    // maintainer discovers as an absence is the hardest kind to notice.
-    expect(() => parseApply("coment")).toThrow(/`coment` is not something a duty/);
-  });
-
-  it("refuses an empty value, because granting nothing has to be said", () => {
-    expect(() => parseApply("  ")).toThrow(/Use `none` to grant nothing, explicitly/);
-  });
-});
-
-describe("narrow", () => {
-  it("keeps only what both authorities allow", () => {
-    const result = narrow(["label", "comment"], ["label", "close"]);
-
-    expect(result.permitted).toEqual(["label"]);
-  });
-
-  it("reports what the workflow asked for and the file does not grant", () => {
-    // Not an error — the file is the authority — but a silence a maintainer
-    // would read as a broken action.
-    expect(narrow(["label"], ["label", "comment"]).withheld).toEqual(["comment"]);
-  });
-
-  it("lets a workflow restrict what the file granted", () => {
-    expect(narrow(["label", "comment", "close"], ["label"])).toEqual({
-      permitted: ["label"],
-      withheld: [],
-    });
-  });
-
-  it("lets a workflow grant nothing at all", () => {
-    expect(narrow(["label", "comment"], []).permitted).toEqual([]);
-  });
-
-  it("keeps the file's order, so the report reads the way the authority does", () => {
-    expect(narrow(["label", "comment", "close"], ["close", "label"]).permitted).toEqual([
-      "label",
-      "close",
-    ]);
-  });
-});
-
-describe("narrowWarned", () => {
-  beforeEach(() => {
-    vi.mocked(core.warning).mockClear();
-  });
-
-  it("narrows exactly as `narrow` does", () => {
-    expect(narrowWarned(["label", "comment"], ["label", "close"], "triage", PATH)).toEqual(
-      narrow(["label", "comment"], ["label", "close"]),
-    );
-  });
-
-  it("says once per withheld capability, naming the duty and the file quoted at it", () => {
-    narrowWarned(["label"], ["label", "comment", "close"], "triage", PATH);
-
-    expect(vi.mocked(core.warning).mock.calls.map(([message]) => message)).toEqual([
-      "`apply` asks for `comment`, which `.github/reeve.yml` does not grant to triage. " +
-        "The narrower of the two wins.",
-      "`apply` asks for `close`, which `.github/reeve.yml` does not grant to triage. " +
-        "The narrower of the two wins.",
-    ]);
-  });
-
-  it("quotes whatever path it was handed, not one it went looking for", () => {
-    // Translate names the raw `warrant` input where the other four name
-    // `warrant.path`, and this parameter is what lets both keep their bytes.
-    narrowWarned([], ["comment"], "translate", "./.github/reeve.yml");
-
-    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(
-      expect.stringContaining("`./.github/reeve.yml` does not grant to translate"),
-    );
-  });
-
-  it("stays silent when the file grants everything the workflow asked for", () => {
-    narrowWarned(["label", "comment"], ["label"], "triage", PATH);
-
-    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
-  });
-});
 
 describe("enforceLabels", () => {
   it("applies what the warrant names, in the verdict's own order", () => {
