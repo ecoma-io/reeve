@@ -6,13 +6,17 @@
  * vitest suite — this one — needs its own include. Kept beside the suite
  * rather than widening the root config, so the eval tree stays self-contained
  * under `eval/`.
+ *
+ * `root` is pinned even though vitest would root itself at ConfigLoader.root
+ * (the file's own directory) when the config is loaded by absolute path: the
+ * script invokes `vitest run --config <relative path>`, and a relative path
+ * roots the run at the cwd instead, silently widening discovery to the whole
+ * repository. The pin keeps the two the same from inside the suite, from the
+ * repo root, and from anywhere a `pnpm test:contract` is ever run from.
  */
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  // Pinned so `pnpm test:contract` sees the same root from anywhere in the
-  // repository — otherwise vitest roots itself at the cwd and its project-wide
-  // discovery swallows every src suite into this one's run.
   root: import.meta.dirname,
   test: {
     environment: "node",

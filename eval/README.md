@@ -17,9 +17,12 @@ from "the wrong thing happened" and from "the run broke."
 
 The exit code is fail-closed:
 
-- `0` when every fixture is a `finding` and none failed.
-- `1` when any fixture failed, or when a duty has no fixtures at all (an
-  unevaluated duty is never mistaken for a passing one).
+- `0` when every fixture is a `finding`, and none failed or skipped.
+- `1` when any fixture failed or skipped, or when a duty has no fixtures at
+  all (an unevaluated duty is never mistaken for a passing one). A skipped
+  fixture is a run that deliberately did nothing — a duty the warrant no
+  longer grants would read `skipped` everywhere — and that must not exit
+  green.
 - `2` when the requested duty is not one the runner knows.
 
 ## Running

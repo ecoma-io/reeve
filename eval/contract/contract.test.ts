@@ -1,12 +1,19 @@
 /**
  * The config contract: what the post-T1 warrant reader promises about the
- * `duties:` block, asserted against `src/core/warrant.ts` and the duty
- * capability modules, both read-only.
+ * `duties:` block.
  *
- * Every eval fixture under `eval/fixtures/` stands on these shapes — a bug is
- * supported and retained report. A change to the reader that breaks one of them
- * breaks the fixtures first and loudest here, before any bundle has to chase a
- * misbehaving run.
+ * What this suite holds evidence of: the shapes every eval fixture under
+ * `eval/fixtures/` stands on — `duties:` root key, `true` → documented
+ * default, explicit list → exactly the list, unnamed-duty semantics. A change
+ * to the reader that breaks one of those shapes breaks the fixtures first and
+ * loudest here, before any bundle has to chase a misbehaving run.
+ *
+ * What it does not promise: regression-proofing of grant *semantics*. The
+ * grant cases import the same `parseWarrant` they test, so a coordinated
+ * change to the reader and to the documented defaults together would pass
+ * silently — the suite pins the shapes, it cannot pin the values. (The
+ * `EXPECTED_GRANTS` table below is the one partial oracle: a literal
+ * expected-grant roster, not derived from the reader.)
  */
 import { describe, expect, it } from "vitest";
 
@@ -25,6 +32,33 @@ function withDuties(duties: string): string {
 function grant(body: string, duty: string, fallback: readonly Capability[]): readonly Capability[] {
   return parseWarrant("reeve.yml", body).granted(duty, fallback);
 }
+
+/** The duty → capability → its run's grant under `duties` when written bare. */
+interface ExpectedGrant {
+  readonly duty: string;
+  /** The grant a `duties: { <duty>: true }` entry carries. */
+  readonly named: readonly string[];
+  /** The fallback the duty's own `capabilities.ts` ships, used when absent. */
+  readonly fallback: readonly string[];
+}
+
+/**
+ * `true` → the duty's documented default; no block → the same default.
+ * `[a]` → exactly `[a]`.
+ * A block naming other duties → this duty is refused everything.
+ */
+const EXPECTED_GRANTS: readonly ExpectedGrant[] = [
+  { duty: "triage", named: ["label"], fallback: ["label"] },
+  { duty: "respond", named: [], fallback: [] },
+  { duty: "harmonise", named: [], fallback: [] },
+];
+
+/** The fallback `granted` is handed by each duty, imported from its module. */
+const DEFAULTS: Record<string, readonly Capability[]> = {
+  triage: TRIAGE_DEFAULTS,
+  respond: RESPOND_DEFAULTS,
+  harmonise: HARMONISE_DEFAULTS,
+};
 
 describe("the post-T1 warrant contract every eval fixture stands on", () => {
   it("names `duties` as the root key, refusing the old `apply` vocabulary", () => {
@@ -102,5 +136,25 @@ describe("the post-T1 warrant contract every eval fixture stands on", () => {
     expect(() => parseWarrant("reeve.yml", withDuties("  triage: [warp]\n"))).toThrow(
       /not something a duty can be granted/,
     );
+  });
+
+  it("matches the independent expected-grant oracle for every duty", () => {
+    // The one place the suite refuses to trust the same reader it tests: the
+    // expected grants below are written out literally, so a coordinated change
+    // to the reader AND the duty defaults together still breaks here.
+    for (const row of EXPECTED_GRANTS) {
+      const fallback = DEFAULTS[row.duty];
+      if (fallback === undefined) throw new Error(`no default seeded for \`${row.duty}\``);
+
+      expect(fallback, `the ${row.duty} module's own default`).toEqual(row.fallback);
+      expect(
+        grant(withDuties(`  ${row.duty}: true\n`), row.duty, fallback),
+        `${row.duty}: true`,
+      ).toEqual(row.named);
+      expect(
+        grant(`version: 1\nlabels: []\n`, row.duty, fallback),
+        `${row.duty} with no block`,
+      ).toEqual(row.fallback);
+    }
   });
 });
