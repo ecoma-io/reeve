@@ -10,8 +10,9 @@
  * That leaves a real hazard: `uses: ecoma-io/reeve@v0.1` is the obvious thing to
  * write, it resolves, and it runs this. The one behaviour that is not allowed
  * is for it to quietly succeed. A run that cannot do its job fails red, and
- * this one cannot do any job — so it fails, names what the consumer asked for,
- * and says what to write instead.
+ * this one cannot do any job — so it explains (the `main.ts` entry point's
+ * job-summary page), names what the consumer asked for, and says what to write
+ * instead.
  *
  * Nothing here reaches a network or a model. It is a signpost.
  */
@@ -118,6 +119,19 @@ export function refusal(
       : `Reeve has no duty called \`${duty}\`.`;
 
   return [opening, available(built)].join("\n");
+}
+
+/**
+ * The `uses:` line to write instead of the root, for a duty the caller named —
+ * or empty when what they named is not one duty this ref builds (nothing at
+ * all, a plan-not-built duty, an unknown word). The root records this as its
+ * `leaf-action` output, so the corrected line survives in a machine-readable
+ * form rather than only in the refusal's log. It is still a signpost: it names
+ * a line to write, and never runs anything.
+ */
+export function leafActionFor(raw: string, built: readonly string[] = DUTIES): string {
+  const duty = normalise(raw);
+  return duty.length > 0 && built.includes(duty) ? `ecoma-io/reeve/${duty}@${pinned()}` : "";
 }
 
 /** The half of the message that lists what a consumer could write instead. */

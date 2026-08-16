@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DUTIES, PLANNED, normalise, refusal } from "./refusal.js";
+import { DUTIES, PLANNED, leafActionFor, normalise, refusal } from "./refusal.js";
 
 describe("normalise", () => {
   it("lowercases and trims", () => {
@@ -88,6 +88,41 @@ describe("refusal", () => {
     // A duty can be in both lists during the release that builds it, and the
     // useful answer is the one the consumer can act on today.
     expect(refusal("duplicate", ["duplicate"])).toContain("uses: ecoma-io/reeve/duplicate@v0.1");
+  });
+});
+
+describe("leafActionFor", () => {
+  // The corrected line repeats the ref the consumer pinned; the same
+  // envvar dance the refusal suite above uses.
+  const REF = process.env.GITHUB_ACTION_REF;
+  beforeEach(() => {
+    process.env.GITHUB_ACTION_REF = "v0.1";
+  });
+  afterEach(() => {
+    if (REF === undefined) delete process.env.GITHUB_ACTION_REF;
+    else process.env.GITHUB_ACTION_REF = REF;
+  });
+
+  it("names the leaf action for a duty this ref builds", () => {
+    expect(leafActionFor("triage")).toBe("ecoma-io/reeve/triage@v0.1");
+  });
+
+  it("reads a misspelled case the way the corrected spelling would be read", () => {
+    expect(leafActionFor("  TRIAGE ")).toBe("ecoma-io/reeve/triage@v0.1");
+  });
+
+  it("repeats the ref the consumer pinned, not one written down here", () => {
+    process.env.GITHUB_ACTION_REF = "a1b2c3d";
+    expect(leafActionFor("translate")).toBe("ecoma-io/reeve/translate@a1b2c3d");
+  });
+
+  it("is empty when nothing was named", () => {
+    expect(leafActionFor("")).toBe("");
+  });
+
+  it("is empty for a plan-not-built duty and for an unknown word", () => {
+    expect(leafActionFor("someday", ["translate"])).toBe("");
+    expect(leafActionFor("nonsense", ["translate"])).toBe("");
   });
 });
 

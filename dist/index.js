@@ -31796,6 +31796,10 @@ function refusal(raw, built = DUTIES, planned = PLANNED) {
   const opening = duty.length === 0 ? "`ecoma-io/reeve` is not a duty. Reeve ships one action per duty, and a workflow names the one it wants." : `Reeve has no duty called \`${duty}\`.`;
   return [opening, available(built)].join("\n");
 }
+function leafActionFor(raw, built = DUTIES) {
+  const duty = normalise(raw);
+  return duty.length > 0 && built.includes(duty) ? `ecoma-io/reeve/${duty}@${pinned()}` : "";
+}
 function available(built) {
   if (built.length === 0) {
     return `No duty has been built at this ref yet. What is planned, and when: ${ROADMAP}`;
@@ -33054,7 +33058,64 @@ async function run() {
     await runDoctor();
     return;
   }
-  setFailed(refusal(getInput("duty")));
+  const duty = getInput("duty");
+  const leaf = leafActionFor(duty);
+  if (leaf.length > 0) setOutput("leaf-action", leaf);
+  await writeExplain(leaf);
+  setFailed(refusal(duty));
+}
+async function writeExplain(leaf) {
+  const parts = [
+    "## Reeve \xB7 the root action",
+    "",
+    "This action is the marketplace listing \u2014 it is not a duty, and it never runs one. A duty runs through the leaf action that owns it:",
+    "",
+    table2(
+      ["Duty", "Action to write"],
+      [
+        ["translate", "`ecoma-io/reeve/translate@<ref>`"],
+        ["triage", "`ecoma-io/reeve/triage@<ref>`"],
+        ["duplicate", "`ecoma-io/reeve/duplicate@<ref>`"],
+        ["respond", "`ecoma-io/reeve/respond@<ref>`"],
+        ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
+        ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
+        ["dependa", "`ecoma-io/reeve/dependa@<ref>`"]
+      ]
+    ),
+    ""
+  ];
+  if (leaf.length > 0) {
+    parts.push(
+      `You named a duty, and the action that runs it is ${leaf} \u2014 write that line in your workflow instead of the root.`
+    );
+  } else {
+    parts.push(
+      "Name the duty you meant in the `duty` input and rerun to have this page name the exact leaf action to write."
+    );
+  }
+  parts.push(
+    "",
+    "What a duty may do is decided by the `duties:` block of your warrant (`.github/reeve.yml`), never by this action \u2014 it grants nothing and carries no authority-widening input.",
+    "",
+    "Run the leaf action with `dry-run: true` to rehearse it before it acts, and check a warrant with this action's own `doctor: true` \u2014 the one thing this listing does besides refuse."
+  );
+  await writeSummary2(`${parts.join("\n").trimEnd()}
+`);
+}
+function table2(headers, rows) {
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+async function writeSummary2(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) return;
+  try {
+    await summary.addRaw(markdown).write();
+  } catch {
+    warning("The job summary could not be written \u2014 the run itself was unaffected.");
+  }
 }
 await run();
 export {
