@@ -31,15 +31,15 @@ the `apply:` input never named never reached a thread. The rows below give
 each duty its pre-1.0 `apply:` default where the workflow never wrote the
 input.
 
-| Duty        | Old `apply:` default | Old effective authority (with a written `capabilities:` grant) | New `duties:` entry that preserves it                                                                                        |
-| ----------- | -------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `triage`    | `label`              | the grant ∩ `[label]`                                          | `triage: [label]`, or `triage: true` if the file granted exactly `[label]`                                                   |
-| `translate` | `edit-body`          | the grant ∩ `[edit-body]`                                      | `translate: [edit-body]`, or `true` if the file granted exactly `[edit-body]`                                                |
-| `lifecycle` | `label, comment`     | the grant ∩ `[label, comment]`                                 | `lifecycle: true` (its built-in default is `[label, comment]`)                                                               |
-| `duplicate` | `none`               | `[]`                                                           | `duplicate: false` — or `[none]` — unless the old workflow did name `apply: comment` at the same time as the file granted it |
-| `respond`   | `none`               | `[]`                                                           | `respond: false`, or `[none]`, unless the old workflow named `apply: comment` with the file granting it                      |
-| `harmonise` | `none`               | `[]`                                                           | `harmonise: false`, or `[none]`, unless the old workflow named `apply: edit-file, open-pr` with the file granting both       |
-| `dependa`   | `none`               | `[]`                                                           | `dependa: false`, or `[none]`, unless the old workflow named `apply: edit-file, open-pr` with the file granting both         |
+| Duty        | Old `apply:` default | Old effective authority (with a written `capabilities:` grant) | New `duties:` entry that preserves it                                                                                                                                                |
+| ----------- | -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `triage`    | `label`              | the grant ∩ `[label]`                                          | `triage: [label]`, or `triage: true` if the file granted exactly `[label]`                                                                                                           |
+| `translate` | `edit-body`          | the grant ∩ `[edit-body]`                                      | `translate: [edit-body]`, or `true` if the file granted exactly `[edit-body]`                                                                                                        |
+| `lifecycle` | `label, comment`     | the grant ∩ `[label, comment]`                                 | `lifecycle: [label, comment]`, or `[label, comment, close]` when the old workflow named `close` and the file granted it — `true` only if the file granted exactly `[label, comment]` |
+| `duplicate` | `none`               | `[]`                                                           | `duplicate: false` — or `[none]` — unless the old workflow did name `apply: comment` at the same time as the file granted it                                                         |
+| `respond`   | `none`               | `[]`                                                           | `respond: false`, or `[none]`, unless the old workflow named `apply: comment` with the file granting it                                                                              |
+| `harmonise` | `none`               | `[]`                                                           | `harmonise: false`, or `[none]`, unless the old workflow named `apply: edit-file, open-pr` with the file granting both                                                               |
+| `dependa`   | `none`               | `[]`                                                           | `dependa: false`, or `[none]`, unless the old workflow named `apply: edit-file, open-pr` with the file granting both                                                                 |
 
 The default-`none` row is the one a migration must write on purpose: with no
 `duties:` block at all the duty keeps its own built-in default, and a duty
@@ -47,6 +47,15 @@ left out of a written block is denied everything — neither is the pre-1.0
 `none` intent spelled out. `false` (or `[none]`) names the duty in the block
 and grants it nothing, which is what the old `apply: none` meant. See
 [duty entry values in the warrant guide](warrant.md#duties).
+
+`lifecycle` is the other row that cannot lean on the shorthand. Its
+`apply:` default is `label, comment`, but the grant and the input could
+diverge in both directions: a file granting only `[label]` ran no `comment`,
+so writing `lifecycle: true` there would silently add the comment step;
+and a workflow that wrote `apply: "label, comment, close"` with the file
+granting `close` ran it too, so `true` would silently strip the close.
+Write the exact intersection — `[label, comment]` at minimum, `close` added
+only when both halves carried it — exactly like the `triage` row above.
 
 The workflow's half mattered even when it was not written, because the
 input had a default. Only a consumer who wrote `apply: "label, close,
