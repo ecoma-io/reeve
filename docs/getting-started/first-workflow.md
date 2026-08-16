@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/translate@v0.1
+      - uses: ecoma-io/reeve/translate@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini

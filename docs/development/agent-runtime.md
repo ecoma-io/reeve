@@ -16,7 +16,7 @@ question:
 
 The doctrine half — the part that binds this repository rather than merely
 describing a plan — lives where doctrine lives:
-[the north star's 2.x entry](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships),
+[the north star's 2.x entry](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships),
 which moved first, in its own commit, per that document's own amendment
 rule.
 
@@ -40,7 +40,7 @@ anything the opposite: the more a piece of software is allowed to decide,
 the earlier its limits need to be fixed in writing, because a limit added
 after the software already has users is a limit someone has to be talked
 into accepting. This page is that fixing, done ahead of the code the way
-[D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation)
+[D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)
 already asks every duty's evaluation set to be written ahead of its
 implementation.
 
@@ -101,7 +101,7 @@ separate, looser gate for the agentic path.
 
 **Verify.** Check the effect actually happened and matches the plan before
 continuing. A step that cannot be verified stops the loop rather than
-continuing on an assumption — this is [D5](../doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
+continuing on an assumption — this is [D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible)
 applied to a loop instead of a single pass.
 
 **Stop.** Every loop terminates. There is no standing agent, no background
@@ -118,7 +118,7 @@ That sentence is the whole design. Everything the loop above reasons and
 plans is a candidate; the Authority Kernel is the code, wired in the same
 place the enforcement stage already sits, that checks every candidate
 effect against the warrant before Act is allowed to run it — exactly the
-relationship [D2](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded)
+relationship [D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded)
 already establishes between a duty and the warrant, extended to a loop that
 may propose more than one effect per run instead of one.
 
@@ -230,10 +230,10 @@ discipline's point — a maintainer can read the whole of what Reeve may do
 in one place — holds. And the sequencing is itself governed, and has begun
 in the order the amendment rule requires: the north star moved first, in
 its own commit —
-[its 2.x entry](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships)
+[its 2.x entry](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships)
 records the direction as doctrine — while the `.reeve/` tree itself still
 lands only in
-[its roadmap phase](roadmap-2x.md#phase-2-the-governance-tree-and-authorityyaml),
+[its roadmap phase](roadmap-2x.md#phase-2--the-governance-tree-and-authorityyaml),
 behind the kernel it depends on.
 
 **[Open question §10.4](../doctrine/north-star.md#10-open-questions) has
@@ -257,9 +257,9 @@ repository state only through explicit capabilities — holds in both modes.
 Agent Mode's Act stage executes effects a duty already has a name
 for; it does not gain a new category of effect by being agentic, and
 `code.write` sits permanently on the forbidden floor in
-[`authority.yaml`](agent-governance.md#authorityyaml-the-grant) — not a
+[`authority.yaml`](agent-governance.md#authorityyaml--the-grant) — not a
 default that could be widened, a floor that cannot, and
-[now doctrine](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships)
+[now doctrine](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships)
 rather than only this page's ruling.
 
 ## Non-goals
@@ -302,7 +302,7 @@ revised as the phases of [the 2.x roadmap](roadmap-2x.md) actually land, in
 the pull requests that land them. User-facing documentation for Agent Mode
 appears only once there is a real workflow to run: no installation page, no
 reference page, and no guide will describe it before a repository can
-actually invoke it — which [the roadmap](roadmap-2x.md#phase-4-agent-mode-acts)
+actually invoke it — which [the roadmap](roadmap-2x.md#phase-4--agent-mode-acts)
 places in its final phase, deliberately.
 
 ---

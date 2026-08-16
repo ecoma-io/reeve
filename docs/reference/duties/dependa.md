@@ -52,13 +52,13 @@ than a quarterly fire drill.
 
 ## Supported ecosystems
 
-| Ecosystem          | Manager finds             | Datasource queries           | Dogfoods on Reeve |
-| ------------------ | ------------------------- | ---------------------------- | ----------------- |
-| **npm**            | `package.json`            | npm registry API             | ✅                |
-| **GitHub Actions** | `.github/workflows/*.yml` | GitHub tags/releases API     | ✅                |
-| **Cargo**          | `Cargo.toml`              | crates.io API                | ❌                |
-| **Go**             | `go.mod`                  | proxy.golang.org API         | ❌                |
-| **Docker**         | `Dockerfile`              | Docker Hub / registry v2 API | ❌                |
+| Ecosystem          | Manager finds             | Datasource queries           | Dogfoods on Reeve | Production caveat                                                  |
+| ------------------ | ------------------------- | ---------------------------- | ----------------- | ------------------------------------------------------------------ |
+| **npm**            | `package.json`            | npm registry API             | ✅                | —                                                                  |
+| **GitHub Actions** | `.github/workflows/*.yml` | GitHub tags/releases API     | ✅                | —                                                                  |
+| **Cargo**          | `Cargo.toml`              | crates.io API                | ❌                | Not dogfooded on this repo — exercise with `dry-run` before arming |
+| **Go**             | `go.mod`                  | proxy.golang.org API         | ❌                | Not dogfooded on this repo — exercise with `dry-run` before arming |
+| **Docker**         | `Dockerfile`              | Docker Hub / registry v2 API | ❌                | Not dogfooded on this repo — exercise with `dry-run` before arming |
 
 Each ecosystem adds one manager and one datasource. The interfaces are shared —
 only parsing and API details differ. A monorepo containing manifests in nested
@@ -86,7 +86,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/dependa@v0.1
+      - uses: ecoma-io/reeve/dependa@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -240,19 +240,21 @@ major PRs are opened as drafts. `"patch"` means only patches are ready.
 
 **`auto-close` controls whether dependa may close its own obsolete PRs.**
 Defaults `false` — closing is a maintainer decision
-([D3](../../doctrine/north-star.md#d3-the-humans-work-is-inviolable)).
+([D3](../../doctrine/north-star.md#d3--the-humans-work-is-inviolable)).
 When `true`, dependa closes a PR when the update is no longer relevant:
 the target version was yanked, the dependency was removed from the manifest,
-or a newer proposal supersedes it. **Not yet implemented** — the setting is
-parsed from the warrant but has no effect at runtime; a `core.notice()` is
-emitted when it is set.
+or a newer proposal supersedes it. Closing is scoped hard: only PRs carrying
+dependa's own marker and living on dependa's own `reeve/dependa/*` branch are
+ever considered, and a PR whose branch shows an unverifiable authorship is
+left alone rather than closed.
 
 **`auto-rebase` controls whether dependa may rebase its own PRs.** Defaults
 `true` — rebasing is a mechanical operation that does not change the
 proposal's content. When `false`, a PR with merge conflicts stays conflicted
-until a maintainer resolves it. **Not yet implemented** — the setting is
-parsed from the warrant but has no effect at runtime; a `core.notice()` is
-emitted when it is set.
+until a maintainer resolves it. A rebase force-updates the `reeve/dependa/*`
+branch to the current base and only ever proceeds when the branch is
+exclusively dependa's own work; a branch containing any human commit is
+reported as a conflict for the maintainer instead of being reset.
 
 **`schedule` throttles how often dependa runs.** An interval means "skip if
 the last run was fewer than N days ago." A cron expression means "only run
@@ -347,20 +349,27 @@ where nothing was security-flagged, never an unset output.
 
 ## Failure behavior
 
-| What happened                           | What you get                                                                    |
-| --------------------------------------- | ------------------------------------------------------------------------------- |
-| A datasource is temporarily unavailable | That ecosystem skipped, others proceed, warning in summary, **green**           |
-| A package is not found in the registry  | Reported as `not-found`, no proposal, **green**                                 |
-| Registry metadata is malformed          | Reported as `malformed-metadata`, no proposal, **green**                        |
-| No warrant capabilities for `dependa`   | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
-| `apply: none`                           | Pipeline runs, nothing committed or PR'd, **green**                             |
-| A proposal is refused by policy         | Refusal recorded in output and summary, **green**                               |
-| The configuration is broken             | **Red**, naming the input                                                       |
+| What happened                           | What you get                                                                      |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| A datasource is temporarily unavailable | That ecosystem skipped, others proceed, warning in summary, **green**             |
+| A package is not found in the registry  | Reported as `not-found`, no proposal, **green**                                   |
+| Registry metadata is malformed          | Reported as `malformed-metadata`, no proposal, **green**                          |
+| No warrant capabilities for `dependa`   | Notice, no model calls, **green** — the duty decides nothing when it cannot act   |
+| `apply: none`                           | Pipeline runs, nothing committed or PR'd, **green**                               |
+| A proposal is refused by policy         | Refusal recorded in output and summary, **green**                                 |
+| The run's token is refused (401/403)    | **Red**, naming the token's scope — an auth failure is configuration, not weather |
+| The configuration is broken             | **Red**, naming the input                                                         |
 
 **A package that cannot be resolved is not an error.** The datasource reports
 `not-found` or `temporarily-unavailable`, and the pipeline continues with the
 packages it could resolve. A partial result is better than a red run over one
 unreachable registry.
+
+**A token the registry refuses is the one thing that is not weather.** A
+`401`/`403` from the GitHub API means this run's own token lacks read access —
+failing quietly as a "temporarily unavailable registry" would turn a
+permission mistake into a silent green no-op (the N1 asymmetry). It fails
+**red** instead, naming the token's scope.
 
 **Running with no `capabilities:` block at all is noted, once, rather than
 left silent.** An absent warrant file at the default path is level 0, and
@@ -423,6 +432,18 @@ See [Cost](../../guides/cost.md) for the full arithmetic.
   `auto-close: true`; edit a file that is not a manifest or lock file; treat
   registry metadata as authority; bypass enforcement. See
   [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
+
+## What it does not update
+
+- **Lockfiles are read-only.** dependa commits manifest edits only; it never
+  regenerates `package-lock.json`, `poetry.lock`, `Cargo.lock`, `go.sum`, or
+  any other lock/vendor file. CI failing on a stale lockfile is expected — run
+  your package manager's install step after merging a dependa PR, exactly as
+  the repo's existing dependency workflow would.
+- **PR metadata is not customisable.** dependa opens a PR per ecosystem group,
+  but does not support PR reviewers, assignees, or labels. `auto-approve`
+  controls ready-vs-draft status only — it never performs a real GitHub
+  approval, and dependa never merges its own PR.
 
 ## Related concepts
 

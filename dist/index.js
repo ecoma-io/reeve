@@ -32725,30 +32725,38 @@ function describe(value) {
   return "a value of a kind this file cannot hold";
 }
 
-// src/duties/duplicate/capabilities.ts
+// src/duties/dependa/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
+// src/duties/duplicate/capabilities.ts
+var DEFAULT_CAPABILITIES2 = [];
+
+// src/duties/harmonise/capabilities.ts
+var DEFAULT_CAPABILITIES3 = [];
+
 // src/duties/lifecycle/capabilities.ts
-var DEFAULT_CAPABILITIES2 = ["label", "comment"];
+var DEFAULT_CAPABILITIES4 = ["label", "comment"];
 var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 
 // src/duties/respond/capabilities.ts
-var DEFAULT_CAPABILITIES3 = [];
+var DEFAULT_CAPABILITIES5 = [];
 
 // src/duties/translate/capabilities.ts
-var DEFAULT_CAPABILITIES4 = ["edit-body"];
+var DEFAULT_CAPABILITIES6 = ["edit-body"];
 
 // src/duties/triage/capabilities.ts
-var DEFAULT_CAPABILITIES5 = ["label"];
+var DEFAULT_CAPABILITIES7 = ["label"];
 
 // src/doctor/diagnose.ts
 var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
-  ["translate", DEFAULT_CAPABILITIES4],
-  ["triage", DEFAULT_CAPABILITIES5],
-  ["duplicate", DEFAULT_CAPABILITIES],
-  ["respond", DEFAULT_CAPABILITIES3],
-  ["lifecycle", DEFAULT_CAPABILITIES2]
+  ["translate", DEFAULT_CAPABILITIES6],
+  ["triage", DEFAULT_CAPABILITIES7],
+  ["duplicate", DEFAULT_CAPABILITIES2],
+  ["respond", DEFAULT_CAPABILITIES5],
+  ["lifecycle", DEFAULT_CAPABILITIES4],
+  ["harmonise", DEFAULT_CAPABILITIES3],
+  ["dependa", DEFAULT_CAPABILITIES]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", null],

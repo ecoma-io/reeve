@@ -82,20 +82,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
+          dry-run: true # safe first run — remove when you trust it
 
   translate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/translate@v0.1
+      - uses: ecoma-io/reeve/translate@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
           languages: en, vi
+          dry-run: true # safe first run — remove when you trust it
 ```
 
 > [!NOTE]
@@ -109,7 +111,7 @@ One repository, one version line, one core — and each duty keeps its own input
 so nothing you write is meaningless to the thing you are configuring.
 
 Before granting a capability for real, check what your warrant would actually
-do with `uses: ecoma-io/reeve@v0.1` and `doctor: true` — it reads your file
+do with `uses: ecoma-io/reeve@v0.6` and `doctor: true` — it reads your file
 and this repository's labels and reports what a duty would find, writing
 nothing. See [Doctor](docs/guides/doctor.md).
 
@@ -146,20 +148,20 @@ core — the provider client and its fallback, the language layer, several
 drafts filtered by deterministic scoring, the sanitiser, the allowlist, the
 state kept as files in your repository — and differs only in what it decides:
 
-| Duty        | What it does                                                                                                                                                                 | Reference                                       |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `triage`    | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has.                                                     | [Reference](docs/reference/duties/triage.md)    |
-| `translate` | Puts every issue and pull request in every language your project reads — in the thread's own body, marked as the version that counts.                                        | [Reference](docs/reference/duties/translate.md) |
-| `duplicate` | Finds the thread that already reported this — across the language it was reported in. Top rung: opt-in, never on by accident.                                                | [Reference](docs/reference/duties/duplicate.md) |
-| `respond`   | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Top rung: granted nothing until a warrant names it. | [Reference](docs/reference/duties/respond.md)   |
-| `lifecycle` | Runs your own staleness policy — reminders, un-staling, and a final close as not planned — from timestamps and labels alone. No model is ever called.                        | [Reference](docs/reference/duties/lifecycle.md) |
-| `harmonise` | Synchronises your documentation across languages and formats — translating README files and keeping them current as the source changes.                                      | [Reference](docs/reference/duties/harmonise.md) |
-| `dependa`   | Maintains your dependencies — discovers updates, assesses risk, and opens reviewable PRs within the authority you granted.                                                   | [Reference](docs/reference/duties/dependa.md)   |
+| Duty        | What it does                                                                                                                                                                                                | Reference                                       |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `triage`    | Sorts a backlog against the taxonomy you wrote — or, at the bottom rung, against the labels your repository already has.                                                                                    | [Reference](docs/reference/duties/triage.md)    |
+| `translate` | Puts every issue and pull request in every language your project reads — in the thread's own body, marked as the version that counts.                                                                       | [Reference](docs/reference/duties/translate.md) |
+| `duplicate` | Finds the thread that already reported this — across the language it was reported in. Top rung: opt-in, never on by accident.                                                                               | [Reference](docs/reference/duties/duplicate.md) |
+| `respond`   | Gives a stranger a first, useful reply in the language they wrote to you in, grounded in what the project already knows. Top rung: granted nothing until a warrant names it.                                | [Reference](docs/reference/duties/respond.md)   |
+| `lifecycle` | Runs your own staleness policy — reminders, un-staling, and a final close as not planned — from timestamps and labels alone. No model is ever called.                                                       | [Reference](docs/reference/duties/lifecycle.md) |
+| `harmonise` | Synchronises your documentation across languages and formats — translating README files and keeping them current as the source changes. Report-only at level 0 — needs `capabilities:` in a warrant to act. | [Reference](docs/reference/duties/harmonise.md) |
+| `dependa`   | Maintains your dependencies — discovers updates, assesses risk, and opens reviewable PRs within the authority you granted. Report-only at level 0 — needs `capabilities:` in a warrant to act.              | [Reference](docs/reference/duties/dependa.md)   |
 
 What comes after them is decided by one test, and it is a strict one: the work
 has to recur, be uniformly expensive today, already be work a maintainer stopped
 doing, and be harder on a project whose contributors do not share a language.
-[Doctrine D10](docs/doctrine/north-star.md#d10-a-duty-must-earn-its-place)
+[Doctrine D10](docs/doctrine/north-star.md#d10--a-duty-must-earn-its-place)
 rejects most feature requests, on purpose.
 
 ## Cost

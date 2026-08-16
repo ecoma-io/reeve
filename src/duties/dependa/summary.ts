@@ -60,7 +60,7 @@ export function renderSummary(summary: RunSummary): string {
 
   const header = "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|";
 
-  let body = `## dependa\n\n${header}\n${rows.join("\n")}`;
+  let body = `## Reeve · dependa\n\n${header}\n${rows.join("\n")}`;
 
   if (summary.starved) {
     body += "\n\n⚠️ All models failed on capacity this run. No proposals were made.";

@@ -107,6 +107,21 @@ describe("queryAdvisories", () => {
     expect(result).toEqual([]);
   });
 
+  it("throws on 401/403 — the run's own token being refused is not weather", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+    });
+
+    await expect(queryAdvisories("fake-token", "npm", "some-pkg")).rejects.toThrow(/HTTP 403/);
+    await expect(queryAdvisories("fake-token", "npm", "some-pkg")).rejects.toThrow(/refused/);
+
+    // Tagged `AuthRefused` so dependa's caller rethrows instead of swallowing.
+    await expect(queryAdvisories("fake-token", "npm", "some-pkg")).rejects.toMatchObject({
+      name: "AuthRefused",
+    });
+  });
+
   it("degrades gracefully on non-ok response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,

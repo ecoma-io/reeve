@@ -59,16 +59,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/translate@v0.1
+      - uses: ecoma-io/reeve/translate@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
           languages: en, vi
+          dry-run: true # safe first run — remove when you trust it
 ```
 
 That writes one block into the issue body carrying every configured language
 except the one the issue was written in, below the author's own text and
-below a line saying which half is which. Edit the issue and it replaces that
+below a line saying which half is which — keep `dry-run: true` until you want
+a run to edit anything. Edit the issue and it replaces that
 block rather than adding a second one; edit nothing and the next run
 recognises its own output and stops before it spends a single request.
 
@@ -253,7 +255,7 @@ where everything worked, never an unset output:
 
 ```yaml
 - id: translate
-  uses: ecoma-io/reeve/translate@v0.1
+  uses: ecoma-io/reeve/translate@v0.6
   with:
     models: gpt-5-mini
 

@@ -4,7 +4,7 @@
 # deliberately does not restate every input, because a copy is only free to
 # drift.
 #
-# A workflow names this directory: `uses: ecoma-io/reeve/harmonise@v0.1`.
+# A workflow names this directory: `uses: ecoma-io/reeve/harmonise@v0.6`.
 name: Reeve - harmonise
 description: Keep multilingual documentation files synchronised across locales — classify the diff, propagate only shared semantic changes, and open a pull request.
 author: ecoma.io

@@ -39,7 +39,9 @@ import {
   type Capability,
   type Warrant,
 } from "../core/warrant.js";
+import { DEFAULT_CAPABILITIES as DEPENDA_DEFAULTS } from "../duties/dependa/capabilities.js";
 import { DEFAULT_CAPABILITIES as DUPLICATE_DEFAULTS } from "../duties/duplicate/capabilities.js";
+import { DEFAULT_CAPABILITIES as HARMONISE_DEFAULTS } from "../duties/harmonise/capabilities.js";
 import {
   DEFAULT_CAPABILITIES as LIFECYCLE_DEFAULTS,
   LIFECYCLE_CAPABILITIES,
@@ -67,6 +69,8 @@ const DEFAULTS_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["duplicate", DUPLICATE_DEFAULTS],
   ["respond", RESPOND_DEFAULTS],
   ["lifecycle", LIFECYCLE_DEFAULTS],
+  ["harmonise", HARMONISE_DEFAULTS],
+  ["dependa", DEPENDA_DEFAULTS],
 ]);
 
 /**

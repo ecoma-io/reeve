@@ -121,7 +121,7 @@ describe("renderSummary", () => {
     const summary = summarize([groupResult()], stubWeather(), [], false);
     const rendered = renderSummary(summary);
 
-    expect(rendered).toContain("## dependa");
+    expect(rendered).toContain("## Reeve · dependa");
     expect(rendered).toContain("| Group | Ecosystem | Updates | Outcome | PR |");
     expect(rendered).toContain("npm");
     expect(rendered).toContain("1"); // proposal count

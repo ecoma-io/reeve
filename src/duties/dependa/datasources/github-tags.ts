@@ -65,7 +65,17 @@ async function resolve(token: string, packageName: string): Promise<ResolutionRe
     return { status: "not-found" };
   }
 
-  if (tagsResponse.status === 403 || tagsResponse.status === 429 || tagsResponse.status >= 500) {
+  // A 401/403 is this run's own token being refused, not weather — the same
+  // class doctor's `classify` turns RED. Rate limits (429) and server errors
+  // stay capacity.
+  if (tagsResponse.status === 401 || tagsResponse.status === 403) {
+    return {
+      status: "auth-refused",
+      reason: `GitHub API returned ${String(tagsResponse.status)} for tags — the token may lack read access to ${packageName}`,
+    };
+  }
+
+  if (tagsResponse.status === 429 || tagsResponse.status >= 500) {
     return {
       status: "temporarily-unavailable",
       reason: `GitHub API returned ${String(tagsResponse.status)} for tags`,

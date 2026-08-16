@@ -70,7 +70,9 @@ jobs:
   doctor:
     runs-on: ubuntu-latest
     steps:
-      - uses: ecoma-io/reeve@v0.1
+      # checkout is required — doctor reads .github/reeve.yml from the local checkout
+      - uses: actions/checkout@v4
+      - uses: ecoma-io/reeve@v0.6
         with:
           doctor: true
 ```
@@ -109,7 +111,7 @@ step itself fails if even one of them is present.
 **GitHub's own capacity is weather, not a finding against your
 configuration** — a rate limit, a 5xx, or a timeout on the labels endpoint
 is reported green, naming the endpoint and saying plainly that the check
-was not performed, the same posture [D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
+was not performed, the same posture [D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
 takes everywhere else in this project. Run `doctor` again once GitHub
 answers.
 
