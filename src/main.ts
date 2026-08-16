@@ -64,7 +64,7 @@ export async function run(): Promise<void> {
  * `doctor: false`, never under `doctor: true`, whose own report owns the page.
  *
  * The table is the canonical route from a duty to the leaf action that runs it.
- * The seven duties and their leaves are written here and in
+ * The eight duties and their leaves are written here and in
  * `docs/reference/root-action.md`; the leaf pages (`docs/reference/duties/`)
  * are the single source for what each duty does, and a `description:` drift
  * there never reaches this page the way it reaches the marketplace listing.
@@ -86,6 +86,7 @@ async function writeExplain(leaf: string): Promise<void> {
         ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
         ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
         ["dependa", "`ecoma-io/reeve/dependa@<ref>`"],
+        ["review", "`ecoma-io/reeve/review@<ref>`"],
       ],
     ),
     "",

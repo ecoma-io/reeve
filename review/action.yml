@@ -1,0 +1,233 @@
+# The `review` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/review@v0.6`.
+#
+# Review answers a pull request with exactly one comment — its own, idempotent
+# under its marker — and never anything else. Comment writing is the only
+# thing the warrant can grant this duty (`review: [comment]`), and no input
+# here widens that.
+name: Reeve - review
+description: Review a pull request — deterministic pre-checks plus one model pass, reported as a single owned comment that tracks its own findings across synchronize events instead of reposting them.
+author: ecoma.io
+
+branding:
+  icon: check-circle
+  color: purple
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read the pull request and write the single review
+      comment. `GITHUB_TOKEN` is enough. `pull-requests: write` is one
+      indivisible scope — a token that can comment can also merge and close —
+      which is why the warrant file exists: whether this run may leave a
+      comment at all is decided in code, against a file in your repository,
+      and not by what the token can reach.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The pull request to review. Defaults to the one that triggered the
+      workflow — this duty is meant to run on `pull_request` events
+      (`ready-for-review`, `synchronize`, `opened`), not on a backfill.
+
+      An event that carries no pull request — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for pull request `NaN`.
+    required: false
+    default: ""
+
+  base-url:
+    description: >-
+      An OpenAI-compatible `/chat/completions` endpoint. Any provider that
+      speaks the protocol works, including one you run yourself and one that
+      needs no key.
+    required: false
+    default: https://api.openai.com/v1
+
+  api-key:
+    description: >-
+      The provider's key. Leave it empty for a keyless endpoint, which is a
+      supported configuration rather than a mistake. Registered as a secret
+      before anything can log it.
+    required: false
+    default: ""
+
+  models:
+    description: >-
+      Model ids, comma or newline separated, in preference order. The order is
+      preference and not last resort: the first one that answers is used, and a
+      model that fails is never asked again in the same run.
+
+      `id = Name` gives a model a display name, and everything a person reads —
+      the job summary, every warning — shows the name instead of the id. A
+      model nobody named shows its id.
+    required: true
+
+  warrant:
+    description: >-
+      Where the permissions live. Review is the top rung of Reeve's comment
+      surface — a finding printed on a pull request reads to everyone
+      downstream as though somebody from the project reviewed it — so it has
+      no cheap, reversible default: `review` is granted nothing until a
+      warrant explicitly names it, whether the file is missing entirely or
+      merely silent about this duty. Write `duties: { review: [comment] }`
+      to grant it. It may also carry a `languages:` key, which becomes the
+      whole answer for detection once it is written.
+
+      A file missing at this default path is not a failure — the run
+      resolves to granting nothing and says so in the job summary. Point
+      this at a path of your own instead, and a file missing there fails the
+      run red, because naming a file that is not there is a configuration
+      mistake rather than an absence. A file that exists but does not parse
+      always fails red, wherever it lives.
+    required: false
+    default: .github/reeve.yml
+
+  rules-path:
+    description: >-
+      A repo-relative path to the repository's own review rules, a YAML file
+      in the checkout (see `docs/reference/duties/review.md`): ignore lists,
+      generated-file suffixes, phrases the diff must not contain, and rules a
+      finding can cite. Deterministic pre-checks fire before any model is
+      asked; the same `yaml` parser the warrant uses reads this file, so a
+      maintainer learns one format. Missing is an empty rules set, not an
+      error — an unconfigured repository is reviewed by the built-in default
+      rules alone.
+    required: false
+    default: .github/reeve-rules.yml
+
+  trigger:
+    description: >-
+      What kind of pull request this run reviews. `pr` — the default —
+      waits for ready-for-review: a draft is skipped green, with the reason
+      in the job summary, because a draft that is explicitly still being
+      worked on is exactly the false-positive source a review duty must not
+      be. `prod` also reviews drafts, for the repository that would rather
+      have a running review than a quiet one, and is worth wiring to
+      `pull_request` events explicitly.
+    required: false
+    default: pr
+
+  max-diff-chars:
+    description: >-
+      How much diff one file may contribute before it is skipped as capped,
+      or `none` for no bound at all. A cap keeps one absurd file from
+      blowing the prompt; the review comment's coverage table names every
+      skipped file and why. `0` is refused — write `none` for that meaning
+      instead.
+    required: false
+    default: "4000"
+
+  confidence:
+    description: >-
+      How sure a finding has to be before it is reported, between 0 and 1.
+      The model states the whole review's confidence in its answer; below
+      the floor, findings are still reconciled and shown in the job summary,
+      but the comment is withheld — which is how a maintainer tunes this
+      against real diffs before letting it write to one.
+
+      Refused rather than clamped: `75` is a typo that would otherwise mean
+      `1`.
+    required: false
+    default: "0.6"
+
+  endpoints:
+    description: >-
+      Additional `alias = url` endpoints, comma or newline separated, each
+      with an optional `timeout=<duration>` after the url — for example
+      `fast = https://api.example.com/v1 timeout=30s`. A model id then
+      routes to one of these with `model@alias`, split at the last `@`
+      only when that alias was declared here; a model id with no `@alias`
+      still routes to `base-url` as it always has. The alias and url are
+      both safe to read back in this run's log.
+
+      A capacity failure — a 429, a 5xx, a timeout — demotes only the
+      `model@alias` pair that hit it, so a roster spread across endpoints
+      keeps rotating through whatever is left standing. A transport failure
+      demotes the whole endpoint, on the grounds that one broken connection
+      says nothing about the model asked over it. An auth failure — a 401 or
+      403 — is recorded rather than failing the run red immediately.
+    required: false
+    default: ""
+
+  api-keys:
+    description: >-
+      One `alias = key` per line, comma or newline separated, supplying the
+      key for each `endpoints` alias that needs one. Every alias named here
+      must also be declared in `endpoints`. Each entry's key — everything
+      after its first `=` — is registered as a secret before any entry is
+      validated, so a malformed line further down can never land an unmasked
+      key in an error message or this run's log.
+    required: false
+    default: ""
+
+  request-timeout:
+    description: >-
+      How long one request is allowed to run before it counts as a timeout —
+      weather, not a failure — expressed as a whole number of seconds or
+      minutes, like `120s` or `2m`. A bare number is refused rather than
+      assumed to be seconds. Applies to `base-url` and to every `endpoints`
+      line that names no `timeout=` of its own.
+    required: false
+    default: 120s
+
+  temperature:
+    description: >-
+      Sampling temperature, between 0 and 2. Empty is the default and omits
+      the field from every request outright, rather than sending some
+      assumed default value. Refused outside its range rather than clamped,
+      for the same reason `confidence` is.
+    required: false
+    default: ""
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output, and post nothing. The
+      review comment that would have been posted is printed to the log and
+      the job summary still shows the full verdict.
+    required: false
+    default: "false"
+
+outputs:
+  commented:
+    description: >-
+      `true` when the single review comment was posted or replaced this run.
+      `false` on every other path — including one that reconciled findings
+      but the warrant, the confidence floor, or `dry-run` withheld the write.
+      Never unset. There is no update-in-place beyond this duty's own owned
+      comment: the same comment is updated rather than a second one posted,
+      so `true` never means a duplicate appeared.
+
+  note:
+    description: >-
+      Why this run stopped before a verdict, when it did — merged, closed,
+      a draft under `trigger: pr`, or a Reeve proposal pull request. Empty
+      when the run reached a verdict.
+
+  head-sha:
+    description: >-
+      The pull request's head SHA at review time. Empty when the run stopped
+      before reading the pull request.
+
+  starved:
+    description: >-
+      `true` when every model in `models` failed on capacity this run — a
+      429, a 5xx, a timeout, or a network failure, on every one of them.
+      Weather, never a failure by itself. Worth alerting on if a schedule
+      keeps producing it.
+
+  findings:
+    description: >-
+      How many findings this run's reconciliation produced — created,
+      persisted, changed, resolved and reopened combined. The comment, when
+      one was posted, carries the same count.
+
+runs:
+  using: node24
+  main: dist/index.js

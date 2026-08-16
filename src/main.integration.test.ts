@@ -300,6 +300,14 @@ describe("the root action", () => {
     expect(run.log).toContain("uses: ecoma-io/reeve/lifecycle@v0.1");
   });
 
+  it("names review's own is-a-duty refusal text, exactly the same shape as every other shipped duty", async () => {
+    const run = await runAction(stub, { doctor: "false", duty: "review" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("`review` is a duty, but it is not this action.");
+    expect(run.log).toContain("uses: ecoma-io/reeve/review@v0.1");
+  });
+
   it("fails clean, naming the accepted spellings, when `doctor` is not a recognised boolean", async () => {
     const run = await runAction(stub, { doctor: "yes" });
 
