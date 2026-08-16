@@ -25,6 +25,38 @@ The exit code is fail-closed:
   green.
 - `2` when the requested duty is not one the runner knows.
 
+## Multilingual coverage
+
+The fixtures under `eval/fixtures/triage/` and `eval/fixtures/respond/`
+include a language matrix: one triage fixture and one respond fixture per
+language, each asserting the language its thread must be identified as
+(`expected.language`, the label the run's `language` output carries) alongside
+the triage/duplicate/respond decision. A fixture that declares a language and
+a run that identified the thread as something else is **`failed`**, never
+`skipped` — a misidentified language is a thread handled wrong, not a clean
+stop (`eval/language.ts`, pinned by `eval/contract/multilingual.test.ts`).
+
+| Language                           | Code | Detection path      | Triage         | Respond          |
+| ---------------------------------- | ---- | ------------------- | -------------- | ---------------- |
+| English (baseline)                 | `en` | profile             | `en-report`    | `en-first-reply` |
+| Vietnamese                         | `vi` | profile             | `vi-report`    | `vi-first-reply` |
+| Japanese                           | `ja` | profile (Han vs zh) | `ja-duplicate` | `ja-first-reply` |
+| Portuguese                         | `pt` | profile             | `pt-report`    | `pt-first-reply` |
+| Spanish                            | `es` | profile             | `es-report`    | `es-first-reply` |
+| Korean (structural: Hangul script) | `ko` | script              | `ko-report`    | `ko-first-reply` |
+| Arabic (structural: RTL)           | `ar` | script              | `ar-report`    | `ar-first-reply` |
+| Indonesian (provider-identified)   | `id` | model               | `id-model`     | `id-model-reply` |
+
+Each fixture's warrant configures the language in `languages:`, so the thread
+is identified against a candidate set that actually lists it. The Japanese
+duplicate fixture drives the duplicate-detection-and-close pipeline on a
+non-Latin thread. The Indonesian fixtures spell out the provider-based
+identification step (the script step cannot narrow a Latin thread, and the
+bundled profile data does not cover the language), so an answer that
+misidentified it would break the fixture as `failed`. The review duty's
+PR-language dimension is not covered — T6 (review) has not landed on this
+branch yet; that surface belongs to its own task.
+
 ## Running
 
 ```sh
