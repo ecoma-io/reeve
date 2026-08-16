@@ -11,8 +11,8 @@ only through its leaf action
 ([the leaf-action table](../reference/root-action.md#the-leaf-actions)).
 
 If your workflow does not use any of the removed inputs, you have nothing to
-do — read [the warrant](../guides/warrant.md) and stop here. Everything below
-maps the old shapes onto the new ones, one at a time.
+do — read [the warrant](warrant.md) and stop here. Everything below maps the
+old shapes onto the new ones, one at a time.
 
 ## Where the old inputs went
 
@@ -23,37 +23,60 @@ now.
 
 The old `apply:` input was the workflow's half of the authority, intersected
 with the warrant's `capabilities:` grant — the narrower of the two won. There
-is no second half of the gate anymore, so the file holds it all: write the
-capabilities you used to grant in `apply:` into the duty's `duties:` entry
-instead, and the workflow adds nothing.
+is no second half of the gate anymore, so the file holds it all. Construct
+the `duties:` entry from what a run was **effectively** allowed to do —
+`narrow(grant, apply)`, never from either half blindly. Start from the
+grant, then intersect it with what the workflow actually carried; a grant
+the `apply:` input never named never reached a thread. The rows below give
+each duty its pre-1.0 `apply:` default where the workflow never wrote the
+input.
 
-| Old `apply:` (workflow)                    | New `duties:` entry (warrant)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `triage` with `apply: "label, close"`      | `triage: [label, close]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `translate` with `apply: "edit-body"`      | `translate: [edit-body]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `lifecycle` with `apply: "label, comment"` | `lifecycle: true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| any duty with `apply: none`                | `duty: false` — or `[none]` — in a `duties:` block that names the duty, for the same intent: the run still executes, decides, writes every output, and changes nothing. This is the one mapping a migration must write on purpose: with no `duties:` block at all, the duty keeps its own default, and a duty left out of a written block is denied everything — both are answers, and neither is the pre-1.0 `none` intent spelled out. See [duty entry values](../guides/warrant.md#duties). |
+| Duty        | Old `apply:` default | Old effective authority (with a written `capabilities:` grant) | New `duties:` entry that preserves it                                                                                        |
+| ----------- | -------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `triage`    | `label`              | the grant ∩ `[label]`                                          | `triage: [label]`, or `triage: true` if the file granted exactly `[label]`                                                   |
+| `translate` | `edit-body`          | the grant ∩ `[edit-body]`                                      | `translate: [edit-body]`, or `true` if the file granted exactly `[edit-body]`                                                |
+| `lifecycle` | `label, comment`     | the grant ∩ `[label, comment]`                                 | `lifecycle: true` (its built-in default is `[label, comment]`)                                                               |
+| `duplicate` | `none`               | `[]`                                                           | `duplicate: false` — or `[none]` — unless the old workflow did name `apply: comment` at the same time as the file granted it |
+| `respond`   | `none`               | `[]`                                                           | `respond: false`, or `[none]`, unless the old workflow named `apply: comment` with the file granting it                      |
+| `harmonise` | `none`               | `[]`                                                           | `harmonise: false`, or `[none]`, unless the old workflow named `apply: edit-file, open-pr` with the file granting both       |
+| `dependa`   | `none`               | `[]`                                                           | `dependa: false`, or `[none]`, unless the old workflow named `apply: edit-file, open-pr` with the file granting both         |
+
+The default-`none` row is the one a migration must write on purpose: with no
+`duties:` block at all the duty keeps its own built-in default, and a duty
+left out of a written block is denied everything — neither is the pre-1.0
+`none` intent spelled out. `false` (or `[none]`) names the duty in the block
+and grants it nothing, which is what the old `apply: none` meant. See
+[duty entry values in the warrant guide](warrant.md#duties).
+
+The workflow's half mattered even when it was not written, because the
+input had a default. Only a consumer who wrote `apply: "label, close,
+assign"` in the old workflow — and had that list granted in the file —
+migrates to `triage: [label, close, assign]`. The list a file granted but
+the step never applied stays out of the new entry.
 
 The two exclusives, `record` and `propose`, worked through the same double
 gate, and both are now granted by the `duties:` block alone — `triage: [label,
 record]` or `triage: [label, propose]`, exactly like any other capability.
 `record` needs `contents: write` on the token, `propose` needs `contents:
-write` and `pull-requests: write`, unchanged from before. See
+write` and `pull-requests: write`, unchanged from before. But the same
+intersection rule applies: `record` only ever fired when the workflow's
+`apply:` named it too, so a migration copies `record` into the `duties:`
+entry only if the old `apply:` carried it. See
 [the capabilities table](../reference/warrant-format.md#the-capabilities-table)
 for what each capability requires.
 
 Capabilities a migration may find in `apply:` — `label`, `comment`, `close`,
-`assign`, `record`, `propose`, `edit-file`, `open-pr` — are all still
-available, now granted in the `duties:` entry of the duty that uses them
-instead of on the workflow step. None of them was ever a knob the warrant
-could not already state; the input was only ever the narrower-of-two gate,
-and the gate is gone.
+`assign`, `record`, `propose`, `edit-body`, `edit-file`, `open-pr` — are all
+still available, now granted in the `duties:` entry of the duty that uses
+them instead of on the workflow step. None of them was ever a knob the
+warrant could not already state; the input was only ever the narrower-of-two
+gate, and the gate is gone.
 
 `none` is not `dry-run`. A `none` value always meant "decide, write every
 output, change nothing" — the intent a migration now spells out by writing
 the duty's entry as `false` or `[none]`. Rehearsing without writing is the
 separate `dry-run: true` input, which still exists on the leaf actions. See
-[the dry-run guide](../guides/dry-run.md).
+[the dry-run guide](dry-run.md).
 
 ### `languages:` and the `languages` input
 
@@ -62,10 +85,11 @@ the warrant, on `triage`) moved into the warrant file. The key is spelled the
 same and keeps the same grammar. "Written here, it is the whole answer": once
 `languages:` exists in the warrant, the duty's own documented default list is
 not consulted at all, exactly as the input used to override the default. A
-warrant without the key leaves each duty's own documented default in charge —
-the default is `en, vi, zh` for the duties that read it. See
-[Languages](../guides/languages.md) for the grammar, and
-[the warrant guide's Languages section](../guides/warrant.md#languages) for
+warrant without the key leaves each duty's own documented default in charge:
+`triage`, `translate`, `duplicate` and `respond` default to `en, vi, zh`,
+`harmonise` to `vi, zh`. See
+[Languages](../guides/languages.md) for the grammar and the defaults, and
+[the warrant guide's Languages section](warrant.md#languages) for
 the precedence.
 
 ### `capabilities:` and everything else in the old warrant
@@ -81,11 +105,17 @@ list, `true`, or `false` — before, an entry was always a list.
 | —                                          | `duties: { triage: true }` — spells out `triage`'s own default without restating it |
 | —                                          | `duties: { triage: false }` or `[none]` — the duty is enabled, granted nothing      |
 
-That first row — a rename with identical semantics — is the migration for
-almost every existing warrant. The block's meaning is unchanged: a duty a
-written block does not name is granted nothing at all, not its old default,
-once a block exists. See [duty entry values](../guides/warrant.md#duties) for
-the three shapes an entry may take.
+The block's meaning is unchanged — a duty a written block does not name is
+granted nothing at all, not its old default, once a block exists — and the
+value shapes are enumerated the same way. But the move into `duties:` is not
+a rename for the workflow: the file was never the whole authority before
+1.0. Where the old file granted a list the workflow's `apply:` did not
+name, the effective authority was narrower than the file row, and blindly
+copying the file row into `duties:` widens the run. Migrate the file by
+intersecting each row with what that workflow's `apply:` actually allowed —
+see [the `apply:` mapping](#apply) for the per-duty effective values. See
+[duty entry values in the warrant guide](warrant.md#duties) for the three
+shapes an entry may take.
 
 ## Workflow steps change to leaf actions
 
@@ -114,17 +144,32 @@ see the mapping above.
     models: gpt-5-mini
 ```
 
-The root action — `uses: ecoma-io/reeve@v0.6` naming no duty — still resolves
-and still runs no duty, which is the one thing it has always done. What
-changed is the failure mode: it now fails red, naming the leaf action a duty
-actually ships from, and `doctor: true` trades the refusal for a read-only
-configuration report. There is no form in which `uses: ecoma-io/reeve@v0.6`
-runs a duty — a duty runs only through its leaf action. See
-[the root action](../reference/root-action.md#what-it-does).
+The root action — `uses: ecoma-io/reeve@v0.6` naming no duty — still
+resolves and still runs no duty, and it has always failed red with the
+corrected `uses:` line in the message, exactly as it does today. What 1.0
+adds to that refusal is the explain surface: the run still fails red, but a
+step-summary page now names the leaf action a duty actually ships from, and
+a `leaf-action` output makes the corrected `uses:` line machine-readable.
+`doctor: true` itself is unchanged — the same read-only configuration
+report it has always been — and remains the way to verify a converted
+warrant before the first real run. There is no form in which
+`uses: ecoma-io/reeve@v0.6` runs a duty — a duty runs only through its leaf
+action. See [the root action](../reference/root-action.md#what-it-does).
 
 ## A before-and-after warrant
 
-A complete old-style configuration, rewritten:
+The case where the workflow's `apply:` named the same list the file granted
+is the clean migration — the effective authority and the file row agree, and
+only the block's name changes. That is the shape shown here:
+
+```yaml
+# .github/workflows/reeve.yml — before
+- uses: ecoma-io/reeve/triage@v0.6
+  with:
+    api-key: ${{ secrets.OPENAI_API_KEY }}
+    models: gpt-5-mini
+    apply: "label, close, assign"
+```
 
 ```yaml
 # .github/reeve.yml — before
@@ -154,13 +199,22 @@ languages:
   - vi
 ```
 
-The only change is the block's name. Every old capability has a `duties:`
-entry to move into, so nothing a pre-1.0 grant used to cover is unavailable on
-the new model. If you want `triage` on its own default without
-restating it, rewrite that row as `triage: true`; to keep the duty running but
-grant it nothing, write `triage: false` instead of `triage: []` — an empty
-list is refused, on the grounds that `[none]` is the explicit way to grant
-nothing.
+The workflow gains nothing. `translate`'s row could equally be written
+`translate: true` — its built-in default is exactly `[edit-body]`, so the
+list and the shorthand name the same authority. `triage` is shown as the
+list because that is the shape the workflow's `apply:` named; the only
+consumer who may copy this `triage` row verbatim is one whose old workflow
+did write `apply: "label, close, assign"`. If your workflow never wrote
+that, this example is a widening, not a migration: `triage` ran at most
+`[label]` until the step named more — write `triage: [label]`, or `true`
+if the file granted exactly that.
+
+Every old capability has a `duties:` entry to move into, so nothing a
+pre-1.0 grant used to cover is unavailable on the new model. If you want
+`triage` on its own default without restating it, rewrite that row as
+`triage: true`; to keep the duty running but grant it nothing, write
+`triage: false` instead of `triage: []` — an empty list is refused, on the
+grounds that `[none]` is the explicit way to grant nothing.
 
 ## Verify the conversion with `doctor: true`
 
@@ -176,24 +230,25 @@ repository with
 
 `doctor` reads your warrant and this repository's labels and writes nothing —
 no label, no comment, no commit. The job summary's three sections answer
-exactly the three things a migrated configuration has to get right:
+exactly the three things a migrated configuration has to get right, in the
+order `doctor` prints them:
 
 - **`### Problems`** — anything that would refuse a duty at runtime: a warrant
   that will not parse, a label the taxonomy names that does not exist and
   cannot be created, a token the labels endpoint refuses. A green nothing here
   is the migration's green light.
-- **`### Effective authority`** — one row per duty, showing what its `duties:`
-  entry effectively grants. This is where the conversion is read back: a duty
-  that used to be `apply: "label, close"` and is now an exact list shows that
-  exact list here, and a duty you wrote as `true` shows its own built-in
-  default. A duty a written block leaves unnamed is shown as denied
-  everything, which is the real answer of a migrated block, not a finding.
 - **`### Notes`** — the defaults in play. Every duty whose effective grant is
   exactly its own built-in default — because the file never wrote an opinion,
   or because you wrote `true` — is named in one aggregated green note, so
   "healthy" and "healthy because nothing is configured yet" never look the
   same. Missing labels marked `create: true` appear here too, as labels a duty
   granted `label` will create.
+- **`### Effective authority`** — one row per duty, showing what its `duties:`
+  entry effectively grants. This is where the conversion is read back: a duty
+  that used to be `apply: "label, close"` and is now an exact list shows that
+  exact list here, and a duty you wrote as `true` shows its own built-in
+  default. A duty a written block leaves unnamed is shown as denied
+  everything, which is the real answer of a migrated block, not a finding.
 
 Set `duty:` alongside `doctor: true` to scope the report to one duty's row —
 useful when a migration changed that one duty's entry. Add `problems != '0'`
