@@ -173,7 +173,7 @@ Bounded by whatever the warrant already grants the duties it is sequencing
 This is a floor, not a default. No future warrant key, however it is
 written, is permitted to grant any of the following — turning one of these
 on is not a configuration change Reeve will ever read as valid, the same
-way no `apply` value today can make `duplicate` skip its double gate:
+way no `duties:` entry today can make `duplicate` skip its double gate:
 
 - **`code.write` — writing, running, or modifying any code, workflow file,
   or CI configuration in the consumer's repository.** Permanently forbidden.

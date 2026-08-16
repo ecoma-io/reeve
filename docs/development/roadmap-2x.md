@@ -49,11 +49,11 @@ and dogfooded — in the 1.x line:
 | The warrant — `.github/reeve.yml`, an allowlist checked in code ([D2](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded)) | `.reeve/authority.yaml` — the same grant, plus a `forbidden:` floor ([the governance tree](agent-governance.md))   |
 | A duty — a fixed pipeline invoked by name                                                                                                     | A capability — the same pipeline, invocable by the agent as well as by a workflow line                             |
 | A duty's proposed effects, checked by [`src/core/enforce.ts`](../../src/core/enforce.ts) before publish                                       | A capability request, checked by the Authority Kernel — the same module's job, given a name and a boundary         |
-| The `apply` input and the warrant, narrower one winning                                                                                       | The kernel's grant resolution — unchanged rule, more callers                                                       |
+| The warrant's `duties:` block, the whole authority, checked in code                                                                           | The kernel's grant resolution — unchanged rule, more callers                                                       |
 | Idempotency markers in the thread ([D9](../doctrine/north-star.md#d9-re-running-is-cheap-and-safe))                                           | The Verify stage — a loop step that reads the marker the publish step wrote                                        |
 | The corrections store, plain files in the repository ([D6](../doctrine/north-star.md#d6-the-repository-is-the-database))                      | `.reeve/memory/` — the same files, relocated under the governance roof                                             |
 | The taxonomy's `not:` fields — a project's own rulings, in prose                                                                              | `.reeve/duties/` — per-duty doctrine, same idea with room to grow                                                  |
-| `dry-run`, and `apply` withholding a write                                                                                                    | Agent Mode's report-only phase — the plan written to the summary, nothing executed                                 |
+| `dry-run`, a rehearsal that withholds every write                                                                                             | Agent Mode's report-only phase — the plan written to the summary, nothing executed                                 |
 | The sweep — `sweep`, `since`, `limit` bounding a run over a backlog                                                                           | The Observe stage's enumeration — bounded the same way, for the same reason                                        |
 | Weather ([D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)) — a starved roster delivers what finished       | A loop stop condition — an agent run out of provider delivers what it verified and names the remainder             |
 | The job summary — what was decided per item, and what it cost                                                                                 | The plan-and-verify transcript — the same page, now also showing what the kernel refused                           |
@@ -88,7 +88,7 @@ on this repository, the last two of those in report-only mode first, which
 is the same discipline Phase 3 below borrows; `lifecycle` is the newest and
 does not yet have a workflow of its own here.
 The warrant is the whole answer for authority, with total enumeration once a
-`capabilities:` block exists
+`duties:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog
 under `sweep`, `since` and `limit`; weather is not failure, and a
 multi-endpoint roster rotates through providers and starves honestly
@@ -210,10 +210,9 @@ per [D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation).
 untouched. A repository that adds the agent workflow in this phase risks
 exactly nothing written.
 
-**Deliberately not yet:** no writes, from any path, under any input. There
-is no `apply` that turns Phase 3 into Phase 4 early — the acting loop is a
-release, not a flag, so that the decision to let it act is made by this
-roadmap's gate and not by a workflow typo.
+**Deliberately not yet:** no writes, from any path, under any input. The
+acting loop is a release, not a flag, so that the decision to let it act is
+made by this roadmap's gate and not by a workflow typo.
 
 ## Phase 4 — Agent Mode acts
 
