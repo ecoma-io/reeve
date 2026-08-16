@@ -737,47 +737,44 @@ export async function openAuthority(
   return { authority, denied: authority.warrant.unnamed(duty) };
 }
 
-/** What resolving `languages` against the warrant and the input decided. */
+/** What resolving `languages` against the warrant decided. */
 export interface LanguagesResolution {
   readonly languages: readonly Language[];
   /**
-   * Set only when the warrant's key won, so a run can say once why the
-   * `languages` input was never consulted — a maintainer staring at an input
-   * that looks configured and a run that plainly ignored it deserves the one
-   * sentence that explains it, not a warning storm.
+   * Set only when the warrant's key won, so a run can say once that the
+   * file's `languages:` is what a maintainer staring at a workflow that used
+   * to be able to answer this deserves: the one sentence that names the file
+   * as the whole answer, not silence.
    */
   readonly notice: string | null;
 }
 
 /**
- * Which of the two sources answers "what to translate into" or "what a
- * contributor writes in" this run.
+ * What answers "what to translate into" or "what a contributor writes in"
+ * this run.
  *
- * The warrant wins outright when it has an opinion: once `languages:` is
- * written there, the `languages` input is not a fallback to blend with it, it
- * is not consulted at all — the file is the whole answer, the same way a
- * `capabilities:` block is. Only when the file is silent about it — no key,
- * or no warrant at all, which `implicitWarrant` always leaves silent — does
- * the input get asked, exactly as it always has.
+ * The warrant is the only place the question is answered. Once `languages:`
+ * is written there, it is the whole answer — the file is the whole authority,
+ * the same way a `duties:` block is, and there is no input left to argue with
+ * it. Only when the file is silent — no key, or no warrant at all, which
+ * `implicitWarrant` always leaves silent — does the caller's own documented
+ * default answer, which is the least a duty has always been trusted with and
+ * is now the duty's to say (`fallback`). No action input is read anywhere.
  */
-export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesResolution {
+export function resolveLanguages(
+  warrant: Warrant,
+  fallback: readonly Language[],
+): LanguagesResolution {
   if (warrant.languages !== null) {
     return {
       languages: warrant.languages,
       notice:
-        `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` ` +
-        "input — the file is the whole answer once that key is written.",
+        `languages: read from \`${warrant.path}\`'s \`languages:\` key — ` +
+        "the file is the whole answer once that key is written.",
     };
   }
 
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      "languages: no language is configured. Write `languages:` in the warrant " +
-        `(\`${warrant.path}\`), or set the \`languages\` input.`,
-    );
-  }
-
-  return { languages: parseLanguages(rawInput), notice: null };
+  return { languages: fallback, notice: null };
 }
 
 /**
@@ -791,18 +788,18 @@ export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesR
  * configured a language for it, and the honest answer for a run that will
  * read nothing is that it reads no languages.
  *
- * `rawInput` is passed rather than read here, because a duty's `main.ts` is
- * where its own `action.yml` inputs are read — see any duty's
- * `main.integration.test.ts` for the audit that keeps it that way.
+ * `fallback` is the duty's own documented default, passed rather than read
+ * here because each duty's defaults live beside its `DEFAULT_CAPABILITIES` —
+ * see any duty's `main.integration.test.ts` for the audit that keeps that so.
  */
 export function dutyLanguages(
   warrant: Warrant,
   denied: boolean,
-  rawInput: string,
+  fallback: readonly Language[],
 ): readonly Language[] {
   if (denied) return [];
 
-  const resolution = resolveLanguages(warrant, rawInput);
+  const resolution = resolveLanguages(warrant, fallback);
   if (resolution.notice !== null) core.notice(resolution.notice);
   return resolution.languages;
 }

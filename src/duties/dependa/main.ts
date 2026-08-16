@@ -30,7 +30,6 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrowWarned } from "../../core/enforce.js";
 import { isCapacityError, type Location, readContentsFile } from "../../core/forge.js";
 import { createMeter } from "../../core/meter.js";
 import { assembleClient, createWeather, rotateModels, settleAuth } from "../../core/provider.js";
@@ -125,12 +124,7 @@ export async function run(): Promise<void> {
       return;
     }
 
-    const { permitted } = narrowWarned(
-      authority.warrant.granted("dependa", DEFAULT_CAPABILITIES),
-      base.apply,
-      "dependa",
-      base.warrant,
-    );
+    const permitted = authority.warrant.granted("dependa", DEFAULT_CAPABILITIES);
 
     settings = { ...base, permitted };
 

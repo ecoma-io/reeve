@@ -21,6 +21,7 @@ import {
   DEFAULT_WARRANT_PATH,
   type Warrant,
 } from "./warrant.js";
+import { parseLanguages } from "./languages.js";
 
 // Nothing is mocked, in the tests that read a file the ordinary way. The YAML
 // parser is a library, not a collaborator, and every assertion here is about
@@ -442,31 +443,25 @@ describe("languages", () => {
 });
 
 describe("resolveLanguages", () => {
-  it("lets the warrant's own key win outright, with a notice naming both sources", () => {
+  it("lets the warrant's own key win outright, with a notice naming the file", () => {
     const source = `${MINIMAL}languages:\n  - en\n`;
-    const resolution = resolveLanguages(warrant(source), "vi, zh");
+    const fallback = parseLanguages("vi, zh");
+    const resolution = resolveLanguages(warrant(source), fallback);
 
     expect(resolution.languages).toEqual([{ code: "en", label: "English", scripts: ["Latn"] }]);
     expect(resolution.notice).toContain(`\`${PATH}\`'s \`languages:\` key`);
-    expect(resolution.notice).toContain("not the `languages` input");
+    expect(resolution.notice).toContain("the file is the whole answer");
   });
 
-  it("falls back to the input when the warrant never mentions the key", () => {
-    const resolution = resolveLanguages(warrant(MINIMAL), "en, vi");
+  it("falls back to the duty's own default when the warrant never mentions the key", () => {
+    const fallback = parseLanguages("en, vi");
+    const resolution = resolveLanguages(warrant(MINIMAL), fallback);
 
     expect(resolution.languages).toEqual([
       { code: "en", label: "English", scripts: ["Latn"] },
       { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] },
     ]);
     expect(resolution.notice).toBeNull();
-  });
-
-  it("refuses a run where neither source names a language, naming both", () => {
-    const refusing = (): void => {
-      resolveLanguages(warrant(MINIMAL), "  ");
-    };
-    expect(refusing).toThrow(`Write \`languages:\` in the warrant (\`${PATH}\`)`);
-    expect(refusing).toThrow("or set the `languages` input");
   });
 });
 
@@ -476,29 +471,27 @@ describe("dutyLanguages", () => {
   });
 
   it("resolves against the warrant and says once when the warrant's key won", () => {
-    const languages = dutyLanguages(warrant(`${MINIMAL}languages:\n  - en\n`), false, "vi, zh");
+    const languages = dutyLanguages(
+      warrant(`${MINIMAL}languages:\n  - en\n`),
+      false,
+      parseLanguages("vi, zh"),
+    );
 
     expect(languages).toEqual([{ code: "en", label: "English", scripts: ["Latn"] }]);
     expect(vi.mocked(core.notice)).toHaveBeenCalledTimes(1);
   });
 
-  it("stays silent when the input answered and there was nothing to explain", () => {
-    expect(dutyLanguages(warrant(MINIMAL), false, "en")).toHaveLength(1);
+  it("stays silent when the duty's own default answered and there was nothing to explain", () => {
+    expect(dutyLanguages(warrant(MINIMAL), false, parseLanguages("en"))).toHaveLength(1);
     expect(vi.mocked(core.notice)).not.toHaveBeenCalled();
   });
 
   it("answers a denied duty with no languages rather than resolving at all", () => {
-    // The point of the guard: this input would refuse a duty that was granted
-    // something, and a run promised a green no-op has no business failing red
-    // over configuration it was never going to reach.
-    expect(dutyLanguages(warrant(MINIMAL), true, "  ")).toEqual([]);
+    // The point of the guard: a granted duty would read its own default and a
+    // run promised a green no-op has no business spending anything on resolving
+    // a languages nobody configured for it.
+    expect(dutyLanguages(warrant(MINIMAL), true, parseLanguages("en, vi"))).toEqual([]);
     expect(vi.mocked(core.notice)).not.toHaveBeenCalled();
-  });
-
-  it("still refuses a granted duty that neither source named a language for", () => {
-    expect(() => dutyLanguages(warrant(MINIMAL), false, "  ")).toThrow(
-      `Write \`languages:\` in the warrant (\`${PATH}\`)`,
-    );
   });
 });
 

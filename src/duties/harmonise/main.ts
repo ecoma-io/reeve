@@ -17,9 +17,8 @@
  *      c. Let the judge panel pick between the admitted drafts, or fall
  *         back to the best-scored draft when no panel is configured.
  *   5. Open a PR per document group with the updated locale files — unless
- *      the warrant does not grant `edit-file` + `open-pr`, or `apply` is
- *      `none`, in which case every step above still ran and only the write
- *      is withheld.
+ *      the warrant does not grant `edit-file` + `open-pr`, in which case
+ *      every step above still ran and only the write is withheld.
  *
  * **A locale that fails does not fail the run.** Only a broken configuration
  * and a provenance state that cannot be read are `setFailed` — everything
@@ -34,7 +33,6 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
 import {
   bounded,
@@ -87,8 +85,8 @@ import { publishSync, type PublishApi, type SyncResult } from "./publish.js";
 import { publishState, type StateBranchApi } from "../../core/state-branch.js";
 import { summarize, type GroupResult } from "./summary.js";
 
-/** This duty's `languages` default (target locales only). */
-const DEFAULT_LANGUAGES_INPUT = "vi, zh";
+/** This duty's `languages` default (target locales only), when the warrant is silent. */
+const DEFAULT_LANGUAGES: readonly Language[] = parseLanguages("vi, zh");
 /** This duty's `source-language` default. */
 const DEFAULT_SOURCE_LANGUAGE_INPUT = "en";
 
@@ -99,7 +97,7 @@ export interface Settings {
   readonly sourceLanguage: Language;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  readonly apply: readonly Capability[];
+  /** What the file grants — the sole authority, so the run's only `permitted` list. */
   readonly permitted: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   readonly judgeNames: Names;
@@ -131,7 +129,6 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
   return {
     ...shared,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
@@ -191,9 +188,9 @@ export async function run(): Promise<void> {
       denied,
     );
 
-    // Parse target languages — the locales the documentation is translated into.
-    const rawLanguages = core.getInput("languages");
-    const languages = dutyLanguages(authority.warrant, denied, rawLanguages);
+    // Parse target languages — the locales the documentation is translated
+    // into, from the warrant's `languages:` key or this duty's own default.
+    const languages = dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES);
 
     // Validate: source language must not appear in target languages
     if (sourceLanguage !== null && languages.length > 0) {
@@ -212,14 +209,10 @@ export async function run(): Promise<void> {
     );
 
     // Notice when running on the default language config
-    if (
-      !denied &&
-      authority.warrant.languages === null &&
-      rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
-    ) {
+    if (!denied && authority.warrant.languages === null) {
       core.notice(
         "languages: running on the default (`vi, zh`) — nobody has set this yet. " +
-          "Write the `languages` input, or `languages:` in the warrant, to choose on purpose.",
+          "Write `languages:` in the warrant to choose on purpose.",
       );
     }
 
@@ -234,12 +227,7 @@ export async function run(): Promise<void> {
       );
     }
 
-    const { permitted } = narrowWarned(
-      authority.warrant.granted("harmonise", DEFAULT_CAPABILITIES),
-      base.apply,
-      "harmonise",
-      base.warrant,
-    );
+    const permitted = authority.warrant.granted("harmonise", DEFAULT_CAPABILITIES);
 
     const fallbackSource = parseLanguages("en")[0];
     if (fallbackSource === undefined) {
