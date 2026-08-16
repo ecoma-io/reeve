@@ -33302,7 +33302,7 @@ async function providerProbe(probe) {
     rotation = await rotateModels(probe.models, (model) => provider.complete(model, PROBE_TURN));
   } catch (error2) {
     const authFailure = error2 instanceof AuthenticationFailure ? error2.failure : void 0;
-    const reason2 = authFailure !== void 0 ? "the configured endpoint refused this run's key (HTTP 401 or 403)" : error2 instanceof Error ? `the probe itself failed (${excerpt2(error2.message)})` : "the probe itself failed";
+    const reason2 = authFailure !== void 0 ? "the configured endpoint refused this run's key (HTTP 401 or 403)" : error2 instanceof Error ? "the probe itself failed" : "the probe itself failed";
     return {
       severity: "green",
       text: `Provider probe \u2014 no configured model answered a tiny request: ${reason2}. This is weather, not a configuration finding: the probe exists to say whether the endpoint answers, and it says nothing about what any duty may do.`
@@ -33322,15 +33322,11 @@ async function providerProbe(probe) {
   const auth2 = failures.find((failure) => failure.kind === "auth");
   const capacity = failures.find((failure) => failure.kind === "capacity");
   const protocol = failures.find((failure) => failure.kind === "protocol");
-  const reason = auth2 !== void 0 ? "the configured endpoint refused this run's key (HTTP 401 or 403)" : capacity !== void 0 ? capacity.transport === true ? "the endpoint could not be reached" : `the endpoint answered with a rate limit or server error (${excerpt2(capacity.reason)})` : protocol !== void 0 ? `the endpoint answered outside the chat-completions protocol (${excerpt2(protocol.reason)})` : "the probe did not reach any provider";
+  const reason = auth2 !== void 0 ? "the configured endpoint refused this run's key (HTTP 401 or 403)" : capacity !== void 0 ? capacity.transport === true ? "the endpoint could not be reached" : "the endpoint answered with a rate limit or server error" : protocol !== void 0 ? "the endpoint answered outside the chat-completions protocol" : "the probe did not reach any provider";
   return {
     severity: "green",
     text: `Provider probe \u2014 no configured model answered a tiny request: ${reason}. This is weather, not a configuration finding: the probe exists to say whether the endpoint answers, and it says nothing about what any duty may do.`
   };
-}
-function excerpt2(reason) {
-  const flat = reason.replace(/\s+/g, " ").trim();
-  return flat.length <= 80 ? flat : `${flat.slice(0, 80)}\u2026`;
 }
 async function checkoutState(workspaceDir) {
   try {
@@ -33436,8 +33432,9 @@ function note(row) {
 // src/doctor/run.ts
 var DEFAULT_REQUEST_TIMEOUT = "120s";
 function providerConfig() {
-  const baseUrl2 = getInput("base-url");
   const apiKey = getInput("api-key");
+  if (apiKey.length > 0) setSecret(apiKey);
+  const baseUrl2 = getInput("base-url");
   const roster = parseModels(getInput("models"));
   if (baseUrl2.length === 0 || roster.models.length === 0) {
     return void 0;
