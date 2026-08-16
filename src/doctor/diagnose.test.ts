@@ -505,5 +505,37 @@ describe("diagnose", () => {
       const page = result.findings.map((finding) => finding.text).join("\n");
       expect(page).not.toContain("probe-key");
     });
+
+    it("keeps a key out of the summary even when a rate-limit body echoes it", async () => {
+      probeFetch.mockResolvedValueOnce(
+        probeJson({ error: { message: "quota exceeded for key probe-key" } }, 429),
+      );
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
+
+    it("keeps a key out of the summary even when a server-error body echoes it", async () => {
+      probeFetch.mockResolvedValueOnce(probeJson({ error: { message: "boom probe-key" } }, 500));
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
+
+    it("keeps a key out of the summary even when a fetch rejection mentions it", async () => {
+      probeFetch.mockRejectedValueOnce(new Error("request failed — key probe-key rejected"));
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
   });
 });
