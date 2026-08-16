@@ -4,7 +4,7 @@
 # deliberately does not restate every input, because a copy is only free to
 # drift.
 #
-# A workflow names this directory: `uses: ecoma-io/reeve/duplicate@v0.1`.
+# A workflow names this directory: `uses: ecoma-io/reeve/duplicate@v0.6`.
 name: Reeve - duplicate
 description: Check whether an issue already describes a problem the tracker has open, ranked by shared words and judged by a model against a shortlist it actually saw — never a number a thread merely claimed.
 author: ecoma.io

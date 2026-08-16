@@ -4,7 +4,7 @@ name: Issue triage
 # workflow beside it does. `uses: ./triage` points at the working tree rather
 # than a tag, so a change to the duty is dogfooded on the pull request that
 # makes it; a workflow elsewhere writes the same path against a tag:
-# `uses: ecoma-io/reeve/triage@v0.1`.
+# `uses: ecoma-io/reeve/triage@v0.6`.
 #
 # The taxonomy is not here. It is `.github/reeve.yml`, which is the whole point
 # of a warrant: what may be applied is reviewed as a file with a diff, and this

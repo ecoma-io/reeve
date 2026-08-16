@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/harmonise@v0.1
+      - uses: ecoma-io/reeve/harmonise@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5
@@ -77,6 +77,20 @@ changed, updating only the locale variants that are stale. No source change,
 no PR. A human edit in a target locale since the last sync is reported as a
 conflict, not overwritten. The PR must be marked "ready for review" before it
 can be merged — this is deliberate: a sync should never merge unreviewed.
+
+`edit-file` and `open-pr` are **not** granted at level 0, so this example only
+does what it promises once the warrant names the capability. The minimal
+warrant that makes the workflow above work:
+
+```yaml
+capabilities:
+  harmonise: [edit-file, open-pr]
+```
+
+Without it, the run classifies and reports, writes nothing, and ends green —
+see [the warrant](../../guides/warrant.md). The first time you run a real sync,
+also needs the initial translation to already exist — committing the first
+`README.vi.md` / `README.zh.md` yourself is the load-bearing step.
 
 ## Required permissions
 
@@ -251,6 +265,16 @@ docs/getting-started.zh.md    ← ZH
 README.md                     ← EN
 README.vi.md                  ← VI
 ```
+
+## Bootstrap
+
+A locale variant must **already exist** for a document group to be discovered.
+A repository with only `README.md` and no `README.vi.md` / `README.zh.md`
+reports no document groups and ends green having synced nothing — it will not
+create the first translation for you. Commit the initial
+`README.vi.md` / `README.zh.md` yourself (a human first translation is the
+load-bearing step), and the duty takes over keeping them current once the
+source changes.
 
 The suffix `.<locale-code>.md` before the final `.md` extension marks a
 target locale. Files without a locale suffix are the source. Grouping is by

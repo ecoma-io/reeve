@@ -4,7 +4,7 @@
 # deliberately does not restate every input, because a copy is only free to
 # drift.
 #
-# A workflow names this directory: `uses: ecoma-io/reeve/dependa@v0.1`.
+# A workflow names this directory: `uses: ecoma-io/reeve/dependa@v0.6`.
 name: Reeve - dependa
 description: Keep dependencies up to date — discover, classify, evidence, and propose updates through pull requests governed by your warrant.
 author: ecoma.io

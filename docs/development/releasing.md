@@ -7,7 +7,7 @@ is.
 ## What "publish" means here
 
 There is no package registry in the picture. A consumer writes
-`uses: ecoma-io/reeve/triage@v0.1` and GitHub resolves that straight to a git ref
+`uses: ecoma-io/reeve/triage@v0.1` <!-- historical ref --> and GitHub resolves that straight to a git ref
 in this repository.
 
 So publishing is exactly two things:
@@ -152,7 +152,7 @@ are not separately listed. That trade was made deliberately.
 
 **A release must not be cut before every duty's `dist/` exists in the tree being
 tagged.** A tag whose tree has no bundle for a duty makes
-`uses: ecoma-io/reeve/triage@v0.1.0` resolve to nothing — a broken pin that
+`uses: ecoma-io/reeve/triage@v0.1.0` <!-- historical ref --> resolve to nothing — a broken pin that
 cannot be unpublished, only superseded. This held the first release pull request
 open until both duties had landed; it is a standing check on the release rather
 than a phase that has passed, because it applies again to every duty added.
@@ -176,7 +176,7 @@ both lists is still a step in [the duty checklist](duties.md).
    from commit subjects — a subject nobody could read in a changelog is a subject
    to fix before merging, not after.
 4. If a duty changed, put its evaluation numbers in the release notes
-   ([D11](../doctrine/north-star.md#d11-every-duty-ships-with-an-evaluation)).
+   ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)).
 5. Merge. The rest runs on its own.
 6. Verify: the release exists, `reeve-action.tar.gz` and
    `reeve-action.intoto.jsonl` are attached, and the floating tag moved.

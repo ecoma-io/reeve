@@ -6,8 +6,10 @@ Reeve is dogfooded: its duties run against this repository's own
 issues, pull requests, and dependencies. `triage` and `translate` act on
 real threads; `duplicate` and `respond` run in report-only mode, writing
 verdicts to job summaries and touching nothing; `lifecycle` observes in
-dry-run; `harmonise` synchronises this repository's own README translations;
-and `dependa` maintains this repository's own dependencies. This
+dry-run; and `dependa` maintains this repository's own dependencies.
+`harmonise` is configured to watch `README.md`, whose sync to
+Vietnamese/Chinese is pending the bootstrap of its first translations — see
+[the harmonise reference](../reference/duties/harmonise.md#bootstrap). This
 is not self-modification; it is **proving the execution path**. A duty that
 labels a stranger's issue and a duty that labels its own follow the same code,
 the same warrant, and the same guardrails.

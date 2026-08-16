@@ -69,7 +69,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/respond@v0.1
+      - uses: ecoma-io/reeve/respond@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini

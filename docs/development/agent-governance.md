@@ -7,7 +7,7 @@ today's warrant lifts into it. Prerequisites:
 > [!IMPORTANT]
 > **Draft. Nothing on this page ships today, and the spellings are not
 > frozen.** No code in this repository reads a `.reeve/` directory; the tree
-> lands in [Phase 2 of the 2.x roadmap](roadmap-2x.md#phase-2-the-governance-tree-and-authorityyaml),
+> lands in [Phase 2 of the 2.x roadmap](roadmap-2x.md#phase-2--the-governance-tree-and-authorityyaml),
 > after the kernel exists to read it. What this page fixes now is the
 > **shape** — which file grants, which files merely inform, and what review
 > each requires. Key names and nesting are settled by the pull requests that
@@ -45,7 +45,7 @@ still. The tree exists because 2.x has more kinds of non-granting input than
 
 Version-controlled, reviewed in pull requests, deleted with `rm` — the same
 discipline the warrant already follows, because
-[D6](../doctrine/north-star.md#d6-the-repository-is-the-database) does not
+[D6](../doctrine/north-star.md#d6--the-repository-is-the-database) does not
 gain an exception by the file count growing.
 
 ### `authority.yaml` — the grant
@@ -72,7 +72,7 @@ authority:
 
 `capabilities:` is the allowlist the warrant's `capabilities:` block already
 is: what is absent is not granted, and once the block exists, enumeration is
-total — [D2's rule](../doctrine/north-star.md#d2-authority-is-granted-written-and-bounded),
+total — [D2's rule](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded),
 unchanged.
 
 `forbidden:` is new, and it is not redundancy. An allowlist expresses "not
@@ -107,7 +107,7 @@ sentence shown to a model, and
 the close still dies at the kernel because `authority.yaml` never granted it.
 Persuasive prose in the tree has exactly the power persuasive prose in a
 hostile thread has — none, where authority is concerned
-([D8](../doctrine/north-star.md#d8-every-thread-is-hostile)).
+([D8](../doctrine/north-star.md#d8--every-thread-is-hostile)).
 
 ### `policies/` — the constitution, sharded
 
@@ -182,7 +182,7 @@ rule held in their head, which is precisely what
 [the ladder's one-file discipline](../doctrine/north-star.md#3-the-ladder)
 exists to prevent. Two files that can disagree about authority are a
 configuration that said something and got it wrong, and that is the case
-[D5](../doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
+[D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible)
 already rules on: loud, immediate, named.
 
 ---

@@ -45,7 +45,7 @@ number that quietly stops moving once a page boundary is behind it.
 
 ## Why a sweep exists at all: weather
 
-[D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
 is the doctrine; this is what it looks like from the outside. A 429, a 5xx or
 a timeout is **weather** — a provider could not serve this particular request
 right now, and that says nothing about whether Reeve is allowed near your
@@ -104,7 +104,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: ecoma-io/reeve/triage@v0.1
+      # checkout is required — duties read .github/reeve.yml from the local checkout
+      - uses: actions/checkout@v4
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           sweep: true
           limit: 200

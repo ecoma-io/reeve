@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/triage@v0.1
+      - uses: ecoma-io/reeve/triage@v0.6
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
@@ -60,15 +60,15 @@ already.
 
 ### Which duty should I start with?
 
-| Duty         | Cost        | Best for                                                                                                           |
-| ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| **`triage`** | Low         | First duty. Labels issues from your existing taxonomy — no warrant file needed.                                    |
-| `translate`  | Low         | Multilingual repositories. Appends translated blocks to issue bodies.                                              |
-| `duplicate`  | Low         | High-volume issue trackers. Reports likely duplicates without acting by default.                                   |
-| `respond`    | Medium      | Drafts replies to issues from guidance files you write. Reports by default.                                        |
-| `lifecycle`  | **Zero**    | Stale-issue management. Calls no model — driven entirely by your warrant policy.                                   |
-| `harmonise`  | Medium      | Keeps translated files (README, docs) in sync with a source language.                                              |
-| `dependa`    | Medium–High | Dependency maintenance. Discovers updates, classifies risk, opens PRs. Can run without a model for discovery only. |
+| Duty         | Cost        | Best for                                                                                                                                                                               |
+| ------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`triage`** | Low         | First duty. Labels issues from your existing taxonomy — no warrant file needed.                                                                                                        |
+| `translate`  | Low         | Multilingual repositories. Appends translated blocks to issue bodies.                                                                                                                  |
+| `duplicate`  | Low         | High-volume issue trackers. Reports likely duplicates without acting by default (report-only at level 0).                                                                              |
+| `respond`    | Medium      | Drafts replies to issues from guidance files you write. Reports by default (report-only at level 0).                                                                                   |
+| `lifecycle`  | **Zero**    | Stale-issue management. Calls no model — driven entirely by your warrant policy.                                                                                                       |
+| `harmonise`  | Medium      | Keeps translated files (README, docs) in sync with a source language. Report-only at level 0 — needs `capabilities:` in a warrant to act.                                              |
+| `dependa`    | Medium–High | Dependency maintenance. Discovers updates, classifies risk, opens PRs. Report-only at level 0 — needs `capabilities:` in a warrant to act. Can run without a model for discovery only. |
 
 **Start with `triage`.** It is the narrowest authority, the cheapest to run,
 and the one that needs nothing beyond a model key and the labels your
@@ -184,7 +184,7 @@ asked over it.
 **An auth failure behaves differently once there is more than one endpoint.**
 A single-endpoint run still fails red immediately on the first 401 or 403,
 exactly as
-[D12](../doctrine/north-star.md#d12-capacity-is-weather-authority-is-configuration)
+[D12](../doctrine/north-star.md#d12--capacity-is-weather-authority-is-configuration)
 has always described. Once `endpoints` names more than one, a 401 or 403 is
 recorded instead of thrown, and the run keeps going — one endpoint's wrong
 key says nothing about another endpoint's — failing red only at the end, and
@@ -275,7 +275,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ecoma-io/reeve/translate@v0.1
+      - uses: ecoma-io/reeve/translate@v0.6
         with:
           number: ${{ inputs.number }}
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -328,18 +328,20 @@ behaviours that shaped the design are in
 ## 4. Pin a version
 
 ```yaml
-- uses: ecoma-io/reeve/triage@v0.1 # floating minor — fixes only
-- uses: ecoma-io/reeve/triage@v0.1.3 # an exact release
-- uses: ecoma-io/reeve/triage@9c0f… # a commit SHA — cannot move at all
+- uses: ecoma-io/reeve/triage@v0.6 # floating minor — the current one
+- uses: ecoma-io/reeve/triage@v0.6.0 # an exact release
+- uses: ecoma-io/reeve/triage@9c0f… # a commit SHA — cannot move at all <!-- historical ref -->
 ```
 
-**`@v0.1` is the widest ref worth pinning today, and there is deliberately no
+Every release publishes both `v0.$MINOR` and `v0.$MINOR.$PATCH`, and the
+`floating-tag` job moves `v0.$MINOR` forward on every release — so
+**`@v0.6` is the widest ref worth pinning today, and there is deliberately no
 `v0`.** Reeve is on a `0.x` line, where a breaking change lands on the minor
 digit ([why](../development/releasing.md#what-0x-and-10-mean-here)) — so a `v0`
-tag would hand you one silently, and the repository does not publish one. `v0.1`
-can only ever move forward by a patch. When the roadmap is finished and `1.0`
-arrives, `v1` becomes the floating ref and behaves the way a major line is
-supposed to.
+tag would hand you one silently, and the repository does not publish one. A
+`v0.$MINOR` tag only ever moves forward by a patch within its own minor. When the
+roadmap is finished and `1.0` arrives, `v1` becomes the floating ref and behaves
+the way a major line is supposed to.
 
 Pin a SHA when you want something that cannot move at all. Every form works: the
 built bundle is committed to this repository, so a duty resolves without a build

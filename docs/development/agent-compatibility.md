@@ -23,7 +23,7 @@ in review.
 ## What "superset" binds, concretely
 
 **Every 1.x workflow keeps working unmodified.** A workflow that says
-`uses: ecoma-io/reeve/triage@v2` with the inputs it uses today gets the
+`uses: ecoma-io/reeve/triage@v2` <!-- roadmap ref --> with the inputs it uses today gets the
 behaviour it gets today. No input is removed or renamed, no default moves,
 and no summary line a maintainer might be parsing changes meaning — the
 same tests [the breaking-change definition](releasing.md#what-a-breaking-change-is)
@@ -59,7 +59,7 @@ no egress past `base-url` and the GitHub API — binds an agent-mode run
 exactly as it binds an explicit one, and breaking one remains a breaking
 change regardless of what any `action.yml` says. `code.write` sits below
 even that, on
-[the permanent floor](../doctrine/north-star.md#beyond-10-the-2x-line-direction-nothing-ships):
+[the permanent floor](../doctrine/north-star.md#beyond-10--the-2x-line--direction-nothing-ships):
 not a compatibility promise that a major could renegotiate, a line no
 version may cross.
 
@@ -68,8 +68,8 @@ version may cross.
 `@v2` still resolves per duty, from the same subdirectories:
 
 ```yaml
-- uses: ecoma-io/reeve/triage@v2
-- uses: ecoma-io/reeve/translate@v2
+- uses: ecoma-io/reeve/triage@v2 # roadmap ref
+- uses: ecoma-io/reeve/translate@v2 # roadmap ref
 ```
 
 One repository, one core, one version line — the

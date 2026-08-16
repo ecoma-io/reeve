@@ -261,6 +261,10 @@ export async function run(): Promise<void> {
           core.warning(
             `dependa: ${dep.ecosystem} registry temporarily unavailable for \`${dep.name}\`: ${result.reason}`,
           );
+        } else if (result.status === "auth-refused") {
+          // The run's own token is the problem, not weather — fail red the
+          // same way doctor does, with a hint that points at token scope.
+          throw new Error(`dependa: ${result.reason}. Check the token's scope.`);
         } else {
           core.warning(
             `dependa: malformed metadata for \`${dep.name}\` on ${dep.ecosystem}: ${result.reason}`,
@@ -283,6 +287,12 @@ export async function run(): Promise<void> {
       try {
         advisories = await queryAdvisories(base.token, dep.ecosystem, dep.name);
       } catch (error) {
+        // The run's own token being refused is configuration, not weather —
+        // fail red exactly as the datasource `auth-refused` path does. Any
+        // other failure degrades to a warning per D12.
+        if (error instanceof Error && error.name === "AuthRefused") {
+          throw error;
+        }
         core.warning(
           `dependa: could not query advisories for \`${dep.name}\` — ${error instanceof Error ? error.message : String(error)}`,
         );

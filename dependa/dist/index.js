@@ -33592,7 +33592,13 @@ async function resolve3(token, packageName) {
   if (tagsResponse.status === 404) {
     return { status: "not-found" };
   }
-  if (tagsResponse.status === 403 || tagsResponse.status === 429 || tagsResponse.status >= 500) {
+  if (tagsResponse.status === 401 || tagsResponse.status === 403) {
+    return {
+      status: "auth-refused",
+      reason: `GitHub API returned ${String(tagsResponse.status)} for tags \u2014 the token may lack read access to ${packageName}`
+    };
+  }
+  if (tagsResponse.status === 429 || tagsResponse.status >= 500) {
     return {
       status: "temporarily-unavailable",
       reason: `GitHub API returned ${String(tagsResponse.status)} for tags`
@@ -34053,6 +34059,13 @@ async function queryAdvisories(token, ecosystem, packageName) {
       });
     } catch {
       return parseAdvisories(allAdvisories);
+    }
+    if (response.status === 401 || response.status === 403) {
+      const error2 = new Error(
+        `dependa: security advisory API refused this run's token (HTTP ${String(response.status)})`
+      );
+      error2.name = "AuthRefused";
+      throw error2;
     }
     if (!response.ok) {
       return parseAdvisories(allAdvisories);
@@ -36561,7 +36574,7 @@ function renderSummary(summary2) {
     return `| ${g.groupId}${securityMarker} | ${g.ecosystem ?? "mixed"} | ${String(g.proposalCount)} | ${g.outcome} | ${prCell} |`;
   });
   const header = "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|";
-  let body = `## dependa
+  let body = `## Reeve \xB7 dependa
 
 ${header}
 ${rows.join("\n")}`;
@@ -36857,6 +36870,8 @@ async function run() {
           warning(
             `dependa: ${dep.ecosystem} registry temporarily unavailable for \`${dep.name}\`: ${result.reason}`
           );
+        } else if (result.status === "auth-refused") {
+          throw new Error(`dependa: ${result.reason}. Check the token's scope.`);
         } else {
           warning(
             `dependa: malformed metadata for \`${dep.name}\` on ${dep.ecosystem}: ${result.reason}`
@@ -36870,6 +36885,9 @@ async function run() {
       try {
         advisories = await queryAdvisories(base.token, dep.ecosystem, dep.name);
       } catch (error2) {
+        if (error2 instanceof Error && error2.name === "AuthRefused") {
+          throw error2;
+        }
         warning(
           `dependa: could not query advisories for \`${dep.name}\` \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`
         );

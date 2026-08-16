@@ -24,7 +24,7 @@ inputs:
       cannot run any duty — but it is what turns a puzzling red job into a line
       you can paste.
 
-      A workflow uses a duty directly: `uses: ecoma-io/reeve/triage@v0.1`.
+      A workflow uses a duty directly: `uses: ecoma-io/reeve/triage@v0.6`.
       Under `doctor: true`, naming one here scopes the report to it instead —
       see `doctor` below.
     required: false

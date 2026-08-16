@@ -172,7 +172,8 @@ export type ResolutionResult =
   | { readonly status: "available"; readonly releases: readonly Release[] }
   | { readonly status: "not-found" }
   | { readonly status: "temporarily-unavailable"; readonly reason: string }
-  | { readonly status: "malformed-metadata"; readonly reason: string };
+  | { readonly status: "malformed-metadata"; readonly reason: string }
+  | { readonly status: "auth-refused"; readonly reason: string };
 
 /**
  * One dependency update that dependa proposes.
