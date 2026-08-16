@@ -96,9 +96,10 @@ take effect.
 
 **Warrant capability:** `label` is granted by default, at level 0, with no
 warrant file at all. Wider effects — `comment`, `close`, `assign`, `record`,
-`open-pr` — need `.github/reeve.yml` to name them under `capabilities.triage`, and
-`apply` on the workflow to name them too; the narrower of the two always
-wins. See [the capabilities table](../../guides/warrant.md#capabilities).
+`open-pr` — need `.github/reeve.yml` to name them under `duties.triage`. The
+warrant's `duties:` block is the whole authority: the workflow says when a
+run happens and how the runtime operates, but nothing in it can widen what
+that block grants. See [the duties section](../../guides/warrant.md#duties).
 
 ## Required inputs
 
@@ -121,16 +122,14 @@ narrower one would only be free to drift from it.
 | `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                         |
 | `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                                                                                   |
 | `screen-models`   | no       | _(empty)_                   | A cheaper roster asked which language a thread is in and whether it is spam or off-topic, before `models` is spent.                                                                                                                                     |
-| `languages`       | no       | `en, vi, zh`                | Languages your contributors write in. Ignored once the warrant's own `languages:` key is written.                                                                                                                                                       |
 | `warrant`         | no       | `.github/reeve.yml`         | Where the taxonomy and permissions live. Missing at this default path is not a failure — see [The warrant](../../guides/warrant.md).                                                                                                                    |
 | `labels`          | no       | _(empty)_                   | Which of the warrant's taxonomy this run may propose, or empty for all of it. A name not in the taxonomy fails red — see below.                                                                                                                         |
-| `apply`           | no       | `label`                     | What this run may do, comma separated: `label`, `comment`, `close`, `assign`, `record`, `propose`, or `none`. Narrowed by the warrant, never widened past it.                                                                                           |
+| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                             |
 | `confidence`      | no       | `0.75`                      | How sure the verdict has to be before anything is applied, between 0 and 1.                                                                                                                                                                             |
 | `corrections-dir` | no       | `.reeve/corrections`        | Directory of `.ndjson` files recording maintainer corrections, shown to the model as examples.                                                                                                                                                          |
 | `min-body-chars`  | no       | `40`                        | How much authored text is enough to be worth a model, in characters. `0` turns the length screen off.                                                                                                                                                   |
 | `max-body-chars`  | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                                                                                                |
 | `about`           | no       | _(empty)_                   | What this repository is about, in one sentence. Used only by the spam screen. Ignored once the warrant's own `about:` key is written.                                                                                                                   |
-| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                             |
 | `sweep`           | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                                                                              |
 | `since`           | no       | _(empty)_                   | The oldest issue a sweep will consider, bounded by when it was opened.                                                                                                                                                                                  |
 | `limit`           | no       | `50`                        | The most issues one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                                                                                                          |
@@ -158,17 +157,11 @@ simply more expensive. [Cost](../../guides/cost.md) has the arithmetic.
 because the labels are yours. [Measure it](../../development/evaluation.md)
 before you move it.
 
-**`record` needs naming in both halves — the file and the workflow.** The
-narrower of `reeve.yml`'s `capabilities:` block and the workflow's `apply`
-input wins, always, and that rule applies to `record` exactly as it applies
-to `label` or `comment`. Granting `record` in the file alone is not enough:
-`apply` defaults to `label`, and a run triggered on an eligible event with
-`record` left out of `apply` re-triages the thread instead of recording it —
-silently, because nothing about that is a misconfiguration the warrant
-reader could catch. A trigger this duty would otherwise have recorded, doing
-an ordinary verdict instead because `apply` did not name `record`, is
-logged as a notice for exactly this reason. The workflow needs both the
-trigger and the grant:
+**`record` is granted by the warrant alone.** The `duties:` block in
+`.github/reeve.yml` is the whole authority — there is no second knob on the
+workflow to name `record` in. A run triggered on an eligible event records
+because the file grants it, and re-triages instead when the file does not.
+The workflow needs only the trigger; the grant lives in the file:
 
 ```yaml
 on:
@@ -189,13 +182,12 @@ jobs:
           number: ${{ github.event.issue.number }}
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          apply: label, close, record
 ```
 
-and the file's own half, alongside whatever else `triage` is granted:
+alongside whatever else `triage` is granted in `.github/reeve.yml`:
 
 ```yaml
-capabilities:
+duties:
   triage: [label, close, record]
 ```
 
@@ -245,9 +237,8 @@ this run's own `confidence` input for that label alone — see
 [the warrant format reference](../warrant-format.md#label-fields).
 
 **`propose` writes the taxonomy itself, not a verdict, and only ever under
-`sweep`.** Granted like `record` — `capabilities: { triage: [propose] }` in
-the file **and** `apply: propose` on the workflow, the narrower always
-winning — it walks a monorepo's own package layout (read from the default
+`sweep`.** Granted by `duties: { triage: [propose] }` in the warrant alone,
+it walks a monorepo's own package layout (read from the default
 branch's own tree, no checkout) and looks for two things: a package no
 label's `paths:` already covers, mentioned by path in enough distinct open
 issues within a rolling window to be real signal rather than one report; and,
@@ -269,7 +260,7 @@ proposing), and a package whose computed label name would exceed GitHub's
 own PR body and marker grammar.
 
 ```yaml
-capabilities:
+duties:
   triage: [label, propose]
 
 propose:
@@ -289,7 +280,7 @@ maintaining a taxonomy file per area.
 
 ```yaml
 # .github/reeve.yml — one shared taxonomy, both areas' labels in it
-capabilities:
+duties:
   triage: [label]
 
 labels:
@@ -327,7 +318,7 @@ Every output `triage/action.yml` declares.
 | `proposed`     | JSON array of every label the verdict named, including the ones that were refused.                                                                                                                                                      |
 | `confidence`   | How sure the verdict was, to two decimal places. `0.00` when there was no verdict.                                                                                                                                                      |
 | `language`     | The detected language of the thread, or empty — empty means none of the configured languages wrote it.                                                                                                                                  |
-| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not `apply` names `close` — and empty on a run the hard gate refused to close, even though a verdict proposed it.                                       |
+| `duplicate-of` | The issue number the verdict thinks this repeats, or empty. Reported whether or not the warrant grants `close` — and empty on a run the hard gate refused to close, even though a verdict proposed it.                                  |
 | `screened-out` | Why the run stopped before reaching the expensive model — `empty`, `template`, `too-short`, `spam` or `off-topic` — or empty when it did not.                                                                                           |
 | `applied`      | What actually changed, as JSON: `labels`, `commented`, `assigned`, `closed`. `{}` under `dry-run`.                                                                                                                                      |
 | `starved`      | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                    |

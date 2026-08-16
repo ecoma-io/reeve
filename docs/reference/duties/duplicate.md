@@ -71,33 +71,28 @@ the job summary to see what it would have proposed before granting anything.
 **Token:** `issues: write`. `GITHUB_TOKEN` is enough — it reads the thread,
 lists the corpus, and posts the one comment this duty may write.
 
-**Warrant capability:** unlike every other duty in Reeve, `duplicate` has
+**Warrant grant:** unlike every other duty in Reeve, `duplicate` has
 **no** cheapest-reversible-action default. `triage` labels for free;
 `translate` writes a block for free. A comment naming the wrong thread as a
 duplicate is a claim posted in public about somebody else's report, not
 something undone with one click — so there is no default worth reaching
-for. Both halves have to be set explicitly before this duty ever writes to a
-thread:
+for. The grant has to be written explicitly before this duty ever writes to
+a thread:
 
 ```yaml
 # .github/reeve.yml
-capabilities:
+duties:
   duplicate: [comment]
 ```
 
-```yaml
-# the workflow
-with:
-  apply: comment
-```
-
-Either alone still leaves it reporting `duplicate-of` and `score` and
-touching nothing. `close` exists as a capability name, mirrored from
+Without it, the duty still reports `duplicate-of` and `score` and touches
+nothing. `close` exists as a capability name, mirrored from
 `triage`, for a future where this duty might close a confirmed duplicate
 itself — off by default, undocumented as a setting to turn on, and this duty
 never checks for it today. `duplicate-of` is what a workflow reads to close
-a thread itself, under its own authority, right now. See
-[the capabilities table](../../guides/warrant.md#capabilities).
+a thread itself, under its own authority, right now. The `duties:` block is
+the whole authority — nothing on the workflow can widen it. See
+[the duties table](../../guides/warrant.md#duties).
 
 ## Required inputs
 
@@ -117,9 +112,7 @@ Every input `duplicate/action.yml` declares.
 | `base-url`         | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                         |
 | `api-key`          | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                            |
 | `models`           | **yes**  | —                           | Model ids, comma or newline separated, in preference order. Used for detection, the pivot bridge, and the judge.                                                           |
-| `languages`        | no       | `en, vi, zh`                | Languages your contributors write in. The first named is also the pivot language for bridging a ranking across a language gap.                                             |
-| `warrant`          | no       | `.github/reeve.yml`         | Grants nothing to this duty until `duplicate: [comment]` is written into it. Missing at this default path is not a failure.                                                |
-| `apply`            | no       | `none`                      | `comment`, or `none`. Narrowed by, never widening, the warrant — and neither half defaults to `comment` on its own.                                                        |
+| `warrant`          | no       | `.github/reeve.yml`         | Where the permissions live. Grants nothing to this duty until `duplicate: [comment]` is written into it. Missing at this default path is not a failure.                    |
 | `candidates`       | no       | `5`                         | How many of the closest-ranked open threads reach the judge.                                                                                                               |
 | `corpus-limit`     | no       | `none`                      | How many open threads the ranking runs against at all. `none` is every open issue.                                                                                         |
 | `corpus-since`     | no       | _(empty)_                   | The oldest thread the corpus considers, bounded by when it was opened. A cost control, not a correctness setting.                                                          |
@@ -226,7 +219,7 @@ could never match. See [Cost](../../guides/cost.md) for the full arithmetic.
   unrelated thread the model happened to name in passing.
 - **What it will never do:** close, reopen, label or assign anything; edit a
   title or a body; post more than one comment per thread; post at all
-  without both the warrant and `apply` naming `comment`. See
+  without the warrant granting `comment`. See
   [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 
 ## Related concepts

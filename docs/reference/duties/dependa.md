@@ -42,7 +42,7 @@ Any repository whose dependencies go stale because no one is updating them by
 hand. `edit-file` and `open-pr` are **not** granted at
 [level 0 of the ladder](../../doctrine/north-star.md#3-the-ladder) — committing
 files and opening pull requests is too much authority for zero-config, so an
-explicit `capabilities:` block in the warrant is required before this duty can
+explicit `duties:` block in the warrant is required before this duty can
 act.
 
 This is the duty to reach for when the cost of a stale dependency is a known
@@ -90,7 +90,6 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          apply: edit-file, open-pr
 ```
 
 That discovers all supported manifest files, resolves current versions,
@@ -106,7 +105,7 @@ patch updates are ready for review.
 `pull-requests: write` to open or update pull requests. `GITHUB_TOKEN` is
 enough for both.
 
-**Warrant capability:** `edit-file` and `open-pr` are **not** granted by
+**Warrant grant:** `edit-file` and `open-pr` are **not** granted by
 default. At level 0, with no warrant file, this duty cannot act — it discovers
 and classifies without touching the repository. A maintainer who wants
 `dependa` to propose update PRs must write:
@@ -114,19 +113,19 @@ and classifies without touching the repository. A maintainer who wants
 ```yaml
 # .github/reeve.yml
 version: 1
-capabilities:
+duties:
   dependa: [edit-file, open-pr]
 ```
 
-Once a `capabilities:` block exists, the enumeration becomes total: leaving
-`dependa` out of it grants this duty nothing, and the run says so rather than
-guessing. See [the capabilities table](../../guides/warrant.md#capabilities).
+The `duties:` block in the warrant is the whole authority. Once it exists,
+the enumeration becomes total: leaving `dependa` out of it grants this duty
+nothing, and the run says so rather than guessing. Nothing on the workflow
+can widen the block. See [the duties table](../../guides/warrant.md#duties).
 
-**`apply`** is the workflow's own half of the same gate — `edit-file, open-pr`,
-or `none` for a run that discovers, classifies, and groups but never commits
-or opens a PR. The narrower of `apply` and the warrant always wins. `apply:
-none` is a good way to watch what a run would have proposed before it is
-allowed to propose anything.
+A run that should discover, classify, and group but never commit or open a PR
+is a [`dry-run`](../../guides/dry-run.md) — the pipeline runs, every output is
+written, nothing changes. Watch what a run would have proposed before you
+grant it `edit-file` and `open-pr`.
 
 ## Required inputs
 
@@ -148,8 +147,7 @@ Every input `dependa/action.yml` declares.
 | `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint. Used only for optional risk interpretation — the core pipeline is deterministic.                                          |
 | `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                              |
 | `models`          | no       | _(empty)_                   | Model ids for risk interpretation, comma or newline separated, in preference order. `id = Name` gives a model a display name. Empty + `drafts: 0` = fully deterministic run. |
-| `warrant`         | no       | `.github/reeve.yml`         | Where `edit-file` and `open-pr` are granted. Missing at this default path is not a failure.                                                                                  |
-| `apply`           | no       | `none`                      | What this run may do: `edit-file, open-pr`, or `none` to discover and classify without touching the repository. The narrower of this and the warrant wins.                   |
+| `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `edit-file` and `open-pr` are granted here, under `duties:`, and are not granted by default. Missing at this default path is not a failure.      |
 | `ecosystems`      | no       | _(empty)_                   | Which ecosystems to scan: `npm`, `github-actions`, `cargo`, `go`, `docker` — comma or newline separated. Empty = all known. Narrows the warrant's own list; cannot widen it. |
 | `drafts`          | no       | `0`                         | Risk interpretations per proposal, scored deterministically. `0` = no model call at all; deterministic facts alone. The quality lever that costs calls instead of money.     |
 | `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                  |
@@ -352,8 +350,8 @@ where nothing was security-flagged, never an unset output.
 | A datasource is temporarily unavailable | That ecosystem skipped, others proceed, warning in summary, **green**           |
 | A package is not found in the registry  | Reported as `not-found`, no proposal, **green**                                 |
 | Registry metadata is malformed          | Reported as `malformed-metadata`, no proposal, **green**                        |
-| No warrant capabilities for `dependa`   | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
-| `apply: none`                           | Pipeline runs, nothing committed or PR'd, **green**                             |
+| Warrant grants `dependa` nothing        | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
+| `dry-run: true`                         | Pipeline runs, nothing committed or PR'd, **green**                             |
 | A proposal is refused by policy         | Refusal recorded in output and summary, **green**                               |
 | The configuration is broken             | **Red**, naming the input                                                       |
 
@@ -362,9 +360,9 @@ where nothing was security-flagged, never an unset output.
 packages it could resolve. A partial result is better than a red run over one
 unreachable registry.
 
-**Running with no `capabilities:` block at all is noted, once, rather than
+**Running with no `duties:` block at all is noted, once, rather than
 left silent.** An absent warrant file at the default path is level 0, and
-`dependa` at level 0 has no granted capabilities — the run says so and stops
+`dependa` at level 0 has no retained grant — the run says so and stops
 before spending a single model request.
 
 ## Dry-run behavior
@@ -375,8 +373,9 @@ opened are all printed to the log instead.
 
 **Dry-run still spends datasource queries.** Resolution runs normally — only
 the write (file commits and PR creation) is withheld. A dry-run on a large
-monorepo costs the same in registry calls as a real run. Use `apply: none`
-to prevent model calls for risk interpretation.
+monorepo costs the same in registry calls as a real run. Leave `dependa` out
+of the warrant's `duties:` block to prevent the model calls for risk
+interpretation.
 
 See [Rehearsing a run](../../guides/dry-run.md) for the pattern every duty
 in Reeve shares.
