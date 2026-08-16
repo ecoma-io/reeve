@@ -1,9 +1,10 @@
 # Dependa vs Renovate — shadow/dry-run comparison.
 #
-# This workflow does NOT create real PRs. It runs dependa in apply:none mode
-# (observations only), extracts what Renovate would find from the repository's
-# configuration and manifests, compares the two, and uploads the conformance
-# report as a workflow artifact.
+# This workflow does NOT create real PRs. The warrant deliberately omits
+# `dependa` from its `duties:` block, so the duty runs in shadow mode —
+# observations only. This workflow extracts what Renovate would find from the
+# repository's configuration and manifests, compares the two, and uploads the
+# conformance report as a workflow artifact.
 #
 # Renovate remains the production authority. Dependa runs in shadow mode.
 # No shared mutation path exists between the two systems.
@@ -49,14 +50,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Run dependa in apply:none mode — observations only, no mutations.
-      # The warrant deliberately omits dependa from its capabilities block,
-      # so even if apply were set to edit-file, open-pr, dependa would refuse.
+      # Run dependa in shadow mode — observations only, no mutations. The
+      # warrant deliberately omits dependa from its `duties:` block, so no
+      # grant exists for this duty to act on.
       - uses: ./dependa
         id: dependa
         with:
           ecosystems: "npm, github-actions"
-          apply: none
           drafts: "0"
 
       # Run the conformance comparison CLI.

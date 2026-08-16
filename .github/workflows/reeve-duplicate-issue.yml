@@ -1,10 +1,11 @@
 name: Issue duplicates
 
 # Report-only dogfood: the warrant grants `duplicate: [comment]`, and this
-# workflow deliberately leaves `apply` at its `none` default — the file's half
-# says what the duty MAY do, this half says it may not do it yet. The job
-# summary carries the verdict and its rationale, which is the read a maintainer
-# does for a few weeks before widening `apply`.
+# workflow runs `dry-run: true`, so the duty drafts and writes its verdict to
+# the job summary without ever posting to a thread. The warrant says what the
+# duty MAY do; this half says it may not do it yet, by withholding the act.
+# The job summary carries the verdict and its rationale, which is the read a
+# maintainer does for a few weeks before removing the dry-run.
 #
 # `uses: ./duplicate` points at the working tree, as the triage workflow beside
 # it does, so a change to the duty is dogfooded on the pull request that makes
@@ -58,5 +59,6 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          # `apply` stays unset: report-only until this backlog says what the
-          # false-positive rate actually is.
+          # Report-only until this backlog says what the false-positive rate
+          # actually is.
+          dry-run: true
