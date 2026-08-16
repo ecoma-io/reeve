@@ -48,19 +48,14 @@ import {
   scriptRespond,
 } from "./drivers/respond.ts";
 import type { RespondScenario } from "./drivers/respond.ts";
+// The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
+// suite pins every outcome→exit-code pairing without spawning a run.
+import { exitCodeFor } from "./exit-code.ts";
+import type { Line } from "./exit-code.ts";
 
 const exec = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
-
-/** The three outcomes a run can have, kept apart so none collapses into another. */
-type Outcome = "finding" | "failed" | "skipped";
-
-interface Line {
-  readonly fixture: string;
-  readonly outcome: Outcome;
-  readonly detail: string;
-}
 
 /** Every duty the runner knows how to drive. */
 const DUTIES = ["harmonise", "triage", "respond"] as const;
@@ -567,10 +562,12 @@ async function main(): Promise<void> {
   }
 
   banner(all);
-  const failed = all.filter((l) => l.outcome === "failed").length;
-  // Fail-closed: any failed fixture fails the run, so `no findings` is never
-  // confused with `review passed`.
-  process.exitCode = failed === 0 ? 0 : 1;
+  // Fail-closed: 0 only when every fixture was a finding and none failed or
+  // skipped. A skipped fixture means the run deliberately did nothing — a
+  // duty the warrant no longer grants reads as `skipped` everywhere, and that
+  // must not look like a passing run at the CI gate. Pinned by the contract
+  // suite in `exit-code.ts`.
+  process.exitCode = exitCodeFor(all);
 }
 
 main().catch((error: unknown) => {
