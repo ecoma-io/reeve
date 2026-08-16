@@ -35,14 +35,21 @@ import { summarize } from "./summary.js";
  * the runner's `INPUT_*` mechanism whether or not the manifest declared it,
  * so a consumer who configures `base-url`/`api-key`/`models` alongside
  * `doctor: true` gets the probe for free, and one who does not still gets a
- * clean, provider-free report. `base-url` unset with `models` unset means no
- * provider exists to probe; `models` unset with a `base-url` set is a
- * half-configured provider and is reported by `providerProbe` as "no model
- * was configured to probe".
+ * clean, provider-free report. A probe needs both an endpoint and at least
+ * one model; either missing means there is nothing to probe, and this
+ * returns `undefined` — the report then never touches a provider.
  */
-function providerConfig(): ProviderProbe | undefined {
-  const baseUrl = core.getInput("base-url");
+export function providerConfig(): ProviderProbe | undefined {
+  // Masked before anything else can run, the same standard every duty's own
+  // inputs reader keeps: a provider's `reason` quotes the response body, and
+  // a gateway that echoes a request it just refused would otherwise put the
+  // key in a public workflow log. The `api-keys` lines' values are masked
+  // inside `parseApiKeys`; this is the default endpoint's key, which nothing
+  // else in this path would ever mask.
   const apiKey = core.getInput("api-key");
+  if (apiKey.length > 0) core.setSecret(apiKey);
+
+  const baseUrl = core.getInput("base-url");
   const roster = parseModels(core.getInput("models"));
 
   if (baseUrl.length === 0 || roster.models.length === 0) {

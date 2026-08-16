@@ -402,11 +402,17 @@ async function providerProbe(probe: ProviderProbe): Promise<Finding> {
     // not that run, so the throw is caught here and reported as weather,
     // exactly as the `kind: "auth"` failure below is.
     const authFailure = error instanceof AuthenticationFailure ? error.failure : undefined;
+    // The reason is always one of a fixed set — never a provider's own words.
+    // A gateway can echo the request it refused (the key included) into its
+    // error body, and a fetch failure can embed the endpoint URL, so a probe
+    // that rendered either verbatim into the job summary would defeat the
+    // masking the entry point does. The class of answer is enough: the probe
+    // exists to say whether the endpoint answered, not to quote what it said.
     const reason =
       authFailure !== undefined
         ? "the configured endpoint refused this run's key (HTTP 401 or 403)"
         : error instanceof Error
-          ? `the probe itself failed (${excerpt(error.message)})`
+          ? "the probe itself failed"
           : "the probe itself failed";
     return {
       severity: "green",
@@ -440,15 +446,19 @@ async function providerProbe(probe: ProviderProbe): Promise<Finding> {
   const auth = failures.find((failure) => failure.kind === "auth");
   const capacity = failures.find((failure) => failure.kind === "capacity");
   const protocol = failures.find((failure) => failure.kind === "protocol");
+  // The same fixed-set discipline as the thrown-auth branch above: none of
+  // these carries a provider's own words, because a provider-sourced reason
+  // can echo the request (key included) back into the summary and undo the
+  // entry point's masking. The class of failure is what matters.
   const reason =
     auth !== undefined
       ? "the configured endpoint refused this run's key (HTTP 401 or 403)"
       : capacity !== undefined
         ? capacity.transport === true
           ? "the endpoint could not be reached"
-          : `the endpoint answered with a rate limit or server error (${excerpt(capacity.reason)})`
+          : "the endpoint answered with a rate limit or server error"
         : protocol !== undefined
-          ? `the endpoint answered outside the chat-completions protocol (${excerpt(protocol.reason)})`
+          ? "the endpoint answered outside the chat-completions protocol"
           : "the probe did not reach any provider";
   return {
     severity: "green",
@@ -457,12 +467,6 @@ async function providerProbe(probe: ProviderProbe): Promise<Finding> {
       "This is weather, not a configuration finding: the probe exists to say whether the " +
       "endpoint answers, and it says nothing about what any duty may do.",
   };
-}
-
-/** A provider reason, shortened for a one-line finding. */
-function excerpt(reason: string): string {
-  const flat = reason.replace(/\s+/g, " ").trim();
-  return flat.length <= 80 ? flat : `${flat.slice(0, 80)}…`;
 }
 
 /**
