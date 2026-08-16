@@ -37226,7 +37226,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
   }
   const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
   const permitted = grantedCapabilities;
-  const recording = recordGrantedByRun(permitted);
+  const recording = recordGrantedByRun(permitted) && settings.sweepState !== "open";
   acc.recording = recording;
   const stateBranch = settings.stateBranch !== "" ? settings.stateBranch : void 0;
   let canRecordToBranch = false;
@@ -37307,12 +37307,8 @@ async function runSweep(acc, api, authority2, settings, stages, weather) {
 }
 var EVIDENCE_LISTING_MAX_PAGES = 10;
 async function runProposeSweep(api, authority2, settings) {
-  const grantedCapabilities = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
-  if (!grantedCapabilities.includes("propose")) return null;
-  const permitted = grantedCapabilities;
-  if (!permitted.includes("propose")) {
-    return null;
-  }
+  const permitted = authority2.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  if (!permitted.includes("propose")) return null;
   let atlas;
   let openIssues;
   try {

@@ -257,12 +257,14 @@ function newAccumulator(): SweepAccumulator {
  * **`record` composes with `sweep` by replacing the loop's whole body, not by
  * running alongside it.** A single-thread run tells the two apart by the
  * triggering event — a label change is a correction, anything else is a
- * verdict — but a sweep has no such event per thread, only a warrant and an
- * `permitted` that either grants `record` or does not. So the same test single-thread
- * mode uses at its own branch point (`recordGrantedByRun`) is made once here,
- * for the whole run: granted, every candidate is recorded as bulk-migrated
- * history; not granted, every candidate is triaged, exactly as before this
- * capability existed.
+ * verdict — but a sweep has no such event per thread, only a warrant and a
+ * `sweep-state`. So the same test single-thread mode uses at its own branch
+ * point (`recordGrantedByRun`) is made once here, for the whole run — and
+ * only when the sweep was deliberately scoped to a closed/all listing: bulk
+ * migration is a hand-run one-off (`sweep-state: all`), never what the
+ * scheduled `sweep-state: open` sweep does. Scoped that way, every candidate
+ * is recorded as bulk-migrated history; otherwise every candidate is triaged,
+ * exactly as before this capability existed.
  */
 async function runSweep(
   acc: SweepAccumulator,
@@ -279,7 +281,14 @@ async function runSweep(
 
   const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
   const permitted = grantedCapabilities;
-  const recording = recordGrantedByRun(permitted);
+  // Bulk migration is a deliberate, hand-run one-off, not what a scheduled
+  // sweep does: the ordinary sweep (`sweep-state: open`) is an incremental
+  // label pass, so `record` composes with `sweep` only when the sweep was
+  // explicitly scoped to a closed/all listing — the `sweep-state: all` a
+  // maintainer writes by hand to import history. Gating it here keeps the
+  // weekly schedule labelling the backlog instead of silently writing
+  // corrections for every open thread.
+  const recording = recordGrantedByRun(permitted) && settings.sweepState !== "open";
   acc.recording = recording;
 
   // When state-branch is set, open-pr must also be granted — the branch-write
@@ -420,13 +429,8 @@ async function runProposeSweep(
   authority: Authority,
   settings: Settings,
 ): Promise<ProposeReport | null> {
-  const grantedCapabilities = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
-  if (!grantedCapabilities.includes("propose")) return null;
-
-  const permitted = grantedCapabilities;
-  if (!permitted.includes("propose")) {
-    return null;
-  }
+  const permitted = authority.warrant.granted("triage", DEFAULT_CAPABILITIES);
+  if (!permitted.includes("propose")) return null;
 
   // The two reads `runPropose`'s own capacity boundary cannot see, under the
   // same D12 classification it applies inside: capacity is weather, reported

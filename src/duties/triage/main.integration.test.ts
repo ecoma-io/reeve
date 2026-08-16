@@ -2710,7 +2710,10 @@ describe("the sweep", () => {
           candidate(702, "2026-01-01T00:00:00Z", { labels: ["docs"] }),
         ];
 
-        const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+        const run = await runAction(
+          stub,
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
+        );
 
         expect(run.code).toBe(0);
         expect(run.outputs.recorded).toBe("true");
@@ -2749,7 +2752,10 @@ describe("the sweep", () => {
         candidate(802, "2026-01-01T00:00:00Z", { labels: ["bug"] }),
       ];
 
-      const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+      const run = await runAction(
+        stub,
+        sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
+      );
 
       expect(run.code).toBe(0);
       expect(run.outputs.processed).toBe("1");
@@ -2784,7 +2790,10 @@ describe("the sweep", () => {
           902: [{ label: "docs", event: "labeled", bot: true }],
         };
 
-        const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+        const run = await runAction(
+          stub,
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
+        );
 
         expect(run.code).toBe(0);
         expect(run.outputs.processed).toBe("1");
@@ -2815,7 +2824,10 @@ describe("the sweep", () => {
         ];
         stub.truncatedLabelHistory = new Set([902]);
 
-        const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+        const run = await runAction(
+          stub,
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
+        );
 
         expect(run.code).toBe(0);
         expect(run.outputs.processed).toBe("1");
@@ -2841,7 +2853,10 @@ describe("the sweep", () => {
       async () => {
         stub.issues = [candidate(901, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
 
-        const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+        const run = await runAction(
+          stub,
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
+        );
 
         expect(run.code).toBe(0);
         expect(run.outputs.recorded).toBe("false");
@@ -2851,5 +2866,19 @@ describe("the sweep", () => {
         expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
       },
     );
+
+    it("does NOT bulk-record on the scheduled `open` sweep even when the warrant grants `record`", async () => {
+      // The weekly schedule lists `open` threads; bulk migration is a
+      // deliberate hand-run (`sweep-state: closed`/`all`).
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      stub.issues = [candidate(903, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
+
+      const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.recorded).toBe("false");
+      // The ordinary sweep labels the backlog instead of importing it.
+      expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+    });
   });
 });

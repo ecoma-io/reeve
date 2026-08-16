@@ -287,6 +287,15 @@ describe("duties", () => {
     expect(warrant(MINIMAL).granted("triage", ["label"])).toEqual(["label"]);
   });
 
+  it("expands an explicit `duties: { triage: true }` to that same documented default", () => {
+    // `true` is the sentinel that spells "this duty's own default" out — the
+    // two forms (`true` and the bare absent key) must agree, so a maintainer
+    // can write either and get the same grant.
+    const source = "version: 1\nduties:\n  triage: true\n";
+    expect(warrant(source).granted("triage", ["label"])).toEqual(["label"]);
+    expect(warrant(source).unnamed("triage")).toBe(false);
+  });
+
   it("distinguishes an explicit `none` from an absent entry", () => {
     const source = `version: 1\nduties:\n  triage: [none]\n`;
     expect(warrant(source).granted("triage", ["label"])).toEqual([]);
