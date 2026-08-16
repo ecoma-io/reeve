@@ -135,6 +135,9 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
+  /** What the diff showed the model, for the summary's coverage table. */
+  readonly shown: readonly { path: string }[];
+  readonly skipped: readonly { path: string; reason: string }[];
   /** What the warrant actually granted — the summary reports it beside every other decision. */
   readonly permitted: readonly Capability[];
 }
@@ -150,6 +153,8 @@ type Settled = Partial<
     | "headSha"
     | "malformedAnswers"
     | "rulesPath"
+    | "shown"
+    | "skipped"
   >
 >;
 
@@ -183,6 +188,8 @@ async function decide(
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    shown: [],
+    skipped: [],
     permitted,
     ...over,
   });
@@ -210,12 +217,18 @@ async function decide(
     });
   }
   if (pr.draft) {
-    return settled({
-      ...settledBase,
-      note:
-        "This pull request is a draft. The review runs on ready-for-review and synchronize events, " +
-        "and a draft is not ready for review — re-run when the draft is marked ready.",
-    });
+    // `prod` also reviews drafts — a draft is still a diff a maintainer asked
+    // to have reviewed. `pr`, the default, waits for ready-for-review: a draft
+    // that is explicitly still being worked on is exactly the false-positive
+    // source a code review duty must not be.
+    if (settings.trigger !== "prod") {
+      return settled({
+        ...settledBase,
+        note:
+          "This pull request is a draft. The review runs on ready-for-review and synchronize events, " +
+          "and a draft is not ready for review — re-run when the draft is marked ready.",
+      });
+    }
   }
 
   // The diff bound: `none` (from `bounded`) means no cap at all, which the
@@ -312,6 +325,18 @@ async function decide(
 
   const next = remember(final, pr.headSha, previous);
 
+  // The confidence floor, before the write. The model's findings are still
+  // reconciled and reported (a maintainer tuning the floor against real diffs
+  // needs to see them), but nothing below the floor reaches the pull request —
+  // the same posture every other posting duty takes with its own floor.
+  //
+  // Only a measured verdict counts against it. `confidence` is 0 whenever no
+  // model answered readably — an all-skipped diff, a capacity failure, an
+  // unreadable answer — and the findings left standing then are the deterministic
+  // pre-checks, which are certain by construction and need no confidence floor.
+  const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
+  const belowFloor = verdictMeasured && confidence < settings.confidence;
+
   if (!permitted.includes("comment")) {
     core.warning(
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`,
@@ -323,6 +348,25 @@ async function decide(
       confidence,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
       rulesPath: rulesLabel(settings),
+      shown: bounded.shown,
+      skipped: bounded.skipped,
+    });
+  }
+
+  if (belowFloor) {
+    core.info(
+      `#${String(at.number)}: review confidence ${confidence.toFixed(2)} is below the ` +
+        `${settings.confidence.toFixed(2)} floor, so this run's review was not posted.`,
+    );
+    return settled({
+      ...settledBase,
+      language: language?.code ?? null,
+      findings: final,
+      confidence,
+      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      rulesPath: rulesLabel(settings),
+      shown: bounded.shown,
+      skipped: bounded.skipped,
     });
   }
 
@@ -343,6 +387,8 @@ async function decide(
       posted: would,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
       rulesPath: rulesLabel(settings),
+      shown: bounded.shown,
+      skipped: bounded.skipped,
     });
   }
 
@@ -356,6 +402,8 @@ async function decide(
     posted,
     malformedAnswers: reviewed.unreadable === null ? 0 : 1,
     rulesPath: rulesLabel(settings),
+    shown: bounded.shown,
+    skipped: bounded.skipped,
   });
 }
 
@@ -478,8 +526,8 @@ function page(
     headSha: outcome?.headSha ?? "",
     note: outcome?.note ?? null,
     previousSha: "",
-    shown: [],
-    skipped: [],
+    shown: outcome?.shown ?? [],
+    skipped: outcome?.skipped ?? [],
     findings: outcome?.findings ?? [],
     confidence: outcome?.confidence ?? null,
     posted: outcome?.posted ?? null,
