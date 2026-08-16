@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -163,5 +163,22 @@ describe("the duty lists", () => {
       .filter((name) => existsSync(join(repoRoot, name, "action.yml")));
 
     expect(dutyDirs.sort()).toEqual([...DUTIES].sort());
+  });
+
+  it("tells the consumer to run `actions/checkout` on one source line — a folded scalar would render it with a space", () => {
+    // The `warrant` description is a YAML `>` folded scalar: every newline
+    // becomes a space. `actions/` newline `checkout` would therefore render
+    // as `actions/ checkout` in the Marketplace listing, telling a consumer
+    // to run a step that does not exist. The one place the guarantee is real
+    // is the manifest itself — GitHub renders the description live from
+    // `action.yml`, and no built bundle carries this text.
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const text = readFileSync(join(root, "action.yml"), "utf8");
+    const block =
+      /warrant:\n(\s+)description: >-\n([\s\S]*?)\n {4}[a-z][a-z0-9-]*:/.exec(text)?.[2] ?? "";
+
+    expect(block).toContain("`actions/checkout`");
+    expect(block).not.toContain("actions/\n");
+    expect(block).not.toContain("actions/ ");
   });
 });

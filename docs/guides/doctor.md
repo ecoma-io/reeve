@@ -16,17 +16,19 @@ anything, and what?**
 
 ## What it checks
 
-Four things, every one of them read the exact way a real run reads it — the
+Six things, every one of them read the exact way a real run reads it — the
 same `readWarrant`, the same `resolveAuthority`, the same
 `DEFAULT_CAPABILITIES` each duty's own `main.ts` falls back to. A second,
 looser reader here would be a second chance for this report and a real run
 to disagree.
 
 1. **Does the warrant parse.** A missing file at the default path is not a
-   problem — that is the narrowest built-in authority, and `doctor` reports
-   it as a green note, not a red finding. A missing file at a path you named
-   yourself, or a file that exists but does not parse, is red — the same
-   failure a real run would have.
+   problem, when a checkout reached this runner — that is the narrowest
+   built-in authority, and `doctor` reports it as a green note, not a red
+   finding. A missing file at a path you named yourself, or a file that
+   exists but does not parse, is red — the same failure a real run would
+   have. See #5 for the one case where an absent file at the default path
+   is read as something worse.
 2. **Do the labels it names exist.** Every label the taxonomy and a written
    `lifecycle:` policy reference, checked against this repository's actual
    labels. Missing, but marked `create: true`, is a green note — a duty
@@ -43,6 +45,28 @@ to disagree.
    "healthy because nothing is configured yet" never look identical. A duty
    a written block denies outright (see #3) is a different, separate fact
    and never appears in this note: denied is not default.
+5. **Could the missing-warrant report be a lie?** When the warrant is absent
+   at the default path, `doctor` also checks whether a checkout ever reached
+   this runner. A workspace with a checkout in it is the genuine level-0
+   absence — the repository wrote no warrant — and stays the green note in
+   #1. An empty workspace is a runner the repository never reached, and the
+   absence is read as what it is: the configuration never made it here, so
+   `doctor` reports it red and tells you to run `actions/checkout` first.
+   Without this check, a missing warrant on a checkout-less runner would be
+   reported as the narrowest authority — silent, and wrong about what a
+   real run would do.
+6. **Would the configured provider answer at all?** When a `base-url`,
+   `api-key`, and `models` are configured alongside `doctor: true`, the run
+   sends the configured endpoint one tiny completion (the word `ping`) and
+   reports, green, whether the first configured model answered — and, when
+   models failed before it, how many rotated past. This is deliberately
+   **weather, never authority**: a probe that answered grants nothing and a
+   probe that failed red nothing, so even a refused key (HTTP 401/403), a
+   rate limit, an unreachable endpoint, or a reply that would not parse is
+   reported green, with the reason named. `doctor` stays a report about
+   what a run would _be allowed_ to do — no verdict ever becomes a
+   capability — and it never prints a key. No provider inputs configured
+   means no probe at all, and no model is ever called.
 
 ## Example: lint your warrant in CI
 
@@ -120,12 +144,19 @@ authentication, not GitHub's weather, and a real run would fail on it too.
 
 ## `doctor` is not a duty
 
-It never reads a thread, never calls a model, and takes no `models` or
-`api-key` input — there is nothing here for either to do. `duty:` narrows
-the report to one duty's row instead of running anything; naming a duty on
-this action never runs it, `doctor` or not — see
+It never reads a thread and never decides anything for a thread. `duty:`
+narrows the report to one duty's row instead of running anything; naming a
+duty on this action never runs it, `doctor` or not — see
 [the root action](../reference/root-action.md) for the refusal it is a mode
 of.
+
+The one provider input a configuration _can_ carry is the probe in #6:
+a `base-url`, `api-key`, and `models` you already pass a duty describe the
+endpoint you also want `doctor` to say something about, so the same inputs
+the duty's own action reads double as the probe's. They are weather, not
+authority — no probe result ever grants or denies anything — and the report
+never prints a key. Leave them unset, and `doctor` never touches a
+provider at all.
 
 ---
 

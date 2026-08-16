@@ -2,7 +2,7 @@ import * as core from "@actions/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Report } from "./diagnose.js";
-import { runDoctor } from "./run.js";
+import { providerConfig, runDoctor } from "./run.js";
 
 // `runDoctor` is the adapter between the decision logic (`diagnose`,
 // `problems`, `summarize`) and the runner's effects (`setOutput`,
@@ -12,16 +12,27 @@ import { runDoctor } from "./run.js";
 // rather than only through a spawned bundle: the decisions here are the
 // normalisation of the `duty` input and the exact words of the failure.
 
+const PROVIDER_INPUTS = [
+  "base-url",
+  "api-key",
+  "models",
+  "request-timeout",
+  "endpoints",
+  "api-keys",
+];
+
 vi.mock("@actions/core", async (importOriginal) => ({
   ...(await importOriginal<typeof core>()),
   getInput: vi.fn((name: string) => {
     if (name === "github-token") return "token";
     if (name === "warrant") return ".github/reeve.yml";
     if (name === "duty") return "";
+    if (PROVIDER_INPUTS.includes(name)) return "";
     throw new Error(`unexpected input ${name}`);
   }),
   setOutput: vi.fn(),
   setFailed: vi.fn(),
+  setSecret: vi.fn(),
 }));
 
 vi.mock("@actions/github", () => ({
@@ -51,6 +62,8 @@ const REPORT: Report = {
 beforeEach(() => {
   vi.mocked(core.setOutput).mockClear();
   vi.mocked(core.setFailed).mockClear();
+  vi.mocked(core.setSecret).mockClear();
+  vi.mocked(core.getInput).mockClear();
   vi.mocked(diagnose).mockClear();
   vi.mocked(diagnose).mockResolvedValue(REPORT);
   vi.mocked(problems).mockReturnValue(0);
@@ -67,7 +80,7 @@ describe("runDoctor", () => {
 
   it("passes a normalised duty through, so a scoped doctor run reads the spelling the user meant", async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) =>
-      name === "duty" ? "  Triage  " : "default",
+      name === "duty" ? "  Triage  " : name === "warrant" ? "default" : "",
     );
 
     await runDoctor();
@@ -83,7 +96,7 @@ describe("runDoctor", () => {
 
   it("turns a whitespace-only duty into no duty at all", async () => {
     vi.mocked(core.getInput).mockImplementation((name: string) =>
-      name === "duty" ? "   \n  " : "default",
+      name === "duty" ? "   \n  " : name === "warrant" ? "default" : "",
     );
 
     await runDoctor();
@@ -134,5 +147,31 @@ describe("runDoctor", () => {
     await runDoctor();
 
     expect(core.setFailed).toHaveBeenCalledWith("the build did not anticipate this");
+  });
+});
+
+describe("providerConfig", () => {
+  it("returns undefined when a base-url is set but no model is — nothing exists to probe", () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) =>
+      name === "base-url" ? "http://provider.test/v1" : "",
+    );
+
+    expect(providerConfig()).toBeUndefined();
+  });
+
+  it("registers the default endpoint's api-key as a secret before anything else runs", () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) =>
+      name === "base-url"
+        ? "http://provider.test/v1"
+        : name === "api-key"
+          ? "probe-key"
+          : name === "models"
+            ? "probe-model"
+            : "",
+    );
+
+    providerConfig();
+
+    expect(core.setSecret).toHaveBeenCalledWith("probe-key");
   });
 });

@@ -20726,7 +20726,7 @@ var require_foldFlowLines = __commonJS({
         else
           end = lineWidth - indentAtStart;
       }
-      let split = void 0;
+      let split2 = void 0;
       let prev = void 0;
       let overflow = false;
       let i = -1;
@@ -20759,18 +20759,18 @@ var require_foldFlowLines = __commonJS({
           if (mode === FOLD_BLOCK)
             i = consumeMoreIndentedLines(text2, i, indent.length);
           end = i + indent.length + endStep;
-          split = void 0;
+          split2 = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
             const next = text2[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
-              split = i;
+              split2 = i;
           }
           if (i >= end) {
-            if (split) {
-              folds.push(split);
-              end = split + endStep;
-              split = void 0;
+            if (split2) {
+              folds.push(split2);
+              end = split2 + endStep;
+              split2 = void 0;
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
@@ -20783,7 +20783,7 @@ var require_foldFlowLines = __commonJS({
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
-              split = void 0;
+              split2 = void 0;
             } else {
               overflow = true;
             }
@@ -24317,13 +24317,13 @@ var require_resolve_block_scalar = __commonJS({
       return { mode, indent, chomp, comment, length };
     }
     function splitLines(source) {
-      const split = source.split(/\n( *)/);
-      const first = split[0];
+      const split2 = source.split(/\n( *)/);
+      const first = split2[0];
       const m = first.match(/^( *)/);
       const line0 = m?.[1] ? [m[1], first.slice(m[1].length)] : ["", first];
       const lines = [line0];
-      for (let i = 1; i < split.length; i += 2)
-        lines.push([split[i], split[i + 1]]);
+      for (let i = 1; i < split2.length; i += 2)
+        lines.push([split2[i], split2[i + 1]]);
       return lines;
     }
     exports.resolveBlockScalar = resolveBlockScalar;
@@ -27535,6 +27535,9 @@ var ExitCode;
   ExitCode2[ExitCode2["Success"] = 0] = "Success";
   ExitCode2[ExitCode2["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
+function setSecret(secret) {
+  issueCommand("add-mask", {}, secret);
+}
 function getInput(name, options) {
   const val = process.env[`INPUT_${name.replace(/ /g, "_").toUpperCase()}`] || "";
   if (options && options.required && !val) {
@@ -31571,6 +31574,275 @@ function parseList(raw) {
   return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
+// src/core/provider.ts
+var DEFAULT_TIMEOUT_MS = 12e4;
+var EXCERPT_CHARS = 200;
+function shown(names, id) {
+  return names.get(id) ?? id;
+}
+function parseModels(raw) {
+  const models = [];
+  const names = /* @__PURE__ */ new Map();
+  for (const entry of parseList(raw)) {
+    const { ids, name } = split(entry);
+    if (ids.includes("|")) {
+      throw new Error(
+        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+      );
+    }
+    const id = ids.trim();
+    if (id.length === 0 || models.includes(id)) continue;
+    models.push(id);
+    if (name !== null) names.set(id, name);
+  }
+  return { models, names };
+}
+function split(entry) {
+  const at = entry.indexOf("=");
+  if (at === -1) return { ids: entry, name: null };
+  const name = entry.slice(at + 1).trim();
+  return { ids: entry.slice(0, at), name: name.length > 0 ? name : null };
+}
+function createProvider(config) {
+  const endpoint2 = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const headers = { "content-type": "application/json" };
+  if (config.apiKey.length > 0) headers.authorization = `Bearer ${config.apiKey}`;
+  return {
+    async complete(model, messages, options) {
+      const body = JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        ...options?.temperature === void 0 ? {} : { temperature: options.temperature }
+      });
+      let response;
+      try {
+        response = await fetch(endpoint2, {
+          method: "POST",
+          headers,
+          body,
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+      } catch (error2) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          ...isTimeout(error2) ? {} : { transport: true },
+          reason: describeRequestError(error2, timeoutMs)
+        };
+      }
+      let text2;
+      try {
+        text2 = await response.text();
+      } catch (error2) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "capacity",
+          reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
+        };
+      }
+      return readCompletion(model, response.status, text2);
+    }
+  };
+}
+function splitEndpointAlias(model, aliases) {
+  const at = model.lastIndexOf("@");
+  if (at === -1) return { id: model, alias: null };
+  const alias = model.slice(at + 1);
+  if (!aliases.has(alias)) return { id: model, alias: null };
+  return { id: model.slice(0, at), alias };
+}
+function createRoutedProvider(endpoints) {
+  const aliases = new Set(
+    endpoints.flatMap((endpoint2) => endpoint2.alias === null ? [] : [endpoint2.alias])
+  );
+  const byAlias = new Map(
+    endpoints.map((endpoint2) => [
+      endpoint2.alias,
+      createProvider({
+        baseUrl: endpoint2.baseUrl,
+        apiKey: endpoint2.apiKey,
+        timeoutMs: endpoint2.timeoutMs
+      })
+    ])
+  );
+  return {
+    async complete(model, messages, options) {
+      const { id, alias } = splitEndpointAlias(model, aliases);
+      const provider = byAlias.get(alias);
+      if (provider === void 0) {
+        return {
+          ok: false,
+          model,
+          usage: null,
+          kind: "protocol",
+          endpoint: alias,
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+        };
+      }
+      const completion = await provider.complete(id, messages, options);
+      return { ...completion, model, endpoint: alias };
+    }
+  };
+}
+function resolveEndpoints(shared) {
+  const keyed = new Map(shared.apiKeys.map((entry) => [entry.alias, entry.key]));
+  return [
+    {
+      alias: null,
+      baseUrl: shared.baseUrl,
+      apiKey: shared.apiKey,
+      timeoutMs: shared.requestTimeoutMs
+    },
+    ...shared.endpoints.map((endpoint2) => ({
+      alias: endpoint2.alias,
+      baseUrl: endpoint2.baseUrl,
+      apiKey: keyed.get(endpoint2.alias) ?? "",
+      timeoutMs: endpoint2.timeoutMs ?? shared.requestTimeoutMs
+    }))
+  ];
+}
+function readCompletion(model, status, text2) {
+  const at = `HTTP ${String(status)}`;
+  const kind = classifyStatus(status);
+  let payload;
+  try {
+    payload = JSON.parse(text2);
+  } catch {
+    return {
+      ok: false,
+      model,
+      usage: null,
+      kind,
+      reason: `${at}: body was not JSON \u2014 ${excerpt(text2)}`
+    };
+  }
+  const usage = readUsage(payload);
+  const reported = readErrorMessage(payload);
+  if (reported !== null) return { ok: false, model, usage, kind, reason: `${at}: ${reported}` };
+  if (status < 200 || status >= 300) {
+    return { ok: false, model, usage, kind, reason: `${at}: ${excerpt(text2)}` };
+  }
+  const choice = asRecord(asArray(asRecord(payload)?.choices)?.[0]);
+  if (choice === null) {
+    return {
+      ok: false,
+      model,
+      usage,
+      kind,
+      reason: `${at}: no choices in the response \u2014 ${excerpt(text2)}`
+    };
+  }
+  const content = asRecord(choice.message)?.content;
+  if (typeof content !== "string") {
+    return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
+  }
+  if (content.trim().length === 0) {
+    return { ok: false, model, usage, kind, reason: `${at}: answered with empty content` };
+  }
+  const finishReason = choice.finish_reason;
+  return {
+    ok: true,
+    model,
+    usage,
+    content,
+    finishReason: typeof finishReason === "string" ? finishReason : null
+  };
+}
+function classifyStatus(status) {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429 || status >= 500 && status < 600) return "capacity";
+  return "protocol";
+}
+function readUsage(payload) {
+  const usage = asRecord(asRecord(payload)?.usage);
+  if (usage === null) return null;
+  const prompt = asCount(usage.prompt_tokens);
+  const completion = asCount(usage.completion_tokens);
+  if (prompt === null && completion === null) return null;
+  return { prompt: prompt ?? 0, completion: completion ?? 0 };
+}
+function asCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
+}
+var AuthenticationFailure = class extends Error {
+  failure;
+  constructor(failure) {
+    super(`${failure.model}: ${failure.reason}`);
+    this.name = "AuthenticationFailure";
+    this.failure = failure;
+  }
+};
+function weatherFailure(model) {
+  return {
+    ok: false,
+    model,
+    kind: "capacity",
+    usage: null,
+    reason: "already rotated past for capacity earlier in this run \u2014 a provider's limit does not clear inside one job, so it was not asked again"
+  };
+}
+function reckon(failure, weather) {
+  if (failure.kind === "auth") {
+    if (weather?.multiEndpoint === true) {
+      weather.failAuth(failure.endpoint ?? null, failure);
+      return;
+    }
+    throw new AuthenticationFailure(failure);
+  }
+  if (failure.kind === "capacity") {
+    if (failure.transport === true) weather?.groundEndpoint(failure.endpoint ?? null);
+    else weather?.ground(failure.model);
+  }
+}
+async function rotateModels(models, attempt, weather) {
+  const failures = [];
+  for (const model of models) {
+    if (weather?.grounded(model) === true) {
+      failures.push(weatherFailure(model));
+      continue;
+    }
+    const completion = await attempt(model);
+    if (completion.ok) return { success: completion, failures };
+    reckon(completion, weather);
+    failures.push(completion);
+  }
+  return { success: null, failures };
+}
+function isTimeout(error2) {
+  return error2 instanceof Error && error2.name === "TimeoutError";
+}
+function describeRequestError(error2, timeoutMs) {
+  if (isTimeout(error2)) {
+    return `request timed out after ${String(timeoutMs)}ms`;
+  }
+  return `request failed \u2014 ${error2 instanceof Error ? error2.message : String(error2)}`;
+}
+function readErrorMessage(payload) {
+  const error2 = asRecord(payload)?.error;
+  if (typeof error2 === "string") return error2.trim().length > 0 ? error2 : null;
+  const reported = asRecord(error2);
+  if (reported === null || Object.keys(reported).length === 0) return null;
+  const message2 = reported.message;
+  return typeof message2 === "string" && message2.trim().length > 0 ? message2 : `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
+}
+function asRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+function asArray(value) {
+  return Array.isArray(value) ? value : null;
+}
+function excerpt(text2) {
+  const flat = text2.replace(/\s+/g, " ").trim();
+  if (flat.length === 0) return "the body was empty";
+  return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}\u2026`;
+}
+
 // src/core/summary.ts
 async function writeSummary(markdown) {
   if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
@@ -32780,6 +33052,89 @@ function describe(value) {
   return "a value of a kind this file cannot hold";
 }
 
+// src/core/inputs.ts
+function parseEndpoints(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return parseList(raw).map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) {
+      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
+    }
+    const alias = entry.slice(0, at).trim();
+    const rest = entry.slice(at + 1).trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
+      throw new Error(
+        `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
+      );
+    }
+    if (alias === "default") {
+      throw new Error(
+        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
+      );
+    }
+    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
+    if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
+    let timeoutMs = null;
+    for (const token of rest2) {
+      const match = /^timeout=(.+)$/.exec(token);
+      if (!match) {
+        throw new Error(
+          `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
+        );
+      }
+      const [, duration = ""] = match;
+      if (timeoutMs !== null) {
+        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
+      }
+      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
+    }
+    return { alias, baseUrl: url, timeoutMs };
+  });
+}
+function parseApiKeys(raw) {
+  const entries = parseList(raw);
+  for (const entry of entries) {
+    const at = entry.indexOf("=");
+    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
+    if (value.length > 0) setSecret(value);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return entries.map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
+    const alias = entry.slice(0, at).trim();
+    const key = entry.slice(at + 1).trim();
+    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
+    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    return { alias, key };
+  });
+}
+function parseTimeout(name, raw) {
+  const trimmed = raw.trim();
+  const match = /^(\d+)(s|m)$/.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
+    );
+  }
+  const [, digits, unit] = match;
+  const value = Number(digits);
+  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
+  const ms = unit === "m" ? value * 6e4 : value * 1e3;
+  if (ms > 2147483647) {
+    throw new Error(
+      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
+    );
+  }
+  return ms;
+}
+
+// src/doctor/diagnose.ts
+import { readdir as readdir2 } from "node:fs/promises";
+
 // src/duties/dependa/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
@@ -32804,6 +33159,7 @@ var DEFAULT_CAPABILITIES7 = ["label"];
 
 // src/doctor/diagnose.ts
 var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
+var PROBE_TURN = [{ role: "user", content: "ping" }];
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", DEFAULT_CAPABILITIES6],
   ["triage", DEFAULT_CAPABILITIES7],
@@ -32862,10 +33218,18 @@ async function diagnose(options) {
   }
   const findings = [];
   if (authority.implicit) {
-    findings.push({
-      severity: "green",
-      text: `No \`${warrantPath}\` \u2014 this run would act at the narrowest authority: labels only, from this repository's own label descriptions.`
-    });
+    const checkout = await checkoutState(options.workspaceDir ?? process.cwd());
+    if (checkout === "missing") {
+      findings.push({
+        severity: "red",
+        text: `No checkout was found in this run's workspace, so the absence of \`${warrantPath}\` cannot be told from a deleted warrant. The configuration under check never reached this runner \u2014 run \`actions/checkout\` before \`doctor\`.`
+      });
+    } else {
+      findings.push({
+        severity: "green",
+        text: `No \`${warrantPath}\` \u2014 this run would act at the narrowest authority: labels only, from this repository's own label descriptions.`
+      });
+    }
     if (authority.excludedLabels.length > 0) {
       findings.push({
         severity: "green",
@@ -32916,6 +33280,9 @@ async function diagnose(options) {
       text: `${defaulted.map((row) => `\`${row.duty}\``).join(", ")} \u2014 each duty's effective grant above is exactly its own built-in default right now.`
     });
   }
+  if (options.provider !== void 0) {
+    findings.push(await providerProbe(options.provider));
+  }
   return {
     ...base,
     implicit: authority.implicit,
@@ -32923,6 +33290,54 @@ async function diagnose(options) {
     authority: authorityRows,
     findings
   };
+}
+async function providerProbe(probe) {
+  const endpoints = resolveEndpoints(probe);
+  const keyed = endpoints.some((endpoint2) => endpoint2.apiKey.length > 0);
+  if (!keyed) {
+    return {
+      severity: "green",
+      text: "The configured provider is keyless \u2014 no probe was sent, and none could say anything a keyed provider's could. Add `api-key` to probe the endpoint."
+    };
+  }
+  const provider = createRoutedProvider(endpoints);
+  let rotation;
+  try {
+    rotation = await rotateModels(probe.models, (model) => provider.complete(model, PROBE_TURN));
+  } catch (error2) {
+    const authFailure = error2 instanceof AuthenticationFailure ? error2.failure : void 0;
+    const reason2 = authFailure !== void 0 ? "the configured endpoint refused this run's key (HTTP 401 or 403)" : error2 instanceof Error ? "the probe itself failed" : "the probe itself failed";
+    return {
+      severity: "green",
+      text: `Provider probe \u2014 no configured model answered a tiny request: ${reason2}. This is weather, not a configuration finding: the probe exists to say whether the endpoint answers, and it says nothing about what any duty may do.`
+    };
+  }
+  const answered = rotation.success;
+  if (answered !== null) {
+    const answeredName = shown(probe.modelNames, answered.model);
+    const failedBefore = rotation.failures.length;
+    const retried = failedBefore === 0 ? "" : `${String(failedBefore)} model${failedBefore === 1 ? "" : "s"} rotated past before it, `;
+    return {
+      severity: "green",
+      text: `Provider probe \u2014 the first configured model answered a tiny request: ${answeredName}${retried.length === 0 ? "" : ` (${retried})`}. Weather, not authority: a probe that answered says nothing about what any duty may do.`
+    };
+  }
+  const failures = rotation.failures;
+  const auth2 = failures.find((failure) => failure.kind === "auth");
+  const capacity = failures.find((failure) => failure.kind === "capacity");
+  const protocol = failures.find((failure) => failure.kind === "protocol");
+  const reason = auth2 !== void 0 ? "the configured endpoint refused this run's key (HTTP 401 or 403)" : capacity !== void 0 ? capacity.transport === true ? "the endpoint could not be reached" : "the endpoint answered with a rate limit or server error" : protocol !== void 0 ? "the endpoint answered outside the chat-completions protocol" : "the probe did not reach any provider";
+  return {
+    severity: "green",
+    text: `Provider probe \u2014 no configured model answered a tiny request: ${reason}. This is weather, not a configuration finding: the probe exists to say whether the endpoint answers, and it says nothing about what any duty may do.`
+  };
+}
+async function checkoutState(workspaceDir) {
+  try {
+    return (await readdir2(workspaceDir)).length > 0 ? "present" : "missing";
+  } catch {
+    return "missing";
+  }
 }
 function authorityRow(warrant, duty) {
   const fallback = DEFAULTS_BY_DUTY.get(duty) ?? [];
@@ -33019,18 +33434,43 @@ function note(row) {
 }
 
 // src/doctor/run.ts
+var DEFAULT_REQUEST_TIMEOUT = "120s";
+function providerConfig() {
+  const apiKey = getInput("api-key");
+  if (apiKey.length > 0) setSecret(apiKey);
+  const baseUrl2 = getInput("base-url");
+  const roster = parseModels(getInput("models"));
+  if (baseUrl2.length === 0 || roster.models.length === 0) {
+    return void 0;
+  }
+  const timeoutRaw = getInput("request-timeout");
+  return {
+    baseUrl: baseUrl2,
+    apiKey,
+    requestTimeoutMs: parseTimeout(
+      "request-timeout",
+      timeoutRaw.length > 0 ? timeoutRaw : DEFAULT_REQUEST_TIMEOUT
+    ),
+    models: roster.models,
+    modelNames: roster.names,
+    endpoints: parseEndpoints(getInput("endpoints")),
+    apiKeys: parseApiKeys(getInput("api-keys"))
+  };
+}
 async function runDoctor() {
   try {
     const token = getInput("github-token", { required: true });
     const warrantPath = getInput("warrant", { required: true });
     const duty = normalise(getInput("duty"));
     const api = getOctokit(token);
+    const provider = providerConfig();
     const report = await diagnose({
       api,
       at: context2.repo,
       warrantPath,
       defaultWarrantPath: DEFAULT_WARRANT_PATH,
-      duty: duty.length === 0 ? null : duty
+      duty: duty.length === 0 ? null : duty,
+      ...provider === void 0 ? {} : { provider }
     });
     const count = problems(report);
     setOutput("problems", String(count));

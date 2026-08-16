@@ -28,8 +28,19 @@
  * worth ending the check over" has one answer, shared with `triage`'s
  * `propose.ts` and `lifecycle`'s sweep.
  */
+import { readdir } from "node:fs/promises";
+
 import type { Location, TrackerApi } from "../core/forge.js";
 import { isCapacityError, listRepositoryLabels } from "../core/forge.js";
+import {
+  AuthenticationFailure,
+  createRoutedProvider,
+  resolveEndpoints,
+  rotateModels,
+  shown,
+  type Message,
+  type Rotation,
+} from "../core/provider.js";
 import {
   checkLabelsExist,
   checkLifecycleLabelsExist,
@@ -53,6 +64,18 @@ import { DUTIES } from "../refusal.js";
 
 /** The endpoint named in every finding the labels check produces. */
 const LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
+
+/**
+ * The one-token question the provider probe asks, asked only ever as weather.
+ *
+ * Deliberately not a verdict Reeve would ever build authority on, and not a
+ * request whose answer could reach a thread: a single cheap completion,
+ * reported green whatever it says. "Capacity is weather" (D12) is why every
+ * answer lands in the green register even when a real run would fail red on
+ * it — the probe exists so `doctor` can say whether the configured endpoint
+ * answers at all, never to grant or deny anything.
+ */
+const PROBE_TURN: readonly Message[] = [{ role: "user", content: "ping" }];
 
 /**
  * Every built duty's own fallback, wired to its name.
@@ -150,6 +173,36 @@ export interface DiagnoseOptions {
   readonly defaultWarrantPath: string;
   /** Already normalised (trimmed, lower-cased) by the caller, or `null` for every duty. */
   readonly duty: string | null;
+  /**
+   * Where this run's workspace lives, `process.cwd()` when absent — the one
+   * place doctor can tell a genuine level-0 absence from a checkout that
+   * never happened. Only consulted when the warrant is absent at the default
+   * path, which is the only case where the distinction changes a finding.
+   */
+  readonly workspaceDir?: string;
+  /**
+   * The run's provider inputs, when the caller had any to hand. Present,
+   * doctor probes the configured endpoint with a single tiny completion —
+   * always weather, never authority — so a maintainer learns whether the
+   * provider a duty would call is reachable at all. Absent, no probe happens
+   * and the report never touches a provider. See `providerProbe` below.
+   */
+  readonly provider?: ProviderProbe;
+}
+
+/** The provider half of the probe: what `providerProbe` needs to reach an endpoint. */
+export interface ProviderProbe {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly requestTimeoutMs: number;
+  readonly models: readonly string[];
+  readonly modelNames: ReadonlyMap<string, string>;
+  readonly endpoints: readonly {
+    readonly alias: string;
+    readonly baseUrl: string;
+    readonly timeoutMs: number | null;
+  }[];
+  readonly apiKeys: readonly { readonly alias: string; readonly key: string }[];
 }
 
 /** The report `doctor: true` writes to the job summary and reduces to `problems`. */
@@ -197,12 +250,33 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
   const findings: Finding[] = [];
 
   if (authority.implicit) {
-    findings.push({
-      severity: "green",
-      text:
-        `No \`${warrantPath}\` — this run would act at the narrowest authority: labels only, ` +
-        "from this repository's own label descriptions.",
-    });
+    // An absent file at the default path is level 0 only when the absence is
+    // a fact about the repository — the file was never written, or was
+    // deleted to withdraw what it granted. A checkout that never happened
+    // also leaves the file absent, and reporting the two the same way would
+    // read "no warrant" off a runner that was never given the repository: a
+    // lie about authority that makes a missing warrant look like the
+    // narrowest authority. The one signal this run can read is the workspace
+    // itself — `actions/checkout` populates it, and nothing else does — so a
+    // workspace with no checkout in it turns the implicit report into a red
+    // finding that names the actual problem.
+    const checkout = await checkoutState(options.workspaceDir ?? process.cwd());
+    if (checkout === "missing") {
+      findings.push({
+        severity: "red",
+        text:
+          `No checkout was found in this run's workspace, so the absence of ` +
+          `\`${warrantPath}\` cannot be told from a deleted warrant. The configuration ` +
+          "under check never reached this runner — run `actions/checkout` before `doctor`.",
+      });
+    } else {
+      findings.push({
+        severity: "green",
+        text:
+          `No \`${warrantPath}\` — this run would act at the narrowest authority: labels only, ` +
+          "from this repository's own label descriptions.",
+      });
+    }
     if (authority.excludedLabels.length > 0) {
       findings.push({
         severity: "green",
@@ -276,6 +350,10 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
     });
   }
 
+  if (options.provider !== undefined) {
+    findings.push(await providerProbe(options.provider));
+  }
+
   return {
     ...base,
     implicit: authority.implicit,
@@ -283,6 +361,131 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
     authority: authorityRows,
     findings,
   };
+}
+
+/**
+ * One tiny completion against every endpoint a run would use, reported green
+ * whatever it answers.
+ *
+ * "Capacity is weather, authority is configuration" (D12) is the whole design
+ * of this probe: a real duty fails red when its provider says 401, because
+ * the run could not do its job; doctor is not that run, it is only saying
+ * whether the configured endpoint would answer. So every outcome — a usable
+ * answer, an auth refusal, a rate limit, a timeout, a body that would not
+ * parse — is weather here, never a red finding. The one thing this probe is
+ * not allowed to be is authority: nothing a provider says can grant a duty a
+ * capability, and nothing in this report suggests otherwise.
+ *
+ * Switching off, deliberately: a keyless configuration (empty `api-key` over
+ * HTTP) is supported, and no probe that can neither auth nor fail over the
+ * wire is a probe worth spending a request on — the note says so instead.
+ */
+async function providerProbe(probe: ProviderProbe): Promise<Finding> {
+  const endpoints = resolveEndpoints(probe);
+  const keyed = endpoints.some((endpoint) => endpoint.apiKey.length > 0);
+  if (!keyed) {
+    return {
+      severity: "green",
+      text:
+        "The configured provider is keyless — no probe was sent, and none could say anything " +
+        "a keyed provider's could. Add `api-key` to probe the endpoint.",
+    };
+  }
+
+  const provider = createRoutedProvider(endpoints);
+  let rotation: Rotation;
+  try {
+    rotation = await rotateModels(probe.models, (model) => provider.complete(model, PROBE_TURN));
+  } catch (error) {
+    // `rotateModels` throws on the first `auth` failure — a real duty's D12
+    // answer, since no rotation repairs a key that never worked. Doctor is
+    // not that run, so the throw is caught here and reported as weather,
+    // exactly as the `kind: "auth"` failure below is.
+    const authFailure = error instanceof AuthenticationFailure ? error.failure : undefined;
+    // The reason is always one of a fixed set — never a provider's own words.
+    // A gateway can echo the request it refused (the key included) into its
+    // error body, and a fetch failure can embed the endpoint URL, so a probe
+    // that rendered either verbatim into the job summary would defeat the
+    // masking the entry point does. The class of answer is enough: the probe
+    // exists to say whether the endpoint answered, not to quote what it said.
+    const reason =
+      authFailure !== undefined
+        ? "the configured endpoint refused this run's key (HTTP 401 or 403)"
+        : error instanceof Error
+          ? "the probe itself failed"
+          : "the probe itself failed";
+    return {
+      severity: "green",
+      text:
+        `Provider probe — no configured model answered a tiny request: ${reason}. ` +
+        "This is weather, not a configuration finding: the probe exists to say whether the " +
+        "endpoint answers, and it says nothing about what any duty may do.",
+    };
+  }
+
+  const answered = rotation.success;
+  if (answered !== null) {
+    const answeredName = shown(probe.modelNames, answered.model);
+    const failedBefore = rotation.failures.length;
+    const retried =
+      failedBefore === 0
+        ? ""
+        : `${String(failedBefore)} model${failedBefore === 1 ? "" : "s"} rotated past before it, `;
+    return {
+      severity: "green",
+      text:
+        `Provider probe — the first configured model answered a tiny request: ${answeredName}` +
+        `${retried.length === 0 ? "" : ` (${retried})`}. Weather, not authority: a probe that ` +
+        "answered says nothing about what any duty may do.",
+    };
+  }
+
+  // Nothing answered at all. Every failure is still weather — see the probe's
+  // doc comment for why auth is not red here the way it is in a real run.
+  const failures = rotation.failures;
+  const auth = failures.find((failure) => failure.kind === "auth");
+  const capacity = failures.find((failure) => failure.kind === "capacity");
+  const protocol = failures.find((failure) => failure.kind === "protocol");
+  // The same fixed-set discipline as the thrown-auth branch above: none of
+  // these carries a provider's own words, because a provider-sourced reason
+  // can echo the request (key included) back into the summary and undo the
+  // entry point's masking. The class of failure is what matters.
+  const reason =
+    auth !== undefined
+      ? "the configured endpoint refused this run's key (HTTP 401 or 403)"
+      : capacity !== undefined
+        ? capacity.transport === true
+          ? "the endpoint could not be reached"
+          : "the endpoint answered with a rate limit or server error"
+        : protocol !== undefined
+          ? "the endpoint answered outside the chat-completions protocol"
+          : "the probe did not reach any provider";
+  return {
+    severity: "green",
+    text:
+      `Provider probe — no configured model answered a tiny request: ${reason}. ` +
+      "This is weather, not a configuration finding: the probe exists to say whether the " +
+      "endpoint answers, and it says nothing about what any duty may do.",
+  };
+}
+
+/**
+ * Whether the workspace holds any checkout at all: `"present"` when it holds
+ * anything (including a `.git/` directory, which is its own honest marker),
+ * `"missing"` when the directory does not exist or is empty.
+ *
+ * The distinction is only ever consulted when the warrant is absent — the one
+ * case where "the workspace is empty" means "a real run would be acting at
+ * level 0" and "the warrant never reached the runner" look identical from the
+ * report's side. An empty workspace cannot be distinguished from "nothing was
+ * ever checked out here", which is the whole point.
+ */
+async function checkoutState(workspaceDir: string): Promise<"present" | "missing"> {
+  try {
+    return (await readdir(workspaceDir)).length > 0 ? "present" : "missing";
+  } catch {
+    return "missing";
+  }
 }
 
 /** One duty's effective grant, and why. */
