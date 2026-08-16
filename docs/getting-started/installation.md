@@ -60,15 +60,15 @@ already.
 
 ### Which duty should I start with?
 
-| Duty         | Cost        | Best for                                                                                                                                                                               |
-| ------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`triage`** | Low         | First duty. Labels issues from your existing taxonomy — no warrant file needed.                                                                                                        |
-| `translate`  | Low         | Multilingual repositories. Appends translated blocks to issue bodies.                                                                                                                  |
-| `duplicate`  | Low         | High-volume issue trackers. Reports likely duplicates without acting by default (report-only at level 0).                                                                              |
-| `respond`    | Medium      | Drafts replies to issues from guidance files you write. Reports by default (report-only at level 0).                                                                                   |
-| `lifecycle`  | **Zero**    | Stale-issue management. Calls no model — driven entirely by your warrant policy.                                                                                                       |
-| `harmonise`  | Medium      | Keeps translated files (README, docs) in sync with a source language. Report-only at level 0 — needs `capabilities:` in a warrant to act.                                              |
-| `dependa`    | Medium–High | Dependency maintenance. Discovers updates, classifies risk, opens PRs. Report-only at level 0 — needs `capabilities:` in a warrant to act. Can run without a model for discovery only. |
+| Duty         | Cost        | Best for                                                                                                                                                                                   |
+| ------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`triage`** | Low         | First duty. Labels issues from your existing taxonomy — no warrant file needed.                                                                                                            |
+| `translate`  | Low         | Multilingual repositories. Appends translated blocks to issue bodies.                                                                                                                      |
+| `duplicate`  | Low         | High-volume issue trackers. Reports likely duplicates without acting by default (report-only at level 0).                                                                                  |
+| `respond`    | Medium      | Drafts replies to issues from guidance files you write. Reports by default (report-only at level 0).                                                                                       |
+| `lifecycle`  | **Zero**    | Stale-issue management. Calls no model — driven entirely by your warrant policy.                                                                                                           |
+| `harmonise`  | Medium      | Keeps translated files (README, docs) in sync with a source language. Report-only at level 0 — needs a `duties:` grant in the warrant to act.                                              |
+| `dependa`    | Medium–High | Dependency maintenance. Discovers updates, classifies risk, opens PRs. Report-only at level 0 — needs a `duties:` grant in the warrant to act. Can run without a model for discovery only. |
 
 **Start with `triage`.** It is the narrowest authority, the cheapest to run,
 and the one that needs nothing beyond a model key and the labels your
