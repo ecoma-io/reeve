@@ -34,7 +34,16 @@ import type { Completion, Message, Provider, Usage } from "./provider.js";
  * exactly the ratio a maintainer tunes.
  */
 export type Purpose =
-  "classify" | "detect" | "draft" | "judge" | "screen" | "triage" | "pivot" | "duplicate" | "risk";
+  | "classify"
+  | "detect"
+  | "draft"
+  | "judge"
+  | "screen"
+  | "triage"
+  | "pivot"
+  | "duplicate"
+  | "risk"
+  | "review";
 
 /**
  * The stage names a reader of the documentation already knows.
@@ -54,6 +63,7 @@ export const STAGE: Record<Purpose, string> = {
   pivot: "Pivot translation",
   duplicate: "Duplicate check",
   risk: "Risk assessment",
+  review: "Review",
 };
 
 /** One model's spend on one purpose. */
