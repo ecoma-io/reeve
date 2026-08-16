@@ -21,8 +21,9 @@ on:
   workflow_dispatch: {}
 
 # Read-only permissions: dependa is in shadow mode and writes nothing.
-# If someone changes apply to edit-file, open-pr, the token-level
-# rejection serves as defense-in-depth beyond the application-level gate.
+# If someone adds dependa to the warrant's `duties:` block with
+# edit-file/open-pr, the token-level rejection serves as defense-in-depth
+# beyond the application-level gate.
 permissions:
   contents: read
   pull-requests: read
