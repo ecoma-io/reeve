@@ -10,7 +10,14 @@
 # `Reeve` alone would not survive — so the listing carries the brand plus what
 # it does, which is also what someone searching the Marketplace actually types.
 name: Reeve - multilingual repository upkeep
-description: Triage, translation and upkeep in any language, with any OpenAI-compatible model, within an authority you wrote down.
+description: >-
+  Automated upkeep for a repository — triage, translation, duplicates, replies,
+  lifecycle, documentation synchronisation and dependency maintenance — with
+  any OpenAI-compatible model, inside an authority you wrote down.
+
+  This listing is the umbrella: it runs no duty itself, so pin a leaf action to
+  run one, e.g. `ecoma-io/reeve/triage@v0.6`. Set `doctor: true` here to check
+  your warrant before anything runs.
 author: ecoma.io
 
 branding:
@@ -21,12 +28,13 @@ inputs:
   duty:
     description: >-
       The duty you meant to run. Naming one here does not run it — this action
-      cannot run any duty — but it is what turns a puzzling red job into a line
-      you can paste.
+      cannot run any duty — but it turns a puzzling red job into the `uses:`
+      line to write instead, both in the log and as the `leaf-action` output,
+      and the job summary names the leaf action that runs it.
 
-      A workflow uses a duty directly: `uses: ecoma-io/reeve/triage@v0.6`.
-      Under `doctor: true`, naming one here scopes the report to it instead —
-      see `doctor` below.
+      A workflow uses a duty's leaf action directly: `uses:
+      ecoma-io/reeve/triage@v0.6`. Under `doctor: true`, naming one here scopes
+      the report to it instead — see `doctor` below.
     required: false
     default: ""
 
@@ -55,12 +63,12 @@ inputs:
 
   warrant:
     description: >-
-      Where the taxonomy and the permissions live. Every label a duty may
-      apply is named in this file, in your own words, with the cases it does
-      not cover — and every effect is checked against the parsed file rather
-      than against the model's account of what it was allowed to do. It may
-      also carry a `languages:` key and a `lifecycle:` policy, both checked by
-      `doctor: true` the same way.
+      Where the taxonomy and the authority live. Its `duties:` block is the
+      whole authority — what each duty may do to a thread, written in your own
+      words, checked against the parsed file rather than against the model's
+      account of what it was allowed to do. It may also carry a `languages:`
+      key and a `lifecycle:` policy, both checked by `doctor: true` the same
+      way. Every leaf action reads the same file.
 
       Missing at this default path, there is no failure: `doctor: true`
       reports the narrowest authority this build knows — labelling only, from
@@ -74,6 +82,14 @@ inputs:
     default: .github/reeve.yml
 
 outputs:
+  leaf-action:
+    description: >-
+      The `uses:` line to write instead of this one, when `duty` named a duty
+      this repository builds — `ecoma-io/reeve/<duty>@<the ref you pinned>`.
+      Set only in the refusal mode: the run still fails red, this is the
+      corrected line machine-readable. Unset when `duty` named nothing or
+      something this repository does not build, and unset under `doctor: true`.
+
   problems:
     description: >-
       How many findings `doctor: true` reported that would refuse a duty at

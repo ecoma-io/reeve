@@ -214,6 +214,7 @@ describe("the root action", () => {
     expect(run.code).not.toBe(0);
     expect(run.log).toContain("is not a duty");
     expect(run.outputs.problems).toBeUndefined();
+    expect(run.outputs["leaf-action"]).toBeUndefined();
   });
 
   it("still refuses naming the duty when `doctor` is false and `duty` names one", async () => {
@@ -222,6 +223,48 @@ describe("the root action", () => {
     expect(run.code).not.toBe(0);
     expect(run.log).toContain("`triage` is a duty, but it is not this action.");
     expect(run.log).toContain("uses: ecoma-io/reeve/triage@v0.1");
+  });
+
+  it("records the leaf action as an output, and still fails, when `duty` names one", async () => {
+    const run = await runAction(stub, { doctor: "false", duty: "translate" });
+
+    expect(run.outputs["leaf-action"]).toBe("ecoma-io/reeve/translate@v0.1");
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("`translate` is a duty, but it is not this action.");
+  });
+
+  it("explains the leaves on the job summary page, still failing red", async () => {
+    const run = await runAction(stub, { doctor: "false", duty: "triage" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.summary).toContain("## Reeve · the root action");
+    expect(run.summary).toContain("| Duty | Action to write |");
+    expect(run.summary).toContain("| `ecoma-io/reeve/translate@<ref>` |");
+    expect(run.summary).toContain("the action that runs it is ecoma-io/reeve/triage@v0.1");
+    expect(run.summary).toContain("`duties:` block of your warrant");
+  });
+
+  it("writes an explain page that asks for the duty when none was named", async () => {
+    const run = await runAction(stub, { doctor: "false" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.summary).toContain("Name the duty you meant in the `duty` input");
+  });
+
+  it("leaves the summary page unset when there is no summary file to write to", async () => {
+    // A consumer reading the log for the corrected line is never failed by the
+    // absence of the explain page — the refusal carries the same text.
+    const run = await runAction(
+      stub,
+      { doctor: "false", duty: "triage" },
+      {
+        GITHUB_STEP_SUMMARY: "",
+      },
+    );
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("uses: ecoma-io/reeve/triage@v0.1");
+    expect(run.outputs["leaf-action"]).toBe("ecoma-io/reeve/triage@v0.1");
   });
 
   it("names lifecycle's own is-a-duty refusal text, exactly the same shape as every other shipped duty", async () => {
