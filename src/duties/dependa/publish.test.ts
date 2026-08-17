@@ -379,6 +379,83 @@ describe("publishGroup: D3 branch safety", () => {
     expect(result.pr).toBeNull();
   });
 
+  it("pages through ALL compareCommits pages before judging — a human commit beyond page 1 still refuses", async () => {
+    // >100 branch-unique commits: the first page (100) is all bot-authored,
+    // and the human commit sits on page 2. Stopping at the first page would
+    // false-positive the D3 comparison as bot-only and force-reset over a
+    // maintainer's commit — the invariant-3 paging gap this regression pins.
+    const pages: {
+      commits: { sha: string; author: { login: string } | null }[];
+      ahead_by: number;
+      behind_by: number;
+    }[] = [
+      {
+        ahead_by: 105,
+        behind_by: 0,
+        commits: Array.from({ length: 100 }, (_, i) => ({
+          sha: `bot-${String(i)}`,
+          author: { login: "github-actions[bot]" },
+        })),
+      },
+      {
+        ahead_by: 105,
+        behind_by: 0,
+        commits: Array.from({ length: 5 }, (_, i) => ({
+          sha: `tail-${String(i)}`,
+          author: i === 4 ? { login: "maintainer" } : { login: "github-actions[bot]" },
+        })),
+      },
+    ];
+    const remainingPages = [...pages];
+    let updateRefCalled = false;
+    const base = baseApi();
+    base.rest.repos.compareCommits = (params: { page?: number }) => {
+      const page = params.page ?? 1;
+      const next = remainingPages[page - 1];
+      if (next === undefined) throw new Error("should not request beyond the pages provided");
+      return Promise.resolve({ data: next });
+    };
+    base.rest.git.updateRef = () => {
+      updateRefCalled = true;
+      return Promise.resolve({});
+    };
+
+    const result = await publishGroup(base, AT, group(), false, true);
+
+    expect(remainingPages).toHaveLength(2); // both pages were consumed
+    expect(updateRefCalled).toBe(false); // force-reset refused
+    expect(result.outcome).toBe("refused");
+    expect(result.pr).toBeNull();
+  });
+
+  it("pages through ALL compareCommits pages and proceeds when every commit is bot-authored", async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      sha: `bot-a-${String(i)}`,
+      author: { login: "github-actions[bot]" },
+    }));
+    const page2 = Array.from({ length: 7 }, (_, i) => ({
+      sha: `bot-b-${String(i)}`,
+      author: { login: "reeve[bot]" },
+    }));
+    let updateRefCalled = false;
+    const base = baseApi();
+    base.rest.repos.compareCommits = (params: { page?: number }) => {
+      const page = params.page ?? 1;
+      if (page === 1)
+        return Promise.resolve({ data: { ahead_by: 107, behind_by: 0, commits: page1 } });
+      return Promise.resolve({ data: { ahead_by: 107, behind_by: 0, commits: page2 } });
+    };
+    base.rest.git.updateRef = () => {
+      updateRefCalled = true;
+      return Promise.resolve({});
+    };
+
+    const result = await publishGroup(base, AT, group(), false, true);
+
+    expect(updateRefCalled).toBe(true); // force-reset proceeded
+    expect(result.outcome).not.toBe("refused");
+  });
+
   it("proceeds with force-reset when compareCommits shows zero branch-unique commits", async () => {
     const base = baseApi();
     base.rest.repos.compareCommits = () =>

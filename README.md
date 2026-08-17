@@ -85,6 +85,18 @@ jobs:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
           dry-run: true # safe first run — remove when you trust it
+
+  translate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ecoma-io/reeve/translate@v0.6
+        with:
+          api-key: ${{ secrets.OPENAI_API_KEY }}
+          models: gpt-5-mini
+          # languages lives under the warrant's `languages:` key, not here —
+          # see docs/reference/duties/translate.md.
+          dry-run: true # safe first run — remove when you trust it
 ```
 
 > [!NOTE]

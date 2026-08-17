@@ -32265,6 +32265,15 @@ async function resolveAuthority(read, path, api, at) {
   return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
 }
 var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+function resolveLanguages(warrant, fallback) {
+  if (warrant.languages !== null) {
+    return {
+      languages: warrant.languages,
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key \u2014 the file is the whole answer once that key is written.`
+    };
+  }
+  return { languages: fallback, notice: null };
+}
 function load(path, source) {
   let document;
   try {
@@ -33138,12 +33147,15 @@ import { readdir as readdir2 } from "node:fs/promises";
 
 // src/duties/dependa/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
+var DEPENDA_CAPABILITIES = ["edit-file", "open-pr"];
 
 // src/duties/duplicate/capabilities.ts
 var DEFAULT_CAPABILITIES2 = [];
+var DUPLICATE_CAPABILITIES = ["comment"];
 
 // src/duties/harmonise/capabilities.ts
 var DEFAULT_CAPABILITIES3 = [];
+var HARMONISE_CAPABILITIES = ["edit-file", "open-pr"];
 
 // src/duties/lifecycle/capabilities.ts
 var DEFAULT_CAPABILITIES4 = ["label", "comment"];
@@ -33151,33 +33163,114 @@ var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 
 // src/duties/respond/capabilities.ts
 var DEFAULT_CAPABILITIES5 = [];
+var RESPOND_CAPABILITIES = ["comment"];
+
+// src/duties/review/capabilities.ts
+var DEFAULT_CAPABILITIES6 = [];
+var REVIEW_CAPABILITIES = ["comment"];
 
 // src/duties/translate/capabilities.ts
-var DEFAULT_CAPABILITIES6 = ["edit-body"];
+var DEFAULT_CAPABILITIES7 = ["edit-body"];
+var TRANSLATE_CAPABILITIES = ["edit-body"];
 
 // src/duties/triage/capabilities.ts
-var DEFAULT_CAPABILITIES7 = ["label"];
+var DEFAULT_CAPABILITIES8 = ["label"];
+var TRIAGE_CAPABILITIES = [
+  "label",
+  "comment",
+  "close",
+  "assign",
+  "record",
+  "propose",
+  "open-pr"
+];
+
+// src/doctor/profile.ts
+var PROFILE_CODES = /* @__PURE__ */ new Set([
+  "am",
+  "ar",
+  "az",
+  "be",
+  "bg",
+  "bn",
+  "ca",
+  "cs",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es",
+  "et",
+  "eu",
+  "fa",
+  "fi",
+  "fr",
+  "gu",
+  "he",
+  "hi",
+  "hr",
+  "hu",
+  "hy",
+  "is",
+  "it",
+  "ja",
+  "ka",
+  "kn",
+  "ko",
+  "ku",
+  "lo",
+  "lt",
+  "lv",
+  "ml",
+  "mr",
+  "ms",
+  "nl",
+  "no",
+  "or",
+  "pa",
+  "pl",
+  "pt",
+  "ro",
+  "ru",
+  "sk",
+  "sl",
+  "sq",
+  "sr",
+  "sv",
+  "ta",
+  "te",
+  "th",
+  "tl",
+  "tr",
+  "uk",
+  "ur",
+  "vi",
+  "yo",
+  "zh"
+]);
 
 // src/doctor/diagnose.ts
 var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
 var PROBE_TURN = [{ role: "user", content: "ping" }];
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
-  ["translate", DEFAULT_CAPABILITIES6],
-  ["triage", DEFAULT_CAPABILITIES7],
+  ["translate", DEFAULT_CAPABILITIES7],
+  ["triage", DEFAULT_CAPABILITIES8],
   ["duplicate", DEFAULT_CAPABILITIES2],
   ["respond", DEFAULT_CAPABILITIES5],
   ["lifecycle", DEFAULT_CAPABILITIES4],
   ["harmonise", DEFAULT_CAPABILITIES3],
-  ["dependa", DEFAULT_CAPABILITIES]
+  ["dependa", DEFAULT_CAPABILITIES],
+  ["review", DEFAULT_CAPABILITIES6]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
-  ["translate", null],
-  ["triage", null],
-  ["duplicate", null],
-  ["respond", null],
+  ["translate", TRANSLATE_CAPABILITIES],
+  ["triage", TRIAGE_CAPABILITIES],
+  ["duplicate", DUPLICATE_CAPABILITIES],
+  ["respond", RESPOND_CAPABILITIES],
   ["lifecycle", LIFECYCLE_CAPABILITIES],
-  ["harmonise", null],
-  ["dependa", null]
+  ["harmonise", HARMONISE_CAPABILITIES],
+  ["dependa", DEPENDA_CAPABILITIES],
+  ["review", REVIEW_CAPABILITIES]
 ]);
 function problems(report) {
   return report.findings.filter((finding) => finding.severity === "red").length;
@@ -33274,7 +33367,29 @@ async function diagnose(options) {
   }
   const scoped = duty === null ? DUTIES : [duty];
   const authorityRows = scoped.map((name) => authorityRow(authority.warrant, name));
-  const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
+  const inert = authorityRows.filter((row) => row.unused.length > 0);
+  for (const row of inert) {
+    const effective = row.granted.length === 0 ? "[none]" : `[${row.granted.join(", ")}]`;
+    findings.push({
+      severity: "red",
+      text: `\`${row.duty}\` is granted ${row.unused.map((capability) => `\`${capability}\``).join(", ")}, which this duty has no use for \u2014 the warrant says more than a real run would apply (effective: \`${row.duty}: ${effective}\`). A capability nobody reads is a misspelled grant, so \`doctor\` flags it the way the reader refuses a misspelled capability at parse time.`
+    });
+  }
+  if (authority.warrant.languages !== null) {
+    const { languages: resolvedLanguages } = resolveLanguages(authority.warrant, []);
+    const unsupported = resolvedLanguages.filter(
+      (language) => !PROFILE_CODES.has(language.code.toLowerCase())
+    );
+    if (unsupported.length > 0) {
+      findings.push({
+        severity: "green",
+        text: `\`languages:\` names ${unsupported.map((language) => `\`${language.code}\``).join(", ")} \u2014 outside the bundled byte-ngram profile set, so the free \`detectByProfile\` step declines for the whole run and every ambiguous thread is sent to the model instead. Not a failure; spell the regional identity in the label and use the base profiled code to keep the free step, or add the variant explicitly as a candidate \u2014 the \`code:Label:Script\` long form keeps the code verbatim, so it changes nothing here.`
+      });
+    }
+  }
+  const defaulted = authorityRows.filter(
+    (row) => row.isDefault && !row.denied && row.unused.length === 0
+  );
   if (defaulted.length > 0) {
     findings.push({
       severity: "green",
@@ -33346,9 +33461,9 @@ function authorityRow(warrant, duty) {
     return { duty, granted: [], denied: true, isDefault: false, unused: [] };
   }
   const grantedRaw = warrant.granted(duty, fallback);
-  const ladder = LADDER_BY_DUTY.get(duty) ?? null;
-  const granted = ladder === null ? grantedRaw : grantedRaw.filter((c) => ladder.includes(c));
-  const unused = ladder === null ? [] : grantedRaw.filter((c) => !ladder.includes(c));
+  const ladder = LADDER_BY_DUTY.get(duty) ?? [];
+  const granted = grantedRaw.filter((c) => ladder.includes(c));
+  const unused = grantedRaw.filter((c) => !ladder.includes(c));
   return { duty, granted, denied: false, isDefault: sameCapabilities(granted, fallback), unused };
 }
 function sameCapabilities(a, b) {

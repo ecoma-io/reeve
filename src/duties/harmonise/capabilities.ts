@@ -19,3 +19,15 @@ import type { Capability } from "../../core/warrant.js";
  * `duties:` block.
  */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = [];
+
+/**
+ * The full ladder this duty ever asks for — anything else a warrant names
+ * for it is inert here, not an error; see `Warrant.granted`'s own doc
+ * comment for why a per-duty enumeration is not this module's to validate.
+ * Exported so `doctor` mode can apply the exact same narrowing a real run
+ * applies, rather than a second guess at which capabilities this duty
+ * actually has a use for. The read-set is every `permitted.includes()`
+ * `harmonise`'s runtime applies: `edit-file` to write the synced file,
+ * `open-pr` to open the pull request that carries it.
+ */
+export const HARMONISE_CAPABILITIES: readonly Capability[] = ["edit-file", "open-pr"];

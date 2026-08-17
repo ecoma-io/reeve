@@ -36176,20 +36176,28 @@ async function publishGroup(api, at, group2, dryRun, isDraft, autoRebase = true)
     });
   } else if (autoRebase) {
     try {
-      const { data: comparison } = await api.rest.repos.compareCommits({
-        owner: at.owner,
-        repo: at.repo,
-        base: baseSha,
-        head: branchName,
-        per_page: 100
-      });
       const botAuthors = /* @__PURE__ */ new Set([
         "github-actions[bot]",
         "github-actions",
         "dependabot[bot]",
         "reeve[bot]"
       ]);
-      const hasHumanCommit = comparison.commits.some((c) => {
+      const commits = [];
+      let aheadBy = 0;
+      for (let page = 1; ; page++) {
+        const { data: comparison } = await api.rest.repos.compareCommits({
+          owner: at.owner,
+          repo: at.repo,
+          base: baseSha,
+          head: branchName,
+          per_page: 100,
+          page
+        });
+        aheadBy = comparison.ahead_by;
+        commits.push(...comparison.commits);
+        if (commits.length >= aheadBy || comparison.commits.length === 0) break;
+      }
+      const hasHumanCommit = commits.some((c) => {
         const login = c.author?.login ?? c.committer?.login;
         if (login === void 0) {
           return true;

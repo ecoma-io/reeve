@@ -46,20 +46,44 @@ import {
   checkLifecycleLabelsExist,
   readWarrant,
   resolveAuthority,
+  resolveLanguages,
   type Authority,
   type Capability,
   type Warrant,
 } from "../core/warrant.js";
-import { DEFAULT_CAPABILITIES as DEPENDA_DEFAULTS } from "../duties/dependa/capabilities.js";
-import { DEFAULT_CAPABILITIES as DUPLICATE_DEFAULTS } from "../duties/duplicate/capabilities.js";
-import { DEFAULT_CAPABILITIES as HARMONISE_DEFAULTS } from "../duties/harmonise/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as DEPENDA_DEFAULTS,
+  DEPENDA_CAPABILITIES,
+} from "../duties/dependa/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as DUPLICATE_DEFAULTS,
+  DUPLICATE_CAPABILITIES,
+} from "../duties/duplicate/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as HARMONISE_DEFAULTS,
+  HARMONISE_CAPABILITIES,
+} from "../duties/harmonise/capabilities.js";
 import {
   DEFAULT_CAPABILITIES as LIFECYCLE_DEFAULTS,
   LIFECYCLE_CAPABILITIES,
 } from "../duties/lifecycle/capabilities.js";
-import { DEFAULT_CAPABILITIES as RESPOND_DEFAULTS } from "../duties/respond/capabilities.js";
-import { DEFAULT_CAPABILITIES as TRANSLATE_DEFAULTS } from "../duties/translate/capabilities.js";
-import { DEFAULT_CAPABILITIES as TRIAGE_DEFAULTS } from "../duties/triage/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as RESPOND_DEFAULTS,
+  RESPOND_CAPABILITIES,
+} from "../duties/respond/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as REVIEW_DEFAULTS,
+  REVIEW_CAPABILITIES,
+} from "../duties/review/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as TRANSLATE_DEFAULTS,
+  TRANSLATE_CAPABILITIES,
+} from "../duties/translate/capabilities.js";
+import {
+  DEFAULT_CAPABILITIES as TRIAGE_DEFAULTS,
+  TRIAGE_CAPABILITIES,
+} from "../duties/triage/capabilities.js";
+import { PROFILE_CODES } from "./profile.js";
 import { DUTIES } from "../refusal.js";
 
 /** The endpoint named in every finding the labels check produces. */
@@ -94,24 +118,29 @@ const DEFAULTS_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["lifecycle", LIFECYCLE_DEFAULTS],
   ["harmonise", HARMONISE_DEFAULTS],
   ["dependa", DEPENDA_DEFAULTS],
+  ["review", REVIEW_DEFAULTS],
 ]);
 
 /**
  * Every duty's own ladder of capabilities it actually has a use for, wired
- * to its name — `null` when a duty has no narrower ladder than "whatever the
- * warrant grants it". Only `lifecycle` narrows today (see
- * `LIFECYCLE_CAPABILITIES`'s own doc comment); the map exists so a future
- * duty that grows the same kind of narrowing needs one entry here, not a
- * second filtering scheme.
+ * to its name. Each value is the duty's own `*_CAPABILITIES` export, the
+ * same constant a real run's `permitted.includes()` reads, so `doctor`'s
+ * narrowing is never a second guess. Every entry is non-`null`: a capability
+ * the warrant grants a duty that the duty's ladder filters back out is inert,
+ * and `doctor` reports it as such (see the `unused` finding). The values live
+ * in each duty's `capabilities.ts` — never re-typed here — because `main.ts`
+ * calls `run()` at import time and cannot be the module doctor mode imports
+ * this from (see those files' doc comments).
  */
-const LADDER_BY_DUTY: ReadonlyMap<string, readonly Capability[] | null> = new Map([
-  ["translate", null],
-  ["triage", null],
-  ["duplicate", null],
-  ["respond", null],
+const LADDER_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
+  ["translate", TRANSLATE_CAPABILITIES],
+  ["triage", TRIAGE_CAPABILITIES],
+  ["duplicate", DUPLICATE_CAPABILITIES],
+  ["respond", RESPOND_CAPABILITIES],
   ["lifecycle", LIFECYCLE_CAPABILITIES],
-  ["harmonise", null],
-  ["dependa", null],
+  ["harmonise", HARMONISE_CAPABILITIES],
+  ["dependa", DEPENDA_CAPABILITIES],
+  ["review", REVIEW_CAPABILITIES],
 ]);
 
 /** Whether a finding stops a real run (`red`) or describes a healthy or weather condition (`green`). */
@@ -140,8 +169,8 @@ export interface AuthorityRow {
   /**
    * Capabilities the warrant granted this duty that its own ladder filters
    * back out — granted, but never asked for, the same distinction a real
-   * `lifecycle` run's `core.notice` warns about at runtime. Empty for every
-   * duty whose `LADDER_BY_DUTY` entry is `null`.
+   * `lifecycle` run's `core.notice` warns about at runtime. Non-empty for a
+   * duty spells an inert grant, which `diagnose` reports red.
    */
   readonly unused: readonly Capability[];
 }
@@ -333,14 +362,70 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
   const scoped = duty === null ? DUTIES : [duty];
   const authorityRows = scoped.map((name) => authorityRow(authority.warrant, name));
 
+  // Inert grants: a capability the warrant granted a duty that the duty's own
+  // ladder has no use for. The runtime ignores it, so a report that listed it
+  // as effective authority would be a lie. RED, because it is the same
+  // misspelled-capability failure the warrant reader names at parse time
+  // ("Refused rather than dropped, everywhere") — only narrowable per duty in
+  // doctor, where each duty's ladder lives. `duplicate: [close]` is the
+  // canonical case. Scoped to the same duties the table reports, so a
+  // `duty`-scoped run flags only the duty it was asked about.
+  const inert = authorityRows.filter((row) => row.unused.length > 0);
+  for (const row of inert) {
+    const effective = row.granted.length === 0 ? "[none]" : `[${row.granted.join(", ")}]`;
+    findings.push({
+      severity: "red",
+      text:
+        `\`${row.duty}\` is granted ${row.unused.map((capability) => `\`${capability}\``).join(", ")}, ` +
+        `which this duty has no use for — the warrant says more than a real run ` +
+        `would apply (effective: \`${row.duty}: ${effective}\`). A capability nobody reads is a ` +
+        "misspelled grant, so `doctor` flags it the way the reader refuses a misspelled " +
+        "capability at parse time.",
+    });
+  }
+
+  // Configured languages outside the bundled profile set: weather, never red —
+  // the runtime deliberately treats an unsupported code as "not a failure"; it
+  // just sends every ambiguous thread to the model instead of the free
+  // byte-ngram step (see detectByProfile, and docs/guides/languages.md).
+  // Resolved with the same `resolveLanguages` the duties use; when the warrant
+  // is silent the run keeps each duty's documented default (`en, vi, zh`), all
+  // inside the profile set — so only the warrant's own key can ever flag.
+  if (authority.warrant.languages !== null) {
+    const { languages: resolvedLanguages } = resolveLanguages(authority.warrant, []);
+    const unsupported = resolvedLanguages.filter(
+      (language) => !PROFILE_CODES.has(language.code.toLowerCase()),
+    );
+    if (unsupported.length > 0) {
+      findings.push({
+        severity: "green",
+        text:
+          `\`languages:\` names ${unsupported.map((language) => `\`${language.code}\``).join(", ")} — ` +
+          "outside the bundled byte-ngram profile set, so the free `detectByProfile` step " +
+          "declines for the whole run and every ambiguous thread is sent to the model instead. " +
+          "Not a failure; spell the regional identity in the label and use the base " +
+          "profiled code to keep the free step, or add the variant explicitly as a " +
+          "candidate — the `code:Label:Script` long form keeps the code verbatim, so it " +
+          "changes nothing here.",
+      });
+    }
+  }
+
   // One aggregated note, not one per duty — named once so a reader sees the
   // whole set of duties running unmodified at their own built-in default in
-  // a single place. `isDefault` alone is deliberately the only test: a duty
-  // `warrant.unnamed` denies is a different, separate fact, already visible
-  // in its own row (`denied: true`), and never belongs in this note — a
-  // written `duties:` block that leaves a duty out denies it, it does
+  // a single place. `isDefault` alone is deliberately not the only test: a
+  // duty `warrant.unnamed` denies is a different, separate fact, already
+  // visible in its own row (`denied: true`), and never belongs in this note —
+  // a written `duties:` block that leaves a duty out denies it, it does
   // not default it (see `unnamed`'s own doc comment in `core/warrant.ts`).
-  const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
+  // And a duty with an inert grant is excluded too: it carries its own red
+  // finding just above, and "exactly its own built-in default right now"
+  // next to a red flag would read as the report contradicting itself.
+  // `unused` is what an inert grant took to the red finding, so filtering on
+  // it keeps every duty the red loop already named out of this green note.
+  const defaulted = authorityRows.filter(
+    (row) => row.isDefault && !row.denied && row.unused.length === 0,
+  );
   if (defaulted.length > 0) {
     findings.push({
       severity: "green",
@@ -495,9 +580,12 @@ function authorityRow(warrant: Warrant, duty: string): AuthorityRow {
     return { duty, granted: [], denied: true, isDefault: false, unused: [] };
   }
   const grantedRaw = warrant.granted(duty, fallback);
-  const ladder = LADDER_BY_DUTY.get(duty) ?? null;
-  const granted = ladder === null ? grantedRaw : grantedRaw.filter((c) => ladder.includes(c));
-  const unused = ladder === null ? [] : grantedRaw.filter((c) => !ladder.includes(c));
+  // Every duty `DUTIES` names has a ladder; the empty fallback covers a name
+  // this build never heard of (left refusing everything) so the row is still
+  // well-formed instead of crashing the report.
+  const ladder = LADDER_BY_DUTY.get(duty) ?? [];
+  const granted = grantedRaw.filter((c) => ladder.includes(c));
+  const unused = grantedRaw.filter((c) => !ladder.includes(c));
   return { duty, granted, denied: false, isDefault: sameCapabilities(granted, fallback), unused };
 }
 

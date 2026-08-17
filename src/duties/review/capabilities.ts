@@ -20,3 +20,15 @@ import type { Capability } from "../../core/warrant.js";
  * `duties:` block explicitly grants `comment`.
  */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = [];
+
+/**
+ * The full ladder this duty ever asks for — anything else a warrant names
+ * for it is inert here, not an error; see `Warrant.granted`'s own doc
+ * comment for why a per-duty enumeration is not this module's to validate.
+ * Exported so `doctor` mode can apply the exact same narrowing a real run
+ * applies, rather than a second guess at which capabilities this duty
+ * actually has a use for. The read-set is every `permitted.includes()`
+ * `review`'s runtime applies: `comment` is the one effect posting a review
+ * verdict — a public claim about a pull request.
+ */
+export const REVIEW_CAPABILITIES: readonly Capability[] = ["comment"];

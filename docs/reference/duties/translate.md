@@ -63,6 +63,8 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
+          # Not an action input — the languages to translate into live under
+          # the warrant's `languages:` key (see Configuration below).
           dry-run: true # safe first run — remove when you trust it
 ```
 
@@ -278,12 +280,13 @@ A skipped language is not in the fingerprint, so the next run tries it
 again rather than reading its own claim and stopping.
 
 **Running on the unconfigured `languages` default is noted, once, rather
-than left silent.** `en, vi, zh` is `languages`'s own default in
-`action.yml`, meant to make a first run cheap to try — but a project that
-never comes back to choose on purpose is making a decision without knowing
-it made one. A run that reaches this default with no `languages:` key in the
-warrant either logs a `notice` saying so; writing either one, to whatever
-value, clears it for good.
+than left silent.** `en, vi, zh` is the duty's own default, decided in code —
+`DEFAULT_LANGUAGES = parseLanguages("en, vi, zh")` in `src/duties/translate/main.ts` —
+applied whenever the warrant's `languages:` key is silent, and meant to make a
+first run cheap to try. But a project that never comes back to choose on
+purpose is making a decision without knowing it made one. A run that reaches
+this default with no `languages:` key in the warrant logs a `notice` saying
+so; writing the key, to whatever value, clears it for good.
 
 ## Dry-run behavior
 

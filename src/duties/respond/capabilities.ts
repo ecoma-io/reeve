@@ -23,3 +23,15 @@ import type { Capability } from "../../core/warrant.js";
  * shapes resolve through the same `fallback` argument.
  */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = [];
+
+/**
+ * The full ladder this duty ever asks for — anything else a warrant names
+ * for it is inert here, not an error; see `Warrant.granted`'s own doc
+ * comment for why a per-duty enumeration is not this module's to validate.
+ * Exported so `doctor` mode can apply the exact same narrowing a real run
+ * applies, rather than a second guess at which capabilities this duty
+ * actually has a use for. The read-set is every `permitted.includes()`
+ * `respond`'s runtime applies: `comment` is the whole of posting a first
+ * reply.
+ */
+export const RESPOND_CAPABILITIES: readonly Capability[] = ["comment"];

@@ -653,8 +653,11 @@ averages. `pnpm eval <duty>`, fixtures committed, results committed — the one
 number the whole thesis rests on, published from this repository and
 reproducible by anyone who clones it.
 
-**Missing:** there is no fixture set and no harness in this repository yet, so
-every accuracy claim on these pages remains unbacked until this stage lands.
+**Committed and CI-gated:** the fixture set and harness live in `eval/` —
+`eval/harness.ts` plus 30 `.expected.json` fixtures across `triage`, `respond`
+and `harmonise` — and CI runs `pnpm eval all` on every push, so the
+fail-closed contract is exercised rather than this number resting on a
+hand-run.
 
 **Done when:** the worst-language number is published and reproducible from
 this repository.
