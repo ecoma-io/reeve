@@ -32502,6 +32502,9 @@ function markerFor(duty) {
 function authorHalf(text2) {
   return text2.replace(/\s+$/u, "");
 }
+function isFingerprint(payload) {
+  return /^[0-9a-f]{16}$/.test(payload);
+}
 function fingerprint(text2, keys) {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
   return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
@@ -36272,10 +36275,17 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
       // here calls the tracker or a model, only `marker.split` on text the
       // listing already fetched.
       //
+      // The digest, not the marker: the marker's shape is public and anyone
+      // can type it, so `<!-- reeve:translate source= -->` (or any payload that
+      // is not a real digest) carries no evidence a translation exists — and
+      // counts as untranslated, so a forged empty marker cannot permanently
+      // withhold a thread from sweeps. A real 16-hex digest is the only claim
+      // of prior work this line accepts.
+      //
       // Recursion guard on the same line: Reeve never translates its own
       // proposal pull request, and the listing already carries `isPullRequest`
       // and `body`, so this costs nothing beyond the marker check.
-      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread)
+      isFingerprint(marker.split(thread.body).fingerprint ?? "") || isReeveProposalPr(thread)
     ),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a

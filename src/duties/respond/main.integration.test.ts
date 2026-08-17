@@ -544,6 +544,29 @@ describe("the action", () => {
     expect(second.summary).toContain("answers a thread once");
   });
 
+  it("does not treat a bot's forged marker as this duty's own reply", async () => {
+    // A second automation (not Reeve) wrote a comment carrying the marker's
+    // public shape but not a real digest. That is not evidence this duty
+    // already answered — only a payload this duty's own `fingerprint`
+    // produces is, so the first reply is still owed.
+    stub.comments.push({
+      id: 901,
+      body: `Ran the checks.\n\n<!-- reeve:respond source= -->`,
+      login: "some-other-bot",
+      type: "Bot",
+    });
+    stub.body = VIETNAMESE;
+    stub.answer = stageAnswer({
+      draft: JSON.stringify({ text: REPLY, confidence: 0.92 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(2); // the forged one + this duty's own
+    expect(run.outputs.responded).toBe("true");
+  });
+
   it("grounds the draft in a correction this project already made", async () => {
     await remember({});
     let seenDecisions = "";

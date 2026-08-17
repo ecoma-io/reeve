@@ -33323,6 +33323,9 @@ function markerFor(duty) {
 function authorHalf(text2) {
   return text2.replace(/\s+$/u, "");
 }
+function isFingerprint(payload) {
+  return /^[0-9a-f]{16}$/.test(payload);
+}
 function fingerprint(text2, keys) {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
   return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
@@ -35934,7 +35937,7 @@ async function walkReplies(api, at, settled) {
   let alreadyAnswered = false;
   let humanFirst = false;
   for (const reply of replies) {
-    if (marker.split(reply.body).fingerprint !== null) {
+    if (isFingerprint(marker.split(reply.body).fingerprint ?? "")) {
       alreadyAnswered = true;
       break;
     }

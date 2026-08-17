@@ -1407,10 +1407,12 @@ describe("the sweep", () => {
   });
 
   it("skips a thread whose body already carries this duty's marker, at no cost", async () => {
+    // A real digest — the shape `fingerprint` produces and nothing narrower is
+    // accepted as "already translated"; see the forged-marker test below.
     stub.issues = [
       candidate(
         501,
-        `${VIETNAMESE}\n\n<!-- reeve:translate source=deadbeef -->`,
+        `${VIETNAMESE}\n\n<!-- reeve:translate source=deadbeefdeadbeef -->`,
         "2026-01-02T00:00:00Z",
       ),
       candidate(502, VIETNAMESE, "2026-01-01T00:00:00Z"),
@@ -1427,6 +1429,28 @@ describe("the sweep", () => {
     expect(stub.asked).toHaveLength(1);
     expect(run.summary).toContain("| #502 |");
     expect(run.summary).not.toContain("| #501 |");
+  });
+
+  it("does not let a forged marker permanently withhold a thread from sweeps", async () => {
+    // The marker's shape is public, so `<!-- reeve:translate source= -->` (or
+    // any payload that is not a real digest) carries no evidence a translation
+    // exists. Treating it as "already translated" would let anyone who can edit
+    // a thread body permanently suppress it from every future sweep — the
+    // withholding attack this line guards against.
+    stub.issues = [
+      candidate(511, `${VIETNAMESE}\n\n<!-- reeve:translate source= -->`, "2026-01-02T00:00:00Z"),
+      candidate(512, VIETNAMESE, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs());
+
+    expect(run.code).toBe(0);
+    // Both threads were translated — the forged marker on #511 was not taken
+    // as evidence of prior work.
+    expect(run.outputs.processed).toBe("2");
+    expect(run.outputs.skipped).toBe("0");
+    expect(run.summary).toContain("| #511 |");
+    expect(run.summary).toContain("| #512 |");
   });
 
   it("refuses `sweep` combined with `number`, before spending anything", async () => {

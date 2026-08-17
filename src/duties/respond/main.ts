@@ -79,7 +79,7 @@ import { type Language, parseLanguages } from "../../core/languages.js";
 
 /** What detection reads when the warrant's `languages:` key is silent. */
 const DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
-import { isReeveProposalPr } from "../../core/marker.js";
+import { isFingerprint, isReeveProposalPr } from "../../core/marker.js";
 import { RECALLED } from "../../core/memory.js";
 import { createMeter } from "../../core/meter.js";
 import {
@@ -223,7 +223,11 @@ async function walkReplies(
   let alreadyAnswered = false;
   let humanFirst = false;
   for (const reply of replies) {
-    if (marker.split(reply.body).fingerprint !== null) {
+    // A real digest, not the bare marker: the marker's shape is public, and a
+    // stranger or a second bot typing it into a comment must not suppress this
+    // duty's first reply. Only a payload this repository's own `fingerprint`
+    // produces is evidence Reeve already answered.
+    if (isFingerprint(marker.split(reply.body).fingerprint ?? "")) {
       alreadyAnswered = true;
       break;
     }

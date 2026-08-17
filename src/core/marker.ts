@@ -215,6 +215,21 @@ export function authorHalf(text: string): string {
  * Truncated because it is compared, never inverted: it goes into a public body
  * and a reader should see a short opaque tag rather than a wall of hex.
  */
+/**
+ * Whether a marker's payload is one this repository's own `fingerprint`
+ * produces — sixteen lowercase hex characters.
+ *
+ * A marker carrying anything else is not a record of this run's work: it is
+ * text someone typed, whether a stranger forging the shape to steer a sweep or
+ * a truncation that lost the digest. Either way there is no evidence the
+ * described work was done, so a consumer treating a payload as "already done"
+ * must first see a real digest here. `fingerprint` truncates to 16 characters
+ * and never emits an empty string, so the two directions agree on the shape.
+ */
+export function isFingerprint(payload: string): boolean {
+  return /^[0-9a-f]{16}$/.test(payload);
+}
+
 export function fingerprint(text: string, keys: readonly string[]): string {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
   // A NUL separator: it cannot occur in any key a duty uses, and GitHub does

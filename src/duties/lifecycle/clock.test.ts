@@ -267,7 +267,12 @@ describe("evaluateTrack", () => {
     const f = facts({
       createdAt: T0,
       comments: [
-        comment({ body: `text\n\n${MARKER.render(fp0)}`, isBot: true, createdAt: firedAt }),
+        comment({
+          body: `text\n\n${MARKER.render(fp0)}`,
+          login: OWN_LOGIN,
+          isBot: true,
+          createdAt: firedAt,
+        }),
       ],
     });
     const notYetDue = evaluateTrack(t, f, { neverExempt: false, firstStepAfter: null }, firedAt);
@@ -277,6 +282,44 @@ describe("evaluateTrack", () => {
     const result = evaluateTrack(t, f, { neverExempt: false, firstStepAfter: null }, dueNow);
     expect(result.due?.stepIndex).toBe(1);
     expect(result.due?.anchor).toEqual(firedAt);
+  });
+
+  it("ignores a stranger's comment carrying the exact computed fingerprint", () => {
+    // The fingerprint is a deterministic public hash over the track name and
+    // the anchor, both of which any reader of the thread can observe — so a
+    // commenter who copies it in is not evidence this duty's own step fired.
+    // Without the two-part check, a stranger could anchor the clock to their
+    // own comment and walk a `when:` track into permanent suppression.
+    const t = track({
+      name: "stale",
+      steps: [step({ after: DAY, say: { kind: "built-in" } }), step({ after: DAY, close: true })],
+    });
+    const fp0 = fingerprintFor(t, 0, T0);
+    const f = facts({
+      createdAt: T0,
+      comments: [
+        // A human commenter who read the track name off the warrant and the
+        // anchor off the timeline, and pasted the computed digest.
+        comment({
+          body: `text\n\n${MARKER.render(fp0)}`,
+          login: "alice",
+          isBot: false,
+          createdAt: T0,
+        }),
+      ],
+    });
+
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(T0.getTime() + DAY),
+    );
+
+    // Step 0 did not fire: the whole track's clock still starts from T0 and
+    // nothing has advanced past it, so the first step is the one due.
+    expect(result.due).not.toBeNull();
+    expect(result.due?.stepIndex).toBe(0);
   });
 
   it("fires a label-only step from this run's own latest labeled event, not a marker", () => {
@@ -564,7 +607,12 @@ describe("evaluateLifecycle", () => {
       // in line; `reminder-track`'s own (unrelated) step is independently
       // due by the same clock.
       comments: [
-        comment({ body: `text\n\n${MARKER.render(fp0)}`, isBot: true, createdAt: firedAt }),
+        comment({
+          body: `text\n\n${MARKER.render(fp0)}`,
+          login: OWN_LOGIN,
+          isBot: true,
+          createdAt: firedAt,
+        }),
       ],
       events: [
         event({ event: "closed", isBot: true, createdAt: firedAt }),
@@ -597,7 +645,12 @@ describe("evaluateLifecycle", () => {
     const f = facts({
       createdAt: T0,
       comments: [
-        comment({ body: `text\n\n${MARKER.render(fp0)}`, isBot: true, createdAt: firedAt }),
+        comment({
+          body: `text\n\n${MARKER.render(fp0)}`,
+          login: OWN_LOGIN,
+          isBot: true,
+          createdAt: firedAt,
+        }),
         comment({ createdAt: T0 }),
         comment({ createdAt: T0 }),
       ],

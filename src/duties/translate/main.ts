@@ -94,7 +94,7 @@ import {
   type EndpointSpec,
 } from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
-import { isReeveProposalPr } from "../../core/marker.js";
+import { isFingerprint, isReeveProposalPr } from "../../core/marker.js";
 import {
   assembleClient,
   createWeather,
@@ -332,10 +332,17 @@ async function runSweep(
       // here calls the tracker or a model, only `marker.split` on text the
       // listing already fetched.
       //
+      // The digest, not the marker: the marker's shape is public and anyone
+      // can type it, so `<!-- reeve:translate source= -->` (or any payload that
+      // is not a real digest) carries no evidence a translation exists — and
+      // counts as untranslated, so a forged empty marker cannot permanently
+      // withhold a thread from sweeps. A real 16-hex digest is the only claim
+      // of prior work this line accepts.
+      //
       // Recursion guard on the same line: Reeve never translates its own
       // proposal pull request, and the listing already carries `isPullRequest`
       // and `body`, so this costs nothing beyond the marker check.
-      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread),
+      isFingerprint(marker.split(thread.body).fingerprint ?? "") || isReeveProposalPr(thread),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
     // thread it cannot even begin — leaving it for `remaining` is cheaper

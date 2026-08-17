@@ -33855,7 +33855,7 @@ function evaluateTrack(track, facts, overrideRes, now) {
     let firedAt = null;
     if (talks) {
       const marker = facts.comments.find(
-        (comment) => MARKER.split(comment.body).fingerprint === fp
+        (comment) => comment.login === facts.ownLogin && MARKER.split(comment.body).fingerprint === fp
       );
       firedAt = marker?.createdAt ?? null;
     } else if (step.label !== null) {
