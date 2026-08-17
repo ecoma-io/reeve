@@ -22,6 +22,13 @@
  *   answer about a diff that was actually reviewed.
  * - `denied` — the warrant's `duties:` block never names review; the run is
  *   refused before the pull request is read, and nothing is posted.
+ * - `id-pr` — the pull request is Indonesian, so detection reaches the model
+ *   (Latin script, no bundled profile) and must answer `id`; the assertion
+ *   reads the summary's `| Language | id |` row. A misidentifying answer
+ *   breaks this fixture as `failed`, never a clean stop.
+ * - `update-pr` — the stub serves a previous review comment under this duty's
+ *   own marker; the run reconciles the moved finding and replaces the comment
+ *   in place, exercising the PATCH path instead of a second POST.
  *
  * The fixture's `.expected.json` reads:
  *
@@ -59,6 +66,13 @@ export interface ReviewPr {
 
 export interface ReviewEffect {
   commented: boolean;
+  /**
+   * Which write the run used for its one comment — `post` when no previous
+   * marker existed, `patch` when it replaced one in place. `null` when the run
+   * wrote nothing. Lets a fixture pin that a rerun exercised the update path
+   * and not a second post.
+   */
+  wrote: "post" | "patch" | null;
 }
 
 /** What the run did to the pull request, as the stub routes saw it. */
@@ -79,6 +93,8 @@ export interface ReviewScenario {
   readonly verdict: string;
   /** The language-detection answer, when detection reaches a model. */
   readonly detect: string;
+  /** A review comment a previous run left, or null on the first review. */
+  readonly previous: { readonly body: string } | null;
   /** The assertions this fixture declares. */
   readonly expected: ReviewAssertions;
 }
@@ -95,6 +111,15 @@ export interface ReviewFixture {
   readonly "verdict-over"?: Record<string, unknown>;
   /** The language detection must answer when it reaches a model. */
   readonly detect?: string;
+  /**
+   * A review comment a previous run left — present forces the update-in-place
+   * path (the PATCH, not a second POST). The body must carry this duty's own
+   * marker (`<!-- reeve:review source=… -->`) written by a bot author, exactly
+   * as a real run leaves it.
+   */
+  readonly previous?: {
+    readonly body: string;
+  };
   readonly expected?: ReviewAssertions;
 }
 
@@ -103,6 +128,19 @@ export interface ReviewAssertions {
   readonly commented?: string;
   readonly findings?: string;
   readonly "head-sha"?: string;
+  /**
+   * The language code the run must have identified the pull request as, when
+   * detection reaches the model. Review carries no `language` output — the
+   * summary's `### Verdict` table renders the row `| Language | <code> |` —
+   * so this assertion reads that row (see `reviewLine` in the runner).
+   */
+  readonly language?: string;
+  /**
+   * The write the run must have used for its one comment: `post` on a first
+   * review, `patch` when it replaced its own previous comment in place. A
+   * fixture that declares it pins which half of the comment trio ran.
+   */
+  readonly wrote?: "post" | "patch";
 }
 
 /** A verdict, in the shape the review prompt asks for. */
@@ -165,7 +203,17 @@ export function reviewRoutes(scenario: ReviewScenario, tracker: ReviewTracker): 
       // The comment trio: list (the previous-run memory search reads it),
       // create (the run posts its review), update (a rerun replaces in place).
       if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.exec(url) !== null) {
-        send(response, 200, []);
+        const existing =
+          scenario.previous === null
+            ? []
+            : [
+                {
+                  id: 7,
+                  body: scenario.previous.body,
+                  user: { login: "reeve[bot]", type: "Bot" },
+                },
+              ];
+        send(response, 200, existing);
         return true;
       }
       if (
@@ -173,6 +221,7 @@ export function reviewRoutes(scenario: ReviewScenario, tracker: ReviewTracker): 
         /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.exec(url) !== null
       ) {
         tracker.effect.commented = true;
+        tracker.effect.wrote = "post";
         send(response, 201, { id: 1 });
         return true;
       }
@@ -181,7 +230,8 @@ export function reviewRoutes(scenario: ReviewScenario, tracker: ReviewTracker): 
         /^\/repos\/[^/]+\/[^/]+\/issues\/comments\/\d+$/.exec(url) !== null
       ) {
         tracker.effect.commented = true;
-        send(response, 200, { id: 1 });
+        tracker.effect.wrote = "patch";
+        send(response, 200, { id: 7 });
         return true;
       }
 
@@ -223,11 +273,12 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     rules: fixture.rules ?? null,
     verdict: verdictOf(fixture["verdict-over"] ?? {}),
     detect: fixture.detect ?? "en",
+    previous: fixture.previous ?? null,
     expected: fixture.expected ?? {},
   };
 }
 
 /** A fresh tracker for one fixture run. */
 export function newTracker(): ReviewTracker {
-  return { effect: { commented: false } };
+  return { effect: { commented: false, wrote: null } };
 }

@@ -1,0 +1,29 @@
+{
+  "description": "A pull request whose title is Indonesian — the one review fixture that makes the provider-based language identification step actually run. Indonesian is written in Latin script, so script narrowing keeps every Latin candidate; the profile step's bundled data does not cover the language, so the question reaches the model, which answers `id`. The fixture scripts `detect: id` — a setUp that lets a misidentifying model answer break this fixture as `failed` (via the summary's `| Language | id |` row), exactly the fail-closed direction the strict language assertion exists for. The diff is small and the verdict clean, so the review posts the empty chrome.",
+  "warrant": "version: 1\nlanguages:\n  - en\n  - vi\n  - zh\n  - id\nduties:\n  review: [comment]\n",
+  "pr": {
+    "title": "Perbaiki penanganan kesalahan pada saat menyimpan pengaturan",
+    "body": "Pull request ini memperbaiki penanganan kesalahan pada saat menyimpan pengaturan. Saya sudah menguji secara lokal dan perbaikan ini menyelesaikan masalahnya."
+  },
+  "files": [
+    {
+      "filename": "src/settings.ts",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,2 @@\n+export const SAVE_TIMEOUT_MS = 5000;\n+export const SAVE_RETRIES = 3;"
+    }
+  ],
+  "detect": "id",
+  "verdict-over": {
+    "findings": [],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "0",
+    "head-sha": "abc123",
+    "language": "id",
+    "wrote": "post"
+  }
+}
