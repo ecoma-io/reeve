@@ -224,7 +224,7 @@ cost of the last rung a human review thread has — conversation itself. See
 
 ## Deterministic findings, before any model
 
-The repository rules file carries three deterministic pre-checks that fire
+The repository rules file carries four deterministic pre-checks that fire
 before a model is asked anything, each _always-right by construction_:
 
 - **`ignore.files` / `ignore.paths`** — files that never reach the model.
@@ -234,6 +234,18 @@ before a model is asked anything, each _always-right by construction_:
   per phrase (capped at 40 per phrase) with the printed line number — the
   only reason a deterministic check can report a line a model was never
   shown.
+- **`architecture`** — forbidden dependency boundaries: layers (a name → a
+  list of path globs) and edges (a `from` side that must not depend on a `to`
+  side, each a layer name or a path glob). An import in the diff that crosses
+  a forbidden edge is a finding with the printed line number and the
+  evidence sentence — a deterministic check where the repository's own rules
+  prove the violation, before any model is asked. Direction matters:
+  `domain → infrastructure` fires only on `domain` importing `infrastructure`,
+  never the reverse, never same-layer. `node:`/`https:` builtins and bare
+  packages never resolve into the repo and can never fire; an intra-repo
+  package boundary is caught with a glob (`packages/a/**` → `packages/b/**`)
+  or an alias (`@/` → `src/`). Type-only imports count as edges — a type
+  import is still a dependency. Capped at 40 findings per run.
 - **`rules`** — the named rules a finding can cite, replacing the one
   built-in default rule (`dedup`, repeated code).
 
@@ -248,6 +260,17 @@ blocked:
   - phrase: "TODO-FIXME"
     severity: critical
     note: "Must be resolved before merge."
+architecture:
+  layers:
+    domain: ["src/domain/**"]
+    infrastructure: ["src/infra/**"]
+  edges:
+    - from: domain
+      to: infrastructure
+      severity: critical
+      note: Domain must not depend on infrastructure.
+  aliases:
+    "@/": "src/"
 rules:
   - id: dedup
     name: Repeated code

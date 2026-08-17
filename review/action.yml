@@ -93,12 +93,12 @@ inputs:
     description: >-
       A repo-relative path to the repository's own review rules, a YAML file
       in the checkout (see `docs/reference/duties/review.md`): ignore lists,
-      generated-file suffixes, phrases the diff must not contain, and rules a
-      finding can cite. Deterministic pre-checks fire before any model is
-      asked; the same `yaml` parser the warrant uses reads this file, so a
-      maintainer learns one format. Missing is an empty rules set, not an
-      error — an unconfigured repository is reviewed by the built-in default
-      rules alone.
+      generated-file suffixes, phrases the diff must not contain, architecture
+      boundary rules, and rules a finding can cite. Deterministic pre-checks
+      fire before any model is asked; the same `yaml` parser the warrant uses
+      reads this file, so a maintainer learns one format. Missing is an empty
+      rules set, not an error — an unconfigured repository is reviewed by the
+      built-in default rules alone.
     required: false
     default: .github/reeve-rules.yml
 
