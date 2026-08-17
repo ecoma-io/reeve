@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { parseVerdict, parseFinding, review, NOTHING } from "./verdict.js";
+import { parseVerdict, parseFinding } from "./verdict.js";
 import type { ShownFile } from "./pr.js";
-import { createWeather, type Provider } from "../../core/provider.js";
 
 function file(overrides: Partial<ShownFile> = {}): ShownFile {
   return {
@@ -114,82 +113,5 @@ describe("parseFinding", () => {
       FILES,
     );
     expect(out?.snippet).toHaveLength(120);
-  });
-});
-
-function providerOf(content: string | null): Provider {
-  return {
-    complete: () =>
-      Promise.resolve(
-        content === null
-          ? { ok: false, model: "m", kind: "capacity", reason: "down" }
-          : {
-              ok: true,
-              model: "m",
-              content,
-              finishReason: "stop",
-              cost: { input: 1, output: 1, total: 2 },
-            },
-      ),
-  };
-}
-
-function request(overrides: Record<string, unknown> = {}) {
-  return {
-    provider: providerOf(JSON.stringify({ findings: [], confidence: 0.9 })),
-    models: ["m"],
-    prTitle: "T",
-    prBody: "",
-    headSha: "abc",
-    files: FILES,
-    rules: [
-      { id: "dedup", name: "Repeated code", marker: "", body: "", severity: "warning" as const },
-    ],
-    language: null,
-    context: { sections: [], text: null, totalChars: 0, readFiles: 0 },
-    weather: createWeather(),
-    ...overrides,
-  };
-}
-
-describe("review", () => {
-  it("returns NOTHING without asking when the diff has no files to show", async () => {
-    const out = await review({ ...request(), files: [] });
-    expect(out).toEqual({ verdict: NOTHING, failures: [], unreadable: null, model: null });
-  });
-
-  it("returns NOTHING and the failures when every model fails on capacity", async () => {
-    const out = await review({ ...request(), provider: providerOf(null) });
-    expect(out.verdict).toBe(NOTHING);
-    expect(out.failures.length).toBeGreaterThan(0);
-    expect(out.model).toBeNull();
-  });
-
-  it("reports a truncated answer as a protocol failure", async () => {
-    const provider: Provider = {
-      complete: () =>
-        Promise.resolve({
-          ok: true,
-          model: "m",
-          content: '{"findings": ',
-          finishReason: "length",
-          cost: { input: 1, output: 1, total: 2 },
-        }),
-    };
-    const out = await review({ ...request(), provider });
-    expect(out.failures[0]?.kind).toBe("protocol");
-  });
-
-  it("returns the parsed verdict and the model that wrote it", async () => {
-    const out = await review(request());
-    expect(out.model).toBe("m");
-    expect(out.unreadable).toBeNull();
-    expect(out.verdict.findings).toEqual([]);
-  });
-
-  it("marks an answer that did not parse as unreadable", async () => {
-    const out = await review({ ...request(), provider: providerOf("not json") });
-    expect(out.unreadable).toBe("not json");
-    expect(out.verdict).toBe(NOTHING);
   });
 });

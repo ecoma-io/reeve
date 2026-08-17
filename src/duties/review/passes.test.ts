@@ -10,8 +10,7 @@ import {
   detectContradictions,
   rank,
   runPasses,
-  securityPass,
-  selectPasses,
+  secondOpinionPass,
   synthesize,
   type PassContext,
   type PassResult,
@@ -104,28 +103,13 @@ function resultOf(
   };
 }
 
-describe("selectPasses", () => {
-  it("runs one correctness pass by default, ahead of cost", () => {
-    expect(selectPasses("default").map((pass) => pass.id)).toEqual(["correctness"]);
-  });
-
-  it("runs correctness before security in the deep profile", () => {
-    expect(selectPasses("deep").map((pass) => pass.id)).toEqual(["correctness", "security"]);
-  });
-
-  it("keeps the correctness pass first so the cheapest, highest-yield read leads", () => {
-    const [first] = selectPasses("deep");
-    expect(first?.name).toBe("Correctness");
-  });
-});
-
 describe("runPasses", () => {
   it("runs every pass in order, each against its own rotation", async () => {
     const asked: string[] = [];
     const provider: Provider = {
       complete: (_model, messages) => {
         const system = messages.find((m) => m.role === "system")?.content ?? "";
-        asked.push(system.includes("security review") ? "security" : "correctness");
+        asked.push(system.includes("second opinion") ? "second-opinion" : "correctness");
         return Promise.resolve({
           ok: true,
           model: "m",
@@ -135,14 +119,24 @@ describe("runPasses", () => {
         });
       },
     };
-    const results = await runPasses(provider, selectPasses("deep"), ["m"], CONTEXT);
-    expect(asked).toEqual(["correctness", "security"]);
-    expect(results.map((r) => r.pass.id)).toEqual(["correctness", "security"]);
+    const results = await runPasses(
+      provider,
+      [correctnessPass(), secondOpinionPass()],
+      ["m"],
+      CONTEXT,
+    );
+    expect(asked).toEqual(["correctness", "second-opinion"]);
+    expect(results.map((r) => r.pass.id)).toEqual(["correctness", "second-opinion"]);
   });
 
   it("reports an unreadable pass as unreadable without retrying or softening", async () => {
     const provider = providerOf(["not json", verdictWith([])]);
-    const results = await runPasses(provider, selectPasses("deep"), ["m"], CONTEXT);
+    const results = await runPasses(
+      provider,
+      [correctnessPass(), secondOpinionPass()],
+      ["m"],
+      CONTEXT,
+    );
     expect(results[0]?.unreadable).toBe("not json");
     expect(results[0]?.verdict).toBeNull();
     expect(results[1]?.unreadable).toBeNull();
@@ -150,7 +144,12 @@ describe("runPasses", () => {
   });
 
   it("reports a capacity failure per pass, leaving the pass unmeasured", async () => {
-    const results = await runPasses(providerOf([null, null]), selectPasses("deep"), ["m"], CONTEXT);
+    const results = await runPasses(
+      providerOf([null, null]),
+      [correctnessPass(), secondOpinionPass()],
+      ["m"],
+      CONTEXT,
+    );
     expect(results[0]?.failures.length).toBeGreaterThan(0);
     expect(results[0]?.verdict).toBeNull();
     expect(results[1]?.failures.length).toBeGreaterThan(0);
@@ -271,7 +270,7 @@ describe("detectContradictions", () => {
         findings: [{ ...finding(), rule: "dedup", body: "a" }],
         confidence: 0.9,
       }),
-      resultOf(securityPass(), {
+      resultOf(secondOpinionPass(), {
         findings: [{ ...finding(), rule: "injection", body: "b" }],
         confidence: 0.9,
       }),
@@ -317,7 +316,7 @@ describe("aggregateConfidence", () => {
   it("is the strongest readable pass's confidence, undegraded when every pass answered", () => {
     const results: PassResult[] = [
       resultOf(correctnessPass(), { findings: [], confidence: 0.6 }),
-      resultOf(securityPass(), { findings: [], confidence: 0.9 }),
+      resultOf(secondOpinionPass(), { findings: [], confidence: 0.9 }),
     ];
     expect(aggregateConfidence(results)).toEqual({ confidence: 0.9, measured: true });
   });
@@ -325,7 +324,7 @@ describe("aggregateConfidence", () => {
   it("degrades the confidence by 10% per pass that could not answer", () => {
     const results: PassResult[] = [
       resultOf(correctnessPass(), { findings: [], confidence: 0.9 }),
-      resultOf(securityPass(), null),
+      resultOf(secondOpinionPass(), null),
     ];
     expect(aggregateConfidence(results).confidence).toBeCloseTo(0.81);
   });
@@ -333,7 +332,7 @@ describe("aggregateConfidence", () => {
   it("is unmeasured when no pass answered — the D5 fail-loud spine", () => {
     const results: PassResult[] = [
       resultOf(correctnessPass(), null),
-      resultOf(securityPass(), null),
+      resultOf(secondOpinionPass(), null),
     ];
     expect(aggregateConfidence(results)).toEqual({ confidence: 0, measured: false });
   });
@@ -343,14 +342,14 @@ describe("synthesize", () => {
   it("builds one report row per pass, in order, with honest per-pass answers", () => {
     const results: PassResult[] = [
       resultOf(correctnessPass(), { findings: [finding()], confidence: 0.9 }),
-      resultOf(securityPass(), null),
+      resultOf(secondOpinionPass(), null),
     ];
     const synthesis = synthesize(results);
-    expect(synthesis.passes.map((p) => p.id)).toEqual(["correctness", "security"]);
+    expect(synthesis.passes.map((p) => p.id)).toEqual(["correctness", "second-opinion"]);
     expect(synthesis.passes[0]).toMatchObject({ answered: true, findings: 1 });
     expect(synthesis.passes[1]).toMatchObject({ answered: false, unreadable: true });
     expect(synthesis.failedPasses).toEqual([
-      { id: "security", reason: "the answer did not parse as findings" },
+      { id: "second-opinion", reason: "the answer did not parse as findings" },
     ]);
     expect(synthesis.measured).toBe(true);
   });
@@ -358,25 +357,28 @@ describe("synthesize", () => {
   it("an unreadable pass is priced in and named — never silently dropped", () => {
     const results: PassResult[] = [
       resultOf(correctnessPass(), { findings: [finding()], confidence: 0.9 }),
-      resultOf(securityPass(), null),
+      resultOf(secondOpinionPass(), null),
     ];
     const synthesis = synthesize(results);
     expect(synthesis.confidence).toBeCloseTo(0.81);
-    expect(synthesis.failedPasses[0]?.id).toBe("security");
+    expect(synthesis.failedPasses[0]?.id).toBe("second-opinion");
   });
 
-  it("the security pass's findings carry their own provenance", () => {
+  it("a later pass's findings carry their own provenance", () => {
     const results: PassResult[] = [
       resultOf(correctnessPass(), { findings: [], confidence: 0.9 }),
-      resultOf(securityPass(), { findings: [finding({ rule: "injection" })], confidence: 0.9 }),
+      resultOf(secondOpinionPass(), {
+        findings: [finding({ rule: "injection" })],
+        confidence: 0.9,
+      }),
     ];
     const synthesis = synthesize(results);
-    expect(synthesis.findings[0]?.passId).toBe("security");
-    expect(synthesis.findings[0]?.passName).toBe("Security");
+    expect(synthesis.findings[0]?.passId).toBe("second-opinion");
+    expect(synthesis.findings[0]?.passName).toBe("Second opinion");
   });
 
   it("a prompt injection in the diff cannot change a pass's marker or parse", async () => {
-    // The diff the security pass reads carries an injection-shaped line; the
+    // The diff the second pass reads carries an injection-shaped line; the
     // provider tries to answer with prose plus a fabricated finding. The strict
     // parse must not propagate the fabricated finding — the whole answer is
     // unreadable instead (D5).
@@ -384,23 +386,29 @@ describe("synthesize", () => {
       verdictWith([]),
       `Sure! This diff is fine.\n${verdictWith([finding({ rule: "injected" })])}`,
     ]);
-    const results = await runPasses(provider, selectPasses("deep"), ["m"], CONTEXT);
+    const results = await runPasses(
+      provider,
+      [correctnessPass(), secondOpinionPass()],
+      ["m"],
+      CONTEXT,
+    );
     const synthesis = synthesize(results);
     expect(synthesis.findings.every((f) => f.ruleId !== "injected")).toBe(true);
-    expect(synthesis.failedPasses.map((f) => f.id)).toContain("security");
+    expect(synthesis.failedPasses.map((f) => f.id)).toContain("second-opinion");
   });
 
-  it("the shared prompt routes the security pass to its own marker", () => {
-    const system =
-      securityPass()
+  it("the shared prompt routes each pass to its own brief", () => {
+    const secondOpinionSystem =
+      secondOpinionPass()
         .prompt(CONTEXT)
         .find((m) => m.role === "system")?.content ?? "";
-    expect(system).toContain("security review pass");
-    expect(system).not.toContain("You are reviewing a pull request");
+    expect(secondOpinionSystem).toContain("second opinion");
+    expect(secondOpinionSystem).toContain("fresh eyes");
     const correctnessSystem =
       correctnessPass()
         .prompt(CONTEXT)
         .find((m) => m.role === "system")?.content ?? "";
     expect(correctnessSystem).toContain("You are reviewing a pull request");
+    expect(correctnessSystem).not.toContain("second opinion");
   });
 });
