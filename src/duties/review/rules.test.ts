@@ -79,6 +79,107 @@ describe("parseRules", () => {
     expect(parseRules("version: 1").version).toBe(1);
     expect(parseRules("version: 5").version).toBe(1);
   });
+
+  it("parses a complete architecture section", () => {
+    const rules = parseRules(
+      [
+        "version: 1",
+        "architecture:",
+        "  layers:",
+        "    domain:",
+        "      - src/domain/**",
+        "    infrastructure:",
+        "      - src/infra/**",
+        "  edges:",
+        "    - from: domain",
+        "      to: infrastructure",
+        "      severity: critical",
+        "      note: Domain must not depend on infra.",
+        "  aliases:",
+        '    "@/": "src/"',
+      ].join("\n"),
+    );
+    expect(rules.architecture).toEqual({
+      layers: { domain: ["src/domain/**"], infrastructure: ["src/infra/**"] },
+      edges: [
+        {
+          from: "domain",
+          to: "infrastructure",
+          severity: "critical",
+          note: "Domain must not depend on infra.",
+        },
+      ],
+      aliases: { "@/": "src/" },
+    });
+    expect(rules.warnings).toEqual([]);
+  });
+
+  it("treats an absent architecture section as empty", () => {
+    const rules = parseRules("version: 1\nblocked:\n  - phrase: x\n");
+    expect(rules.architecture).toEqual({ layers: {}, edges: [], aliases: {} });
+    expect(rules.warnings).toEqual([]);
+  });
+
+  it("warns and drops malformed layers, edges, and aliases", () => {
+    const rules = parseRules(
+      [
+        "version: 1",
+        "architecture:",
+        "  layers:",
+        "    domain: not-a-list",
+        "    infra:",
+        "      - 42",
+        "    ok:",
+        "      - src/ok/**",
+        "  edges: not-a-list",
+        "  aliases:",
+        '    "@/": 42',
+      ].join("\n"),
+    );
+    expect(rules.architecture.layers).toEqual({ ok: ["src/ok/**"] });
+    expect(rules.architecture.edges).toEqual([]);
+    expect(rules.architecture.aliases).toEqual({});
+    expect(rules.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("warns and drops an edge missing from or to, and defaults severity to warning", () => {
+    const rules = parseRules(
+      [
+        "version: 1",
+        "architecture:",
+        "  edges:",
+        "    - to: infrastructure",
+        "    - from: domain",
+        "      to: infra",
+        "      note: default severity",
+      ].join("\n"),
+    );
+    expect(rules.architecture.edges).toEqual([
+      { from: "domain", to: "infra", severity: "warning", note: "default severity" },
+    ]);
+    expect(rules.warnings).toHaveLength(1);
+  });
+
+  it("warns on an unknown severity and keeps the parsed edge at warning", () => {
+    const rules = parseRules(
+      [
+        "version: 1",
+        "architecture:",
+        "  edges:",
+        "    - from: a",
+        "      to: b",
+        "      severity: fatal",
+      ].join("\n"),
+    );
+    expect(rules.architecture.edges[0]?.severity).toBe("warning");
+    expect(rules.warnings.some((w) => w.includes("fatal"))).toBe(true);
+  });
+
+  it("warns when architecture is present but not a mapping, keeping it empty", () => {
+    const rules = parseRules("version: 1\narchitecture: [not, a, mapping]\n");
+    expect(rules.architecture).toEqual({ layers: {}, edges: [], aliases: {} });
+    expect(rules.warnings[0]).toContain("not a mapping");
+  });
 });
 
 function rulesFor(overrides: Partial<Rules> = {}): Rules {

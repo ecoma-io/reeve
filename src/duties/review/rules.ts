@@ -16,6 +16,12 @@ import { readFile } from "node:fs/promises";
 import { parse, YAMLParseError } from "yaml";
 
 import { isMissing } from "../../core/forge.js";
+import {
+  emptyArchitecture,
+  type Architecture,
+  type EdgeRule,
+  type LayerName,
+} from "./architecture.js";
 import { isGenerated } from "./pr.js";
 
 /**
@@ -52,6 +58,8 @@ export interface Rules {
     readonly severity: Rule["severity"];
     readonly note: string;
   }[];
+  /** Forbidden dependency boundaries — layers, edges, and aliases. */
+  readonly architecture: Architecture;
   readonly raw: string;
   /** Parsing left warnings behind (unknown keys, malformed entries). */
   readonly warnings: readonly string[];
@@ -115,6 +123,7 @@ function emptyRules(): Rules {
     ignorePaths: [],
     generatedExtensions: DEFAULT_GENERATED,
     blocked: [],
+    architecture: emptyArchitecture(),
     raw: "",
     warnings: [],
   };
@@ -127,6 +136,7 @@ const KNOWN_RULE_KEYS: Readonly<Set<string>> = new Set([
   "ignore",
   "generated",
   "blocked",
+  "architecture",
 ]);
 
 /**
@@ -163,6 +173,7 @@ export function parseRules(text: string): Rules {
     ignorePaths: ignore.paths,
     generatedExtensions: readGenerated(map.generated, warnings),
     blocked: readBlocked(map.blocked, warnings),
+    architecture: readArchitecture(map.architecture, warnings),
     raw: text,
     warnings,
   };
@@ -348,6 +359,136 @@ export function preflight(
     }
   }
   return findings;
+}
+
+/**
+ * Reads the `architecture:` section of a rules file into the consumed shape
+ * (see `architecture.ts`). Every malformed part is a warning and a drop, never
+ * a silent guess: a misspelled key is a misspelled key, and a rule the parser
+ * had to invent a meaning for would fire findings the maintainer never wrote.
+ * An absent section is an empty architecture — zero findings, zero behavior
+ * change.
+ */
+export function readArchitecture(raw: unknown, warnings: string[]): Architecture {
+  if (raw === undefined || raw === null) return emptyArchitecture();
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`architecture:` is not a mapping; ignoring");
+    return emptyArchitecture();
+  }
+  const map = raw as Record<string, unknown>;
+  return {
+    layers: readArchLayers(map.layers, warnings),
+    edges: readArchEdges(map.edges, warnings),
+    aliases: readArchAliases(map.aliases, warnings),
+  };
+}
+
+/** Re-exported so `rules.ts` remains the single place that owns the file grammar. */
+export type { Architecture } from "./architecture.js";
+
+/** `layers:` — a mapping of layer name → list of path globs. */
+function readArchLayers(
+  raw: unknown,
+  warnings: string[],
+): Readonly<Record<LayerName, readonly string[]>> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`architecture.layers:` is not a mapping; ignoring");
+    return {};
+  }
+  const map = raw as Record<string, unknown>;
+  const layers: Record<string, string[]> = {};
+  for (const [name, value] of Object.entries(map)) {
+    if (name.length === 0) {
+      warnings.push("`architecture.layers` has an empty layer name; dropped");
+      continue;
+    }
+    if (value === undefined || value === null) {
+      warnings.push(`\`architecture.layers.${name}:\` has no glob list; dropped`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      warnings.push(`\`architecture.layers.${name}:\` is not a list; dropped`);
+      continue;
+    }
+    const globs = value
+      .map((entry, index) => {
+        if (typeof entry !== "string" || entry.length === 0) {
+          warnings.push(
+            `\`architecture.layers.${name}\` entry ${String(index + 1)} is not a non-empty string; dropped`,
+          );
+          return null;
+        }
+        return entry;
+      })
+      .filter((entry): entry is string => entry !== null);
+    if (globs.length > 0) layers[name] = globs;
+  }
+  return layers;
+}
+
+/** `edges:` — a list of forbidden dependency edges. */
+function readArchEdges(raw: unknown, warnings: string[]): readonly EdgeRule[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push("`architecture.edges:` is not a list; ignoring");
+    return [];
+  }
+  const out: EdgeRule[] = [];
+  raw.forEach((entry, index) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(`\`architecture.edges\` entry ${String(index + 1)} is not a mapping; dropped`);
+      return;
+    }
+    const map = entry as Record<string, unknown>;
+    const from = typeof map.from === "string" ? map.from : "";
+    const to = typeof map.to === "string" ? map.to : "";
+    if (from.length === 0 || to.length === 0) {
+      warnings.push(
+        `\`architecture.edges\` entry ${String(index + 1)} is missing \`from\`/\`to\`; dropped`,
+      );
+      return;
+    }
+    const severity =
+      typeof map.severity === "string" && SEVERITY.has(map.severity)
+        ? (map.severity as EdgeRule["severity"])
+        : ("warning" as const);
+    if (typeof map.severity === "string" && !SEVERITY.has(map.severity)) {
+      warnings.push(
+        `\`architecture.edges\` entry ${String(index + 1)} has unknown severity \`${map.severity}\`; using warning`,
+      );
+    }
+    out.push({
+      from,
+      to,
+      severity,
+      note: typeof map.note === "string" ? map.note : "",
+    });
+  });
+  return out;
+}
+
+/** `aliases:` — a mapping of prefix → repo-root-relative prefix. */
+function readArchAliases(raw: unknown, warnings: string[]): Readonly<Record<string, string>> {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`architecture.aliases:` is not a mapping; ignoring");
+    return {};
+  }
+  const map = raw as Record<string, unknown>;
+  const aliases: Record<string, string> = {};
+  for (const [prefix, value] of Object.entries(map)) {
+    if (prefix.length === 0) {
+      warnings.push("`architecture.aliases` has an empty prefix; dropped");
+      continue;
+    }
+    if (typeof value !== "string" || value.length === 0) {
+      warnings.push(`\`architecture.aliases.${prefix}:\` is not a non-empty string; dropped`);
+      continue;
+    }
+    aliases[prefix] = value;
+  }
+  return aliases;
 }
 
 function blockedNote(blocked: Rules["blocked"][number]): string {
