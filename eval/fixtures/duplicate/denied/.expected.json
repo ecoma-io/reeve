@@ -1,0 +1,11 @@
+{
+  "description": "The warrant's duties: block exists but never names duplicate, so the run is denied outright — before the thread or the corpus is read, before any model call. `duplicate-of` answers empty, nothing is posted, and the tracker stays untouched.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  triage: [label]\n",
+  "expected": {
+    "duplicate-of": "",
+    "score": "0.00",
+    "effects": {
+      "commented": false
+    }
+  }
+}

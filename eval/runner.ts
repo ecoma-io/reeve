@@ -55,6 +55,13 @@ import {
   translateRoutes,
 } from "./drivers/translate.ts";
 import type { TranslateScenario } from "./drivers/translate.ts";
+import {
+  duplicateRoutes,
+  newTracker as newDuplicateTracker,
+  scenarioOf as duplicateScenarioOf,
+  scriptDuplicate,
+} from "./drivers/duplicate.ts";
+import type { DuplicateScenario } from "./drivers/duplicate.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -69,7 +76,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
 
 /** Every duty the runner knows how to drive. */
-const DUTIES = ["harmonise", "triage", "respond", "translate"] as const;
+const DUTIES = ["harmonise", "triage", "respond", "translate", "duplicate"] as const;
 
 /** Whether a duty has fixtures on disk to run. */
 async function hasFixtures(duty: string): Promise<boolean> {
@@ -603,6 +610,96 @@ function translateLine(
 }
 
 // ---------------------------------------------------------------------------
+// duplicate
+// ---------------------------------------------------------------------------
+
+async function runDuplicate(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "duplicate", fixture);
+  const scenario = await duplicateScenarioOf(fixture, directory);
+  const tracker = newDuplicateTracker();
+  const stub = await startStub({
+    routes: [...duplicateRoutes(scenario, tracker)],
+    completion: scriptDuplicate(scenario),
+  });
+  try {
+    const warrant = join(scratch, `warrant-${fixture}.yml`);
+    if (scenario.warrant !== null) await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "duplicate",
+      stub.url,
+      duplicateInputs(stub.url, warrant),
+      scratchFiles(scratch),
+    );
+    return duplicateLine(fixture, scenario, tracker.effect.commented, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const DUPLICATE_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "stub-model",
+  warrant: "",
+  confidence: "0.75",
+  candidates: "5",
+  "corpus-limit": "50",
+  "corpus-since": "",
+  "max-body-chars": "6000",
+  "show-attribution": "none",
+  "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function duplicateInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...DUPLICATE_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one duplicate fixture. */
+function duplicateLine(
+  fixture: string,
+  scenario: DuplicateScenario,
+  commented: boolean,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const duplicate = run.outputs["duplicate-of"] ?? "";
+  const score = run.outputs.score ?? "";
+  const expectedComments = expected.effects?.commented ?? false;
+  const finding =
+    duplicate === (expected["duplicate-of"] ?? "") &&
+    score === (expected.score ?? "") &&
+    commented === expectedComments;
+
+  if (finding) {
+    const detail = expectedComments
+      ? `proposed #${duplicate}`
+      : `clean stop — ${duplicate === "" ? "warrant denies duplicate" : `#${duplicate} named but ${score} under the floor`}`;
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `duplicate-of=${duplicate} score=${score} commented=${String(commented)}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The banner and the run.
 // ---------------------------------------------------------------------------
 
@@ -628,6 +725,8 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runRespond;
     case "translate":
       return runTranslate;
+    case "duplicate":
+      return runDuplicate;
     default:
       return null;
   }
