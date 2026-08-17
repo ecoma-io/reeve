@@ -8,7 +8,7 @@ import { shown, type Names } from "../../core/provider.js";
 import { cell, cost, table } from "../../core/summary.js";
 import type { Capability } from "../../core/warrant.js";
 
-import type { Finding, Status } from "./findings.js";
+import type { Disposition, Finding, Status } from "./findings.js";
 import type { Posted } from "./publish.js";
 
 export interface Run {
@@ -17,13 +17,19 @@ export interface Run {
   /** The pull request's head SHA, for the page and for the envelope. */
   readonly headSha: string;
   readonly note: string | null;
+  /** Why the stored memory was unreadable, when a corrupt envelope was recovered from — never silent. */
+  readonly memoryNote: string | null;
   /** The head SHA the previous run reviewed, when the envelope carried one. */
   readonly previousSha: string;
   /** Files the model was shown, for the summary's coverage table. */
   readonly shown: readonly { path: string }[];
   /** Files skipped, with their reason. */
   readonly skipped: readonly { path: string; reason: string }[];
-  readonly findings: readonly { finding: Finding; status: Status }[];
+  readonly findings: readonly {
+    finding: Finding;
+    status: Status;
+    disposition: Disposition | null;
+  }[];
   readonly confidence: number | null;
   readonly posted: Posted | null;
   readonly permitted: readonly Capability[];
@@ -71,6 +77,7 @@ export function summarize(run: Run): string {
     "",
     ...(run.implicit ? [authority(run), ""] : []),
     verdict(run),
+    ...(run.memoryNote !== null ? ["", `> ⚠️ ${run.memoryNote}`, ""] : []),
     ...(run.findings.length > 0 ? ["", findingsTable(run)] : []),
     ...(run.skipped.length > 0 ? ["", coverage(run)] : []),
     ...(run.contextReadFiles > 0
@@ -148,17 +155,18 @@ function verdict(run: Run): string {
 }
 
 function findingsTable(run: Run): string {
-  const rows = run.findings.map(({ finding, status }) => [
+  const rows = run.findings.map(({ finding, status, disposition }) => [
     status,
     `\`${finding.path}\`` + (finding.line === null ? "" : `:${String(finding.line)}`),
     finding.severity,
     cell(finding.body),
     finding.verification ?? "—",
+    disposition === null ? "—" : `${disposition.value} by @${disposition.by}`,
   ]);
   return [
     "### Findings",
     "",
-    table(["State", "Location", "Severity", "Finding", "Verified"], rows),
+    table(["State", "Location", "Severity", "Finding", "Verified", "Disposition"], rows),
   ].join("\n");
 }
 

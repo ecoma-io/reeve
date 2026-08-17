@@ -984,7 +984,11 @@ function reviewLine(
     // A fixture that pins verification asserts the evidence engine ran and
     // produced the expected count, read off the summary's `| Verification |`
     // row.
-    (expected.verified === undefined || verifiedFromSummary(run.summary) === expected.verified);
+    (expected.verified === undefined || verifiedFromSummary(run.summary) === expected.verified) &&
+    // A fixture that pins the human-disposition axis asserts the run's summary
+    // rendered the maintainer's triage read off the thread's eligible reply.
+    (expected.disposition === undefined ||
+      dispositionFromSummary(run.summary).includes(expected.disposition));
 
   // The language dimension wins over both: a pull request the pipeline
   // identified as the wrong language was handled wrong, and that can never be
@@ -1125,6 +1129,19 @@ function verifiedFromSummary(summary: string): string {
   const row = /^\|\s*Verification\s*\|\s*(\d+)\s*verified/m.exec(summary);
   if (row?.[1] === undefined) return "0";
   return row[1];
+}
+
+/**
+ * The disposition column of the summary's `### Findings` table, when the run
+ * rendered one. A disposition is rendered as `wont-fix by @octocat`; the first
+ * non-placeholder value the run reported is what a disposition fixture asserts
+ * against.
+ */
+function dispositionFromSummary(summary: string): string[] {
+  return Array.from(
+    summary.matchAll(/([a-z-]+)\s+by\s+@([a-z0-9-]+)/g),
+    (m) => `${m[1] ?? ""} by @${m[2] ?? ""}`,
+  );
 }
 
 /** The outcome for one lifecycle fixture. */

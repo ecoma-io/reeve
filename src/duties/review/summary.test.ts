@@ -9,6 +9,7 @@ function run(overrides: Partial<Run> = {}): Run {
     headSha: "abc",
     note: null,
     previousSha: "",
+    memoryNote: null,
     shown: [{ path: "a.ts" }],
     skipped: [],
     findings: [],
@@ -78,6 +79,7 @@ describe("summarize", () => {
               marker: "",
             },
             status: "created",
+            disposition: null,
           },
         ],
       }),
@@ -106,6 +108,7 @@ describe("summarize", () => {
               evidence: [],
             },
             status: "created",
+            disposition: null,
           },
           {
             finding: {
@@ -122,6 +125,7 @@ describe("summarize", () => {
               evidence: [],
             },
             status: "persists",
+            disposition: null,
           },
           {
             finding: {
@@ -136,6 +140,7 @@ describe("summarize", () => {
               marker: "preflight:blocked",
             },
             status: "created",
+            disposition: null,
           },
         ],
       }),

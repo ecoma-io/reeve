@@ -33,6 +33,7 @@ function previous(over: Partial<Previous["findings"][number]> = {}): Previous {
         body: "debugger; statement on line 13.",
         marker: "",
         wasResolved: false,
+        disposition: null,
         ...over,
       },
     ],

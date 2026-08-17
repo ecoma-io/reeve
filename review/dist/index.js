@@ -10543,15 +10543,15 @@ var require_mock_utils = __commonJS({
         isPromise
       }
     } = __require("node:util");
-    function matchValue(match, value) {
-      if (typeof match === "string") {
-        return match === value;
+    function matchValue(match2, value) {
+      if (typeof match2 === "string") {
+        return match2 === value;
       }
-      if (match instanceof RegExp) {
-        return match.test(value);
+      if (match2 instanceof RegExp) {
+        return match2.test(value);
       }
-      if (typeof match === "function") {
-        return match(value) === true;
+      if (typeof match2 === "function") {
+        return match2(value) === true;
       }
       return false;
     }
@@ -20477,8 +20477,8 @@ var require_createNode = __commonJS({
     var defaultTagPrefix = "tag:yaml.org,2002:";
     function findTagObject(value, tagName, tags) {
       if (tagName) {
-        const match = tags.filter((t) => t.tag === tagName);
-        const tagObj = match.find((t) => !t.format) ?? match[0];
+        const match2 = tags.filter((t) => t.tag === tagName);
+        const tagObj = match2.find((t) => !t.format) ?? match2[0];
         if (!tagObj)
           throw new Error(`Tag ${tagName} not found`);
         return tagObj;
@@ -21173,21 +21173,21 @@ var require_stringify = __commonJS({
     }
     function getTagObject(tags, item) {
       if (item.tag) {
-        const match = tags.filter((t) => t.tag === item.tag);
-        if (match.length > 0)
-          return match.find((t) => t.format === item.format) ?? match[0];
+        const match2 = tags.filter((t) => t.tag === item.tag);
+        if (match2.length > 0)
+          return match2.find((t) => t.format === item.format) ?? match2[0];
       }
       let tagObj = void 0;
       let obj;
       if (identity.isScalar(item)) {
         obj = item.value;
-        let match = tags.filter((t) => t.identify?.(obj));
-        if (match.length > 1) {
-          const testMatch = match.filter((t) => t.test);
+        let match2 = tags.filter((t) => t.identify?.(obj));
+        if (match2.length > 1) {
+          const testMatch = match2.filter((t) => t.test);
           if (testMatch.length > 0)
-            match = testMatch;
+            match2 = testMatch;
         }
-        tagObj = match.find((t) => t.format === item.format) ?? match.find((t) => !t.format);
+        tagObj = match2.find((t) => t.format === item.format) ?? match2.find((t) => !t.format);
       } else {
         obj = item;
         tagObj = tags.find((t) => t.nodeClass && obj instanceof t.nodeClass);
@@ -22829,13 +22829,13 @@ var require_timestamp = __commonJS({
       // assumed to be 00:00:00Z (start of day, UTC).
       test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
       resolve(str) {
-        const match = str.match(timestamp.test);
-        if (!match)
+        const match2 = str.match(timestamp.test);
+        if (!match2)
           throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
-        const [, year, month, day, hour, minute, second] = match.map(Number);
-        const millisec = match[7] ? Number((match[7] + "00").substr(1, 3)) : 0;
+        const [, year, month, day, hour, minute, second] = match2.map(Number);
+        const millisec = match2[7] ? Number((match2[7] + "00").substr(1, 3)) : 0;
         let date = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
-        const tz = match[8];
+        const tz = match2[8];
         if (tz && tz !== "Z") {
           let d = parseSexagesimal(tz, false);
           if (Math.abs(d) < 30)
@@ -24415,29 +24415,29 @@ var require_resolve_flow_scalar = __commonJS({
         first = /(.*?)[ \t]*\r?\n/sy;
         line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
       }
-      let match = first.exec(source);
-      if (!match)
+      let match2 = first.exec(source);
+      if (!match2)
         return source;
-      let res = match[1];
+      let res = match2[1];
       let sep3 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
-      while (match = line.exec(source)) {
-        if (match[1] === "") {
+      while (match2 = line.exec(source)) {
+        if (match2[1] === "") {
           if (sep3 === "\n")
             res += sep3;
           else
             sep3 = "\n";
         } else {
-          res += sep3 + match[1];
+          res += sep3 + match2[1];
           sep3 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
-      match = last.exec(source);
-      return res + sep3 + (match?.[1] ?? "");
+      match2 = last.exec(source);
+      return res + sep3 + (match2?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -28445,15 +28445,15 @@ var applyReviverIteratively = (parsed, userReviver) => {
 var serializeBigInts = (text2) => {
   return text2.replace(
     stringsOrLargeNumbers,
-    (match, digits, fractional, exponential) => {
-      const isString = match[0] === '"';
-      const isNoise = isString && noiseValueWithQuotes.test(match);
-      if (isNoise) return match.substring(0, match.length - 1) + 'n"';
+    (match2, digits, fractional, exponential) => {
+      const isString = match2[0] === '"';
+      const isNoise = isString && noiseValueWithQuotes.test(match2);
+      if (isNoise) return match2.substring(0, match2.length - 1) + 'n"';
       const hasFractionalOrExponential = fractional || exponential;
       const isLessThanMaxSafeInt = digits && (digits.length < MAX_DIGITS || digits.length === MAX_DIGITS && digits <= MAX_INT);
       const isStandardValue = isString || hasFractionalOrExponential || isLessThanMaxSafeInt;
-      if (isStandardValue) return match;
-      return '"' + match + 'n"';
+      if (isStandardValue) return match2;
+      return '"' + match2 + 'n"';
     }
   );
 };
@@ -32430,9 +32430,9 @@ function withoutTerminator(line) {
   return line.replace(/\r?\n$/, "");
 }
 function fenceOpener(line) {
-  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(withoutTerminator(line));
-  if (!match) return null;
-  const [, marker2 = "", info3 = ""] = match;
+  const match2 = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(withoutTerminator(line));
+  if (!match2) return null;
+  const [, marker2 = "", info3 = ""] = match2;
   if (marker2.startsWith("`") && info3.includes("`")) return null;
   return marker2;
 }
@@ -34207,13 +34207,13 @@ function parseEndpoints(raw) {
     if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
     let timeoutMs = null;
     for (const token of rest2) {
-      const match = /^timeout=(.+)$/.exec(token);
-      if (!match) {
+      const match2 = /^timeout=(.+)$/.exec(token);
+      if (!match2) {
         throw new Error(
           `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
         );
       }
-      const [, duration = ""] = match;
+      const [, duration = ""] = match2;
       if (timeoutMs !== null) {
         throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
       }
@@ -34250,13 +34250,13 @@ function checkApiKeysDeclared(endpoints, apiKeys) {
 }
 function parseTimeout(name, raw) {
   const trimmed = raw.trim();
-  const match = /^(\d+)(s|m)$/.exec(trimmed);
-  if (!match) {
+  const match2 = /^(\d+)(s|m)$/.exec(trimmed);
+  if (!match2) {
     throw new Error(
       `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
     );
   }
-  const [, digits, unit] = match;
+  const [, digits, unit] = match2;
   const value = Number(digits);
   if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
   const ms = unit === "m" ? value * 6e4 : value * 1e3;
@@ -34343,30 +34343,66 @@ function reconcile(candidates, previous, diff) {
     if (atPosition !== void 0) {
       matched.add(findingFingerprint(atPosition));
       if (fp === findingFingerprint(atPosition)) {
-        out.push({ finding: candidate, status: "persists" });
+        out.push({ finding: candidate, status: "persists", disposition: atPosition.disposition });
       } else {
-        out.push({ finding: candidate, status: "changed" });
+        out.push({ finding: candidate, status: "changed", disposition: atPosition.disposition });
       }
+      continue;
+    }
+    const activeByIntention = active.filter((old) => sameIntention(old, candidate));
+    const activeOld = activeByIntention[0];
+    if (activeByIntention.length === 1 && activeOld !== void 0) {
+      matched.add(findingFingerprint(activeOld));
+      out.push({ finding: candidate, status: "changed", disposition: activeOld.disposition });
       continue;
     }
     const previouslyResolved = resolved.find((old) => sameIntention(old, candidate));
     if (previouslyResolved !== void 0) {
       matched.add(findingFingerprint(previouslyResolved));
-      out.push({ finding: candidate, status: "reopened" });
+      out.push({
+        finding: candidate,
+        status: "reopened",
+        disposition: previouslyResolved.disposition
+      });
       continue;
     }
-    out.push({ finding: candidate, status: "created" });
+    out.push({ finding: candidate, status: "created", disposition: null });
   }
   for (const old of active) {
     const fp = findingFingerprint(old);
     if (matched.has(fp)) continue;
     if (doesNotStand(old)) {
-      out.push({ finding: old, status: "resolved" });
+      out.push({ finding: old, status: "resolved", disposition: old.disposition });
       continue;
     }
-    out.push({ finding: old, status: "persists" });
+    out.push({ finding: old, status: "persists", disposition: old.disposition });
   }
   return out;
+}
+function envelopeChecksum(previous) {
+  const findings = previous.findings.map((entry) => {
+    const d = entry.disposition;
+    return [
+      findingFingerprint(entry),
+      entry.wasResolved ? "resolved" : "active",
+      entry.resolvedAtSha ?? "",
+      d === null ? "" : `${d.value}:${d.by}:${String(d.replyId)}`
+    ].join("|");
+  }).join("\n");
+  return fingerprint(`findings
+${findings}
+reviewedShas
+${previous.reviewedShas.join("\n")}`, [
+    "review",
+    "envelope"
+  ]);
+}
+var ENVELOPE_BYTES = 6e4;
+function envelopeBytes(next) {
+  return Buffer.byteLength(
+    JSON.stringify({ ...next, version: 2, checksum: envelopeChecksum(next) }),
+    "utf8"
+  );
 }
 var MAX_REMEMBERED_RESOLVED = 8;
 function remember(reconciled, headSha, previous) {
@@ -34374,24 +34410,51 @@ function remember(reconciled, headSha, previous) {
   const findings = [];
   for (const entry of reconciled) {
     if (entry.status === "resolved") {
-      findings.push({ ...entry.finding, wasResolved: true, resolvedAtSha: headSha });
+      findings.push({
+        ...entry.finding,
+        wasResolved: true,
+        resolvedAtSha: headSha,
+        disposition: entry.disposition
+      });
       seen.add(findingFingerprint(entry.finding));
       continue;
     }
-    findings.push({ ...entry.finding, wasResolved: false });
+    findings.push({ ...entry.finding, wasResolved: false, disposition: entry.disposition });
     seen.add(findingFingerprint(entry.finding));
   }
   let keptResolved = 0;
   for (const old of previous.findings) {
     const fp = findingFingerprint(old);
-    if (old.wasResolved && !seen.has(fp) && keptResolved < MAX_REMEMBERED_RESOLVED) {
+    if (old.wasResolved && !seen.has(fp) && old.disposition === null && keptResolved < MAX_REMEMBERED_RESOLVED) {
       findings.push(old);
       seen.add(fp);
       keptResolved += 1;
+    } else if (old.wasResolved && !seen.has(fp) && old.disposition !== null) {
+      findings.push(old);
+      seen.add(fp);
     }
   }
   const shas = previous.reviewedShas.includes(headSha) ? previous.reviewedShas : [...previous.reviewedShas, headSha].slice(-8);
-  return { findings, reviewedShas: shas };
+  let next = { findings, reviewedShas: shas };
+  if (envelopeBytes(next) <= ENVELOPE_BYTES) {
+    return { ...next, version: 2, checksum: envelopeChecksum(next) };
+  }
+  next = { findings, reviewedShas: shas.slice(-1) };
+  if (envelopeBytes(next) <= ENVELOPE_BYTES) {
+    return { ...next, version: 2, checksum: envelopeChecksum(next) };
+  }
+  const compacted = [];
+  for (const entry of next.findings) {
+    if (entry.wasResolved && entry.disposition === null) continue;
+    compacted.push(entry);
+  }
+  next = { findings: compacted, reviewedShas: next.reviewedShas };
+  if (envelopeBytes(next) > ENVELOPE_BYTES) {
+    throw new Error(
+      `review: the envelope cannot fit the comment ceiling \u2014 ${String(envelopeBytes(next))} bytes after evicting every evictable SHA and resolved finding, with all maintained dispositions kept. A comment this large cannot be bounded, so it fails loud instead of being silently trimmed.`
+    );
+  }
+  return { ...next, version: 2, checksum: envelopeChecksum(next) };
 }
 
 // src/duties/review/architecture.ts
@@ -34597,11 +34660,11 @@ function opaqueRanges(line) {
   return ranges;
 }
 function collect(text2, regex, kind, out) {
-  for (const match of text2.matchAll(regex)) {
-    const specifier = match[2];
+  for (const match2 of text2.matchAll(regex)) {
+    const specifier = match2[2];
     if (specifier === void 0) continue;
-    const index = match.index;
-    out.push({ kind, specifier, index, end: index + match[0].length });
+    const index = match2.index;
+    out.push({ kind, specifier, index, end: index + match2[0].length });
   }
 }
 function extractEdges(file, aliases = {}) {
@@ -35315,9 +35378,9 @@ function emptied(payload) {
   return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
 }
 function defangReferences(prose) {
-  return prose.replace(REFERENCE, (match, passthrough) => {
-    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
-    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
+  return prose.replace(REFERENCE, (match2, passthrough) => {
+    if (passthrough !== void 0 || match2.slice(1).startsWith(INERT)) return match2;
+    return `${match2.slice(0, 1)}${INERT}${match2.slice(1)}`;
   });
 }
 
@@ -35327,74 +35390,158 @@ function encodeEnvelope(previous) {
   return Buffer.from(JSON.stringify(previous), "utf8").toString("base64");
 }
 function decodeEnvelope(payload) {
-  if (payload === null) return null;
+  if (payload === null) return { kind: "none" };
   const at = payload.indexOf(" ");
-  const envelope = at === -1 ? payload : payload.slice(at + 1);
-  if (envelope.length === 0) return null;
+  const envelope = at === -1 ? "" : payload.slice(at + 1);
+  if (envelope.length === 0) return { kind: "none" };
+  let parsed;
   try {
-    const parsed = JSON.parse(Buffer.from(envelope, "base64").toString("utf8"));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-    const map = parsed;
-    if (!Array.isArray(map.findings)) return null;
-    const findings = map.findings.filter((entry) => {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
-      const f = entry;
-      return typeof f.id === "string" && typeof f.ruleId === "string" && typeof f.ruleName === "string" && typeof f.ruleBody === "string" && typeof f.path === "string" && (f.line === null || Number.isInteger(f.line)) && typeof f.severity === "string" && typeof f.body === "string" && typeof f.marker === "string" && typeof f.wasResolved === "boolean";
-    }).map((entry) => {
-      const raw = entry;
-      const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
-      const {
-        snippet: _snippet,
-        verification: _verification,
-        evidence: _evidence,
-        ...core
-      } = entry;
-      return {
-        ...core,
-        wasResolved: entry.wasResolved === true,
-        ...resolvedAtSha,
-        ...optionalEvidence(raw)
-      };
-    });
-    const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
-    return { findings, reviewedShas: shas };
+    parsed = JSON.parse(Buffer.from(envelope, "base64").toString("utf8"));
   } catch {
-    return null;
+    return { kind: "corrupt", reason: "the envelope is not valid base64" };
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "corrupt", reason: "the envelope is not a JSON mapping" };
+  }
+  const map = parsed;
+  if (map.version === void 0) return migrateV1(map);
+  return validateV2(map);
 }
-function optionalEvidence(raw) {
-  const out = {};
-  if (typeof raw.snippet === "string") out.snippet = raw.snippet;
-  if (raw.verification === "verified" || raw.verification === "unverified") {
-    out.verification = raw.verification;
-  }
-  if (Array.isArray(raw.evidence)) {
-    const items = raw.evidence.filter((entry) => evidenceShaped(entry));
-    if (items.length > 0) out.evidence = items;
-  }
-  return out;
+function isFindable(entry) {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const f = entry;
+  return typeof f.id === "string" && typeof f.ruleId === "string" && typeof f.ruleName === "string" && typeof f.ruleBody === "string" && typeof f.path === "string" && typeof f.body === "string" && typeof f.marker === "string" && typeof f.wasResolved === "boolean";
 }
-function evidenceShaped(raw) {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
-  const entry = raw;
-  return (entry.kind === "diff" || entry.kind === "rules") && typeof entry.weight === "number" && typeof entry.detail === "string" && typeof entry.provenance === "object" && entry.provenance !== null && typeof entry.provenance.ruleId === "string";
+function isV1Findable(entry) {
+  if (!isFindable(entry)) return false;
+  const f = entry;
+  return f.line === null || Number.isInteger(f.line);
+}
+function migrateV1(map) {
+  if (!Array.isArray(map.findings)) {
+    return { kind: "corrupt", reason: "the envelope has no `findings` array" };
+  }
+  const findings = [];
+  for (const entry of map.findings) {
+    if (!isV1Findable(entry)) {
+      return { kind: "corrupt", reason: "a v1 finding holds a malformed field" };
+    }
+    const raw = entry;
+    const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
+    findings.push({
+      ...entry,
+      wasResolved: raw.wasResolved === true,
+      disposition: null,
+      ...resolvedAtSha
+    });
+  }
+  const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
+  const previous = { findings, reviewedShas: shas };
+  return {
+    kind: "ok",
+    previous: { ...previous, version: 2, checksum: envelopeChecksum(previous) }
+  };
+}
+var SEVERITIES = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
+var DISPOSITION_VALUES = /* @__PURE__ */ new Set([
+  "verified",
+  "accepted-risk",
+  "wont-fix",
+  "rejected"
+]);
+function validateV2(map) {
+  if (map.version !== 2) {
+    return {
+      kind: "corrupt",
+      reason: `the envelope declares unknown version \`${String(map.version)}\``
+    };
+  }
+  if (!Array.isArray(map.findings)) {
+    return { kind: "corrupt", reason: "the envelope has no `findings` array" };
+  }
+  const findings = [];
+  for (const entry of map.findings) {
+    if (!isFindable(entry)) {
+      return { kind: "corrupt", reason: "a v2 finding holds a malformed field" };
+    }
+    const f = entry;
+    if (f.line !== null && !(Number.isInteger(f.line) && f.line > 0)) {
+      return { kind: "corrupt", reason: `a finding names a line that is not a positive integer` };
+    }
+    if (typeof f.severity !== "string" || !SEVERITIES.has(f.severity)) {
+      return { kind: "corrupt", reason: `a finding names an unknown severity` };
+    }
+    const disposition = validateDisposition(f.disposition);
+    if (disposition === "corrupt") {
+      return { kind: "corrupt", reason: "a finding carries a malformed disposition" };
+    }
+    const raw = entry;
+    const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
+    findings.push({
+      ...entry,
+      wasResolved: raw.wasResolved === true,
+      disposition,
+      ...resolvedAtSha
+    });
+  }
+  const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
+  const previous = { findings, reviewedShas: shas };
+  if (typeof map.checksum !== "string" || envelopeChecksum(previous) !== map.checksum) {
+    return { kind: "corrupt", reason: "the envelope fails its checksum \u2014 it is damaged or forged" };
+  }
+  return { kind: "ok", previous: { ...previous, version: 2, checksum: map.checksum } };
+}
+function validateDisposition(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return "corrupt";
+  const d = value;
+  if (typeof d.value !== "string" || !DISPOSITION_VALUES.has(d.value)) return "corrupt";
+  if (typeof d.by !== "string" || typeof d.at !== "string" || typeof d.replyUrl !== "string") {
+    return "corrupt";
+  }
+  if (!Number.isInteger(d.replyId) || d.replyId <= 0) return "corrupt";
+  return {
+    value: d.value,
+    by: d.by,
+    at: d.at,
+    replyId: d.replyId,
+    replyUrl: d.replyUrl
+  };
 }
 var COMMENT_PAGE = 100;
-async function findMarked(api, at) {
-  const { data } = await api.rest.issues.listComments({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number,
-    per_page: COMMENT_PAGE
-  });
-  for (const comment of data) {
-    if (!isBotAuthor(comment.user)) continue;
-    const { official, fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null && official === "") {
-      return { marked: { id: comment.id, payload: found }, uncertain: false };
+var MAX_COMMENT_PAGES = 10;
+async function readThread(api, at) {
+  let marked = null;
+  const replies = [];
+  let uncertain = false;
+  for (let page2 = 1; page2 <= MAX_COMMENT_PAGES; page2 += 1) {
+    const { data } = await api.rest.issues.listComments({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: COMMENT_PAGE,
+      page: page2
+    });
+    for (const comment of data) {
+      replies.push({
+        id: comment.id,
+        login: comment.user?.login ?? "",
+        isBot: isBotAuthor(comment.user),
+        association: comment.author_association ?? "",
+        createdAt: comment.created_at ?? "",
+        body: comment.body ?? ""
+      });
+      if (marked !== null) continue;
+      if (!isBotAuthor(comment.user)) continue;
+      const { official, fingerprint: found } = marker.split(comment.body ?? "");
+      if (found !== null && official === "") {
+        marked = { id: comment.id, payload: found };
+      }
     }
+    if (data.length < COMMENT_PAGE) break;
+    if (page2 === MAX_COMMENT_PAGES) uncertain = true;
   }
-  return { marked: null, uncertain: data.length === COMMENT_PAGE };
+  return { marked, replies, uncertain };
 }
 function publicationFor(pub) {
   const payload = `${renderFingerprint(pub.reconciled)} ${encodeEnvelope(pub.next)}`;
@@ -35403,7 +35550,7 @@ function publicationFor(pub) {
 async function classify2(api, at, pub) {
   const { payload, body } = publicationFor(pub);
   const full = [marker.render(payload), body].join("\n\n");
-  const { marked: existing, uncertain } = await findMarked(api, at);
+  const { marked: existing, uncertain } = await readThread(api, at);
   if (existing === null && uncertain) {
     return { disposition: "withheld", body: full, existing: null };
   }
@@ -35411,7 +35558,9 @@ async function classify2(api, at, pub) {
   return { disposition, body: full, existing };
 }
 function renderFingerprint(reconciled) {
-  const canonical = reconciled.map((entry) => `${entry.status}:${findingFingerprint(entry.finding)}`).join("\n");
+  const canonical = reconciled.map(
+    (entry) => `${entry.status}:${findingFingerprint(entry.finding)}:${entry.disposition?.value ?? ""}`
+  ).join("\n");
   return fingerprint(canonical, ["review"]);
 }
 function renderFingerprintMarker(_pub, payload) {
@@ -35451,7 +35600,7 @@ function render(reconciled) {
   for (const [status, entries] of byStatus) {
     sections.push(
       `### ${statusLabel(status)} (${String(entries.length)})
-${entries.map((entry) => findingLine(entry.finding)).join("\n")}`
+${entries.map((entry) => findingLine(entry.finding, entry.disposition)).join("\n")}`
     );
   }
   return sections.join("\n\n") + "\n\n" + footer();
@@ -35486,13 +35635,22 @@ function statusLabel(status) {
       return status;
   }
 }
-function findingLine(finding) {
+var DISPOSITION_LABELS = {
+  verified: "verified",
+  "accepted-risk": "accepted-risk",
+  "wont-fix": "wont-fix",
+  rejected: "rejected"
+};
+function findingLine(finding, disposition) {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   const body = sanitize(finding.body);
-  const badge = verificationBadge(finding);
-  const suffix = badge.length === 0 ? "" : ` ${badge}`;
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+  const suffix = verificationBadge(finding);
+  let line = `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+  if (disposition !== null) {
+    line += ` \u2014 **${DISPOSITION_LABELS[disposition.value]}** by @${escapeHtml(disposition.by)} ([reply](${disposition.replyUrl}))`;
+  }
+  return line;
 }
 function verificationBadge(finding) {
   if (finding.marker.length > 0) return "";
@@ -35561,9 +35719,9 @@ var SYMBOL = /^\s*(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|co
 function changedSymbols(added) {
   const out = /* @__PURE__ */ new Set();
   for (const line of added) {
-    const match = SYMBOL.exec(line);
-    if (match === null) continue;
-    const name = match[1] ?? match[2] ?? "";
+    const match2 = SYMBOL.exec(line);
+    if (match2 === null) continue;
+    const name = match2[1] ?? match2[2] ?? "";
     if (name.length > 0) out.add(name);
   }
   return [...out].sort((a, b) => a.localeCompare(b));
@@ -35909,6 +36067,82 @@ ${capped.trimEnd()}`);
   }
 };
 
+// src/duties/review/disposition.ts
+var LINE_FORM = /^\s*(?:@[a-z0-9-]+\s+)?(?:line\s+)?(\d+)\s*:\s*(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
+var PATH_FORM = /^\s*(?:@[a-z0-9-]+\s+)?([^\s:]+(?:\.[A-Za-z0-9]+)+):(\d+)\s*:(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
+function parseDispositionLine(line) {
+  const pathMatch = PATH_FORM.exec(line);
+  if (pathMatch?.[2] !== void 0 && pathMatch[3] !== void 0) {
+    return {
+      path: pathMatch[1] ?? null,
+      line: Number(pathMatch[2]),
+      value: pathMatch[3]
+    };
+  }
+  const lineMatch = LINE_FORM.exec(line);
+  if (lineMatch?.[1] !== void 0 && lineMatch[2] !== void 0) {
+    return { path: null, line: Number(lineMatch[1]), value: lineMatch[2] };
+  }
+  return null;
+}
+var ELIGIBLE_ASSOCIATIONS = /* @__PURE__ */ new Set(["OWNER", "COLLABORATOR", "MEMBER"]);
+function isEligibleReply(reply, prAuthorLogin) {
+  return !reply.isBot && reply.login.length > 0 && reply.login !== prAuthorLogin && ELIGIBLE_ASSOCIATIONS.has(reply.association) && Number.isInteger(reply.id) && reply.id > 0 && typeof reply.createdAt === "string" && reply.createdAt.length > 0;
+}
+function dispositionKey(finding) {
+  return `${finding.ruleId}\0${finding.path}`;
+}
+function match(parsed, previousFindings) {
+  if (parsed.path !== null) {
+    return previousFindings.filter((old) => old.path === parsed.path && old.line === parsed.line);
+  }
+  const onLine = previousFindings.filter((old) => old.line === parsed.line);
+  return onLine.length === 1 ? onLine : [];
+}
+function replyUrl(owner, repo, number, replyId) {
+  return `https://github.com/${owner}/${repo}/pull/${String(number)}#issuecomment-${String(replyId)}`;
+}
+function readDispositions(replies, previousFindings, at, prAuthorLogin) {
+  const out = /* @__PURE__ */ new Map();
+  for (const reply of replies) {
+    if (!isEligibleReply(reply, prAuthorLogin)) continue;
+    const parsed = parseDispositionLine(reply.body);
+    if (parsed === null) continue;
+    for (const old of match(parsed, previousFindings)) {
+      out.set(dispositionKey(old), {
+        value: parsed.value,
+        by: reply.login,
+        at: reply.createdAt,
+        replyId: reply.id,
+        replyUrl: replyUrl(at.owner, at.repo, at.number, reply.id)
+      });
+    }
+  }
+  return out;
+}
+function substantiatedDispositions(previousFindings, replies, prAuthorLogin) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const reply of replies) {
+    if (isEligibleReply(reply, prAuthorLogin)) byId.set(reply.id, reply);
+  }
+  const out = /* @__PURE__ */ new Map();
+  for (const old of previousFindings) {
+    const disposition = old.disposition;
+    if (disposition === null) continue;
+    const reply = byId.get(disposition.replyId);
+    if (reply?.login === disposition.by) {
+      out.set(dispositionKey(old), disposition);
+    }
+  }
+  return out;
+}
+function mergeDispositions(fresh, substantiated) {
+  const merged = /* @__PURE__ */ new Map();
+  for (const [key, disposition] of substantiated) merged.set(key, disposition);
+  for (const [key, disposition] of fresh) merged.set(key, disposition);
+  return merged;
+}
+
 // src/duties/review/rules.ts
 var import_yaml3 = __toESM(require_dist2(), 1);
 import { readFile as readFile3 } from "node:fs/promises";
@@ -35967,13 +36201,13 @@ function readPackVersion(text2, parsed, ref) {
       `pack ${ref}: \`version\` could not be read from the file \u2014 got ${JSON.stringify(parsed)}`
     );
   }
-  const match = TWO_PART_VERSION.exec(raw.trim().replace(/^['"]|['"]$/g, ""));
-  if (match === null) {
+  const match2 = TWO_PART_VERSION.exec(raw.trim().replace(/^['"]|['"]$/g, ""));
+  if (match2 === null) {
     throw new UnreadablePacks(
       `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 \u2014 got \`${raw}\``
     );
   }
-  return { major: Number(match[1]), minor: match[2] === void 0 ? 0 : Number(match[2]) };
+  return { major: Number(match2[1]), minor: match2[2] === void 0 ? 0 : Number(match2[2]) };
 }
 function readPackFragment(map, ref, warnings) {
   const rules = readPackRules(map.rules, ref, warnings);
@@ -36140,17 +36374,17 @@ function readPackRefs(raw) {
     if (typeof value !== "string") {
       throw new UnreadablePacks("`packs:` entries must carry a `pack:` string");
     }
-    const match = PACK_REF.exec(value);
-    if (match === null) {
+    const match2 = PACK_REF.exec(value);
+    if (match2 === null) {
       throw new UnreadablePacks(
         `pack reference \`${value}\` is not valid \u2014 expected \`namespace/name\`, \`namespace/name@1\` or \`namespace/name@1.2\``
       );
     }
     const ref = {
-      namespace: match[1] ?? "",
-      name: match[2] ?? "",
-      major: match[3] === void 0 ? null : Number(match[3]),
-      minor: match[4] === void 0 ? null : Number(match[4]),
+      namespace: match2[1] ?? "",
+      name: match2[2] ?? "",
+      major: match2[3] === void 0 ? null : Number(match2[3]),
+      minor: match2[4] === void 0 ? null : Number(match2[4]),
       raw: value
     };
     if (seen.has(value)) {
@@ -37050,6 +37284,7 @@ function summarize(run2) {
     "",
     ...run2.implicit ? [authority(run2), ""] : [],
     verdict(run2),
+    ...run2.memoryNote !== null ? ["", `> \u26A0\uFE0F ${run2.memoryNote}`, ""] : [],
     ...run2.findings.length > 0 ? ["", findingsTable(run2)] : [],
     ...run2.skipped.length > 0 ? ["", coverage(run2)] : [],
     ...run2.contextReadFiles > 0 ? [
@@ -37112,17 +37347,18 @@ function verdict(run2) {
   return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
 }
 function findingsTable(run2) {
-  const rows = run2.findings.map(({ finding, status }) => [
+  const rows = run2.findings.map(({ finding, status, disposition }) => [
     status,
     `\`${finding.path}\`` + (finding.line === null ? "" : `:${String(finding.line)}`),
     finding.severity,
     cell(finding.body),
-    finding.verification ?? "\u2014"
+    finding.verification ?? "\u2014",
+    disposition === null ? "\u2014" : `${disposition.value} by @${disposition.by}`
   ]);
   return [
     "### Findings",
     "",
-    table(["State", "Location", "Severity", "Finding", "Verified"], rows)
+    table(["State", "Location", "Severity", "Finding", "Verified", "Disposition"], rows)
   ].join("\n");
 }
 function coverage(run2) {
@@ -37216,6 +37452,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     rulesPath: null,
     contextReadFiles: 0,
     previous: null,
+    memoryNote: null,
     shown: [],
     skipped: [],
     passes: [],
@@ -37275,12 +37512,19 @@ async function decide(api, at, warrant, settings, stages, weather) {
   info(
     language === null ? `#${String(at.number)}: language not identified (${String(detection.candidates.length)} candidate(s)).` : `#${String(at.number)}: language ${language.code} (by ${detection.by}).`
   );
-  const previous = await readEnvelope(api, at);
+  const { previous, thread, memoryNote } = await readEnvelope(api, at);
   if (previous.findings.length > 0) {
     info(
       `#${String(at.number)}: previous review read (${String(previous.findings.length)} finding(s)).`
     );
   }
+  const fresh = readDispositions(thread.replies, previous.findings, at, pr.author.login);
+  const substantiated = substantiatedDispositions(
+    previous.findings,
+    thread.replies,
+    pr.author.login
+  );
+  const dispositions = mergeDispositions(fresh, substantiated);
   const deterministic = [
     ...preflight(bounded2, rules).map((entry) => ({
       id: entry.id,
@@ -37323,7 +37567,12 @@ async function decide(api, at, warrant, settings, stages, weather) {
       info(`review: context engine read ${String(context3.readFiles)} file(s).`);
     }
   }
-  const withMemory = { previous, contextReadFiles: context3.readFiles, ...settledBase };
+  const withMemory = {
+    previous,
+    memoryNote,
+    contextReadFiles: context3.readFiles,
+    ...settledBase
+  };
   const passContext = {
     prTitle: pr.title,
     prBody: pr.body.slice(0, BODY_EXCERPT),
@@ -37363,7 +37612,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
   for (const file of bounded2.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded2.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
+  const reconciled = reconcile([...deterministic, ...verified], previous, diffStanding);
+  const final = reconciled.map((entry) => ({
+    ...entry,
+    disposition: dispositions.get(dispositionKey(entry.finding)) ?? entry.disposition ?? null
+  }));
   const confidence = synthesis.confidence;
   const next = remember(final, pr.headSha, previous);
   const verdictMeasured = synthesis.measured;
@@ -37479,10 +37732,34 @@ function wrapPr(api) {
   return api;
 }
 async function readEnvelope(api, at) {
-  const { marked } = await findMarked(api, at);
+  const { marked, replies, uncertain } = await readThread(api, at);
   const payload = marked?.payload ?? null;
-  if (payload === null) return { findings: [], reviewedShas: [] };
-  return decodeEnvelope(payload) ?? { findings: [], reviewedShas: [] };
+  if (payload === null) {
+    const note = uncertain && marked === null ? "This run's comment could not be found with certainty \u2014 the write was withheld." : null;
+    return {
+      previous: { findings: [], reviewedShas: [] },
+      thread: { marked, replies, uncertain },
+      memoryNote: note
+    };
+  }
+  const decoded = decodeEnvelope(payload);
+  if (decoded.kind === "ok") {
+    return { previous: decoded.previous, thread: { marked, replies, uncertain }, memoryNote: null };
+  }
+  if (decoded.kind === "corrupt") {
+    const reason = `The review's stored memory failed its checksum and was rebuilt from the thread \u2014 ${decoded.reason}.`;
+    warning(`#${String(at.number)}: ${reason}`);
+    return {
+      previous: { findings: [], reviewedShas: [] },
+      thread: { marked, replies, uncertain },
+      memoryNote: reason
+    };
+  }
+  return {
+    previous: { findings: [], reviewedShas: [] },
+    thread: { marked, replies, uncertain },
+    memoryNote: null
+  };
 }
 function toFinding(claim, rules) {
   const rule = rules.rules.find((entry) => entry.id === claim.ruleId);
@@ -37563,6 +37840,7 @@ function page(settings, authority2, outcome, ungranted, spent) {
     dryRun: settings.dryRun,
     headSha: outcome?.headSha ?? "",
     note: outcome?.note ?? null,
+    memoryNote: outcome?.memoryNote ?? null,
     previousSha,
     shown: outcome?.shown ?? [],
     skipped: outcome?.skipped ?? [],
