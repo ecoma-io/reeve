@@ -58,6 +58,8 @@ export interface Run {
   readonly contextReadFiles: number;
   /** What this run's inline-thread sync did, when one ran — for the "Threads" row. */
   readonly threads: ThreadSync | null;
+  /** The test-aware pass's summary line, when the rules file enabled it. */
+  readonly readTests: string | null;
 }
 
 export function summarize(run: Run): string {
@@ -142,6 +144,9 @@ function verdict(run: Run): string {
   }
   if (run.readRules !== null) {
     rows.push(["Rules", cell(run.readRules)]);
+  }
+  if (run.readTests !== null) {
+    rows.push(["Tests", cell(run.readTests)]);
   }
   if (run.previousSha.length > 0 && run.previousSha !== run.headSha) {
     rows.push(["Previously", `reviewed at \`${run.previousSha}\``]);

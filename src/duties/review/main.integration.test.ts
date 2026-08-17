@@ -1754,6 +1754,47 @@ describe("the action", () => {
     expect(stub.threads).toHaveLength(1);
     expect(stub.threads[0]?.line).toBe(13);
   });
+
+  it("fires a test-gap finding when the rules enable tests and no test covers the change", async () => {
+    await writeFile(rulesPath, ["version: 1", "tests:", "  enabled: true"].join("\n"));
+    // The workspace is the base-branch checkout: no test references src/a.ts.
+    await mkdir(join(scratch, "src"), { recursive: true });
+    await writeFile(join(scratch, "src", "other.test.ts"), 'import { z } from "./other";');
+
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub, {}, { GITHUB_WORKSPACE: scratch });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.findings).toBe("1");
+    const posted = stub.comments[0]?.body ?? "";
+    expect(posted).toContain("### New findings (1)");
+    expect(posted).toContain("src/a.ts");
+    expect(posted).toContain("has no test in the base-branch checkout");
+    expect(run.summary).toContain("| Tests |");
+    expect(run.summary).toContain("1 test file(s), 1 gap finding(s)");
+  });
+
+  it("reports no test-gap finding when a covering test exists in the checkout", async () => {
+    await writeFile(rulesPath, ["version: 1", "tests:", "  enabled: true"].join("\n"));
+    await mkdir(join(scratch, "src"), { recursive: true });
+    await writeFile(join(scratch, "src", "a.test.ts"), 'import { a } from "./a";\n');
+
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub, {}, { GITHUB_WORKSPACE: scratch });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.findings).toBe("0");
+    const posted = stub.comments[0]?.body ?? "";
+    expect(posted).toContain("No issues to report");
+    expect(run.summary).toContain("| Tests |");
+    expect(run.summary).toContain("1 test file(s), 0 gap finding(s)");
+  });
 });
 
 describe("the context engine", () => {

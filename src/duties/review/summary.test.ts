@@ -28,6 +28,7 @@ function run(overrides: Partial<Run> = {}): Run {
     passes: [],
     contextReadFiles: 0,
     threads: null,
+    readTests: null,
     ...overrides,
   };
 }

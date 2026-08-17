@@ -104,6 +104,8 @@ export interface ReviewScenario {
   readonly workspace: Record<string, string>;
   /** The risk profile the run reads from the checkout, or null for the default. */
   readonly risk: string | null;
+  /** Test files written into the checkout: repo-relative path → content. */
+  readonly testmap: Record<string, string>;
   /** The review-stage model answer. */
   readonly verdict: string;
   /** The review-stage model answers per pass, in pass order — overrides `verdict` when present. */
@@ -152,7 +154,7 @@ export interface ReviewFixture {
   readonly files: readonly ReviewFile[];
   /** The rules file to write into the checkout, or absent for the default rules. */
   readonly rules?: string;
-  /** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
+/** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
   readonly packs?: Record<string, string>;
   /**
    * Checkout files planted beside the rules file — the repository context
@@ -162,6 +164,8 @@ export interface ReviewFixture {
   readonly workspace?: Record<string, string>;
   /** The risk profile to write into the checkout, or absent for the default profile. */
   readonly risk?: string;
+  /** Test files to write into the checkout, under the `tests:` section. */
+  readonly testmap?: Record<string, string>;
   /** Fields the review-stage verdict JSON spreads over an empty verdict. */
   readonly "verdict-over"?: Record<string, unknown>;
   /** One review-stage answer per pass, in pass order — replaces `verdict-over`. */
@@ -400,9 +404,10 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     },
     files: fixture.files,
     rules: fixture.rules ?? null,
-    packs: fixture.packs ?? {},
+packs: fixture.packs ?? {},
     workspace: fixture.workspace ?? {},
     risk: fixture.risk ?? null,
+    testmap: fixture.testmap ?? {},
     verdict: verdictOf(fixture["verdict-over"] ?? {}),
     passes: (fixture["review-passes"] ?? []).map((over) => verdictOf(over)),
     detect: fixture.detect ?? "en",

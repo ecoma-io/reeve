@@ -1,0 +1,26 @@
+{
+  "description": "The rules file enables the test-aware section, and the checkout holds a test file that references no changed module. `src/app.ts` changes without a covering test, so the deterministic `tests-map` finding fires and the run posts it.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,1 @@\n+export const VERSION = \"1.0.0\";"
+    }
+  ],
+  "rules": "version: 1\ntests:\n  enabled: true\n",
+  "testmap": {
+    "src/other.test.ts": "import { other } from \"./other\";\n// unrelated to app\n"
+  },
+  "verdict-over": {
+    "findings": [],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "1",
+    "head-sha": "abc123"
+  }
+}

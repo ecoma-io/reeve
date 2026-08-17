@@ -1,0 +1,26 @@
+{
+  "description": "The rules file enables the test-aware section and the checkout holds a test that references the changed module by convention. `src/app.ts` changes and `src/app.test.ts` covers it, so no test-gap finding fires — a clean review that was actually looked at.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,1 @@\n+export const VERSION = \"1.0.0\";"
+    }
+  ],
+  "rules": "version: 1\ntests:\n  enabled: true\n",
+  "testmap": {
+    "src/app.test.ts": "import { openFile } from \"./app\";\n// tests for app\n"
+  },
+  "verdict-over": {
+    "findings": [],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "0",
+    "head-sha": "abc123"
+  }
+}

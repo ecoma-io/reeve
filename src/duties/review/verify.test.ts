@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { verifyFindings, type VerifyRequest } from "./verify.js";
 import type { Finding } from "./findings.js";
 import { emptyArchitecture } from "./architecture.js";
+import { DEFAULT_TESTS } from "./testmap.js";
 import type { Rules } from "./rules.js";
 
 function finding(overrides: Partial<Finding> = {}): Finding {
@@ -32,7 +33,8 @@ function rules(overrides: Partial<Rules> = {}): Rules {
     blocked: [],
     raw: "version: 1\nrules:\n  - id: dedup\n",
     architecture: emptyArchitecture(),
-    packRefs: [],
+packRefs: [],
+    tests: DEFAULT_TESTS,
     warnings: [],
     ...overrides,
   };
