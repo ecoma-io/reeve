@@ -146,6 +146,7 @@ function request(overrides: Record<string, unknown> = {}) {
       { id: "dedup", name: "Repeated code", marker: "", body: "", severity: "warning" as const },
     ],
     language: null,
+    context: { sections: [], text: null, totalChars: 0, readFiles: 0 },
     weather: createWeather(),
     ...overrides,
   };

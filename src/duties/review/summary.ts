@@ -44,6 +44,8 @@ export interface Run {
     readonly failed: boolean;
     readonly findings: number;
   }[];
+  /** How many workspace reads the context engine made this run. */
+  readonly contextReadFiles: number;
 }
 
 export function summarize(run: Run): string {
@@ -71,6 +73,12 @@ export function summarize(run: Run): string {
     verdict(run),
     ...(run.findings.length > 0 ? ["", findingsTable(run)] : []),
     ...(run.skipped.length > 0 ? ["", coverage(run)] : []),
+    ...(run.contextReadFiles > 0
+      ? [
+          "",
+          `**Context:** ${String(run.contextReadFiles)} workspace file(s) read for surrounding source, tests, config and callers.`,
+        ]
+      : []),
     "",
     cost(run.spent, (spend) => shown(run.modelNames, spend.model)),
   ];

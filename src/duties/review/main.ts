@@ -69,6 +69,13 @@ import {
   type Posted,
   type Publication,
 } from "./publish.js";
+import {
+  collectContext,
+  fsSource,
+  type Budget,
+  type Context,
+  type ContextTarget,
+} from "./context.js";
 import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
 import { preflight, readPackedRules } from "./rules.js";
 import {
@@ -102,6 +109,12 @@ interface Settings extends Core {
   readonly trigger: string;
   /** The diff chars a single file may contribute before being skipped as capped — `none` means no bound. */
   readonly maxDiffChars: number | null;
+  /**
+   * The whole-run budget of assembled repository context (symbols, imports,
+   * tests, config, surrounding source, callers, history) one review may carry
+   * to the model, in characters — `none` means no bound.
+   */
+  readonly maxContextChars: number | null;
   /** The confidence at which a finding is reported — kept below in training only. */
   readonly confidence: number;
   /** How thorough the model half of this review is: one pass, or several. */
@@ -119,6 +132,7 @@ function readSettings(): Omit<Settings, "languages"> {
     packsPath: core.getInput("packs-path"),
     trigger: core.getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", core.getInput("max-diff-chars")),
+    maxContextChars: bounded("max-context-chars", core.getInput("max-context-chars")),
     confidence: parseConfidence(core.getInput("confidence")),
     profile: parseProfile(core.getInput("profile")),
   };
@@ -153,6 +167,8 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
+  /** How many workspace reads the context engine made, for the summary's Context row. */
+  readonly contextReadFiles: number;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
   readonly previous: Previous | null;
   /** What the diff showed the model, for the summary's coverage table. */
@@ -175,6 +191,7 @@ type Settled = Partial<
     | "headSha"
     | "malformedAnswers"
     | "rulesPath"
+    | "contextReadFiles"
     | "previous"
     | "shown"
     | "skipped"
@@ -201,6 +218,28 @@ function rulesLabel(settings: Settings): string {
   return settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath;
 }
 
+/**
+ * The bounds one context run spends. The whole-run total is the only input;
+ * the per-section ceilings are the engine's own constants — a repository
+ * cannot widen them, only this file can.
+ */
+function contextBudget(maxContextChars: number | null): Budget {
+  return {
+    total: maxContextChars ?? Number.MAX_SAFE_INTEGER,
+    perFileSourceExcerpt: 800,
+    importsWindow: 60,
+    maxChangedFiles: 25,
+    maxFilesScannedPerDirectory: 100,
+    maxCallsitesPerSymbol: 10,
+    maxMatchesPerSymbol: 10,
+    maxSymbolsPerFile: 15,
+    maxRelatedTestsPerChangedFile: 8,
+    maxConfigFiles: 3,
+    maxHistoryChars: 800,
+    maxFileChars: 64 * 1024,
+  };
+}
+
 async function decide(
   api: ReturnType<typeof getOctokit>,
   at: { owner: string; repo: string; number: number },
@@ -219,6 +258,7 @@ async function decide(
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    contextReadFiles: 0,
     previous: null,
     shown: [],
     skipped: [],
@@ -302,10 +342,6 @@ async function decide(
   // The memory half: what the previous run's comment left this run — read
   // from its own marker's envelope, or empty on the first review.
   const previous = await readEnvelope(api, at);
-  // The memory a later return's page will say "reviewed at" against — carried
-  // on every outcome from here on, so the summary's "Previously" row names the
-  // last SHA this thread was reviewed against, not the current one.
-  const withMemory: Settled = { previous, ...settledBase };
   if (previous.findings.length > 0) {
     core.info(
       `#${String(at.number)}: previous review read (${String(previous.findings.length)} finding(s)).`,
@@ -341,11 +377,43 @@ async function decide(
     })),
   ];
 
+  // The context engine: the assembled, bounded, deterministic half that lives
+  // beside the diff. Read from the workflow's own base-ref checkout — the same
+  // trust tier as the rules file — and only when there is a diff to ask about
+  // and a workspace to read from. It is evidence, never instructions; a finding
+  // still has to be diff-proven (see `verdict.ts`'s `parseFinding`).
+  const workspaceRoot = process.env.GITHUB_WORKSPACE ?? "";
+  let context: Context = { sections: [], text: null, totalChars: 0, readFiles: 0 };
+  if (bounded.shown.length > 0 && workspaceRoot.length > 0) {
+    context = await collectContext(
+      bounded.shown.map((file): ContextTarget => ({
+        path: file.path,
+        status: file.status,
+        lines: file.lines,
+        patch: file.patch,
+      })),
+      fsSource(workspaceRoot),
+      contextBudget(settings.maxContextChars),
+      resolveRulesPath(settings),
+    );
+    if (context.readFiles > 0) {
+      core.info(`review: context engine read ${String(context.readFiles)} file(s).`);
+    }
+  }
+
+  // The memory a later return's page will say "reviewed at" against — carried
+  // on every outcome from here on, so the summary's "Previously" row names the
+  // last SHA this thread was reviewed against, not the current one. Declared
+  // after the context collection so the Context row of the summary can carry
+  // how many workspace files the engine read this run.
+  const withMemory: Settled = { previous, contextReadFiles: context.readFiles, ...settledBase };
+
   // The expensive half, only when there is a diff to ask about. The profile
   // names one or more passes, each reading the same diff through its own
   // prompt and the same strict parser; `synthesize` correlates what came back
   // — dedupes, annotates contradictions, ranks, and prices every pass that
-  // could not answer into the confidence.
+  // could not answer into the confidence. The context enters every pass's
+  // prompt behind the same fence as the diff.
   const passContext: PassContext = {
     prTitle: pr.title,
     prBody: pr.body.slice(0, BODY_EXCERPT),
@@ -353,6 +421,7 @@ async function decide(
     files: bounded.shown,
     rules: rules.rules,
     language: language?.code ?? null,
+    context,
   };
   const passResults: PassResult[] =
     bounded.shown.length > 0
@@ -693,6 +762,7 @@ function page(
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
     passes: outcome?.passes ?? [],
+    contextReadFiles: outcome?.contextReadFiles ?? 0,
   });
 }
 

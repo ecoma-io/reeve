@@ -873,6 +873,13 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, contents);
     }
+    // The context engine reads the checkout itself, so a fixture that
+    // exercises it plants its own base-branch source beside the rules.
+    for (const [rel, text] of Object.entries(scenario.workspace)) {
+      const path = join(scratch, rel);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, text);
+    }
     const run = await runBundle(
       "review",
       stub.url,
@@ -880,6 +887,31 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
       scratchFiles(scratch),
       { GITHUB_WORKSPACE: scratch },
     );
+    // The context engine's own gate, independent of the finding ladder: a
+    // fixture that plants a workspace proves the review-stage prompt carried
+    // that evidence — a marker only the workspace holds, never the diff.
+    // Without it, a deterministic blocked-phrase finding could pass even with
+    // the engine disabled; this is the vector that stays closed.
+    const evidence = scenario.expected["workspace-evidence"];
+    const reviewAsk = stub.asked.find((ask) =>
+      ask.system.includes("You are reviewing a pull request on a GitHub repository."),
+    );
+    if (evidence !== undefined) {
+      if (reviewAsk === undefined) {
+        return {
+          fixture,
+          outcome: "failed",
+          detail: "the review stage never asked the model — cannot prove context surfaced",
+        };
+      }
+      if (!reviewAsk.user.includes(evidence)) {
+        return {
+          fixture,
+          outcome: "failed",
+          detail: `context engine did not surface workspace evidence (\`${evidence}\`)`,
+        };
+      }
+    }
     return reviewLine(fixture, scenario, tracker.effect, run);
   } finally {
     await stub.close();
@@ -897,6 +929,7 @@ const REVIEW_INPUTS: Record<string, string> = {
   "packs-path": ".github/reeve-packs",
   trigger: "pr",
   "max-diff-chars": "none",
+  "max-context-chars": "4000",
   confidence: "0.75",
   "dry-run": "false",
   endpoints: "",
