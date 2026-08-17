@@ -23,6 +23,7 @@ function run(overrides: Partial<Run> = {}): Run {
     ungranted: null,
     malformedAnswers: 0,
     readRules: null,
+    passes: [],
     ...overrides,
   };
 }

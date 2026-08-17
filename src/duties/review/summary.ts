@@ -35,6 +35,15 @@ export interface Run {
   readonly ungranted: string | null;
   readonly malformedAnswers: number;
   readonly readRules: string | null;
+  /** One row per model pass that ran, for the verdict table's "Passes" row. */
+  readonly passes: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly answered: boolean;
+    readonly unreadable: boolean;
+    readonly failed: boolean;
+    readonly findings: number;
+  }[];
 }
 
 export function summarize(run: Run): string {
@@ -95,6 +104,18 @@ function verdict(run: Run): string {
   }
   if (run.malformedAnswers > 0) {
     rows.push(["Unreadable", `${String(run.malformedAnswers)} answer(s) discarded`]);
+  }
+  if (run.passes.length > 0) {
+    rows.push([
+      "Passes",
+      run.passes
+        .map((pass) =>
+          pass.answered
+            ? `${pass.name} (${String(pass.findings)} finding${pass.findings === 1 ? "" : "s"})`
+            : `${pass.name} (did not answer)`,
+        )
+        .join(", "),
+    ]);
   }
   if (run.readRules !== null) {
     rows.push(["Rules", cell(run.readRules)]);
