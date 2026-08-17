@@ -84,11 +84,14 @@ the page is anchored to something checkable rather than to an idea of 1.x.
 [`lifecycle`](../reference/duties/lifecycle.md),
 [`harmonise`](../reference/duties/harmonise.md),
 [`dependa`](../reference/duties/dependa.md) and
-[`review`](../reference/duties/review.md). The first four are dogfooded
-on this repository, the last two of those in report-only mode first, which
-is the same discipline Phase 3 below borrows. `review` is the eighth, granted
-nothing until a warrant names it, and its whole duty is driven end to end by
-its own integration suite against a stub API.
+[`review`](../reference/duties/review.md). Seven of the eight are dogfooded
+on this repository — every duty but `review`, through `.github/workflows/reeve-*.yml`
+(`reeve-triage-issue`, `reeve-translate-issue` and `-pr`, `reeve-duplicate-issue`,
+`reeve-respond-issue`, `reeve-lifecycle-issue`, `reeve-harmonise`, `reeve-dependa`,
+`reeve-dependa-dogfood` and `reeve-sweep`) — which is the same discipline Phase 3
+below borrows. `review` is the eighth, granted nothing until a warrant names it,
+and its whole duty is driven end to end by its own integration suite against a
+stub API.
 The warrant is the whole answer for authority, with total enumeration once a
 `duties:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog

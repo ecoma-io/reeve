@@ -12,10 +12,13 @@ run.
 
 ## What `sweep`, `since` and `limit` are
 
-Every duty gains three workflow-level inputs — not warrant authority, because
-what a sweep may touch is still bounded by the same taxonomy and the same
-capabilities a single-thread run answers to. A sweep decides **how much work a
-run looks for**, never **what it is allowed to do to it**:
+Five duties gain three workflow-level inputs each — `triage`, `harmonise`,
+`duplicate`, `translate` and `lifecycle` (the other three — `respond`,
+`dependa`, `review` — are single-thread runs and read none of these). Not
+warrant authority, because what a sweep may touch is still bounded by the
+same taxonomy and the same capabilities a single-thread run answers to. A
+sweep decides **how much work a run looks for**, never **what it is allowed
+to do to it**:
 
 ```yaml
 with:
