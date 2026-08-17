@@ -150,12 +150,11 @@ exactly as much as you wrote down, one rung of
 | `dependa`   | Maintains your dependencies — discovers updates, assesses risk, and opens reviewable PRs within the authority you granted. Report-only at level 0 — needs a `duties:` grant in a warrant to act.                                              | [Reference](docs/reference/duties/dependa.md)   |
 
 **The review duty deserves the extra sentence.** It reviews pull requests:
-deterministic pre-checks first — exactly-overlapping changes, fenced diffs,
-own-comment detection, churn rules — and a single model pass after them. The
-verdict lands once, as one owned comment, and tracks its findings across
-`synchronize` events instead of reposting. Rules are your own
-(`.github/reeve-rules.yml`) and a maintainer always owns the diff.
-[Review](docs/reference/duties/review.md).
+deterministic pre-checks first — ignore, generated, blocked — and a single
+model pass after them. The verdict lands once, as one owned comment, and
+tracks its findings across `synchronize` events instead of reposting. Rules
+are your own (`.github/reeve-rules.yml`) and a maintainer always owns the
+diff. [Review](docs/reference/duties/review.md).
 
 What comes after these eight is decided by one test, and it is a strict one: the
 work has to recur, be uniformly expensive today, already be work a maintainer

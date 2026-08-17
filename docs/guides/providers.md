@@ -129,9 +129,9 @@ action — `base-url`, `api-key`, `models`, `request-timeout`, `endpoints`,
 a workflow passes in can grant a capability; that is exactly what
 [the warrant](warrant.md) is for. One `models` input can be required (the
 duties that draft), optional (the duties that read or sweep), or unused
-(`lifecycle` and `doctor` call no model at all) — each duty's
-[reference page](../reference/duties/) declares its own table, and that
-table is the contract.
+(`lifecycle` calls no model; `doctor`'s only call is a single weather probe,
+never authority) — each duty's [reference page](../reference/duties/)
+declares its own table, and that table is the contract.
 
 ---
 
