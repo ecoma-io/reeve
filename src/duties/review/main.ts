@@ -33,7 +33,7 @@
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { isReeveProposalPr } from "../../core/marker.js";
@@ -185,7 +185,7 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
-  /** The risk assessment, when the run reached one — `null` on early stops. */
+/** The risk assessment, when the run reached one — `null` on early stops. */
   readonly risk: RiskAssessment | null;
   /** How many workspace reads the context engine made, for the summary's Context row. */
   readonly contextReadFiles: number;
@@ -335,7 +335,6 @@ async function decide(
     shown: [],
     skipped: [],
     passes: [],
-    threads: null,
     permitted,
     ...over,
   });
@@ -484,7 +483,7 @@ async function decide(
     ...testmap.findings.map((entry) => toTestFinding(entry)),
   ];
 
-// The context engine: the assembled, bounded, deterministic half that lives
+  // The context engine: the assembled, bounded, deterministic half that lives
   // beside the diff. Read from the workflow's own base-ref checkout — the same
   // trust tier as the rules file — and only when there is a diff to ask about
   // and a workspace to read from. It is evidence, never instructions; a finding

@@ -154,7 +154,7 @@ export interface ReviewFixture {
   readonly files: readonly ReviewFile[];
   /** The rules file to write into the checkout, or absent for the default rules. */
   readonly rules?: string;
-/** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
+  /** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
   readonly packs?: Record<string, string>;
   /**
    * Checkout files planted beside the rules file — the repository context
@@ -404,7 +404,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     },
     files: fixture.files,
     rules: fixture.rules ?? null,
-packs: fixture.packs ?? {},
+    packs: fixture.packs ?? {},
     workspace: fixture.workspace ?? {},
     risk: fixture.risk ?? null,
     testmap: fixture.testmap ?? {},

@@ -888,14 +888,14 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
     // reads `packs-path` from `GITHUB_WORKSPACE`, so the fixture's pack files
     // are flattened under `.github/reeve-packs` there.
     for (const [rel, contents] of Object.entries(scenario.packs)) {
-      const target = join(scratch, ".github", "reeve-packs", rel);
+      const target = join(checkout, ".github", "reeve-packs", rel);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, contents);
     }
     // The context engine reads the checkout itself, so a fixture that
     // exercises it plants its own base-branch source beside the rules.
     for (const [rel, text] of Object.entries(scenario.workspace)) {
-      const path = join(scratch, rel);
+      const path = join(checkout, rel);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
     }
@@ -903,7 +903,7 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
     const run = await runBundle(
       "review",
       stub.url,
-      reviewInputs(stub.url, warrant),
+reviewInputs(stub.url, warrant),
       scratchFiles(checkout),
       { GITHUB_WORKSPACE: checkout },
     );

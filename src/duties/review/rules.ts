@@ -146,7 +146,7 @@ const KNOWN_RULE_KEYS: Readonly<Set<string>> = new Set([
   "generated",
   "blocked",
   "architecture",
-"packs",
+  "packs",
   "tests",
 ]);
 
@@ -460,6 +460,7 @@ export function composeRules(local: Rules, packs: readonly Pack[]): Rules {
     generatedExtensions: generated.length > 0 ? generated : DEFAULT_GENERATED,
     blocked: [...blockedByPhrase.values()],
     architecture: local.architecture,
+    tests: local.tests,
     raw: local.raw,
     packRefs: local.packRefs,
     warnings,
