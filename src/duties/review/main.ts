@@ -33,7 +33,7 @@
  */
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createLanguagePicker, detectLanguage } from "../../core/detect.js";
 import { isReeveProposalPr } from "../../core/marker.js";
@@ -114,6 +114,7 @@ import {
 } from "./passes.js";
 import { verifyFindings } from "./verify.js";
 import { dryRunThreads, syncThreads, type ThreadSync } from "./threads.js";
+import { discoverTests, gapFindings, testEvidence, type GapFinding } from "./testmap.js";
 import { summarize, type Run } from "./summary.js";
 
 /** The languages this run reads when the warrant's `languages:` key is silent. */
@@ -188,6 +189,10 @@ interface Outcome {
   readonly risk: RiskAssessment | null;
   /** How many workspace reads the context engine made, for the summary's Context row. */
   readonly contextReadFiles: number;
+  /** What the inline-thread sync did — for the page's "Threads" row. */
+  readonly threads: ThreadSync | null;
+  /** A short summary line for the page: test file count and gap findings, or null when the section is off/unavailable. */
+  readonly readTests: string | null;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
   readonly previous: Previous | null;
   /** Why the comment memory was unreadable — set when corruption was found and recovered from, never silent. */
@@ -199,8 +204,6 @@ interface Outcome {
   readonly permitted: readonly Capability[];
   /** One row per model pass that ran, for the summary's verdict table. */
   readonly passes: readonly PassReport[];
-  /** What the inline-thread sync did — for the page's "Threads" row. */
-  readonly threads: ThreadSync | null;
 }
 
 type Settled = Partial<
@@ -216,20 +219,26 @@ type Settled = Partial<
     | "rulesPath"
     | "risk"
     | "contextReadFiles"
+    | "threads"
+    | "readTests"
     | "previous"
     | "memoryNote"
     | "shown"
     | "skipped"
     | "passes"
-    | "threads"
   >
 >;
 
 /** The rules file's path in the checkout, absolute, resolved from the workspace. */
 function resolveRulesPath(settings: Settings): string {
   const workspace = process.env.GITHUB_WORKSPACE ?? "";
-  if (settings.rulesPath.length === 0) return join(workspace, ".github", "reeve-rules.yml");
-  return join(workspace, settings.rulesPath);
+  // `resolve` honours an absolute `rules-path` instead of gluing it onto the
+  // workspace (which a runner that sets `GITHUB_WORKSPACE` and an absolute
+  // path would otherwise concatenate into a path that cannot exist).
+  return resolve(
+    workspace,
+    settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath,
+  );
 }
 
 /** The rule packs directory's path in the checkout, absolute, resolved from the workspace. */
@@ -316,12 +325,13 @@ async function decide(
     rulesPath: null,
     risk: null,
     contextReadFiles: 0,
+    threads: null,
+    readTests: null,
     previous: null,
     memoryNote: null,
     shown: [],
     skipped: [],
     passes: [],
-    threads: null,
     permitted,
     ...over,
   });
@@ -439,6 +449,11 @@ async function decide(
   // model is asked; its findings are guaranteed by construction (a line the
   // patch contains), which is why they enter the finding pool with the same
   // lifecycle as everything else.
+
+  // The test-aware half, opt-in via the rules file's `tests:` section. It never
+  // runs code (D8) and never fabricates coverage (D5): an unavailable checkout
+  // is "no evidence", so no gap finding is attributed to its absence.
+  const testmap = await runTestmap(bounded, rules);
   const deterministic: Finding[] = [
     ...preflight(bounded, rules).map((entry) => ({
       id: entry.id,
@@ -462,6 +477,7 @@ async function decide(
       body: entry.body,
       marker: entry.marker,
     })),
+    ...testmap.findings.map((entry) => toTestFinding(entry)),
   ];
 
   // The context engine: the assembled, bounded, deterministic half that lives
@@ -517,6 +533,9 @@ async function decide(
     rules: rules.rules,
     language: language?.code ?? null,
     context,
+    // The bounded TEST EVIDENCE block, only when the `tests:` section enabled
+    // it and the checkout was readable — an empty block adds nothing.
+    ...(testmap.evidence.length > 0 ? { tests: testmap.evidence } : {}),
   };
   const passResults: PassResult[] = [];
   if (bounded.shown.length > 0) {
@@ -638,6 +657,7 @@ async function decide(
       risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
+      readTests: testmap.readTests,
       shown: bounded.shown,
       skipped: bounded.skipped,
       passes: synthesis.passes,
@@ -657,6 +677,7 @@ async function decide(
       risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
+      readTests: testmap.readTests,
       shown: bounded.shown,
       skipped: bounded.skipped,
       passes: synthesis.passes,
@@ -676,6 +697,7 @@ async function decide(
       risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
+      readTests: testmap.readTests,
       shown: bounded.shown,
       skipped: bounded.skipped,
       passes: synthesis.passes,
@@ -696,6 +718,7 @@ async function decide(
       risk,
       malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
+      readTests: testmap.readTests,
       shown: bounded.shown,
       skipped: bounded.skipped,
       passes: synthesis.passes,
@@ -729,6 +752,7 @@ async function decide(
       risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
+      readTests: testmap.readTests,
       shown: bounded.shown,
       skipped: bounded.skipped,
       passes: synthesis.passes,
@@ -768,6 +792,7 @@ async function decide(
     risk,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
+    readTests: testmap.readTests,
     shown: bounded.shown,
     skipped: bounded.skipped,
     passes: synthesis.passes,
@@ -844,6 +869,62 @@ function toFinding(
     marker: "",
     snippet: claim.snippet,
   };
+}
+
+/** A deterministic test-aware finding admitted into the finding pool. */
+function toTestFinding(entry: GapFinding): Finding {
+  const ruleName =
+    entry.ruleId === "tests-map" ? "Changed code without test" : "Test changed without its code";
+  return {
+    id: `${entry.ruleId}:${entry.path}:0`,
+    ruleId: entry.ruleId,
+    ruleName,
+    ruleBody: "",
+    path: entry.path,
+    line: null,
+    severity: entry.severity,
+    body: entry.body,
+    marker: entry.marker,
+  };
+}
+
+/** What the test-aware pass produced for this run, or null when it was off. */
+interface TestmapRun {
+  readonly findings: readonly GapFinding[];
+  readonly evidence: string;
+  /** A one-line note for the summary page — `null` when the pass was off or the checkout was unavailable. */
+  readonly readTests: string | null;
+}
+
+/** NOTHING: the test-aware pass is off. */
+const TESTMAP_OFF: TestmapRun = { findings: [], evidence: "", readTests: null };
+
+/**
+ * Runs the deterministic test-aware pass, when the rules file enabled it.
+ *
+ * The checkout is the base ref (see review.md's workflow example), so the
+ * pull request head's code is never present and never executed (D8). An
+ * unavailable checkout is "no evidence", so nothing is reported from it (D5).
+ */
+async function runTestmap(
+  bounded: { readonly shown: readonly Parameters<typeof gapFindings>[0][number][] },
+  rules: { readonly tests: Parameters<typeof gapFindings>[2] },
+): Promise<TestmapRun> {
+  if (!rules.tests.enabled) return TESTMAP_OFF;
+  const discovery = await discoverTests(process.env.GITHUB_WORKSPACE ?? "");
+  if (discovery.unavailable) {
+    core.warning(
+      "review: the tests: section is enabled but the checkout is unavailable — test evidence skipped.",
+    );
+    return { findings: [], evidence: "", readTests: null };
+  }
+  if (discovery.capped) {
+    core.warning("review: test discovery hit a budget — evidence truncated.");
+  }
+  const findings = gapFindings(bounded.shown, discovery.tests, rules.tests);
+  const evidence = testEvidence(bounded.shown, discovery.tests);
+  const readTests = `${String(discovery.tests.length)} test file(s), ${String(findings.length)} gap finding(s)`;
+  return { findings, evidence, readTests };
 }
 
 const DEFAULT_GENERATED = [".min.js", ".min.css", ".map"];
@@ -954,6 +1035,7 @@ function page(
     passes: outcome?.passes ?? [],
     threads: outcome?.threads ?? null,
     contextReadFiles: outcome?.contextReadFiles ?? 0,
+    readTests: outcome?.readTests ?? null,
   });
 }
 

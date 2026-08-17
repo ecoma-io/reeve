@@ -25,6 +25,7 @@ import {
 } from "./architecture.js";
 import { isGenerated } from "./pr.js";
 import { MAX_PACK_CHARS, UnreadablePacks, parsePack, type Pack } from "./packs.js";
+import { DEFAULT_TESTS, parseTests, type TestsSection } from "./testmap.js";
 
 /**
  * Cap on the rules file, the same frugality `guidance.ts` applies to respond's
@@ -62,6 +63,8 @@ export interface Rules {
   }[];
   /** Forbidden dependency boundaries — layers, edges, and aliases. */
   readonly architecture: Architecture;
+  /** The opt-in `tests:` section — test-aware review, off unless enabled. See `testmap.ts`. */
+  readonly tests: TestsSection;
   readonly raw: string;
   /** The rule packs this file composes by reference, in reference order. */
   readonly packRefs: readonly PackRef[];
@@ -128,6 +131,7 @@ function emptyRules(): Rules {
     generatedExtensions: DEFAULT_GENERATED,
     blocked: [],
     architecture: emptyArchitecture(),
+    tests: DEFAULT_TESTS,
     raw: "",
     packRefs: [],
     warnings: [],
@@ -143,6 +147,7 @@ const KNOWN_RULE_KEYS: Readonly<Set<string>> = new Set([
   "blocked",
   "architecture",
   "packs",
+  "tests",
 ]);
 
 /**
@@ -249,6 +254,7 @@ export function parseRules(text: string): Rules {
     generatedExtensions: readGenerated(map.generated, warnings),
     blocked: readBlocked(map.blocked, warnings),
     architecture: readArchitecture(map.architecture, warnings),
+    tests: parseTests(map.tests, warnings),
     raw: text,
     packRefs,
     warnings,
@@ -454,6 +460,7 @@ export function composeRules(local: Rules, packs: readonly Pack[]): Rules {
     generatedExtensions: generated.length > 0 ? generated : DEFAULT_GENERATED,
     blocked: [...blockedByPhrase.values()],
     architecture: local.architecture,
+    tests: local.tests,
     raw: local.raw,
     packRefs: local.packRefs,
     warnings,

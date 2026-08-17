@@ -861,39 +861,51 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
     routes: reviewRoutes(scenario, tracker),
     completion: scriptReview(scenario),
   });
+  // A fresh checkout per fixture: the fixtures share one scratch for the whole
+  // duty, and a test file one fixture writes (under `testmap:`) must never leak
+  // into the next fixture's discovery — that would hand `test-gap` the very
+  // covering test `test-covered` wrote and silence a finding that should fire.
+  const checkout = join(scratch, fixture);
   try {
-    const warrant = join(scratch, `warrant-review-${fixture}.yml`);
+    const warrant = join(checkout, `warrant-review-${fixture}.yml`);
+    await mkdir(checkout, { recursive: true });
     await writeFile(warrant, scenario.warrant);
     // The rules file lives in the checkout — the run reads it from
     // `GITHUB_WORKSPACE`, so the fixture's rules are written there.
-    await mkdir(join(scratch, ".github"), { recursive: true });
+    await mkdir(join(checkout, ".github"), { recursive: true });
     if (scenario.rules === null) {
-      await writeFile(join(scratch, ".github", "reeve-rules.yml"), "");
+      await writeFile(join(checkout, ".github", "reeve-rules.yml"), "");
     } else {
-      await writeFile(join(scratch, ".github", "reeve-rules.yml"), scenario.rules);
+      await writeFile(join(checkout, ".github", "reeve-rules.yml"), scenario.rules);
+    }
+    // `tests:` section — written where the discovery walk reads them from.
+    for (const [rel, content] of Object.entries(scenario.testmap)) {
+      const target = join(checkout, rel);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content);
     }
     // Referenced packs live beside the rules file in the checkout — the run
     // reads `packs-path` from `GITHUB_WORKSPACE`, so the fixture's pack files
     // are flattened under `.github/reeve-packs` there.
     for (const [rel, contents] of Object.entries(scenario.packs)) {
-      const target = join(scratch, ".github", "reeve-packs", rel);
+      const target = join(checkout, ".github", "reeve-packs", rel);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, contents);
     }
     // The context engine reads the checkout itself, so a fixture that
     // exercises it plants its own base-branch source beside the rules.
     for (const [rel, text] of Object.entries(scenario.workspace)) {
-      const path = join(scratch, rel);
+      const path = join(checkout, rel);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
     }
-    await writeFile(join(scratch, ".github", "reeve-risk.yml"), scenario.risk ?? "");
+    await writeFile(join(checkout, ".github", "reeve-risk.yml"), scenario.risk ?? "");
     const run = await runBundle(
       "review",
       stub.url,
       reviewInputs(stub.url, warrant),
-      scratchFiles(scratch),
-      { GITHUB_WORKSPACE: scratch },
+      scratchFiles(checkout),
+      { GITHUB_WORKSPACE: checkout },
     );
     // The context engine's own gate, independent of the finding ladder: a
     // fixture that plants a workspace proves the review-stage prompt carried
