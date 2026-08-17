@@ -11,7 +11,7 @@
 # thing the warrant can grant this duty (`review: [comment]`), and no input
 # here widens that.
 name: Reeve - review
-description: Review a pull request — deterministic pre-checks plus one model pass, reported as a single owned comment that tracks its own findings across synchronize events instead of reposting them.
+description: Review a pull request — deterministic pre-checks plus one or more model passes, correlated by synthesis and reported as a single owned comment that tracks its own findings across synchronize events instead of reposting them.
 author: ecoma.io
 
 branding:
@@ -195,6 +195,18 @@ inputs:
       the job summary still shows the full verdict.
     required: false
     default: "false"
+
+  profile:
+    description: >-
+      How many model passes review the diff. `default` — the price-conscious
+      choice — runs one correctness pass, exactly the review this duty has
+      always given. `deep` adds a security pass: a second, focused read of the
+      same diff through its own prompt, and the two are correlated rather than
+      just unioned — the same finding found by both is reported once, ever
+      stronger, and a disagreement between them is annotated for the thread.
+      `deep` costs a second model call per reviewed pull request.
+    required: false
+    default: default
 
 outputs:
   commented:

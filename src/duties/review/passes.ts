@@ -198,7 +198,10 @@ export async function runPasses(
     const verdict = pass.parse(rotation.success.content, context.files);
     results.push({
       pass,
-      verdict: verdict ?? { findings: [], confidence: 0 },
+      // An unreadable answer stays null — never dressed up as a readable
+      // empty verdict. A pass that could not be read is priced into the
+      // confidence and named in `failedPasses`, exactly as loud as D5 asks.
+      verdict,
       unreadable: verdict === null ? rotation.success.content : null,
       failures: rotation.failures,
       model: rotation.success.model,

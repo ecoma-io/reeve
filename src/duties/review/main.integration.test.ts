@@ -140,6 +140,7 @@ type Stage = "detect" | "review";
 /** Which of this duty's stages a request belongs to, read off its own system message. */
 function stageOf(ask: Ask): Stage {
   if (ask.system.includes("You identify which language")) return "detect";
+  if (ask.system.includes("You are a security review pass")) return "review";
   if (ask.system.includes("You are reviewing a pull request")) return "review";
   throw new Error(`a request nothing in this suite recognised: ${ask.system.slice(0, 120)}`);
 }
@@ -349,6 +350,7 @@ function baseInputs(stub: Stub, warrant: string, rules: string): Record<string, 
     trigger: "pr",
     "max-diff-chars": "4000",
     confidence: "0.6",
+    profile: "default",
     endpoints: "",
     "api-keys": "",
     "request-timeout": "120s",

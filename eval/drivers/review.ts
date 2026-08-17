@@ -91,10 +91,14 @@ export interface ReviewScenario {
   readonly rules: string | null;
   /** The review-stage model answer. */
   readonly verdict: string;
+  /** The security pass's answer, when the fixture runs the `deep` profile. */
+  readonly securityVerdict: string;
   /** The language-detection answer, when detection reaches a model. */
   readonly detect: string;
   /** A review comment a previous run left, or null on the first review. */
   readonly previous: { readonly body: string } | null;
+  /** The review profile the run is given — `default` when the fixture is silent. */
+  readonly profile: string;
   /** The assertions this fixture declares. */
   readonly expected: ReviewAssertions;
 }
@@ -109,6 +113,10 @@ export interface ReviewFixture {
   readonly rules?: string;
   /** Fields the review-stage verdict JSON spreads over an empty verdict. */
   readonly "verdict-over"?: Record<string, unknown>;
+  /** Fields the security pass's verdict JSON spreads over an empty verdict. */
+  readonly "security-verdict-over"?: Record<string, unknown>;
+  /** The profile the run is given (`default` when absent). */
+  readonly profile?: string;
   /** The language detection must answer when it reaches a model. */
   readonly detect?: string;
   /**
@@ -159,6 +167,9 @@ export function scriptReview(
   scenario: ReviewScenario,
 ): (ask: { readonly model: string; readonly system: string; readonly user: string }) => Answer {
   return (ask) => {
+    if (ask.system.includes("You are a security review pass for a pull request")) {
+      return saying(scenario.securityVerdict);
+    }
     if (ask.system.includes("You are reviewing a pull request on a GitHub repository.")) {
       return saying(scenario.verdict);
     }
@@ -278,8 +289,10 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     files: fixture.files,
     rules: fixture.rules ?? null,
     verdict: verdictOf(fixture["verdict-over"] ?? {}),
+    securityVerdict: verdictOf(fixture["security-verdict-over"] ?? {}),
     detect: fixture.detect ?? "en",
     previous: fixture.previous ?? null,
+    profile: fixture.profile ?? "default",
     expected: fixture.expected ?? {},
   };
 }

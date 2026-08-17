@@ -868,7 +868,7 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
     const run = await runBundle(
       "review",
       stub.url,
-      reviewInputs(stub.url, warrant),
+      reviewInputs(stub.url, warrant, scenario.profile),
       scratchFiles(scratch),
       { GITHUB_WORKSPACE: scratch },
     );
@@ -894,13 +894,19 @@ const REVIEW_INPUTS: Record<string, string> = {
   "api-keys": "",
   "request-timeout": "120s",
   temperature: "",
+  profile: "default",
 };
 
-function reviewInputs(stubUrl: string, warrant: string): Record<string, string> {
+function reviewInputs(
+  stubUrl: string,
+  warrant: string,
+  profile = "default",
+): Record<string, string> {
   return {
     ...REVIEW_INPUTS,
     "base-url": `${stubUrl}/v1`,
     warrant,
+    ...(profile === "default" ? {} : { profile }),
   };
 }
 

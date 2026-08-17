@@ -388,8 +388,17 @@ was written. See [Rehearsing a run](../../guides/dry-run.md).
 
 ## Cost
 
-One model pass reads the whole diff, once, and its findings are verified
-against deterministic evidence before they are reported (see
+The `profile` input decides how many passes read the diff: `default` runs one
+correctness pass — the cheapest correct review, byte-for-byte the single read
+the duty always made — and `deep` runs a correctness pass and then a security
+pass, correlating the two. The synthesis deduplicates the same finding found
+by more than one pass (reported once, corroborated), ranks by severity then
+corroboration then position, and annotates a contradiction where two passes
+claim different things at the same line. An unreadable pass is never dressed
+up as a readable empty answer: it is priced into the review's confidence
+(10% off per pass that could not answer) and named in the summary, exactly
+as loud as D5 asks. Every admitted model finding is then verified against
+deterministic evidence before it is reported (see
 [Verification](#verification-model-findings-against-deterministic-evidence));
 nothing repeats it — a
 `synchronize` event that changed nothing is recognised by the marker's
