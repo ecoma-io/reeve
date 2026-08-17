@@ -34,7 +34,10 @@ not edit code, open a fixing pull request, run a test suite, request changes
 on the review API, or hold a conversation about its own findings. A
 maintainer who wants any of that does it themselves; no input here, and no
 warrant entry, turns it on. Review comments and threads only, and only where
-the warrant grants `comment`.
+the warrant grants `comment`. A riskier diff gets more passes over the same
+reading — depth is priced, capability is not: no risk profile can ever grant
+`comment` or anything else, and the warrant alone decides what this duty may
+write.
 
 Remediation proposals are a separate duty, not a review capability.
 [`remediation`](remediation.md) reads this review's own owned comment and
@@ -139,26 +142,26 @@ required by the schema, but almost every real provider needs one — see
 
 Every input `review/action.yml` declares.
 
-| Input                                          | Required | Default                     | What it does                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `github-token`                                 | no       | `${{ github.token }}`       | Token used to read the pull request and write the owned summary comment and inline threads. `pull-requests: write` on the token covers all three (list, create, update); the warrant decides whether anything is written at all.                                                                                                                       |
-| `number`                                       | no       | _(empty)_                   | The pull request to review. Defaults to the one that triggered the workflow — meant to run on `pull_request` events, not on a backfill. An event that carries no pull request fails red naming the event.                                                                                                                                              |
-| `base-url`                                     | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                                                                                                                     |
-| `api-key`                                      | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                                                                                                                        |
-| `models`                                       | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that reads the diff.                                                                                                                                                                                                                                                            |
-| `warrant`                                      | no       | `.github/reeve.yml`         | Where the permissions live. `comment` is granted here, under `duties:`. A missing file grants `review` nothing, same as one that is silent about it.                                                                                                                                                                                                   |
-| `rules-path`                                   | no       | `.github/reeve-rules.yml`   | The repository's own review rules, in the same YAML grammar the warrant uses. Missing is an empty rules set, not an error — the built-in default rules alone review the diff.                                                                                                                                                                          |
-| `packs-path`                                   | no       | `.github/reeve-packs`       | Where the rule packs this rules file references live — `<namespace>/<name>.yml` under it. A `packs:` reference resolves here; a missing or non-matching pack fails red. See [Rule packs](../rule-packs.md).                                                                                                                                            |
-| `trigger`                                      | no       | `pr`                        | `pr` — the default — waits for ready-for-review and skips a draft green, with the reason in the job summary. `prod` also reviews drafts.                                                                                                                                                                                                               |
-| `max-diff-chars`                               | no       | `4000`                      | The whole-run budget of diff text one review may carry to the model, in characters — cumulative across files, walked in listing order, with the first file that does not fit and everything after it skipped as capped. `none` removes the bound. `0` is refused.                                                                                      |
-| `max-context-chars`                            | no       | `4000`                      | The whole-run budget of the repository context the review engine assembles (changed symbols, imports, related tests, configuration, surrounding base-branch source, callers, change history) that one review may carry to the model, in characters. Sections drop whole past the budget with a visible mark. `none` removes the bound. `0` is refused. |
-| `confidence`                                   | no       | `0.6`                       | The floor for the whole review's reported confidence, between 0 and 1 — one number for the whole answer, not a per-finding bar. Below it, findings are still reconciled and shown in the job summary, but the comment is withheld.                                                                                                                     |
-| `dry-run`                                      | no       | `false`                     | Run the whole pipeline, write every output, post nothing. The review comment that would have been posted is printed to the log, and the job summary still shows the full verdict.                                                                                                                                                                      |
-| `endpoints`                                    | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                                                                                                        |
-| `api-keys`                                     | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                                                                                                             |
-| `request-timeout`                              | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                                                                                                                       |
-| `temperature`                                  | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                                                                                                           |
-| (feat(review): deep repository context engine) |
+| Input               | Required | Default                     | What it does                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `github-token`      | no       | `${{ github.token }}`       | Token used to read the pull request and write the owned summary comment and inline threads. `pull-requests: write` on the token covers all three (list, create, update); the warrant decides whether anything is written at all.                                                                                                                       |
+| `number`            | no       | _(empty)_                   | The pull request to review. Defaults to the one that triggered the workflow — meant to run on `pull_request` events, not on a backfill. An event that carries no pull request fails red naming the event.                                                                                                                                              |
+| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                                                                                                                     |
+| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                                                                                                                        |
+| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that reads the diff.                                                                                                                                                                                                                                                            |
+| `warrant`           | no       | `.github/reeve.yml`         | Where the permissions live. `comment` is granted here, under `duties:`. A missing file grants `review` nothing, same as one that is silent about it.                                                                                                                                                                                                   |
+| `rules-path`        | no       | `.github/reeve-rules.yml`   | The repository's own review rules, in the same YAML grammar the warrant uses. Missing is an empty rules set, not an error — the built-in default rules alone review the diff.                                                                                                                                                                          |
+| `packs-path`        | no       | `.github/reeve-packs`       | Where the rule packs this rules file references live — `<namespace>/<name>.yml` under it. A `packs:` reference resolves here; a missing or non-matching pack fails red. See [Rule packs](../rule-packs.md).                                                                                                                                            |
+| `risk-path`         | no       | `.github/reeve-risk.yml`    | The repository's own risk profile — deterministic signal weights and path globs that price review depth. Missing is the default profile, not an error. It prices depth only and cannot grant a capability — the warrant alone does that.                                                                                                               |
+| `trigger`           | no       | `pr`                        | `pr` — the default — waits for ready-for-review and skips a draft green, with the reason in the job summary. `prod` also reviews drafts.                                                                                                                                                                                                               |
+| `max-diff-chars`    | no       | `4000`                      | The whole-run budget of diff text one review may carry to the model, in characters — cumulative across files, walked in listing order, with the first file that does not fit and everything after it skipped as capped. `none` removes the bound. `0` is refused.                                                                                      |
+| `max-context-chars` | no       | `4000`                      | The whole-run budget of the repository context the review engine assembles (changed symbols, imports, related tests, configuration, surrounding base-branch source, callers, change history) that one review may carry to the model, in characters. Sections drop whole past the budget with a visible mark. `none` removes the bound. `0` is refused. |
+| `confidence`        | no       | `0.6`                       | The floor for the whole review's reported confidence, between 0 and 1 — one number for the whole answer, not a per-finding bar. Below it, findings are still reconciled and shown in the job summary, but the comment is withheld.                                                                                                                     |
+| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, post nothing. The review comment that would have been posted is printed to the log, and the job summary still shows the full verdict.                                                                                                                                                                      |
+| `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                                                                                                        |
+| `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                                                                                                             |
+| `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                                                                                                                       |
+| `temperature`       | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                                                                                                           |
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
@@ -428,6 +431,36 @@ patch proves (`parseFinding` enforces this) — a file the context mentions
 but the diff never showed cannot authorise a finding about itself. The
 single model pass and the single owned summary comment are unchanged.
 
+## Risk-based review depth
+
+A small diff and a diff that rewires an auth boundary are not the same review.
+`review` prices that deterministically before a model is asked anything: the
+diff is scored against a risk profile — signal weights per trigger, path globs,
+and `medium`/`high` score thresholds — and the price pays in how many passes
+the model gets, not in what it may do.
+
+- **low** — one standard pass.
+- **medium** — a second, independent pass (`second-opinion`) that reads the diff
+  fresh and prefers ground the first pass missed.
+- **high** — the two above plus an adversarial verification pass, fed the
+  earlier passes' findings as untrusted material and told to attack each one,
+  reporting a finding again only when it survives.
+
+Two rules outrank the score. A diff touching an auth path, a security-sensitive
+path, or a DB migration is **high by policy**, however small. A diff with no
+qualitative signal at all — no sensitive path, no dependency change, no
+migration, no public API, no auth, no infra, no security material — is **low
+by construction**, however many lines it moves. The passes' verdicts are merged
+by identity (`rule:path:line`, first one wins), so three passes still produce
+the same single owned comment and one finding per claim.
+
+The profile is `.github/reeve-risk.yml`, read from the checkout and trusted the
+same way `rules-path` is — it enters no prompt and carries no logic of its own.
+It prices **depth** only: a hostile profile that sets every weight to 100 and
+names files under a `capabilities:` key changes how many passes a diff gets,
+and nothing it can say widens what the warrant grants. See
+[Security considerations](#security-considerations).
+
 ## Unreadable output is no verdict
 
 A model's answer is read strictly, and what does not parse is discarded, not
@@ -460,6 +493,7 @@ Every output `review/action.yml` declares.
 | `head-sha`  | The pull request's head SHA at review time. Empty when the run stopped before reading the pull request.                                                                                                                                                                                                   |
 | `starved`   | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                                                                                      |
 | `findings`  | How many findings this run's reconciliation produced — created, persisted, changed, resolved and reopened combined. The summary comment, when one was posted, carries the same count.                                                                                                                     |
+| `risk`      | `low`, `medium`, or `high` — the tier this diff was assessed at, and how many model passes it got. Empty when the run stopped before assessment.                                                                                                                                                          |
 
 Inline threads are not an output — they are a write, like the comment itself.
 The summary's `### Verdict` table carries a `Threads` row naming what the
@@ -475,22 +509,23 @@ watch how it does.
 
 ## Failure behavior
 
-| What happened                                                        | What you get                                                          |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| A blocked phrase was in the diff                                     | Deterministic findings, `commented: true` when `comment` is granted   |
-| Confidence below the floor                                           | Findings reconciled and on the summary, `commented: false`, **green** |
-| `comment` not granted                                                | Findings on the summary, `commented: false`, **green**                |
-| No readable verdict, files were shown                                | Comment withheld, summary says why, **green**                         |
-| Every file skipped by the rules file                                 | Comment withheld, coverage names each file and why, **green**         |
-| Every model failed on capacity                                       | `starved: true`, whatever survived, **green**                         |
-| A draft under `trigger: pr`, merged, closed, a Reeve proposal PR     | `note` set, no model asked, **green**                                 |
-| The warrant or a readable rules file does not parse                  | **Red**, naming the file                                              |
-| A referenced pack is missing, over-budget, or does not match its pin | **Red**, naming the pack and the version it declares                  |
-| The pull request cannot be read                                      | **Red**                                                               |
-| This duty's own comment could not be found with certainty            | Comment withheld, **green**                                           |
-| This duty's own threads could not be listed with certainty           | Threads withheld, summary still posts, **green**                      |
-| A finding's thread could not be anchored at the current commit (422) | Finding falls back to the summary, **green**                          |
-| The review-comment API is missing scope or denied                    | **Red**, before the summary is written                                |
+| What happened                                                                      | What you get                                                          |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| A blocked phrase was in the diff                                                   | Deterministic findings, `commented: true` when `comment` is granted   |
+| Confidence below the floor                                                         | Findings reconciled and on the summary, `commented: false`, **green** |
+| `comment` not granted                                                              | Findings on the summary, `commented: false`, **green**                |
+| High-risk diff with fewer than two readable verdicts, or a failed adversarial pass | Comment withheld, summary says why, **green**                         |
+| No readable verdict, files were shown                                              | Comment withheld, summary says why, **green**                         |
+| Every file skipped by the rules file                                               | Comment withheld, coverage names each file and why, **green**         |
+| Every model failed on capacity                                                     | `starved: true`, whatever survived, **green**                         |
+| A draft under `trigger: pr`, merged, closed, a Reeve proposal PR                   | `note` set, no model asked, **green**                                 |
+| The warrant or a readable rules file does not parse                                | **Red**, naming the file                                              |
+| A referenced pack is missing, over-budget, or does not match its pin               | **Red**, naming the pack and the version it declares                  |
+| The pull request cannot be read                                                    | **Red**                                                               |
+| This duty's own comment could not be found with certainty                          | Comment withheld, **green**                                           |
+| This duty's own threads could not be listed with certainty                         | Threads withheld, summary still posts, **green**                      |
+| A finding's thread could not be anchored at the current commit (422)               | Finding falls back to the summary, **green**                          |
+| The review-comment API is missing scope or denied                                  | **Red**, before the summary is written                                |
 
 **The failure mode of this duty is a withheld write, never a wrong or a
 doubled comment.** Every branch above ends without posting, or posts exactly
@@ -510,29 +545,28 @@ run](../../guides/dry-run.md).
 
 ## Cost
 
-The `profile` input decides how many passes read the diff: `default` runs one
-correctness pass — the cheapest correct review, byte-for-byte the single read
-the duty always made — and `deep` runs a correctness pass and then a security
-pass, correlating the two. The synthesis deduplicates the same finding found
-by more than one pass (reported once, corroborated), ranks by severity then
-corroboration then position, and annotates a contradiction where two passes
-claim different things at the same line. An unreadable pass is never dressed
-up as a readable empty answer: it is priced into the review's confidence
-(10% off per pass that could not answer) and named in the summary, exactly
-as loud as D5 asks. Every admitted model finding is then verified against
-deterministic evidence before it is reported (see
-[Verification](#verification-model-findings-against-deterministic-evidence));
-nothing repeats it — a
-`synchronize` event that changed nothing is recognised by the marker's
-fingerprint and skipped at the write, and the diff cap keeps a huge diff from
-blowing the prompt. `max-diff-chars` (default `4000` for the whole run, `none`
-for no bound) is the lever that bounds the total text a review may carry, and
-`endpoints` spreads a roster across providers so a capacity failure demotes
-only the `model@alias` that hit it. The context engine costs no provider
-requests — its reads hit the checkout's disk only — but its assembled text
-enters the same single prompt, so `max-context-chars` (default `4000`) is the
-second lever on total prompt size. See [Cost](../../guides/cost.md) for the
-full arithmetic.
+The risk tier prices how many passes read the diff: one correctness pass on a
+low-risk diff, a second independent read on medium, and an adversarial
+verification pass on top of that on high — and nothing repeats across
+`synchronize` events: an event that changed nothing is recognised by the
+marker's fingerprint and skipped at the write. The synthesis deduplicates the
+same finding found by more than one pass (reported once, corroborated), ranks
+by severity then corroboration then position, and annotates a contradiction
+where two passes claim different things at the same line. An unreadable pass is
+never dressed up as a readable empty answer: it is priced into the review's
+confidence (10% off per pass that could not answer) and named in the summary,
+exactly as loud as D5 asks. Every admitted model finding is then verified
+against deterministic evidence before it is reported (see
+[Verification](#verification-model-findings-against-deterministic-evidence)).
+
+`max-diff-chars` (default `4000` for the whole run, `none` for no bound) is the
+lever that bounds the total diff text a review may carry, and `endpoints`
+spreads a roster across providers so a capacity failure demotes only the
+`model@alias` that hit it. The context engine costs no provider requests — its
+reads hit the checkout's disk only — but its assembled text enters the same
+single prompt, so `max-context-chars` (default `4000`) is the second lever on
+total prompt size. Risk prices the passes; the warrant prices the capabilities.
+See [Cost](../../guides/cost.md) for the full arithmetic.
 
 ## Security considerations
 
@@ -559,6 +593,14 @@ full arithmetic.
   `capabilities:`, `warrant:` or `labels:` is refused red. Referenced packs
   are pinned and never optional, so a stale or missing pack is a red run, not
   a silent empty review (see [Rule packs](../rule-packs.md)).
+- **The risk profile prices depth, and nothing else.** `.github/reeve-risk.yml`
+  is committed repo text read from the same pinned checkout and parsed by the
+  same grammar, and it can only choose how many model passes a diff gets —
+  low, medium or high. It has no field for capabilities, a `capabilities:` key
+  is refused with a warning, and no signal weight or path glob can widen what
+  the warrant grants: a hostile profile at worst pays for more passes, which
+  is a cost and never a capability (see
+  [Risk-based review depth](#risk-based-review-depth)).
 - **Repository context is read from the base-ref checkout only, through the
   workspace and secret gates.** The context engine reads nothing outside
   `GITHUB_WORKSPACE`, and every path passes `withinWorkspace` (traversal

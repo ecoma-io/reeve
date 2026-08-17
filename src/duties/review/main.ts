@@ -59,7 +59,14 @@ import { bounded, readCore, threadNumber, type Core } from "../../core/inputs.js
 import { type Language, parseLanguages } from "../../core/languages.js";
 
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-import { reconcile, remember, type Finding, type Previous, type Reconciled } from "./findings.js";
+import {
+  reconcile,
+  remember,
+  type Finding,
+  type Previous,
+  type RawFinding,
+  type Reconciled,
+} from "./findings.js";
 import { architectureFindings } from "./architecture.js";
 import {
   decodeEnvelope,
@@ -84,16 +91,25 @@ import {
   dispositionKey,
 } from "./disposition.js";
 import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
+import {
+  assessRisk,
+  describeRisk,
+  readRiskProfile,
+  type RiskAssessment,
+  type RiskTier,
+} from "./risk.js";
 import { preflight, readPackedRules } from "./rules.js";
 import {
+  adversarialPass,
+  correctnessPass,
   runPasses,
-  selectPasses,
+  secondOpinionPass,
   synthesize,
   type PassContext,
   type PassReport,
   type PassResult,
-  type Profile,
   type ReviewFinding,
+  type ReviewPass,
   type ReviewSynthesis,
 } from "./passes.js";
 import { verifyFindings } from "./verify.js";
@@ -113,6 +129,8 @@ interface Settings extends Core {
   readonly rulesPath: string;
   /** Repo-relative path to the rule packs directory in the checkout. */
   readonly packsPath: string;
+  /** Repo-relative path to the repository risk profile in the checkout. */
+  readonly riskPath: string;
   /** The event that triggered this run — `pr` reviews drafts, `prod` reviews everything. */
   readonly trigger: string;
   /** The diff chars a single file may contribute before being skipped as capped — `none` means no bound. */
@@ -125,8 +143,6 @@ interface Settings extends Core {
   readonly maxContextChars: number | null;
   /** The confidence at which a finding is reported — kept below in training only. */
   readonly confidence: number;
-  /** How thorough the model half of this review is: one pass, or several. */
-  readonly profile: Profile;
 }
 
 /** Reads the inputs exactly as `action.yml` declares them — the contract test audits this file. */
@@ -138,19 +154,12 @@ function readSettings(): Omit<Settings, "languages"> {
     warrant: core.getInput("warrant", { required: true }),
     rulesPath: core.getInput("rules-path"),
     packsPath: core.getInput("packs-path"),
+    riskPath: core.getInput("risk-path"),
     trigger: core.getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", core.getInput("max-diff-chars")),
     maxContextChars: bounded("max-context-chars", core.getInput("max-context-chars")),
     confidence: parseConfidence(core.getInput("confidence")),
-    profile: parseProfile(core.getInput("profile")),
   };
-}
-
-function parseProfile(raw: string): Profile {
-  const value = raw.trim();
-  if (value.length === 0 || value === "default") return "default";
-  if (value === "deep") return "deep";
-  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw}\`.`);
 }
 
 function parseConfidence(raw: string): number {
@@ -175,10 +184,10 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
+  /** The risk assessment, when the run reached one — `null` on early stops. */
+  readonly risk: RiskAssessment | null;
   /** How many workspace reads the context engine made, for the summary's Context row. */
   readonly contextReadFiles: number;
-  /** What the inline-thread sync did — for the page's "Threads" row. */
-  readonly threads: ThreadSync | null;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
   readonly previous: Previous | null;
   /** Why the comment memory was unreadable — set when corruption was found and recovered from, never silent. */
@@ -190,6 +199,8 @@ interface Outcome {
   readonly permitted: readonly Capability[];
   /** One row per model pass that ran, for the summary's verdict table. */
   readonly passes: readonly PassReport[];
+  /** What the inline-thread sync did — for the page's "Threads" row. */
+  readonly threads: ThreadSync | null;
 }
 
 type Settled = Partial<
@@ -203,13 +214,14 @@ type Settled = Partial<
     | "headSha"
     | "malformedAnswers"
     | "rulesPath"
+    | "risk"
     | "contextReadFiles"
-    | "threads"
     | "previous"
     | "memoryNote"
     | "shown"
     | "skipped"
     | "passes"
+    | "threads"
   >
 >;
 
@@ -230,6 +242,18 @@ function resolvePacksPath(settings: Settings): string {
 /** The rules file as a reader of the summary will name it. */
 function rulesLabel(settings: Settings): string {
   return settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath;
+}
+
+/** The risk profile's path in the checkout, absolute, resolved from the workspace. */
+function resolveRiskPath(settings: Settings): string {
+  const workspace = process.env.GITHUB_WORKSPACE ?? "";
+  if (settings.riskPath.length === 0) return join(workspace, ".github", "reeve-risk.yml");
+  return join(workspace, settings.riskPath);
+}
+
+/** The risk profile as a reader of the summary will name it. */
+function riskLabel(settings: Settings): string {
+  return settings.riskPath.length === 0 ? ".github/reeve-risk.yml" : settings.riskPath;
 }
 
 /**
@@ -254,6 +278,24 @@ function contextBudget(maxContextChars: number | null): Budget {
   };
 }
 
+/**
+ * The pass roster a risk tier prices, threaded with every earlier pass's
+ * findings. Low-risk diffs are read once; medium-risk ones get an independent
+ * second opinion; high-risk ones add an adversarial verification pass told to
+ * attack the earlier findings before reporting any again (see `passes.ts`).
+ * Depth only: capability still comes from the warrant, never from the tier.
+ */
+function planPasses(tier: RiskTier, prior: readonly RawFinding[]): readonly ReviewPass[] {
+  switch (tier) {
+    case "high":
+      return [correctnessPass(), secondOpinionPass(), adversarialPass(prior)];
+    case "medium":
+      return [correctnessPass(), secondOpinionPass()];
+    default:
+      return [correctnessPass()];
+  }
+}
+
 async function decide(
   api: ReturnType<typeof getOctokit>,
   at: { owner: string; repo: string; number: number },
@@ -272,13 +314,14 @@ async function decide(
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    risk: null,
     contextReadFiles: 0,
-    threads: null,
     previous: null,
     memoryNote: null,
     shown: [],
     skipped: [],
     passes: [],
+    threads: null,
     permitted,
     ...over,
   });
@@ -333,6 +376,16 @@ async function decide(
 
   const rules = await readPackedRules(resolveRulesPath(settings), resolvePacksPath(settings));
   for (const warning of rules.warnings) core.warning(`rules: ${warning}`);
+
+  // The risk tier, priced deterministically before any model is asked — it
+  // decides how many passes the review runs, and nothing else. Depth only:
+  // capability still comes from the warrant (see `risk.ts`'s doc comment).
+  const riskProfile = await readRiskProfile(resolveRiskPath(settings));
+  for (const warning of riskProfile.warnings) core.warning(`risk: ${warning}`);
+  const risk = assessRisk(snapshot.allFiles, rules, riskProfile);
+  core.info(
+    `#${String(at.number)}: risk ${risk.tier} — ${describeRisk(risk)} (${riskLabel(settings)}).`,
+  );
 
   // The snapshot, bounded by the repository's own rules — the diff the model
   // will actually see, plus the honest list of what it will not.
@@ -447,12 +500,15 @@ async function decide(
     ...settledBase,
   };
 
-  // The expensive half, only when there is a diff to ask about. The profile
-  // names one or more passes, each reading the same diff through its own
-  // prompt and the same strict parser; `synthesize` correlates what came back
-  // — dedupes, annotates contradictions, ranks, and prices every pass that
-  // could not answer into the confidence. The context enters every pass's
-  // prompt behind the same fence as the diff.
+  // The expensive half, only when there is a diff to ask about. The risk tier
+  // prices the roster — one pass on low, a second opinion on medium, an
+  // adversarial verification pass on top for high — and each pass runs through
+  // the same engine with its own prompt and the same strict parser. Every later
+  // pass is threaded the earlier ones' findings (untrusted, from a model) inside
+  // the same nonce fence as the diff. `synthesize` correlates what came back
+  // after all steps: dedupes, annotates contradictions, ranks, and prices every
+  // pass that could not answer into the confidence. The context enters every
+  // pass's prompt behind the same fence as the diff.
   const passContext: PassContext = {
     prTitle: pr.title,
     prBody: pr.body.slice(0, BODY_EXCERPT),
@@ -462,16 +518,19 @@ async function decide(
     language: language?.code ?? null,
     context,
   };
-  const passResults: PassResult[] =
-    bounded.shown.length > 0
-      ? await runPasses(
-          stages.review,
-          selectPasses(settings.profile),
-          settings.models,
-          passContext,
-          weather,
-        )
-      : [];
+  const passResults: PassResult[] = [];
+  if (bounded.shown.length > 0) {
+    const prior: RawFinding[] = [];
+    for (const pass of planPasses(risk.tier, prior)) {
+      const results = await runPasses(stages.review, [pass], settings.models, passContext, weather);
+      passResults.push(...results);
+      // The next pass is told what the earlier ones found — adversarial ground,
+      // and the same untrusted material every later pass should see.
+      for (const result of results) {
+        if (result.verdict !== null) prior.push(...result.verdict.findings);
+      }
+    }
+  }
   for (const result of passResults) {
     for (const failure of result.failures) {
       core.warning(`review: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
@@ -533,7 +592,19 @@ async function decide(
   // model answered readably — an all-skipped diff, a capacity failure, an
   // unreadable answer — and the findings left standing then are the deterministic
   // pre-checks, which are certain by construction and need no confidence floor.
-  const verdictMeasured = synthesis.measured;
+  const needsAdversarial = risk.tier === "high";
+  const readablePassCount = passResults.filter((result) => result.verdict !== null).length;
+  const adversarialIndex = passResults.findIndex((result) => result.pass.id === "adversarial");
+  const adversarialReadable =
+    !needsAdversarial ||
+    (adversarialIndex !== -1 && passResults[adversarialIndex]?.verdict !== null);
+  // A high-risk diff's all-clear is double-earned: at least two passes read it
+  // readably, and the adversarial pass specifically read it readably. Fewer
+  // than that is a review nobody can vouch for.
+  const minReadable = needsAdversarial ? 2 : 1;
+  const allClearEarned =
+    readablePassCount >= minReadable && (!needsAdversarial || adversarialReadable);
+  const verdictMeasured = allClearEarned;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
   // An all-clear no model stood behind. The diff had files to show and the
   // model that was asked never delivered a readable verdict — a capacity
@@ -541,7 +612,7 @@ async function decide(
   // would print "No issues to report" about a diff nobody actually reviewed,
   // which is precisely the false all-clear an injected pull request is best
   // served by. Withhold instead; the job summary still says what happened.
-  const silentNoVerdict = bounded.shown.length > 0 && !verdictMeasured && final.length === 0;
+  const silentNoVerdict = bounded.shown.length > 0 && !allClearEarned && final.length === 0;
   // A diff whose every file the rules file's `ignore:` lists removed. The one
   // rules value that may not act alone: a stale or hostile `ignore.paths`
   // like `["**"]` would remove every file, and the empty chrome would then
@@ -564,6 +635,7 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
@@ -582,6 +654,7 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
@@ -600,6 +673,7 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
@@ -619,6 +693,7 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
@@ -651,6 +726,7 @@ async function decide(
       // disposition stays in the log.
       posted: null,
       threads: rehearsal,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
@@ -689,6 +765,7 @@ async function decide(
     confidence,
     posted,
     threads,
+    risk,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded.shown,
@@ -838,6 +915,7 @@ function report(outcome: Outcome | null, rosterStarved: boolean): void {
   core.setOutput("head-sha", outcome?.headSha ?? "");
   core.setOutput("starved", String(rosterStarved));
   core.setOutput("findings", String(outcome?.findings.length ?? 0));
+  core.setOutput("risk", outcome?.risk?.tier ?? "");
 }
 
 function page(
@@ -872,8 +950,9 @@ function page(
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
-    threads: outcome?.threads ?? null,
+    risk: outcome?.risk ?? null,
     passes: outcome?.passes ?? [],
+    threads: outcome?.threads ?? null,
     contextReadFiles: outcome?.contextReadFiles ?? 0,
   });
 }

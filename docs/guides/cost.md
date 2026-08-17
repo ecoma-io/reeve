@@ -145,6 +145,21 @@ skipped before a provider is constructed. [The sweep](sweep.md) covers the
 whole mechanism, including what a run that did not finish looks like and why
 that is the correct outcome rather than a failure to budget for.
 
+## Pricing review by risk
+
+`review` prices depth deterministically before a model is asked anything. The
+diff is scored against the repository's risk profile — signal weights, path
+globs, `medium`/`high` thresholds — and the tier buys passes: one on low, a
+second independent opinion on medium, an adversarial verification pass on top
+for high. An auth-path or DB-migration diff is **high by policy** however
+small, and a diff with no qualitative signal at all is **low by construction**
+however many lines it moves — so the arithmetic rewards the cheap cases (big
+mechanical diffs) and spends on the expensive ones (small sensitive diffs).
+The passes' verdicts are merged by identity, so three passes still produce one
+comment and no repeated findings. Risk prices depth only; it never widens what
+the warrant grants, so a hostile profile can cost you passes but cannot cost
+you a capability.
+
 ## A worked estimate
 
 **Estimated**, on assumptions worth arguing with. A repository receiving 300

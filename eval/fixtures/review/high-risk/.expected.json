@@ -1,0 +1,51 @@
+{
+  "description": "A one-line auth-file change plus a DB migration prices the review high — three model passes, one owned comment carrying the deduplicated finding.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/auth/token.ts",
+      "status": "added",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;"
+    },
+    {
+      "filename": "db/migrations/0002_add_sessions.sql",
+      "status": "added",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1 @@\n+ALTER TABLE sessions ADD COLUMN ttl INT;"
+    }
+  ],
+  "risk": "version: 1\n",
+  "review-passes": [
+    {
+      "findings": [
+        {
+          "rule": "dedup",
+          "severity": "warning",
+          "path": "src/auth/token.ts",
+          "line": 1,
+          "snippet": "export const tokenTtl = 3600;",
+          "body": "Consider a named constant."
+        }
+      ],
+      "confidence": 0.8
+    },
+    { "findings": [], "confidence": 0.7 },
+    {
+      "findings": [
+        {
+          "rule": "dedup",
+          "severity": "warning",
+          "path": "src/auth/token.ts",
+          "line": 1,
+          "snippet": "export const tokenTtl = 3600;",
+          "body": "Consider a named constant."
+        }
+      ],
+      "confidence": 0.9
+    }
+  ],
+  "expected": { "commented": "true", "findings": "1", "head-sha": "abc123", "risk": "high" }
+}

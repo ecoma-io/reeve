@@ -19619,7 +19619,7 @@ var require_dist = __commonJS({
      */
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.format = format;
-    exports.parse = parse6;
+    exports.parse = parse7;
     var TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
     var TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
     var QUOTE_REGEXP = /[\\"]/g;
@@ -19646,7 +19646,7 @@ var require_dist = __commonJS({
       }
       return result;
     }
-    function parse6(header, options) {
+    function parse7(header, options) {
       const len = header.length;
       let index = skipOWS(header, 0, len);
       const valueStart = index;
@@ -23424,7 +23424,7 @@ var require_errors2 = __commonJS({
         this.pos = pos;
       }
     };
-    var YAMLParseError4 = class extends YAMLError {
+    var YAMLParseError5 = class extends YAMLError {
       constructor(pos, code2, message) {
         super("YAMLParseError", pos, code2, message);
       }
@@ -23470,7 +23470,7 @@ ${pointer}
       }
     };
     exports.YAMLError = YAMLError;
-    exports.YAMLParseError = YAMLParseError4;
+    exports.YAMLParseError = YAMLParseError5;
     exports.YAMLWarning = YAMLWarning;
     exports.prettifyError = prettifyError;
   }
@@ -26971,7 +26971,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse6(src, reviver, options) {
+    function parse7(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -27012,7 +27012,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse6;
+    exports.parse = parse7;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument2;
     exports.stringify = stringify;
@@ -36160,13 +36160,500 @@ function mergeDispositions(fresh, substantiated) {
   return merged;
 }
 
-// src/duties/review/rules.ts
-var import_yaml3 = __toESM(require_dist2(), 1);
+// src/duties/review/risk.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
 import { readFile as readFile3 } from "node:fs/promises";
+var UnreadableRiskProfile = class extends Error {
+  warnings;
+  constructor(warnings) {
+    super("the risk profile could not be read as a risk profile");
+    this.name = "UnreadableRiskProfile";
+    this.warnings = warnings;
+  }
+};
+var MAX_RISK_PROFILE_CHARS = 2e4;
+var DEFAULT_THRESHOLDS = { medium: 2, high: 8 };
+var DEFAULT_WEIGHTS = {
+  changed_lines: 1,
+  changed_files: 1,
+  sensitive_path: 2,
+  dependency_changes: 3,
+  db_migration: 4,
+  public_api: 3,
+  auth_change: 4,
+  infra_change: 2,
+  generated_code: 0,
+  security_sensitive: 4
+};
+var BUILTIN_PATHS = {
+  sensitive_path: [
+    "**/auth/**",
+    "auth/**",
+    "**/secrets/**",
+    "secrets/**",
+    "**/secret/**",
+    "secret/**",
+    "**/credentials/**",
+    "credentials/**",
+    "**/*.pem",
+    "*.pem",
+    "**/*.key",
+    "*.key",
+    ".env",
+    ".env.*",
+    "**/token*.ts",
+    "**/token*.js"
+  ],
+  auth_change: [
+    "**/auth/**",
+    "auth/**",
+    "**/authorization/**",
+    "authorization/**",
+    "**/permissions/**",
+    "permissions/**",
+    "**/rbac/**",
+    "rbac/**",
+    "**/session/**",
+    "session/**",
+    "**/oauth/**",
+    "oauth/**",
+    "**/oidc/**",
+    "oidc/**"
+  ],
+  db_migration: [
+    "**/migrations/**",
+    "migrations/**",
+    "**/migrate/**",
+    "migrate/**",
+    "**/prisma/migrations/**",
+    "**/alembic/**",
+    "alembic/**",
+    "**/flyway/**",
+    "**/liquibase/**",
+    "**/schema.sql",
+    "schema.sql"
+  ],
+  public_api: [
+    "**/api/**",
+    "api/**",
+    "**/openapi*.yaml",
+    "**/openapi*.json",
+    "**/swagger*.yaml",
+    "**/*.proto",
+    "**/grpc/**",
+    "grpc/**"
+  ],
+  infra_change: [
+    ".github/workflows/**",
+    ".github/actions/**",
+    "**/Dockerfile*",
+    "Dockerfile*",
+    "**/docker-compose*.yml",
+    "docker-compose*.yml",
+    "**/docker-compose*.yaml",
+    "docker-compose*.yaml",
+    "**/*.tf",
+    "*.tf",
+    "**/*.tfvars",
+    "**/helm/**",
+    "helm/**",
+    "k8s/**",
+    "kubernetes/**",
+    "kubernetes/*",
+    "**/cloudbuild*.yaml",
+    "cloudbuild*.yaml"
+  ],
+  security_sensitive: [
+    "**/*.pem",
+    "*.pem",
+    "**/*.key",
+    "*.key",
+    "**/.env*",
+    ".env*",
+    "**/secret*",
+    "secret*",
+    "**/token*",
+    "token*",
+    "**/credential*",
+    "credential*"
+  ],
+  dependency_changes: [],
+  changed_lines: [],
+  changed_files: [],
+  generated_code: []
+};
+var DEPENDENCY_FILES = /* @__PURE__ */ new Set([
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "go.mod",
+  "go.sum",
+  "Gopkg.lock",
+  "Cargo.toml",
+  "Cargo.lock",
+  "requirements.txt",
+  "Pipfile",
+  "Pipfile.lock",
+  "poetry.lock",
+  "pyproject.toml",
+  "uv.lock",
+  "Gemfile",
+  "Gemfile.lock",
+  "gems.locked",
+  "vendor/modules.txt"
+]);
+var SECURITY_PHRASES = [
+  "password",
+  "api_key",
+  "apikey",
+  "authorization",
+  "bearer ",
+  "private key"
+];
+var QUALITATIVE = /* @__PURE__ */ new Set([
+  "sensitive_path",
+  "dependency_changes",
+  "db_migration",
+  "public_api",
+  "auth_change",
+  "infra_change",
+  "security_sensitive"
+]);
+var POLICY_HIGH = /* @__PURE__ */ new Set([
+  "auth_change",
+  "security_sensitive",
+  "db_migration"
+]);
+var WEIGHT_KEYS = {
+  "changed-lines": "changed_lines",
+  "changed-files": "changed_files",
+  "sensitive-path": "sensitive_path",
+  "dependency-changes": "dependency_changes",
+  "db-migration": "db_migration",
+  "public-api": "public_api",
+  "auth-change": "auth_change",
+  "infra-change": "infra_change",
+  "security-sensitive": "security_sensitive"
+};
+var PATH_KEYS = {
+  sensitive: "sensitive_path",
+  auth: "auth_change",
+  "db-migration": "db_migration",
+  "public-api": "public_api",
+  infra: "infra_change",
+  "security-sensitive": "security_sensitive"
+};
+var KNOWN_KEYS = /* @__PURE__ */ new Set(["version", "thresholds", "weights", "paths"]);
+function defaultRiskProfile() {
+  return {
+    version: 1,
+    thresholds: { ...DEFAULT_THRESHOLDS },
+    weights: { ...DEFAULT_WEIGHTS },
+    paths: {},
+    raw: "",
+    warnings: []
+  };
+}
+async function readRiskProfile(path) {
+  let raw;
+  try {
+    raw = await readFile3(path, "utf8");
+  } catch (error2) {
+    if (isMissing(error2)) return defaultRiskProfile();
+    warning(`review: could not read risk profile at ${path}: ${String(error2)}`);
+    return defaultRiskProfile();
+  }
+  if (raw.trim().length === 0) return defaultRiskProfile();
+  if (raw.length > MAX_RISK_PROFILE_CHARS) {
+    raw = raw.slice(0, MAX_RISK_PROFILE_CHARS);
+  }
+  return parseRiskProfile(raw);
+}
+function parseRiskProfile(text2) {
+  if (text2.trim().length === 0) return defaultRiskProfile();
+  const warnings = [];
+  let document2;
+  try {
+    document2 = (0, import_yaml2.parse)(text2);
+  } catch (error2) {
+    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    throw new UnreadableRiskProfile([`not valid YAML \u2014 ${reason}`]);
+  }
+  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
+    throw new UnreadableRiskProfile(["expected a YAML mapping of risk profile"]);
+  }
+  const map = document2;
+  for (const key of Object.keys(map)) {
+    if (!KNOWN_KEYS.has(key)) {
+      warnings.push(`unknown top-level key \`${key}\`; ignored`);
+    }
+  }
+  return {
+    version: readVersion(map.version, warnings),
+    thresholds: readThresholds(map.thresholds, warnings),
+    weights: readWeights(map.weights, warnings),
+    paths: readPaths(map.paths, warnings),
+    raw: text2,
+    warnings
+  };
+}
+function readVersion(raw, warnings) {
+  if (raw === void 0) {
+    warnings.push("no `version:`; assuming 1");
+    return 1;
+  }
+  if (raw === 1 || raw === "1") return 1;
+  if (typeof raw === "number" && Number.isInteger(raw)) {
+    warnings.push(`unsupported version ${String(raw)}; treating as 1`);
+    return 1;
+  }
+  warnings.push("`version` is not a number; treating as 1");
+  return 1;
+}
+function readThresholds(raw, warnings) {
+  if (raw === void 0 || raw === null) return { ...DEFAULT_THRESHOLDS };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`thresholds:` is not a mapping; using defaults");
+    return { ...DEFAULT_THRESHOLDS };
+  }
+  const map = raw;
+  const medium = readNumber(map.medium, "thresholds.medium", DEFAULT_THRESHOLDS.medium, warnings);
+  const high = readNumber(map.high, "thresholds.high", DEFAULT_THRESHOLDS.high, warnings);
+  if (medium >= high) {
+    warnings.push(
+      `thresholds require medium < high (got medium=${String(medium)} high=${String(high)}); using defaults`
+    );
+    return { ...DEFAULT_THRESHOLDS };
+  }
+  return { medium, high };
+}
+function readNumber(raw, key, fallback, warnings) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > 100) {
+    warnings.push(`\`${key}:\` must be an integer 0..100; using default ${String(fallback)}`);
+    return fallback;
+  }
+  return raw;
+}
+function readWeights(raw, warnings) {
+  const weights = { ...DEFAULT_WEIGHTS };
+  if (raw === void 0 || raw === null) return weights;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`weights:` is not a mapping; using defaults");
+    return weights;
+  }
+  const map = raw;
+  for (const [key, value] of Object.entries(map)) {
+    if (key === "generated-code") {
+      warnings.push("`generated-code` weight is fixed at 0 and cannot be changed");
+      continue;
+    }
+    const signal = WEIGHT_KEYS[key];
+    if (signal === void 0) {
+      warnings.push(`unknown weight \`${key}\`; ignored`);
+      continue;
+    }
+    weights[signal] = readNumber(value, `weights.${key}`, DEFAULT_WEIGHTS[signal], warnings);
+  }
+  return weights;
+}
+function readPaths(raw, warnings) {
+  const paths = {};
+  if (raw === void 0 || raw === null) return paths;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`paths:` is not a mapping; ignoring");
+    return paths;
+  }
+  const map = raw;
+  for (const [key, value] of Object.entries(map)) {
+    const signal = PATH_KEYS[key];
+    if (signal === void 0) {
+      warnings.push(`unknown path signal \`${key}\`; ignored`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      warnings.push(`\`paths.${key}:\` is not a list; ignoring`);
+      continue;
+    }
+    const list = [];
+    for (const [index, entry] of value.entries()) {
+      if (typeof entry !== "string") {
+        warnings.push(`\`paths.${key}\` entry ${String(index + 1)} is not a string; dropped`);
+        continue;
+      }
+      list.push(entry);
+    }
+    paths[signal] = list;
+  }
+  return paths;
+}
+function assessRisk(allFiles, rules, profile) {
+  const { weights, thresholds } = profile;
+  const nonGenerated = allFiles.filter((f) => !isGenerated(f.path, rules.generatedExtensions));
+  const generatedCount = allFiles.length - nonGenerated.length;
+  let signals = [];
+  const lines = nonGenerated.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+  if (lines > 0) {
+    const units = Math.min(Math.floor(lines / 100), 4);
+    if (units > 0) {
+      signals.push({
+        signal: "changed_lines",
+        weight: weights.changed_lines,
+        units,
+        contribution: units * weights.changed_lines,
+        evidence: [
+          `${String(lines)} changed lines${generatedCount > 0 ? ` (${String(generatedCount)} generated excluded)` : ""}`
+        ],
+        escalates: false
+      });
+    }
+  }
+  const n = nonGenerated.length;
+  if (n > 0) {
+    const units = Math.min(Math.floor(n / 5), 3);
+    if (units > 0) {
+      signals.push({
+        signal: "changed_files",
+        weight: weights.changed_files,
+        units,
+        contribution: units * weights.changed_files,
+        evidence: [`${String(n)} changed files`],
+        escalates: false
+      });
+    }
+  }
+  const order = [
+    "sensitive_path",
+    "auth_change",
+    "db_migration",
+    "public_api",
+    "infra_change"
+  ];
+  for (const signal of order) {
+    const matched = nonGenerated.filter((f) => matchesSignal(f, signal, profile));
+    if (matched.length === 0) continue;
+    signals.push({
+      signal,
+      weight: weights[signal],
+      units: 1,
+      contribution: weights[signal],
+      evidence: matched.slice(0, 3).map((f) => `\`${f.path}\` matches ${signalLabel(signal)}`),
+      escalates: POLICY_HIGH.has(signal)
+    });
+  }
+  const deps = nonGenerated.filter((f) => DEPENDENCY_FILES.has(f.path));
+  if (deps.length > 0) {
+    signals.push({
+      signal: "dependency_changes",
+      weight: weights.dependency_changes,
+      units: 1,
+      contribution: weights.dependency_changes,
+      evidence: deps.slice(0, 3).map((f) => `\`${f.path}\` is a dependency manifest`),
+      escalates: false
+    });
+  }
+  const sensitive = collectSensitive(nonGenerated, profile);
+  if (sensitive.matches.length > 0) {
+    signals.push({
+      signal: "security_sensitive",
+      weight: weights.security_sensitive,
+      units: 1,
+      contribution: weights.security_sensitive,
+      evidence: sensitive.matches.slice(0, 3).map((m) => m.evidence),
+      escalates: sensitive.matches.some((m) => m.byPath)
+    });
+  }
+  if (generatedCount > 0) {
+    signals.push({
+      signal: "generated_code",
+      weight: 0,
+      units: 0,
+      contribution: 0,
+      evidence: [`${String(generatedCount)} generated file(s) excluded from volume`],
+      escalates: false
+    });
+  }
+  const score = signals.reduce((sum, s) => sum + s.contribution, 0);
+  const qualitativeZero = signals.every((s) => !QUALITATIVE.has(s.signal));
+  const escalated = signals.some((s) => s.escalates);
+  const base = score < thresholds.medium ? "low" : score < thresholds.high ? "medium" : "high";
+  const tier = qualitativeZero ? "low" : escalated ? "high" : base;
+  if (escalated) {
+    const trigger = signals.find((s) => s.escalates);
+    if (trigger !== void 0) {
+      signals = signals.map(
+        (s) => s.signal === trigger.signal ? {
+          ...s,
+          evidence: [...s.evidence, `${trigger.signal} \u2192 high by policy`]
+        } : s
+      );
+    }
+  }
+  return {
+    tier,
+    score,
+    thresholds: { ...thresholds },
+    signals,
+    profile: profile.raw.length === 0 ? "default" : "repository profile"
+  };
+}
+function matchesSignal(f, signal, profile) {
+  const globs = [...BUILTIN_PATHS[signal], ...profile.paths[signal] ?? []];
+  if (globs.some((pattern) => matchesGlob(pattern, f.path))) return true;
+  if (signal === "db_migration" && /migration|migrate/i.test(f.path)) return true;
+  return false;
+}
+function signalLabel(signal) {
+  switch (signal) {
+    case "sensitive_path":
+      return "a sensitive path";
+    case "auth_change":
+      return "an authorization path";
+    case "db_migration":
+      return "a database-schema path";
+    case "public_api":
+      return "a public API path";
+    case "infra_change":
+      return "an infrastructure path";
+    default:
+      return signal;
+  }
+}
+function collectSensitive(files, profile) {
+  const globs = [...BUILTIN_PATHS.security_sensitive, ...profile.paths.security_sensitive ?? []];
+  const matches = [];
+  for (const f of files) {
+    if (globs.some((pattern) => matchesGlob(pattern, f.path))) {
+      matches.push({ evidence: `\`${f.path}\` matches a security-sensitive path`, byPath: true });
+    } else if (f.patch !== null) {
+      const patch = f.patch.toLowerCase();
+      if (SECURITY_PHRASES.some((phrase) => patch.includes(phrase))) {
+        matches.push({ evidence: `\`${f.path}\` contains security-sensitive text`, byPath: false });
+      }
+    }
+  }
+  return { matches };
+}
+function describeRisk(assessment) {
+  if (assessment.signals.length === 0) return `${assessment.tier} \u2014 no risk signals fired`;
+  const names = assessment.signals.map((s) => s.signal.replace(/_/g, "-")).join(", ");
+  const policy = assessment.signals.find(
+    (s) => s.evidence.some((line) => line.endsWith("by policy"))
+  );
+  return policy !== void 0 ? `${assessment.tier} \u2014 ${policy.signal.replace(/_/g, "-")} \u2014 high by policy` : `${assessment.tier} \u2014 ${names}`;
+}
+
+// src/duties/review/rules.ts
+var import_yaml4 = __toESM(require_dist2(), 1);
+import { readFile as readFile4 } from "node:fs/promises";
 import { join } from "node:path";
 
 // src/duties/review/packs.ts
-var import_yaml2 = __toESM(require_dist2(), 1);
+var import_yaml3 = __toESM(require_dist2(), 1);
 var MAX_PACK_CHARS = 8e3;
 var PACK_TOP_LEVEL_KEYS = /* @__PURE__ */ new Set([
   "name",
@@ -36190,9 +36677,9 @@ function parsePack(text2, ref) {
   const warnings = [];
   let document2;
   try {
-    document2 = (0, import_yaml2.parse)(text2, { maxAliasCount: 0 });
+    document2 = (0, import_yaml3.parse)(text2, { maxAliasCount: 0 });
   } catch (error2) {
-    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml3.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new UnreadablePacks(`pack ${ref}: not valid YAML \u2014 ${reason}`);
   }
   if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
@@ -36211,8 +36698,8 @@ function parsePack(text2, ref) {
 }
 function readPackVersion(text2, parsed, ref) {
   if (parsed === void 0 || parsed === null) return null;
-  const node = (0, import_yaml2.parseDocument)(text2).get("version", true);
-  const raw = (0, import_yaml2.isScalar)(node) && Array.isArray(node.range) ? text2.slice(node.range[0], node.range[1]) : null;
+  const node = (0, import_yaml3.parseDocument)(text2).get("version", true);
+  const raw = (0, import_yaml3.isScalar)(node) && Array.isArray(node.range) ? text2.slice(node.range[0], node.range[1]) : null;
   if (raw === null) {
     throw new UnreadablePacks(
       `pack ${ref}: \`version\` could not be read from the file \u2014 got ${JSON.stringify(parsed)}`
@@ -36338,7 +36825,7 @@ var PREFLIGHT_ID = "review-preflight";
 async function readRules(path) {
   let raw;
   try {
-    raw = await readFile3(path, "utf8");
+    raw = await readFile4(path, "utf8");
   } catch (error2) {
     if (isMissing(error2)) return emptyRules();
     warning(`review: could not read rules file at ${path}: ${String(error2)}`);
@@ -36417,9 +36904,9 @@ function parseRules(text2) {
   const warnings = [];
   let document2;
   try {
-    document2 = (0, import_yaml3.parse)(text2);
+    document2 = (0, import_yaml4.parse)(text2);
   } catch (error2) {
-    const reason = error2 instanceof import_yaml3.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml4.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new UnreadableRules([`not valid YAML \u2014 ${reason}`]);
   }
   if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
@@ -36434,7 +36921,7 @@ function parseRules(text2) {
   const { refs: packRefs, warnings: packWarnings } = readPackRefs(map.packs);
   warnings.push(...packWarnings);
   return {
-    version: readVersion(map.version, warnings),
+    version: readVersion2(map.version, warnings),
     rules,
     ignoreFiles: ignore.files,
     ignorePaths: ignore.paths,
@@ -36458,7 +36945,7 @@ function readIgnore(raw, warnings) {
     paths: readStringList(map.paths, "ignore.paths", warnings)
   };
 }
-function readVersion(raw, warnings) {
+function readVersion2(raw, warnings) {
   if (raw === void 0) {
     warnings.push("no `version:`; assuming 1");
     return 1;
@@ -36632,7 +37119,7 @@ async function readPackedRules(path, packsPath) {
 async function readPackFile(ref, path) {
   let raw;
   try {
-    raw = await readFile3(path, "utf8");
+    raw = await readFile4(path, "utf8");
   } catch (error2) {
     if (isMissing(error2)) {
       throw new UnreadablePacks(
@@ -36889,10 +37376,6 @@ var SEVERITY_ORDER = {
   warning: 1,
   info: 2
 };
-function selectPasses(profile) {
-  if (profile === "deep") return [correctnessPass(), securityPass()];
-  return [correctnessPass()];
-}
 async function runPasses(provider, passes, models, context3, weather) {
   const results = [];
   for (const pass of passes) {
@@ -36947,16 +37430,25 @@ function correctnessPass() {
     parse: (answer2, files) => parseVerdict(answer2, files)
   };
 }
-function securityPass() {
+function secondOpinionPass() {
   return {
-    id: "security",
-    name: "Security",
+    id: "second-opinion",
+    name: "Second opinion",
     models: [],
-    prompt: (context3) => securityPrompt(context3),
+    prompt: (context3) => secondOpinionPrompt(context3),
     parse: (answer2, files) => parseVerdict(answer2, files)
   };
 }
-function material(context3, lead) {
+function adversarialPass(prior) {
+  return {
+    id: "adversarial",
+    name: "Adversarial",
+    models: [],
+    prompt: (context3) => adversarialPrompt(context3, prior),
+    parse: (answer2, files) => parseVerdict(answer2, files)
+  };
+}
+function material(context3, lead, prior) {
   const { prTitle, prBody, headSha, files, rules, language } = context3;
   const repoContext = context3.context;
   const wrapped = enclose(
@@ -36973,6 +37465,13 @@ ${prBody}`,
 ` + (file.additions + file.deletions === 0 ? "" : `+${String(file.additions)} -${String(file.deletions)}
 `) + patchExcerpt(file.patch)
       ),
+      ...prior !== void 0 && prior.length > 0 ? [
+        "",
+        "--- PREVIOUS FINDINGS (untrusted, from earlier passes) ---",
+        ...prior.map(
+          (finding) => `- ${finding.rule} @ ${finding.path}:${String(finding.line ?? 0)} \u2014 ${finding.body}`
+        )
+      ] : [],
       ...repoContext.text === null || repoContext.text.length === 0 ? [] : [
         "",
         "The repository context below is evidence about the repository, collected",
@@ -37025,16 +37524,29 @@ ${prBody}`,
 function correctnessPrompt(context3) {
   return material(context3, ["You are reviewing a pull request on a GitHub repository."]);
 }
-function securityPrompt(context3) {
+function secondOpinionPrompt(context3) {
   return material(context3, [
-    "You are a security review pass for a pull request on a GitHub repository.",
+    "You are reviewing a pull request on a GitHub repository.",
     "",
-    "This pass focuses on security only: secret material committed to the diff, injection",
-    "(shell, SQL, HTML, command), unsafe deserialisation or evaluation of untrusted input,",
-    "authentication or authorisation flaws, privilege changes, and dependency risk visible",
-    "in the diff. Report only what the diff itself supports \u2014 a finding must name one of the",
-    "proven lines below."
+    "This is an independent second opinion. Read the diff with fresh eyes and prefer",
+    "reporting ground the first reviewer would have missed. You may confirm, but new",
+    "ground is worth more."
   ]);
+}
+function adversarialPrompt(context3, prior) {
+  return material(
+    context3,
+    [
+      "You are the adversarial verification pass for a pull request on a GitHub repository.",
+      "",
+      "You are shown the findings earlier reviewers made. Attack each one: is its line proven",
+      "by the diff? is its claim overstated? Report a finding again only if it survives your",
+      "attack, and report anything they missed. An empty list is legitimate only if you",
+      "genuinely could not disprove the diff's claims and found nothing new. You never run",
+      "tests or edit code \u2014 the diff is the whole universe."
+    ],
+    prior
+  );
 }
 var PATCH_EXCERPT = 4e3;
 function patchExcerpt(patch) {
@@ -37455,6 +37967,7 @@ function summarize(run2) {
     "",
     ...run2.implicit ? [authority(run2), ""] : [],
     verdict(run2),
+    ...run2.risk !== null && run2.risk.signals.length > 0 ? ["", riskSection(run2)] : [],
     ...run2.memoryNote !== null ? ["", `> \u26A0\uFE0F ${run2.memoryNote}`, ""] : [],
     ...run2.findings.length > 0 ? ["", findingsTable(run2)] : [],
     ...run2.skipped.length > 0 ? ["", coverage(run2)] : [],
@@ -37479,6 +37992,7 @@ function verdict(run2) {
   const rows = [
     ["Head", run2.headSha === "" ? "unknown" : `\`${run2.headSha}\``],
     ["Language", run2.language === null ? "not identified" : cell(run2.language)],
+    ["Risk", run2.risk === null ? "not assessed" : `${run2.risk.tier} \u2014 ${describeRisk(run2.risk)}`],
     ["Findings", String(run2.findings.length)],
     ["Confidence", run2.confidence === null ? "not measured" : run2.confidence.toFixed(2)],
     ["Posted", run2.posted ?? "nothing to post"]
@@ -37529,6 +38043,23 @@ function threadsCell(threads) {
   const text2 = parts.length > 0 ? parts.join(", ") : "none";
   return threads.uncertain ? `${text2} \u2014 listing uncertain` : text2;
 }
+function riskSection(run2) {
+  const risk = run2.risk;
+  if (risk === null) return "";
+  const passes = risk.tier === "high" ? 3 : risk.tier === "medium" ? 2 : 1;
+  const rows = risk.signals.map((signal) => [
+    signal.signal.replace(/_/g, "-"),
+    String(signal.weight),
+    signal.evidence.join(", ")
+  ]);
+  return [
+    `### Risk: ${risk.tier}`,
+    "",
+    table(["Signal", "Weight", "Evidence"], rows),
+    "",
+    `Score ${String(risk.score)} \u2014 medium \u2265 ${String(risk.thresholds.medium)}, high \u2265 ${String(risk.thresholds.high)} \u2014 ${String(passes)} review pass${passes === 1 ? "" : "es"}.`
+  ].join("\n");
+}
 function findingsTable(run2) {
   const rows = run2.findings.map(({ finding, status, disposition }) => [
     status,
@@ -37572,18 +38103,12 @@ function readSettings() {
     warrant: getInput("warrant", { required: true }),
     rulesPath: getInput("rules-path"),
     packsPath: getInput("packs-path"),
+    riskPath: getInput("risk-path"),
     trigger: getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", getInput("max-diff-chars")),
     maxContextChars: bounded("max-context-chars", getInput("max-context-chars")),
-    confidence: parseConfidence(getInput("confidence")),
-    profile: parseProfile(getInput("profile"))
+    confidence: parseConfidence(getInput("confidence"))
   };
-}
-function parseProfile(raw) {
-  const value = raw.trim();
-  if (value.length === 0 || value === "default") return "default";
-  if (value === "deep") return "deep";
-  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw}\`.`);
 }
 function parseConfidence(raw) {
   const value = Number(raw.trim());
@@ -37606,6 +38131,14 @@ function resolvePacksPath(settings) {
 function rulesLabel(settings) {
   return settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath;
 }
+function resolveRiskPath(settings) {
+  const workspace = process.env.GITHUB_WORKSPACE ?? "";
+  if (settings.riskPath.length === 0) return join2(workspace, ".github", "reeve-risk.yml");
+  return join2(workspace, settings.riskPath);
+}
+function riskLabel(settings) {
+  return settings.riskPath.length === 0 ? ".github/reeve-risk.yml" : settings.riskPath;
+}
 function contextBudget(maxContextChars) {
   return {
     total: maxContextChars ?? Number.MAX_SAFE_INTEGER,
@@ -37622,6 +38155,16 @@ function contextBudget(maxContextChars) {
     maxFileChars: 64 * 1024
   };
 }
+function planPasses(tier, prior) {
+  switch (tier) {
+    case "high":
+      return [correctnessPass(), secondOpinionPass(), adversarialPass(prior)];
+    case "medium":
+      return [correctnessPass(), secondOpinionPass()];
+    default:
+      return [correctnessPass()];
+  }
+}
 async function decide(api, at, warrant, settings, stages, weather) {
   const permitted = warrant.granted("review", DEFAULT_CAPABILITIES);
   const settled = (over = {}) => ({
@@ -37633,13 +38176,14 @@ async function decide(api, at, warrant, settings, stages, weather) {
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    risk: null,
     contextReadFiles: 0,
-    threads: null,
     previous: null,
     memoryNote: null,
     shown: [],
     skipped: [],
     passes: [],
+    threads: null,
     permitted,
     ...over
   });
@@ -37681,6 +38225,12 @@ async function decide(api, at, warrant, settings, stages, weather) {
   });
   const rules = await readPackedRules(resolveRulesPath(settings), resolvePacksPath(settings));
   for (const warning2 of rules.warnings) warning(`rules: ${warning2}`);
+  const riskProfile = await readRiskProfile(resolveRiskPath(settings));
+  for (const warning2 of riskProfile.warnings) warning(`risk: ${warning2}`);
+  const risk = assessRisk(snapshot.allFiles, rules, riskProfile);
+  info(
+    `#${String(at.number)}: risk ${risk.tier} \u2014 ${describeRisk(risk)} (${riskLabel(settings)}).`
+  );
   const bounded2 = classify(snapshot.allFiles, {
     ignoreFiles: rules.ignoreFiles,
     ignorePaths: rules.ignorePaths,
@@ -37766,13 +38316,17 @@ async function decide(api, at, warrant, settings, stages, weather) {
     language: language?.code ?? null,
     context: context3
   };
-  const passResults = bounded2.shown.length > 0 ? await runPasses(
-    stages.review,
-    selectPasses(settings.profile),
-    settings.models,
-    passContext,
-    weather
-  ) : [];
+  const passResults = [];
+  if (bounded2.shown.length > 0) {
+    const prior = [];
+    for (const pass of planPasses(risk.tier, prior)) {
+      const results = await runPasses(stages.review, [pass], settings.models, passContext, weather);
+      passResults.push(...results);
+      for (const result of results) {
+        if (result.verdict !== null) prior.push(...result.verdict.findings);
+      }
+    }
+  }
   for (const result of passResults) {
     for (const failure of result.failures) {
       warning(`review: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
@@ -37803,9 +38357,15 @@ async function decide(api, at, warrant, settings, stages, weather) {
   }));
   const confidence = synthesis.confidence;
   const next = remember(final, pr.headSha, previous);
-  const verdictMeasured = synthesis.measured;
+  const needsAdversarial = risk.tier === "high";
+  const readablePassCount = passResults.filter((result) => result.verdict !== null).length;
+  const adversarialIndex = passResults.findIndex((result) => result.pass.id === "adversarial");
+  const adversarialReadable = !needsAdversarial || adversarialIndex !== -1 && passResults[adversarialIndex]?.verdict !== null;
+  const minReadable = needsAdversarial ? 2 : 1;
+  const allClearEarned = readablePassCount >= minReadable && (!needsAdversarial || adversarialReadable);
+  const verdictMeasured = allClearEarned;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
-  const silentNoVerdict = bounded2.shown.length > 0 && !verdictMeasured && final.length === 0;
+  const silentNoVerdict = bounded2.shown.length > 0 && !allClearEarned && final.length === 0;
   const allShownIgnored = bounded2.shown.length === 0 && bounded2.skipped.length > 0 && bounded2.skipped.every((entry) => entry.reason === "ignored");
   if (!permitted.includes("comment")) {
     warning(
@@ -37816,6 +38376,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
@@ -37832,6 +38393,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
@@ -37848,6 +38410,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
@@ -37864,6 +38427,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
+      risk,
       malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
@@ -37895,6 +38459,7 @@ ${would}`);
       // disposition stays in the log.
       posted: null,
       threads: rehearsal,
+      risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
@@ -37922,6 +38487,7 @@ ${would}`);
     confidence,
     posted,
     threads,
+    risk,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded2.shown,
@@ -38033,6 +38599,7 @@ function report(outcome, rosterStarved) {
   setOutput("head-sha", outcome?.headSha ?? "");
   setOutput("starved", String(rosterStarved));
   setOutput("findings", String(outcome?.findings.length ?? 0));
+  setOutput("risk", outcome?.risk?.tier ?? "");
 }
 function page(settings, authority2, outcome, ungranted, spent) {
   const previousSha = outcome?.previous?.reviewedShas.at(-1) ?? "";
@@ -38057,8 +38624,9 @@ function page(settings, authority2, outcome, ungranted, spent) {
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
-    threads: outcome?.threads ?? null,
+    risk: outcome?.risk ?? null,
     passes: outcome?.passes ?? [],
+    threads: outcome?.threads ?? null,
     contextReadFiles: outcome?.contextReadFiles ?? 0
   });
 }

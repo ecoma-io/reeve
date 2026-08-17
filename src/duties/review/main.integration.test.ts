@@ -153,7 +153,8 @@ type Stage = "detect" | "review";
 /** Which of this duty's stages a request belongs to, read off its own system message. */
 function stageOf(ask: Ask): Stage {
   if (ask.system.includes("You identify which language")) return "detect";
-  if (ask.system.includes("You are a security review pass")) return "review";
+  if (ask.system.includes("You are the adversarial verification pass")) return "review";
+  if (ask.system.includes("This is an independent second opinion")) return "review";
   if (ask.system.includes("You are reviewing a pull request")) return "review";
   throw new Error(`a request nothing in this suite recognised: ${ask.system.slice(0, 120)}`);
 }
@@ -412,6 +413,7 @@ function baseInputs(
   warrant: string,
   rules: string,
   packs: string,
+  risk: string,
 ): Record<string, string> {
   return {
     "github-token": "stub-token",
@@ -422,11 +424,11 @@ function baseInputs(
     warrant,
     "rules-path": rules,
     "packs-path": packs,
+    "risk-path": risk,
     trigger: "pr",
     "max-diff-chars": "4000",
     "max-context-chars": "4000",
     confidence: "0.6",
-    profile: "default",
     endpoints: "",
     "api-keys": "",
     "request-timeout": "120s",
@@ -439,6 +441,7 @@ let scratch: string;
 let warrantPath: string;
 let rulesPath: string;
 let packsPath: string;
+let riskPath: string;
 
 async function runAction(
   stub: Stub,
@@ -460,7 +463,7 @@ async function runAction(
     ...extra,
   };
   for (const [name, value] of Object.entries({
-    ...baseInputs(stub, warrantPath, rulesPath, packsPath),
+    ...baseInputs(stub, warrantPath, rulesPath, packsPath, riskPath),
     ...inputs,
   })) {
     env[`INPUT_${name.toUpperCase()}`] = value;
@@ -510,6 +513,7 @@ beforeEach(async () => {
   warrantPath = join(scratch, "reeve.yml");
   rulesPath = join(scratch, "reeve-rules.yml");
   packsPath = join(scratch, "reeve-packs");
+  riskPath = join(scratch, "reeve-risk.yml");
   await writeFile(warrantPath, WARRANT);
 });
 
@@ -1295,6 +1299,227 @@ describe("the action", () => {
     expect(run.outputs.commented).toBe("false");
     expect(run.outputs.findings).toBe("0");
     expect(run.log).toContain("would have received");
+  });
+
+  it("prices a high-risk diff with three model passes", async () => {
+    stub.pull.files = [
+      {
+        filename: "src/auth/token.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;",
+      },
+    ];
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        return saying(JSON.stringify({ findings: [], confidence: 0.9 }));
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.risk).toBe("high");
+    expect(reviewAsks).toBe(3);
+    expect(run.summary).toContain("### Risk: high");
+    expect(run.summary).toContain("3 review passes");
+    expect(stub.asked.filter((ask) => stageOf(ask) === "review")).toHaveLength(3);
+  });
+
+  it("reports low risk on a small touched diff with one pass", async () => {
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        return saying(JSON.stringify({ findings: [], confidence: 0.9 }));
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.risk).toBe("low");
+    expect(reviewAsks).toBe(1);
+    // A diff with no risk signal fires no signals section, but the verdict
+    // table still names the tier and one pass was paid for.
+    expect(run.summary).toContain("| Risk | low — low — no risk signals fired |");
+  });
+
+  it("prices a dependency change medium with two passes", async () => {
+    stub.pull.files = [
+      {
+        filename: "package-lock.json",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: '@@ -1 +1 @@\n+  "version": "1.2.3",',
+      },
+    ];
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        if (reviewAsks === 1) {
+          return saying(
+            JSON.stringify({
+              findings: [
+                {
+                  rule: "dedup",
+                  severity: "info",
+                  path: "package-lock.json",
+                  line: 1,
+                  snippet: '"version": "1.2.3",',
+                  body: "A named constant is worth considering.",
+                },
+              ],
+              confidence: 0.8,
+            }),
+          );
+        }
+        return saying(JSON.stringify({ findings: [], confidence: 0.7 }));
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.risk).toBe("medium");
+    expect(reviewAsks).toBe(2);
+    expect(run.outputs.findings).toBe("1");
+    expect(stub.comments[0]?.body).toContain("New findings (1)");
+  });
+
+  it("withholds a high-risk all-clear when its adversarial pass fails", async () => {
+    stub.pull.files = [
+      {
+        filename: "src/auth/token.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;",
+      },
+    ];
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: (ask) => {
+        reviewAsks += 1;
+        if (reviewAsks === 3) {
+          return { status: 429, payload: { error: { message: "out of quota" } } };
+        }
+        void ask;
+        return saying(JSON.stringify({ findings: [], confidence: 0.9 }));
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.commented).toBe("false");
+    expect(run.outputs.findings).toBe("0");
+    expect(run.summary).toContain("### Risk");
+  });
+
+  it("posts a high-risk all-clear only when the adversarial pass also found nothing", async () => {
+    stub.pull.files = [
+      {
+        filename: "src/auth/token.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;",
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.commented).toBe("true");
+    expect(run.outputs.findings).toBe("0");
+    expect(stub.comments[0]?.body).toContain("No issues to report");
+  });
+
+  it("merges multiple passes into one deduplicated verdict", async () => {
+    stub.pull.files = [
+      {
+        filename: "src/auth/token.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;",
+      },
+    ];
+    const finding = {
+      rule: "dedup",
+      severity: "warning",
+      path: "src/auth/token.ts",
+      line: 1,
+      snippet: "export const tokenTtl = 3600;",
+      body: "Consider a named constant.",
+    };
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        if (reviewAsks === 1)
+          return saying(JSON.stringify({ findings: [finding], confidence: 0.8 }));
+        if (reviewAsks === 2) return saying(JSON.stringify({ findings: [], confidence: 0.7 }));
+        return saying(JSON.stringify({ findings: [finding], confidence: 0.9 }));
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.findings).toBe("1");
+    expect(stub.comments[0]?.body).toContain("New findings (1)");
+  });
+
+  it("risk config cannot escalate capability", async () => {
+    // A hostile profile names a capability the risk config must never be able
+    // to grant, and sets every weight to 100 — none of which can widen what
+    // the warrant gave this run (nothing at all). The `capabilities:` key is
+    // rejected with a warning, and the run still posts nothing.
+    await writeFile(
+      riskPath,
+      [
+        "version: 1",
+        "capabilities:",
+        "  - edit-file",
+        "weights:",
+        "  sensitive-path: 100",
+        "  auth-change: 100",
+        "  security-sensitive: 100",
+      ].join("\n"),
+    );
+    stub.pull.files = [
+      {
+        filename: "src/auth/token.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;",
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub, {
+      warrant: await writtenAt(NOTHING),
+    });
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(0);
+    expect(run.outputs.commented).toBe("false");
+    expect(run.log).toContain("risk: unknown top-level key `capabilities`; ignored");
+    expect(run.summary).not.toContain("edit-file");
+    expect(run.summary).toContain("nothing to post");
   });
 
   it("anchors each anchorable finding as one inline thread, and the summary comment stays the one owned write", async () => {
