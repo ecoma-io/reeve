@@ -43,7 +43,7 @@ export interface Run {
   readonly ungranted: string | null;
   readonly malformedAnswers: number;
   readonly readRules: string | null;
-/** The risk assessment, when the run reached one — `null` on early stops. */
+  /** The risk assessment, when the run reached one — `null` on early stops. */
   readonly risk: RiskAssessment | null;
   /** One row per model pass that ran, for the verdict table's "Passes" row. */
   readonly passes: readonly {

@@ -903,7 +903,7 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
     const run = await runBundle(
       "review",
       stub.url,
-reviewInputs(stub.url, warrant),
+      reviewInputs(stub.url, warrant),
       scratchFiles(checkout),
       { GITHUB_WORKSPACE: checkout },
     );

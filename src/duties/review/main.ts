@@ -185,7 +185,7 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
-/** The risk assessment, when the run reached one — `null` on early stops. */
+  /** The risk assessment, when the run reached one — `null` on early stops. */
   readonly risk: RiskAssessment | null;
   /** How many workspace reads the context engine made, for the summary's Context row. */
   readonly contextReadFiles: number;
@@ -204,8 +204,6 @@ interface Outcome {
   readonly permitted: readonly Capability[];
   /** One row per model pass that ran, for the summary's verdict table. */
   readonly passes: readonly PassReport[];
-  /** What the inline-thread sync did — for the page's "Threads" row. */
-  readonly threads: ThreadSync | null;
 }
 
 type Settled = Partial<
@@ -228,7 +226,6 @@ type Settled = Partial<
     | "shown"
     | "skipped"
     | "passes"
-    | "threads"
   >
 >;
 
