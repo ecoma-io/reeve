@@ -311,6 +311,7 @@ before a model is asked anything, each _always-right by construction_:
   import is still a dependency. Capped at 40 findings per run.
 - **`rules`** — the named rules a finding can cite, replacing the one
   built-in default rule (`dedup`, repeated code).
+- **`tests`** — the opt-in test-aware pass (off by default; see below).
 
 ```yaml
 # .github/reeve-rules.yml
@@ -318,7 +319,7 @@ version: 1
 ignore:
   files: [docs/legacy.md]
   paths: ["vendor/**"]
-generated: [".min.js", ".min.css", ".map", "_build/**"]
+generated: [".min.js", ".min.css", ".map"]
 blocked:
   - phrase: "TODO-FIXME"
     severity: critical
@@ -339,7 +340,30 @@ rules:
     name: Repeated code
     marker: duplication
     body: Flag code that is repeated and could share one definition.
+tests:
+  enabled: true
+  missing-severity: warning
+  dangerous: ["encrypt", "decrypt", "payment", "checkout", "sql"]
 ```
+
+The `tests:` section fires a deterministic **change-completeness** pass that
+reads the test files in the base-branch checkout and reports coverage gaps the
+diff itself proves:
+
+- `tests-map` — a changed source file with additions but no covering test.
+  Escalated to `critical` when the diff touches a `dangerous` marker
+  (case-insensitive whole-word; the default list covers crypto, payments,
+  filesystem writes, eval, and the like).
+- `tests-only` — a modified or renamed test whose referenced production
+  modules did not change in the same pull request. A regression test for code
+  that never moved is a signal worth naming, not a claim of fault; a test that
+  moved _with_ its code is a pair changing together, which is what a review
+  wants to see.
+
+A pure deletion never fires `tests-map` — an addition-free change introduces
+no new untested behavior. Test discovery is bounded (`MAX_TEST_FILES`), and a
+coverage claim a diff cannot prove stays silent (D5). When the pass is enabled,
+its verdict line appears as the `Tests` row of the summary page.
 
 A phrase like `TODO-FIXME` in the diff is a finding with a line number — one a
 model could not be trusted to make about a line it was never shown, and one

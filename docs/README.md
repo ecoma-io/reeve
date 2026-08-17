@@ -126,6 +126,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`reference/duties/harmonise.md`](reference/duties/harmonise.md)           | reference                | Full contract for the harmonise duty.                                             |
 | [`reference/duties/dependa.md`](reference/duties/dependa.md)               | reference                | Full contract for the dependa duty.                                               |
 | [`reference/duties/review.md`](reference/duties/review.md)                 | reference                | Full contract for the review duty.                                                |
+| [`reference/duties/remediation.md`](reference/duties/remediation.md)       | reference                | Full contract for the remediation duty.                                           |
 | [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
 | [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
 | [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action and its `doctor: true` diagnostic mode.     |
