@@ -9,7 +9,10 @@ verdicts to job summaries and touching nothing; `lifecycle` observes in
 dry-run; and `dependa` maintains this repository's own dependencies.
 `harmonise` is configured to watch `README.md`, whose sync to
 Vietnamese/Chinese is pending the bootstrap of its first translations — see
-[the harmonise reference](../reference/duties/harmonise.md#bootstrap). This
+[the harmonise reference](../reference/duties/harmonise.md#bootstrap).
+`review` is the newest: it has no live workflow here yet, and its whole duty
+is driven end to end by its own integration suite against a stub API — see
+[the review reference](../reference/duties/review.md). This
 is not self-modification; it is **proving the execution path**. A duty that
 labels a stranger's issue and a duty that labels its own follow the same code,
 the same warrant, and the same guardrails.

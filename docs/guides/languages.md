@@ -71,8 +71,8 @@ with it, not a fallback for anything it left out — and the run says so once,
 rather than quietly picking one.
 
 Leave the key out and nothing changes: the duty's own documented default
-answers. `triage`, `translate`, `duplicate` and `respond` default to
-`en, vi, zh`; `harmonise` to `vi, zh`. An implicit warrant — no file at the
+answers. `triage`, `translate`, `duplicate`, `respond` and `review` default
+to `en, vi, zh`; `harmonise` to `vi, zh`. An implicit warrant — no file at the
 default path — carries no languages of its own, for the same reason it
 carries no duties: there is nothing written down to read, so each duty's
 default answers there too. Writing the key with nothing under it is refused

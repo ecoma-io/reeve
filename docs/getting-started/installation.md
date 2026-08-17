@@ -69,6 +69,7 @@ already.
 | `lifecycle`  | **Zero**    | Stale-issue management. Calls no model — driven entirely by your warrant policy.                                                                                                           |
 | `harmonise`  | Medium      | Keeps translated files (README, docs) in sync with a source language. Report-only at level 0 — needs a `duties:` grant in the warrant to act.                                              |
 | `dependa`    | Medium–High | Dependency maintenance. Discovers updates, classifies risk, opens PRs. Report-only at level 0 — needs a `duties:` grant in the warrant to act. Can run without a model for discovery only. |
+| `review`     | Medium      | Pull request review. Deterministic pre-checks plus one model pass, reported as a single owned comment. Report-only at level 0 — needs a `duties:` grant in the warrant to act.             |
 
 **Start with `triage`.** It is the narrowest authority, the cheapest to run,
 and the one that needs nothing beyond a model key and the labels your

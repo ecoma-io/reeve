@@ -21,9 +21,9 @@ which moved first, in its own commit, per that document's own amendment
 rule.
 
 > [!IMPORTANT]
-> **Nothing on this page ships today.** Reeve today runs seven duties —
+> **Nothing on this page ships today.** Reeve today runs eight duties —
 > `triage`, `translate`, `duplicate`, `respond`, `lifecycle`, `harmonise`,
-> `dependa` — each a fixed
+> `dependa`, `review` — each a fixed
 > pipeline of reviewed TypeScript, exactly as described in
 > [Architecture](architecture.md).
 > There is no agent runtime in this repository's `src/`, no workflow can opt

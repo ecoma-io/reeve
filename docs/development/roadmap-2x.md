@@ -67,7 +67,7 @@ inspiration, its ancestor: the kernel is `enforce.ts`'s job description with
 more callers, and a consumer who trusts today's warrant check is trusting the
 same check tomorrow. **The duties are the capability set** — Agent Mode
 composes `triage`, `translate`, `duplicate`, `respond`, `lifecycle`,
-`harmonise` and `dependa`; it
+`harmonise`, `dependa` and `review`; it
 does not replace them, and a capability added later is added the way a duty
 is added today, by [earning its place](../doctrine/north-star.md#d10--a-duty-must-earn-its-place).
 
@@ -76,17 +76,19 @@ is added today, by [earning its place](../doctrine/north-star.md#d10--a-duty-mus
 The phase that is not proposed, because it exists. Named here so the rest of
 the page is anchored to something checkable rather than to an idea of 1.x.
 
-**Standing today:** seven duties ship —
+**Standing today:** eight duties ship —
 [`triage`](../reference/duties/triage.md),
 [`translate`](../reference/duties/translate.md),
 [`duplicate`](../reference/duties/duplicate.md),
 [`respond`](../reference/duties/respond.md),
 [`lifecycle`](../reference/duties/lifecycle.md),
-[`harmonise`](../reference/duties/harmonise.md) and
-[`dependa`](../reference/duties/dependa.md). The first four are dogfooded
+[`harmonise`](../reference/duties/harmonise.md),
+[`dependa`](../reference/duties/dependa.md) and
+[`review`](../reference/duties/review.md). The first four are dogfooded
 on this repository, the last two of those in report-only mode first, which
-is the same discipline Phase 3 below borrows; `lifecycle` is the newest and
-does not yet have a workflow of its own here.
+is the same discipline Phase 3 below borrows. `review` is the eighth, granted
+nothing until a warrant names it, and its whole duty is driven end to end by
+its own integration suite against a stub API.
 The warrant is the whole answer for authority, with total enumeration once a
 `duties:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog

@@ -82,8 +82,9 @@ should never have to rule out the other first.
   [`translate`](../reference/duties/translate.md#security-considerations),
   [`duplicate`](../reference/duties/duplicate.md#security-considerations),
   [`respond`](../reference/duties/respond.md#security-considerations),
-  [`harmonise`](../reference/duties/harmonise.md#security-considerations), and
-  [`dependa`](../reference/duties/dependa.md#security-considerations).
+  [`harmonise`](../reference/duties/harmonise.md#security-considerations),
+  [`dependa`](../reference/duties/dependa.md#security-considerations), and
+  [`review`](../reference/duties/review.md#security-considerations).
 
 - **Dependency-specific threats** — external registry metadata as an attack
   surface, prompt injection through release notes and changelogs, and why

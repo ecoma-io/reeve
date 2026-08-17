@@ -139,8 +139,9 @@ duties:
   translate: [edit-body]
 ```
 
-`duplicate`, `respond`, `lifecycle`, `harmonise`, and `dependa` are not named —
-they are granted nothing. If you want `duplicate` to comment, add it:
+`duplicate`, `respond`, `review`, `lifecycle`, `harmonise`, and `dependa` are
+not named — they are granted nothing. If you want `duplicate` to comment, add
+it:
 
 ```yaml
 duties:
