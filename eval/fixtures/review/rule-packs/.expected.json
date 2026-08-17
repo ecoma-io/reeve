@@ -1,0 +1,25 @@
+{
+  "description": "The rules file composes a versioned rule pack by reference, and the pack's blocked phrase fires on the diff before any model is asked — the deterministic finding is guaranteed by construction, the same loudness the local rules file gives its own blocked list. The run posts one comment carrying the finding.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "added",
+      "additions": 5,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,5 @@\n+export function connect(): void {\n+  const cfg = loadConfig();\n+  goroutine();\n+  console.log(cfg);\n+}"
+    }
+  ],
+  "rules": "version: 1\npacks:\n  - pack: go/concurrency@1.0\n",
+  "packs": {
+    "go/concurrency.yml": "version: 1.0\nblocked:\n  - phrase: goroutine();\n    severity: warning\n    note: Do not spawn a goroutine without a lifecycle bound.\n"
+  },
+  "verdict-over": {
+    "findings": []
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "1",
+    "head-sha": "abc123"
+  }
+}

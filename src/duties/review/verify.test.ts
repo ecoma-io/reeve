@@ -32,6 +32,7 @@ function rules(overrides: Partial<Rules> = {}): Rules {
     blocked: [],
     raw: "version: 1\nrules:\n  - id: dedup\n",
     architecture: emptyArchitecture(),
+    packRefs: [],
     warnings: [],
     ...overrides,
   };
