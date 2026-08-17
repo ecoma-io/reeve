@@ -49,9 +49,11 @@ const ENGLISH =
 const REPLY = "Thanks for filing this — could you share which browser and OS you are on?";
 
 /** A warrant granting `respond` exactly what its own default withholds. */
-const WARRANT = ["version: 1", "capabilities:", "  respond: [comment]"].join("\n");
+const WARRANT = ["version: 1", "duties:", "  respond: [comment]"].join("\n");
 /** A written block that never mentions `respond` at all. */
-const UNNAMED_WARRANT = ["version: 1", "capabilities:", "  triage: [label]"].join("\n");
+const UNNAMED_WARRANT = ["version: 1", "duties:", "  triage: [label]"].join("\n");
+/** A written block naming `respond` but granting it nothing at all. */
+const NOTHING_WARRANT = ["version: 1", "duties:", "  respond: [none]"].join("\n");
 
 beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
@@ -307,9 +309,10 @@ interface Run {
 /**
  * One consumer's settings — deliberately not a copy of `action.yml`'s
  * defaults, which the runner supplies and this file never sees. A case names
- * only what it changes. `apply` is `comment` here rather than the input's own
- * `none`, so a case not otherwise concerned with the double gate sees the
- * warrant's own grant settle the question by itself.
+ * only what it changes. There is no second grant to settle: `comment` is
+ * granted or withheld by the warrant alone, and `languages` is not an input
+ * — the warrant's own `languages:` key, or this duty's documented default,
+ * answers detection.
  */
 function baseInputs(
   stub: Stub,
@@ -325,9 +328,7 @@ function baseInputs(
     models: "stub-model",
     "judge-models": "",
     drafts: "1",
-    languages: "en, vi, zh",
     warrant,
-    apply: "comment",
     confidence: "0.75",
     guidance,
     "corrections-dir": corrections,
@@ -483,8 +484,8 @@ describe("the action", () => {
     expect(stub.comments[0]?.body).toContain("Votes: `judge-model`");
   });
 
-  it("keeps the draft off the thread when the double gate withholds `comment`", async () => {
-    const run = await runAction(stub, { apply: "none" });
+  it("keeps the draft off the thread when the warrant names `respond` but grants nothing", async () => {
+    const run = await runAction(stub, { warrant: await writtenAt(NOTHING_WARRANT) });
 
     expect(run.code).toBe(0);
     expect(stub.comments).toHaveLength(0);
@@ -543,6 +544,29 @@ describe("the action", () => {
     expect(second.summary).toContain("answers a thread once");
   });
 
+  it("does not treat a bot's forged marker as this duty's own reply", async () => {
+    // A second automation (not Reeve) wrote a comment carrying the marker's
+    // public shape but not a real digest. That is not evidence this duty
+    // already answered — only a payload this duty's own `fingerprint`
+    // produces is, so the first reply is still owed.
+    stub.comments.push({
+      id: 901,
+      body: `Ran the checks.\n\n<!-- reeve:respond source= -->`,
+      login: "some-other-bot",
+      type: "Bot",
+    });
+    stub.body = VIETNAMESE;
+    stub.answer = stageAnswer({
+      draft: JSON.stringify({ text: REPLY, confidence: 0.92 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(2); // the forged one + this duty's own
+    expect(run.outputs.responded).toBe("true");
+  });
+
   it("grounds the draft in a correction this project already made", async () => {
     await remember({});
     let seenDecisions = "";
@@ -568,7 +592,7 @@ describe("the action", () => {
     await writeFile(join(correctionsPath, "2026-08.ndjson"), "not json\n");
     await writeFile(
       warrantPath,
-      ["version: 1", "capabilities:", "  respond: [comment]", "memory:", "  recall: 0"].join("\n"),
+      ["version: 1", "duties:", "  respond: [comment]", "memory:", "  recall: 0"].join("\n"),
     );
     let seenDecisions = "";
     stub.answer = stageAnswer({
@@ -601,7 +625,17 @@ describe("the action", () => {
       },
     });
 
-    const run = await runAction(stub, { languages: "en, vi" });
+    // The warrant's `languages:` key is the only source detection reads now
+    // — a narrower list than this run's own default, keeping the pivot away
+    // from the thread's own language so the bridge has to run.
+    await writeFile(
+      warrantPath,
+      ["version: 1", "duties:", "  respond: [comment]", "languages:", "  - en", "  - vi"].join(
+        "\n",
+      ),
+    );
+
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(seenDecisions).toContain("Known double-submit issue");
@@ -624,7 +658,14 @@ describe("the action", () => {
       },
     });
 
-    const run = await runAction(stub, { languages: "en, vi", "screen-models": "cheap-model" });
+    await writeFile(
+      warrantPath,
+      ["version: 1", "duties:", "  respond: [comment]", "languages:", "  - en", "  - vi"].join(
+        "\n",
+      ),
+    );
+
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
 
     expect(run.code).toBe(0);
     // A mechanical translation for recall does not need the roster a first

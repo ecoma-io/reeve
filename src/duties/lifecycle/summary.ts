@@ -27,7 +27,6 @@ export interface OutcomeSummary {
   readonly unstale: readonly string[];
   readonly permanentlyExempt: string | null;
   readonly permitted: readonly Capability[];
-  readonly withheld: readonly Capability[];
   readonly ungranted: string | null;
 }
 
@@ -80,19 +79,6 @@ export function renderRow(
 }
 
 /**
- * The capabilities the workflow asked for and the file does not grant — the
- * same shape `duplicate/summary.ts`'s own `withheld` reports, repeated here
- * rather than shared because the wording names a different duty.
- */
-function withheldLine(warrantPath: string, withheld: readonly Capability[]): string {
-  if (withheld.length === 0) return "";
-  return (
-    `\`apply\` asks for ${withheld.map((capability) => `\`${capability}\``).join(", ")}, ` +
-    `which \`${warrantPath}\` does not grant to lifecycle. The narrower of the two wins, always.`
-  );
-}
-
-/**
  * The one sentence a fallback earns, when {@link chromeFallbackNote} finds
  * one — see its own doc comment. `outcome.language` is the only code this
  * duty's chrome (`footer()`) is ever keyed by, and `footer()` is only ever
@@ -112,7 +98,6 @@ export interface SweptThreadSummary {
 
 /** A sweep's own page: a table instead of one verdict, the same shape `duplicate`'s sweep page uses. */
 export function renderSweepPage(
-  warrantPath: string,
   dryRun: boolean,
   results: readonly SweptThreadSummary[],
   ungranted: string | null,
@@ -142,15 +127,11 @@ export function renderSweepPage(
   }
   parts.push("", rendered.length === 0 ? "Nothing was processed this run." : rendered);
 
-  const gaps = new Set<string>();
   const chromeGaps = new Set<string>();
   for (const result of results) {
-    const line = withheldLine(warrantPath, result.outcome.withheld);
-    if (line.length > 0) gaps.add(line);
     const note = chromeGap(result.outcome, result.done, dryRun);
     if (note.length > 0) chromeGaps.add(note);
   }
-  for (const gap of gaps) parts.push("", gap);
   for (const note of chromeGaps) parts.push("", note);
 
   return `${parts.join("\n").trimEnd()}\n`;
@@ -158,7 +139,6 @@ export function renderSweepPage(
 
 /** One thread's own page — the full detail a sweep's single row has no room for. */
 export function renderThreadPage(
-  warrantPath: string,
   dryRun: boolean,
   number: number,
   outcome: OutcomeSummary,
@@ -184,9 +164,6 @@ export function renderThreadPage(
     for (const action of outcome.actions) {
       parts.push(`- \`${action.track.name}\`, step ${String(action.stepIndex + 1)}.`);
     }
-
-    const gap = withheldLine(warrantPath, outcome.withheld);
-    if (gap.length > 0) parts.push("", gap);
 
     const note = chromeGap(outcome, done, dryRun);
     if (note.length > 0) parts.push("", note);

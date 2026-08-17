@@ -34,7 +34,7 @@ Any repository that maintains documentation in more than one language and
 needs those versions to stay in step. `edit-file` and `open-pr` are **not**
 granted at [level 0 of the ladder](../../doctrine/north-star.md#3-the-ladder) —
 committing files and opening pull requests is too much authority for
-zero-config, so an explicit `capabilities:` block in the warrant is required
+zero-config, so an explicit `duties:` entry in the warrant is required
 before this duty can act.
 
 This is the duty to reach for when the cost of a stale translation is a
@@ -68,8 +68,6 @@ jobs:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5
           source-language: en
-          languages: vi, zh
-          apply: edit-file, open-pr
 ```
 
 That opens a **draft** pull request for each document group whose source locale
@@ -83,7 +81,7 @@ does what it promises once the warrant names the capability. The minimal
 warrant that makes the workflow above work:
 
 ```yaml
-capabilities:
+duties:
   harmonise: [edit-file, open-pr]
 ```
 
@@ -98,7 +96,7 @@ also needs the initial translation to already exist — committing the first
 `pull-requests: write` to open or update pull requests. `GITHUB_TOKEN` is
 enough for both.
 
-**Warrant capability:** `edit-file` and `open-pr` are **not** granted by
+**Warrant grant:** `edit-file` and `open-pr` are **not** granted by
 default. At level 0, with no warrant file, this duty cannot act — it
 classifies and reports without touching the repository. A maintainer who
 wants `harmonise` to open sync PRs must write:
@@ -106,19 +104,19 @@ wants `harmonise` to open sync PRs must write:
 ```yaml
 # .github/reeve.yml
 version: 1
-capabilities:
+duties:
   harmonise: [edit-file, open-pr]
 ```
 
-Once a `capabilities:` block exists, the enumeration becomes total: leaving
-`harmonise` out of it grants this duty nothing, and the run says so rather
-than guessing. See [the capabilities table](../../guides/warrant.md#capabilities).
+The `duties:` block in the warrant is the whole authority. Once it exists,
+the enumeration becomes total: leaving `harmonise` out of it grants this duty
+nothing, and the run says so rather than guessing. Nothing on the workflow
+can widen the block. See [the duties table](../../guides/warrant.md#duties).
 
-**`apply`** is the workflow's own half of the same gate — `edit-file,
-open-pr`, or `none` for a run that classifies and drafts but never commits
-or opens a PR. The narrower of `apply` and the warrant always wins. `apply:
-none` is a good way to watch what a run would have changed before it is
-allowed to change anything.
+A run that should classify and draft but never commit or open a PR is a
+[`dry-run`](../../guides/dry-run.md) — the pipeline runs, every output is
+written, nothing changes. Watch what a run would have changed before you
+grant it `edit-file` and `open-pr`.
 
 ## Required inputs
 
@@ -139,9 +137,7 @@ Every input `harmonise/action.yml` declares.
 | `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                              |
 | `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                                                                                        |
 | `source-language` | no       | `en`                        | The locale code of the source language — the language the unsuffixed documentation files are written in. A deliberate organisational decision, not an incidental preference.                                                                                 |
-| `languages`       | no       | `vi, zh`                    | The target locale codes the documentation is translated into. The source language must NOT appear here — it is a separate input. Ignored once the warrant's own `languages:` key is written.                                                                 |
-| `warrant`         | no       | `.github/reeve.yml`         | Where `edit-file` and `open-pr` are granted. Missing at this default path is not a failure.                                                                                                                                                                  |
-| `apply`           | no       | `none`                      | What this run may do: `edit-file, open-pr`, or `none` to decide and report without touching the repository. The narrower of this and the warrant file wins.                                                                                                  |
+| `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `edit-file` and `open-pr` are granted here, under `duties:`, and are not granted by default. Missing at this default path is not a failure.                                                                                      |
 | `drafts`          | no       | `1`                         | Attempts per stale locale, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                                                                                               |
 | `judge-models`    | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see [`translate`](translate.md#configuration) for the full grammar.                                                                                                                       |
 | `provenance-dir`  | no       | `.reeve/provenance`         | Directory for provenance state — per-document sync status and source revision tracking. The state file lives at `${provenance-dir}/state.json`.                                                                                                              |
@@ -164,11 +160,12 @@ write in any language), `harmonise` works on committed documentation whose
 source language is a known organisational decision — it must be named
 explicitly.
 
-**`languages` names the target locales.** These are the locale-suffixed files
-(`docs/getting-started.vi.md`). The source language must NOT appear in this
-list — it is a separate `source-language` input. The list says which
-translations belong to the same document group; it says nothing about what
-language a contributor may write in.
+**Target locales come from the warrant.** The locale-suffixed files
+(`docs/getting-started.vi.md`) are matched against the warrant's own
+`languages:` key — the source language must NOT appear in the list. The list
+says which translations belong to the same document group; it says nothing
+about what language a contributor may write in. Leave the key out of the
+warrant and the duty's own default answers.
 
 **`provenance-dir` tracks provenance.** `.reeve/provenance/state.json` records
 the source revision and per-locale sync status for each document group. When a
@@ -199,7 +196,7 @@ considered — `docs/` would restrict `harmonise` to documentation, leaving
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **`max-requests` is a ceiling this run sets for itself**, not the provider
 running dry. Every request made counts against it, whatever it answered.
@@ -306,8 +303,8 @@ run where nothing conflicted, never an unset output.
 | One locale had no working model this run    | Warning, that locale left stale, the others synced, **green**                   |
 | No locale could be synced                   | Warning per locale, `synced: []`, **green**                                     |
 | Human edit in target locale since last sync | Conflict reported, that locale not overwritten, **green**                       |
-| No warrant capabilities for `harmonise`     | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
-| `apply: none`                               | Pipeline runs, nothing committed or PR'd, **green**                             |
+| Warrant grants `harmonise` nothing          | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
+| `dry-run: true`                             | Pipeline runs, nothing committed or PR'd, **green**                             |
 | The provenance state file cannot be read    | **Red** — provenance is how the duty knows what changed                         |
 | The configuration is broken                 | **Red**, naming the input                                                       |
 
@@ -315,9 +312,9 @@ A skipped document group is not re-synced until its source changes again.
 A conflicted locale is reported in the PR body and the summary, and a
 maintainer decides whether to accept the sync or keep the human edit.
 
-**Running with no `capabilities:` block at all is noted, once, rather
+**Running with no `duties:` block at all is noted, once, rather
 than left silent.** An absent warrant file at the default path is level 0,
-and `harmonise` at level 0 has no granted capabilities — the run says so
+and `harmonise` at level 0 has no retained grant — the run says so
 and stops before spending a single model request.
 
 ## Dry-run behavior
@@ -329,8 +326,8 @@ opened are all printed to the log instead.
 **Dry-run still spends model requests.** Classification and drafting run
 normally — only the write (file commits and PR creation) is withheld. A
 dry-run on a large document set costs the same in provider calls as a real
-run. Use `apply: none` at the warrant level if you want to prevent model
-calls entirely.
+run. Leave `harmonise` out of the warrant's `duties:` block if you want to
+prevent model calls entirely.
 
 See [Rehearsing a run](../../guides/dry-run.md) for the pattern every duty
 in Reeve shares.

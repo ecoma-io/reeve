@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { enforceLabels, narrow } from "./enforce.js";
+import { enforceLabels } from "./enforce.js";
 import { parseWarrant, type Warrant } from "./warrant.js";
 
 /** A warrant with a fixed taxonomy, used as a stable baseline. */
@@ -32,35 +32,54 @@ labels:
 `,
 );
 
-describe("narrow", () => {
-  it("is a pure function of two arrays — no external state can change its answer", () => {
-    const a = narrow(["label", "comment"], ["label"]);
-    const b = narrow(["label", "comment"], ["label"]);
+describe("single-authority grants", () => {
+  it("answers identically on repeated reads — no external state can change a grant", () => {
+    const a = parseWarrant(
+      ".github/reeve.yml",
+      `
+version: 1
+duties:
+  triage: [label]
+`,
+    );
+    const b = parseWarrant(
+      ".github/reeve.yml",
+      `
+version: 1
+duties:
+  triage: [label]
+`,
+    );
 
-    expect(a).toEqual(b);
+    expect(a.granted("triage", ["label", "comment"])).toEqual(
+      b.granted("triage", ["label", "comment"]),
+    );
   });
 
-  it("produces the same capability set regardless of which side is larger", () => {
-    // The file grants two; the workflow asks for one. The result is one.
-    const fileWider = narrow(["label", "comment", "close"], ["label"]);
-
-    // The file grants one; the workflow asks for three. The result is one.
-    const workflowWider = narrow(["label"], ["label", "comment", "close"]);
-
-    // Both produce the same intersection.
-    expect(fileWider.permitted).toEqual(["label"]);
-    expect(workflowWider.permitted).toEqual(["label"]);
+  it("grants exactly what the file names — a workflow input cannot widen or narrow it", () => {
+    // The file is the whole authority: the two arrays that used to meet in
+    // `narrow` are now one, read from the warrant and bounded by it alone.
+    const warrant = parseWarrant(
+      ".github/reeve.yml",
+      `
+version: 1
+duties:
+  triage: [label, comment]
+`,
+    );
+    expect(warrant.granted("triage", ["open-pr"])).toEqual(["label", "comment"]);
   });
 
-  it("is independent of provider configuration — it takes no provider argument", () => {
-    // `narrow` has no parameter for a provider, model id, or endpoint.
-    // This test documents that structural fact. If `narrow` ever gains
-    // such a parameter, this test should be rewritten to assert that
-    // the parameter does not change the result.
-    const result = narrow(["label"], ["label"]);
-
-    expect(result.permitted).toEqual(["label"]);
-    expect(result.withheld).toEqual([]);
+  it("refuses a duty the block does not name, whatever the fallback grants", () => {
+    const warrant = parseWarrant(
+      ".github/reeve.yml",
+      `
+version: 1
+duties:
+  triage: [label]
+`,
+    );
+    expect(warrant.granted("respond", ["comment"])).toEqual([]);
   });
 });
 

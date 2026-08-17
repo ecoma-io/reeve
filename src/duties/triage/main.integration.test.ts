@@ -57,7 +57,7 @@ const WARRANT = [
   "    owner: '@ana'",
   "  - name: docs",
   "    description: The documentation is wrong or missing.",
-  "capabilities:",
+  "duties:",
   "  triage: [label]",
 ].join("\n");
 
@@ -565,9 +565,7 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     "api-key": "sk-stub-key",
     models: "stub-model",
     "screen-models": "",
-    languages: "en, vi",
     warrant,
-    apply: "label",
     confidence: "0.75",
     "corrections-dir": corrections,
     "min-body-chars": "40",
@@ -857,34 +855,51 @@ describe("the action", () => {
     expect(run.log).toContain("stub-model-a: HTTP 401: invalid api key");
   });
 
-  it("comments only when both the file and the workflow allow it", async () => {
+  it("comments only when the warrant grants comment", async () => {
     // `issues: write` is one indivisible scope — a token that can label can
-    // also comment — so the narrowing that matters is this one, in code.
-    const commented = await runAction(stub, { apply: "label, comment" });
+    // also comment — so the narrowing that matters is this one, in the file.
+    const commented = await runAction(stub);
 
     expect(commented.code).toBe(0);
     expect(stub.effects.comments).toEqual([]);
-    expect(commented.log).toContain(
-      "`apply` asks for `comment`, which " + `\`${warrantPath}\` does not grant to triage`,
-    );
 
     await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, comment]"));
     stub.labels = [];
-    const again = await runAction(stub, { apply: "label, comment" });
+    const again = await runAction(stub);
 
     expect(again.code).toBe(0);
     expect(stub.effects.comments[0]).toContain("Triaged as `bug`.");
     expect(stub.effects.comments[0]).toContain("> It regressed.");
   });
 
+  it("defangs mentions and cross-references in a model-published rationale", async () => {
+    // The rationale is model prose republished under the bot's identity — a
+    // mention or reference the verdict carries would notify and interlink a
+    // second time, from a trusted automation account. Sanitized on the way in,
+    // like every other posting duty.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, comment]"));
+    stub.answer = triaging(
+      verdict({ rationale: "per @alice, see #5 → GH-7; also https://example.com/x#42" }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    const comment = stub.effects.comments[0] ?? "";
+    // The prose reads the same, with every link-neutralising marker spliced in.
+    expect(comment).toContain("> per @<!---->alice, see #<!---->5 → G<!---->H-7;");
+    // A URL is passed through untouched — see `sanitize`'s REFERENCE comment.
+    expect(comment).toContain("https://example.com/x#42");
+  });
+
   it("says nothing on a rerun that applied nothing, so a thread gets one comment", async () => {
     // Idempotency without a marker: the second run's labels are already on the
     // thread, so enforcement refuses them all and there is nothing to announce.
     await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, comment]"));
-    await runAction(stub, { apply: "label, comment" });
+    await runAction(stub);
     expect(stub.effects.comments).toHaveLength(1);
 
-    const again = await runAction(stub, { apply: "label, comment" });
+    const again = await runAction(stub);
 
     expect(again.code).toBe(0);
     expect(stub.effects.comments).toHaveLength(1);
@@ -893,7 +908,7 @@ describe("the action", () => {
   it("assigns the owner the taxonomy names for a label it applied", async () => {
     await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, assign]"));
 
-    const run = await runAction(stub, { apply: "label, assign" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.effects.assigned).toEqual(["ana"]);
@@ -911,7 +926,7 @@ describe("the action", () => {
       ),
     );
 
-    const run = await runAction(stub, { apply: "label, assign" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.effects.assigned).toEqual([]);
@@ -933,7 +948,6 @@ describe("the action", () => {
     // scratch directory `readStore` reads straight off disk elsewhere in this
     // suite.
     const closed = await runAction(stub, {
-      apply: "label, close",
       "corrections-dir": ".reeve/corrections",
     });
 
@@ -941,8 +955,13 @@ describe("the action", () => {
     expect(stub.effects.closed).toBe(true);
   });
 
-  it("decides and touches nothing when the workflow asks for none", async () => {
-    const run = await runAction(stub, { apply: "none" });
+  it("decides and touches nothing when the warrant grants none", async () => {
+    // `[none]` is the way the single authority spells "decide and report, but
+    // apply nothing" — the duty is named, so it still runs its full verdict
+    // pipeline, yet permits nothing at all.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [none]"));
+
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.effects.applied).toEqual([]);
@@ -1051,30 +1070,32 @@ describe("the action", () => {
     expect(stub.asked).toHaveLength(1);
   });
 
-  it("still takes languages from the input when the warrant never mentions the key", async () => {
+  it("uses the duty's own documented default when the warrant never mentions the key", async () => {
     // `WARRANT` above carries no `languages:` key, so this is today's
-    // behaviour, unchanged: the input alone decides what detection is choosing
-    // between, exactly as it did before the warrant could speak on this at all.
+    // behaviour, unchanged: detection reads the duty's own documented default
+    // (`en, vi, zh`), exactly as it did before the warrant could speak on this
+    // at all.
     stub.answer = triaging(verdict());
     stub.title = "Không thể đăng nhập";
     stub.body = VIETNAMESE_REPORT;
 
-    const run = await runAction(stub, { languages: "vi" });
+    const run = await runAction(stub);
 
     expect(run.outputs.language).toBe("Tiếng Việt");
     expect(run.log).not.toContain("languages: read from");
   });
 
-  it("lets the warrant's own `languages:` key win over the input, and says so once", async () => {
+  it("uses the warrant's own `languages:` key as the whole answer, and says so once", async () => {
     stub.answer = triaging(verdict());
     await writeFile(warrantPath, `${WARRANT}\nlanguages:\n  - en\n`);
 
-    const run = await runAction(stub, { languages: "vi" });
+    const run = await runAction(stub);
 
-    // The report is English; had the input's `vi` been consulted instead, the
-    // model would have been asked to pick between only Vietnamese and nothing,
-    // which detection still recognises correctly. The point of this case is
-    // the log line: it must name why `vi` was never even considered.
+    // The report is English; had the duty's default been consulted instead,
+    // the model would have been asked to pick between only English, Vietnamese
+    // and Chinese, which detection still recognises correctly. The point of
+    // this case is the log line: it must name why the file is the whole
+    // answer.
     expect(run.outputs.language).toBe("English");
     expect(run.log).toContain(`languages: read from \`${warrantPath}\`'s \`languages:\` key`);
   });
@@ -1209,10 +1230,17 @@ describe("the action", () => {
   });
 
   it("fails loudly on a capability nothing can do", async () => {
-    const run = await runAction(stub, { apply: "label, delete" });
+    // The warrant takes a closed set of capabilities, so a name outside it
+    // fails at parse time — the same loud failure the removed `apply` input
+    // gave, now spelled by the one authority that exists.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, delete]"));
+
+    const run = await runAction(stub);
 
     expect(run.code).toBe(1);
-    expect(run.log).toContain("apply: `delete` is not something a duty can be asked to do");
+    expect(run.log).toContain(
+      "duties for `triage` names `delete`, which is not something a duty can be granted",
+    );
   });
 
   it("fails loudly on an event that names no thread, rather than asking for issue NaN", async () => {
@@ -1264,7 +1292,7 @@ describe("labels", () => {
     expect(stub.asked).toHaveLength(0);
   });
 
-  it("reads a comma or newline separated list the same way `apply` does", async () => {
+  it("reads a comma or newline separated list the same way every list input does", async () => {
     const run = await runAction(stub, { labels: "docs\nbug" });
 
     expect(run.code).toBe(0);
@@ -1316,7 +1344,7 @@ describe("labels", () => {
 
         const run = await runAction(
           stub,
-          { labels: "docs", apply: "label, record", "corrections-dir": CORRECTIONS },
+          { labels: "docs", "corrections-dir": CORRECTIONS },
           { GITHUB_EVENT_PATH: event },
         );
 
@@ -1350,7 +1378,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1379,7 +1407,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1389,9 +1417,10 @@ describe("record", () => {
     // The ordinary pipeline ran instead — a label change from a bot is still a
     // thread worth triaging, just not a correction worth learning from.
     expect(stub.effects.applied).toEqual(["bug"]);
-    // `record` was fully granted — file and `apply` both name it — and still
-    // did not fire, which is exactly the case a maintainer needs the reason
-    // for: nothing else in this run's log would tell them it was the sender.
+    // `record` was fully granted by the warrant — the only authority — and
+    // still did not fire, which is exactly the case a maintainer needs the
+    // reason for: nothing else in this run's log would tell them it was the
+    // sender.
     expect(run.log).toContain("`record` is granted, but did not fire this run");
     expect(run.log).toContain("the label change came from a bot");
   });
@@ -1430,7 +1459,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1474,7 +1503,7 @@ describe("record", () => {
 
       const run = await runAction(
         stub,
-        { apply: "label, record", "corrections-dir": CORRECTIONS },
+        { "corrections-dir": CORRECTIONS },
         { GITHUB_EVENT_PATH: event },
       );
 
@@ -1533,7 +1562,7 @@ describe("record", () => {
 
       const run = await runAction(
         stub,
-        { apply: "label, record", "corrections-dir": CORRECTIONS },
+        { "corrections-dir": CORRECTIONS },
         { GITHUB_EVENT_PATH: event },
       );
 
@@ -1590,7 +1619,7 @@ describe("record", () => {
 
       const run = await runAction(
         stub,
-        { apply: "label, record", "corrections-dir": CORRECTIONS },
+        { "corrections-dir": CORRECTIONS },
         { GITHUB_EVENT_PATH: event },
       );
 
@@ -1641,7 +1670,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1673,7 +1702,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1701,7 +1730,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1725,7 +1754,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1749,7 +1778,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1781,7 +1810,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1816,7 +1845,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1843,7 +1872,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1855,40 +1884,12 @@ describe("record", () => {
     expect(stub.contentsWrites).toEqual([]);
   });
 
-  it("does not record when the capability is not granted, even though the workflow asked for it", async () => {
+  it("does not record when the warrant does not grant `record`, and triages instead", async () => {
     // `warrantPath` still carries the plain `WARRANT` — `triage: [label]`, no
-    // `record` — from this suite's own `beforeEach`.
+    // `record` — from this suite's own `beforeEach`. The warrant is the only
+    // gate, so there is no second authority to name `record` behind its back.
     const event = await labelEvent();
 
-    const run = await runAction(
-      stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
-      { GITHUB_EVENT_PATH: event },
-    );
-
-    expect(run.code).toBe(0);
-    expect(run.outputs.recorded).toBe("false");
-    expect(stub.contentsWrites).toEqual([]);
-    expect(run.log).toContain(
-      "`apply` asks for `record`, which " + `\`${warrantPath}\` does not grant to triage`,
-    );
-    // The narrower of the two still ran the ordinary pipeline underneath it.
-    expect(stub.asked.length).toBeGreaterThan(0);
-  });
-
-  it("notices and triages instead of recording when the file grants `record` but `apply` does not name it", async () => {
-    await writeFile(warrantPath, RECORDING_WARRANT);
-    // No `stub.labels` set here, unlike the recording tests above: the thread
-    // starts with nothing on it, so the ordinary verdict this run falls
-    // through to is free to apply `bug` rather than refusing it as already
-    // there — matching the bot-actor test just above, which falls through to
-    // the same pipeline for the same reason.
-    const event = await labelEvent();
-
-    // The opposite asymmetry from the test above: the file grants `record`,
-    // and the workflow leaves `apply` at its default of `label` alone — the
-    // exact configuration a maintainer following the docs but forgetting the
-    // second half would end up with.
     const run = await runAction(
       stub,
       { "corrections-dir": CORRECTIONS },
@@ -1898,12 +1899,10 @@ describe("record", () => {
     expect(run.code).toBe(0);
     expect(run.outputs.recorded).toBe("false");
     expect(stub.contentsWrites).toEqual([]);
-    expect(run.log).toContain(
-      `\`${warrantPath}\` grants \`record\`, but \`apply\` does not name it, ` +
-        "so this event was triaged instead of recorded.",
-    );
-    // Fell through to the ordinary pipeline, which did triage the thread.
-    expect(stub.effects.applied).toEqual(["bug"]);
+    // With `record` ungranted, the label event was triaged by the ordinary
+    // pipeline underneath it — `recorded: false` is the run saying the file
+    // did not grant `record`.
+    expect(stub.asked.length).toBeGreaterThan(0);
   });
 
   it("fails red, plainly, when the token cannot write — the permission error it is", async () => {
@@ -1913,7 +1912,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1932,7 +1931,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1956,7 +1955,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -1972,7 +1971,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": `${workspace}/${CORRECTIONS}` },
+      { "corrections-dir": `${workspace}/${CORRECTIONS}` },
       { GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: workspace },
     );
 
@@ -1990,7 +1989,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": "/etc/reeve/corrections" },
+      { "corrections-dir": "/etc/reeve/corrections" },
       { GITHUB_EVENT_PATH: event, GITHUB_WORKSPACE: "/home/runner/work/reeve/reeve" },
     );
 
@@ -2008,7 +2007,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2034,7 +2033,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2051,7 +2050,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS, "dry-run": "true" },
+      { "corrections-dir": CORRECTIONS, "dry-run": "true" },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2072,7 +2071,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: path },
     );
 
@@ -2092,7 +2091,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_NAME: "issue_comment", GITHUB_EVENT_PATH: event },
     );
 
@@ -2121,7 +2120,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2168,7 +2167,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2198,7 +2197,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2221,7 +2220,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2239,7 +2238,7 @@ describe("record", () => {
       RECORDING_WARRANT.replace(
         "triage: [label, record]",
         "triage: [label, record, close]",
-      ).replace("capabilities:", "memory:\n  recall: 0\n\ncapabilities:"),
+      ).replace("duties:", "memory:\n  recall: 0\n\nduties:"),
     );
     // An unreadable shard in the corrections store — `gateClose` reads
     // through the Contents API, not through recall's filesystem-backed store,
@@ -2252,7 +2251,6 @@ describe("record", () => {
     );
 
     const run = await runAction(stub, {
-      apply: "label, record, close",
       "corrections-dir": CORRECTIONS,
     });
 
@@ -2277,7 +2275,7 @@ describe("record", () => {
 
     const run = await runAction(
       stub,
-      { apply: "label, record", "corrections-dir": CORRECTIONS },
+      { "corrections-dir": CORRECTIONS },
       { GITHUB_EVENT_PATH: event },
     );
 
@@ -2328,7 +2326,7 @@ describe("cross-language recall", () => {
           )
         : saying(verdict());
 
-    const run = await runAction(stub, { languages: "en, vi" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     const triaging = stub.asked.find((ask) => !ask.system.includes("Translate the title and body"));
@@ -2344,7 +2342,7 @@ describe("cross-language recall", () => {
       stub.body = VIETNAMESE_REPORT;
 
       // Nothing recorded yet: the model has no reason to disagree with itself.
-      const before = await runAction(stub, { languages: "en, vi" });
+      const before = await runAction(stub);
       expect(before.code).toBe(0);
       expect(before.outputs.labels).toBe(JSON.stringify(["bug"]));
 
@@ -2373,7 +2371,7 @@ describe("cross-language recall", () => {
         );
       };
 
-      const after = await runAction(stub, { languages: "en, vi" });
+      const after = await runAction(stub);
 
       expect(after.code).toBe(0);
       expect(after.outputs.labels).toBe(JSON.stringify(["docs"]));
@@ -2529,7 +2527,7 @@ describe("zero config", () => {
         "labels:",
         "  - name: bug",
         "    description: Something that used to work and does not.",
-        "capabilities:",
+        "duties:",
         "  translate: [comment]",
       ].join("\n"),
     );
@@ -2541,7 +2539,7 @@ describe("zero config", () => {
     expect(stub.effects.applied).toEqual([]);
     expect(run.outputs.labels).toBe(JSON.stringify([]));
     expect(run.summary).toContain(
-      `\`${warrantPath}\`'s \`capabilities:\` block does not name \`triage\`; once that block ` +
+      `\`${warrantPath}\`'s \`duties:\` block does not name \`triage\`; once that block ` +
         "exists it is the whole answer, so add `triage: [label]` to it (or remove the block to " +
         "return to defaults).",
     );
@@ -2559,12 +2557,12 @@ describe("zero config", () => {
         "labels:",
         "  - name: bug",
         "    description: Something that used to work and does not.",
-        "capabilities:",
+        "duties:",
         "  translate: [comment]",
       ].join("\n"),
     );
 
-    const run = await runAction(stub, { languages: "" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.asked).toHaveLength(0);
@@ -2734,7 +2732,7 @@ describe("the sweep", () => {
 
         const run = await runAction(
           stub,
-          sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
         );
 
         expect(run.code).toBe(0);
@@ -2776,7 +2774,7 @@ describe("the sweep", () => {
 
       const run = await runAction(
         stub,
-        sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
+        sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
       );
 
       expect(run.code).toBe(0);
@@ -2814,7 +2812,7 @@ describe("the sweep", () => {
 
         const run = await runAction(
           stub,
-          sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
         );
 
         expect(run.code).toBe(0);
@@ -2848,7 +2846,7 @@ describe("the sweep", () => {
 
         const run = await runAction(
           stub,
-          sweepInputs({ apply: "label, record", "corrections-dir": CORRECTIONS }),
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
         );
 
         expect(run.code).toBe(0);
@@ -2870,13 +2868,15 @@ describe("the sweep", () => {
     );
 
     it(
-      "leaves an ordinary sweep triaging, and `recorded` false, when `apply` does not " +
-        "grant `record`",
+      "leaves an ordinary sweep triaging, and `recorded` false, when the warrant " +
+        "does not grant `record`",
       async () => {
-        await writeFile(warrantPath, RECORDING_WARRANT);
         stub.issues = [candidate(901, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
 
-        const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+        const run = await runAction(
+          stub,
+          sweepInputs({ "corrections-dir": CORRECTIONS, "sweep-state": "closed" }),
+        );
 
         expect(run.code).toBe(0);
         expect(run.outputs.recorded).toBe("false");
@@ -2886,5 +2886,19 @@ describe("the sweep", () => {
         expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
       },
     );
+
+    it("does NOT bulk-record on the scheduled `open` sweep even when the warrant grants `record`", async () => {
+      // The weekly schedule lists `open` threads; bulk migration is a
+      // deliberate hand-run (`sweep-state: closed`/`all`).
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      stub.issues = [candidate(903, "2026-01-01T00:00:00Z", { labels: ["bug"] })];
+
+      const run = await runAction(stub, sweepInputs({ "corrections-dir": CORRECTIONS }));
+
+      expect(run.code).toBe(0);
+      expect(run.outputs.recorded).toBe("false");
+      // The ordinary sweep labels the backlog instead of importing it.
+      expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
+    });
   });
 });

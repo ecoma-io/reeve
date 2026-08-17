@@ -27,7 +27,7 @@ concurrency:
 
 # `dependa` needs `contents: write` to commit manifest edits, and
 # `pull-requests: write` to open or update dependency update pull requests.
-# These are the minimum for the active mode (apply: edit-file, open-pr).
+# These are the minimum for the active mode (edit-file, open-pr).
 permissions:
   contents: write
   pull-requests: write
@@ -68,4 +68,3 @@ jobs:
           models: ${{ secrets.ECOMA_REEVE_MODELS }}
           drafts: "2"
           ecosystems: "npm, github-actions"
-          apply: edit-file, open-pr

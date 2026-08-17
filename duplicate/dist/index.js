@@ -32530,7 +32530,8 @@ var STAGE = {
   triage: "Triage",
   pivot: "Pivot translation",
   duplicate: "Duplicate check",
-  risk: "Risk assessment"
+  risk: "Risk assessment",
+  review: "Review"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();
@@ -32995,10 +32996,6 @@ function residue(text2) {
   return clean;
 }
 
-// src/core/warrant.ts
-import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
-
 // src/core/forge.ts
 function isBotAuthor(author) {
   return author?.type === "Bot" || (author?.login ?? "").endsWith("[bot]");
@@ -33078,6 +33075,524 @@ async function listOpenThreads(api, at, since, state = "open", maxPages) {
   return listed;
 }
 
+// src/core/inputs.ts
+function readCore(options) {
+  const apiKey = getInput("api-key");
+  if (apiKey.length > 0) setSecret(apiKey);
+  const modelsRequired = options?.modelsOptional !== true;
+  const roster = parseModels(getInput("models", { required: modelsRequired }));
+  if (modelsRequired && roster.models.length === 0) {
+    throw new Error("models: no entries. Expected at least one model id.");
+  }
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
+  return {
+    token: getInput("github-token", { required: true }),
+    models: roster.models,
+    modelNames: roster.names,
+    baseUrl: getInput("base-url", { required: true }),
+    apiKey,
+    dryRun: getBooleanInput("dry-run"),
+    endpoints,
+    apiKeys,
+    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
+    temperature: parseTemperature(getInput("temperature"))
+  };
+}
+function readShared() {
+  const sweep = getBooleanInput("sweep");
+  const configuredNumber = getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
+    );
+  }
+  return {
+    ...readCore(),
+    number: sweep ? null : threadNumber(),
+    sweep,
+    since: parseSince(getInput("since")),
+    limit: bounded("limit", getInput("limit"))
+  };
+}
+function parseEndpoints(raw) {
+  const seen = /* @__PURE__ */ new Set();
+  return parseList(raw).map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) {
+      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
+    }
+    const alias = entry.slice(0, at).trim();
+    const rest = entry.slice(at + 1).trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
+      throw new Error(
+        `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
+      );
+    }
+    if (alias === "default") {
+      throw new Error(
+        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
+      );
+    }
+    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
+    if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
+    let timeoutMs = null;
+    for (const token of rest2) {
+      const match = /^timeout=(.+)$/.exec(token);
+      if (!match) {
+        throw new Error(
+          `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
+        );
+      }
+      const [, duration = ""] = match;
+      if (timeoutMs !== null) {
+        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
+      }
+      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
+    }
+    return { alias, baseUrl: url, timeoutMs };
+  });
+}
+function parseApiKeys(raw) {
+  const entries = parseList(raw);
+  for (const entry of entries) {
+    const at = entry.indexOf("=");
+    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
+    if (value.length > 0) setSecret(value);
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return entries.map((entry) => {
+    const at = entry.indexOf("=");
+    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
+    const alias = entry.slice(0, at).trim();
+    const key = entry.slice(at + 1).trim();
+    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
+    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
+    seen.add(alias);
+    return { alias, key };
+  });
+}
+function checkApiKeysDeclared(endpoints, apiKeys) {
+  for (const { alias } of apiKeys) {
+    if (!endpoints.some((endpoint2) => endpoint2.alias === alias)) {
+      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
+    }
+  }
+}
+function parseTimeout(name, raw) {
+  const trimmed = raw.trim();
+  const match = /^(\d+)(s|m)$/.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
+    );
+  }
+  const [, digits, unit] = match;
+  const value = Number(digits);
+  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
+  const ms = unit === "m" ? value * 6e4 : value * 1e3;
+  if (ms > 2147483647) {
+    throw new Error(
+      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
+    );
+  }
+  return ms;
+}
+function parseTemperature(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return void 0;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0 || value > 2) {
+    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
+  }
+  return value;
+}
+function parseSince(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (dateMatch) {
+    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error(`since: \`${raw}\` is not a real date.`);
+    }
+    return parsed;
+  }
+  const durationMatch = /^(\d+)d$/.exec(trimmed);
+  if (durationMatch) {
+    const days = Number(durationMatch[1]);
+    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
+  }
+  throw new Error(
+    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
+  );
+}
+function threadNumber() {
+  const configured = getInput("number");
+  if (configured.length > 0) return whole("number", configured);
+  const triggered = context2.issue.number;
+  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
+    throw new Error(
+      // Read from the environment rather than from `context.eventName`, which
+      // is typed as always present and is not: it is this variable.
+      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
+    );
+  }
+  return triggered;
+}
+function whole(name, raw) {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
+  }
+  return value;
+}
+function bounded(name, raw) {
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "none") return null;
+  const value = Number(trimmed);
+  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
+    throw new Error(
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+    );
+  }
+  return value;
+}
+function fraction(name, raw) {
+  const value = Number(raw.trim());
+  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
+  }
+  return value;
+}
+
+// src/core/marker.ts
+import { createHash } from "node:crypto";
+var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
+var SUFFIX = " -->";
+function markerFor(duty) {
+  if (!DUTY_NAME.test(duty)) {
+    throw new Error(
+      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
+    );
+  }
+  const prefix = `<!-- reeve:${duty} source=`;
+  return {
+    duty,
+    render(fingerprint2) {
+      return `${prefix}${fingerprint2}${SUFFIX}`;
+    },
+    split(body) {
+      const at = body.indexOf(prefix);
+      if (at === -1) return { official: authorHalf(body), fingerprint: null };
+      const from = at + prefix.length;
+      const to = body.indexOf(SUFFIX, from);
+      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
+      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
+    }
+  };
+}
+function authorHalf(text2) {
+  return text2.replace(/\s+$/u, "");
+}
+function fingerprint(text2, keys) {
+  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
+  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
+}
+var PROPOSE_MARKER = markerFor("propose");
+function isReeveProposalPr(thread) {
+  if (!thread.isPullRequest) return false;
+  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
+}
+
+// src/core/sanitize.ts
+var OPENER = "<!--";
+var CLOSER = "-->";
+var INERT = "<!---->";
+var REFERENCE = new RegExp(
+  [
+    String.raw`(https?://\S+|\]\([^\s)]*\))`,
+    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
+    String.raw`#(?:${INERT})?\d+`,
+    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
+  ].join("|"),
+  "gi"
+);
+function sanitize(markdown) {
+  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
+}
+function defangComments(prose) {
+  const lastCloser = prose.lastIndexOf(CLOSER);
+  let defanged = "";
+  let read = 0;
+  for (; ; ) {
+    const opener = prose.indexOf(OPENER, read);
+    if (opener === -1) return defanged + prose.slice(read);
+    defanged += prose.slice(read, opener);
+    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
+    if (closer === -1) {
+      defanged += `<${INERT}!--`;
+      read = opener + OPENER.length;
+      continue;
+    }
+    defanged += emptied(prose.slice(opener + OPENER.length, closer));
+    read = closer + CLOSER.length;
+  }
+}
+var OPAQUE = /[^`~\\\n\r ]/g;
+function emptied(payload) {
+  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
+}
+function defangReferences(prose) {
+  return prose.replace(REFERENCE, (match, passthrough) => {
+    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
+    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
+  });
+}
+
+// src/core/pivot.ts
+async function translateToPivot(request2) {
+  const { provider, models, title, body, to, weather } = request2;
+  const messages = prompt(title, body, to);
+  const rotation = await rotateModels(
+    models,
+    (model) => answer(provider, model, messages),
+    weather
+  );
+  if (!rotation.success) return { draft: null, failures: rotation.failures };
+  const draft = readAnswer(unwrapped(rotation.success.content));
+  if (draft === null) return { draft: null, failures: rotation.failures };
+  return {
+    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
+    failures: rotation.failures
+  };
+}
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the rendering was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function prompt(title, body, to) {
+  const enclosed = enclose("untrusted-thread", `${title}
+
+${body}`);
+  return [
+    {
+      role: "system",
+      content: [
+        `Translate the title and body of a GitHub thread into ${to.label} (${to.code}).`,
+        "Preserve Markdown formatting, code blocks and links exactly; translate prose only.",
+        "Answer with exactly one JSON object and nothing else, shaped like this:",
+        '{"title": "...", "body": "..."}',
+        "No preamble, no code fence around the JSON, no explanation before or after it.",
+        "",
+        enclosed.rule
+      ].join("\n")
+    },
+    { role: "user", content: enclosed.block }
+  ];
+}
+function unwrapped(answer3) {
+  const trimmed = answer3.trim();
+  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return fence?.[1] ?? trimmed;
+}
+function readAnswer(text2) {
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch {
+    return null;
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw;
+  if (typeof record.title !== "string" || typeof record.body !== "string") return null;
+  if (record.title.trim().length === 0) return null;
+  return { title: record.title, body: record.body };
+}
+
+// src/core/summary.ts
+function authSection(failures) {
+  if (failures.length === 0) return "";
+  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
+  return [
+    "",
+    "",
+    "### Endpoints that failed to authenticate",
+    "",
+    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
+  ].join("\n");
+}
+async function writeSummary(markdown) {
+  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
+    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
+    return;
+  }
+  try {
+    await summary.addRaw(markdown).write();
+  } catch (error2) {
+    warning(
+      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
+    );
+  }
+}
+function starvedWarning(sweep) {
+  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
+}
+function warnIfStarved(models, weather, sweep) {
+  const rosterStarved = starved(models, weather);
+  if (rosterStarved) warning(starvedWarning(sweep));
+  return rosterStarved;
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted = protocolExhausted(models, failures);
+  if (exhausted) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted;
+}
+async function writeRunSummary(page2, weather) {
+  await writeSummary(page2 + authSection(weather.authFailures));
+}
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+var COUNT = new Intl.NumberFormat("en-US");
+function count(value) {
+  return COUNT.format(value);
+}
+function cell(text2) {
+  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+function cost(spent, name) {
+  const sum = total(spent);
+  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
+  const rows = spent.map((spend) => [
+    STAGE[spend.purpose],
+    cell(name(spend)),
+    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
+    count(spend.requests),
+    spend.failed === 0 ? "\u2014" : count(spend.failed),
+    count(spend.prompt),
+    count(spend.completion),
+    count(spend.prompt + spend.completion)
+  ]);
+  if (rows.length === 0) {
+    return [
+      "### Cost",
+      "",
+      "No model was asked anything this run \u2014 every decision was made by code."
+    ].join("\n");
+  }
+  rows.push([
+    "**Total**",
+    "",
+    ...multiEndpoint ? [""] : [],
+    `**${count(sum.requests)}**`,
+    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
+    `**${count(sum.prompt)}**`,
+    `**${count(sum.completion)}**`,
+    `**${count(sum.prompt + sum.completion)}**`
+  ]);
+  const lines = [
+    "### Cost",
+    "",
+    table(
+      [
+        "Stage",
+        "Model",
+        ...multiEndpoint ? ["Endpoint"] : [],
+        "Requests",
+        "Failed",
+        "Prompt",
+        "Completion",
+        "Tokens"
+      ],
+      rows
+    )
+  ];
+  if (sum.unreported > 0) {
+    lines.push(
+      "",
+      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
+    );
+  }
+  if (sum.failed > 0) {
+    lines.push(
+      "",
+      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
+    );
+  }
+  return lines.join("\n");
+}
+
+// src/core/sweep.ts
+function newAccumulator() {
+  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
+}
+function reportNoSweep() {
+  setOutput("processed", "0");
+  setOutput("remaining", "0");
+}
+function remainingOf(acc) {
+  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
+}
+function standingFromListing(thread) {
+  return {
+    title: thread.title,
+    body: thread.body,
+    labels: thread.labels,
+    closed: false,
+    author: { login: "", isBot: false },
+    milestone: null,
+    assignees: [],
+    createdAt: thread.createdAt,
+    isPullRequest: thread.isPullRequest
+  };
+}
+async function sweepThreads(acc, candidates, settings, weather, hooks) {
+  acc.candidates = candidates.length;
+  for (const thread of candidates) {
+    if (settings.limit !== null && acc.results.length >= settings.limit) break;
+    if (hooks.alreadyDone?.(thread) === true) {
+      acc.skipped += 1;
+      continue;
+    }
+    if (starved(settings.models, weather)) {
+      acc.starvedRun = true;
+      break;
+    }
+    if (hooks.exhausted?.() === true) break;
+    const row = await hooks.processOne(thread);
+    if (row === null) acc.skipped += 1;
+    else acc.results.push(row);
+    hooks.afterEach?.();
+  }
+}
+
+// src/core/warrant.ts
+import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
+
 // src/duties/dependa/model.ts
 var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
 var UPDATE_TYPES = [
@@ -33098,7 +33613,8 @@ var DUTIES = [
   "respond",
   "lifecycle",
   "harmonise",
-  "dependa"
+  "dependa",
+  "review"
 ];
 var PLANNED = [];
 
@@ -33152,12 +33668,12 @@ function parseWarrant(path, source) {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities"
+    "duties"
   ];
   for (const key of Object.keys(document2)) {
     if (!KNOWN_ROOT.includes(key)) {
       throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
       );
     }
   }
@@ -33175,7 +33691,7 @@ function parseWarrant(path, source) {
   const lifecycle = readLifecycle(path, document2.lifecycle);
   const propose = readPropose(path, document2.propose);
   const dependa = readDependa(path, document2.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document2.duties);
   const names = new Set(labels.map((label) => label.name));
   for (const label of labels) {
     for (const other of label.exclusiveWith) {
@@ -33197,7 +33713,12 @@ function parseWarrant(path, source) {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name)
   };
@@ -33255,23 +33776,18 @@ async function openAuthority(path, api, at, duty) {
   const authority = await resolveAuthority(read, path, api, at);
   return { authority, denied: authority.warrant.unnamed(duty) };
 }
-function resolveLanguages(warrant, rawInput) {
+function resolveLanguages(warrant, fallback) {
   if (warrant.languages !== null) {
     return {
       languages: warrant.languages,
-      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key \u2014 the file is the whole answer once that key is written.`
     };
   }
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
-    );
-  }
-  return { languages: parseLanguages(rawInput), notice: null };
+  return { languages: fallback, notice: null };
 }
-function dutyLanguages(warrant, denied, rawInput) {
+function dutyLanguages(warrant, denied, fallback) {
   if (denied) return [];
-  const resolution = resolveLanguages(warrant, rawInput);
+  const resolution = resolveLanguages(warrant, fallback);
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
@@ -33373,7 +33889,7 @@ function readLanguages(path, raw) {
   if (raw === void 0) return null;
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
   if (!Array.isArray(raw)) {
@@ -33899,25 +34415,34 @@ function optionalWholeNumber(at, key, raw, min) {
   if (raw === void 0 || raw === null) return null;
   return wholeNumber(at, key, raw, min);
 }
-function readCapabilities(path, raw) {
+function readDuties(path, raw) {
   const granted = /* @__PURE__ */ new Map();
   if (raw === void 0) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
     );
   }
   for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
     }
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
@@ -34024,6 +34549,43 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost2 = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost2;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
 function describe(value) {
   if (value === null) return "empty";
   if (value === void 0) return "absent";
@@ -34034,556 +34596,6 @@ function describe(value) {
     return `\`${String(value)}\``;
   }
   return "a value of a kind this file cannot hold";
-}
-
-// src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
-}
-
-// src/core/inputs.ts
-function readCore(options) {
-  const apiKey = getInput("api-key");
-  if (apiKey.length > 0) setSecret(apiKey);
-  const modelsRequired = options?.modelsOptional !== true;
-  const roster = parseModels(getInput("models", { required: modelsRequired }));
-  if (modelsRequired && roster.models.length === 0) {
-    throw new Error("models: no entries. Expected at least one model id.");
-  }
-  const endpoints = parseEndpoints(getInput("endpoints"));
-  const apiKeys = parseApiKeys(getInput("api-keys"));
-  checkApiKeysDeclared(endpoints, apiKeys);
-  return {
-    token: getInput("github-token", { required: true }),
-    models: roster.models,
-    modelNames: roster.names,
-    baseUrl: getInput("base-url", { required: true }),
-    apiKey,
-    dryRun: getBooleanInput("dry-run"),
-    endpoints,
-    apiKeys,
-    requestTimeoutMs: parseTimeout("request-timeout", getInput("request-timeout")),
-    temperature: parseTemperature(getInput("temperature"))
-  };
-}
-function readShared() {
-  const sweep = getBooleanInput("sweep");
-  const configuredNumber = getInput("number");
-  if (sweep && configuredNumber.length > 0) {
-    throw new Error(
-      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
-    );
-  }
-  return {
-    ...readCore(),
-    number: sweep ? null : threadNumber(),
-    sweep,
-    since: parseSince(getInput("since")),
-    limit: bounded("limit", getInput("limit"))
-  };
-}
-function parseEndpoints(raw) {
-  const seen = /* @__PURE__ */ new Set();
-  return parseList(raw).map((entry) => {
-    const at = entry.indexOf("=");
-    if (at === -1) {
-      throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
-    }
-    const alias = entry.slice(0, at).trim();
-    const rest = entry.slice(at + 1).trim();
-    if (!/^[A-Za-z0-9_-]+$/.test(alias)) {
-      throw new Error(
-        `endpoints: \`${alias || entry}\` is not a valid alias \u2014 letters, digits, \`-\` and \`_\` only.`
-      );
-    }
-    if (alias === "default") {
-      throw new Error(
-        "endpoints: `default` is reserved \u2014 it names the built-in `base-url` endpoint. Pick another alias."
-      );
-    }
-    if (seen.has(alias)) throw new Error(`endpoints: \`${alias}\` is declared more than once.`);
-    seen.add(alias);
-    const [url, ...rest2] = rest.split(/\s+/).filter((part) => part.length > 0);
-    if (url === void 0) throw new Error(`endpoints: \`${alias}\` names no url.`);
-    let timeoutMs = null;
-    for (const token of rest2) {
-      const match = /^timeout=(.+)$/.exec(token);
-      if (!match) {
-        throw new Error(
-          `endpoints: \`${alias}\`: unrecognised \`${token}\` \u2014 expected \`timeout=<duration>\`.`
-        );
-      }
-      const [, duration = ""] = match;
-      if (timeoutMs !== null) {
-        throw new Error(`endpoints: \`${alias}\` names \`timeout=\` more than once.`);
-      }
-      timeoutMs = parseTimeout(`endpoints: ${alias}: timeout`, duration);
-    }
-    return { alias, baseUrl: url, timeoutMs };
-  });
-}
-function parseApiKeys(raw) {
-  const entries = parseList(raw);
-  for (const entry of entries) {
-    const at = entry.indexOf("=");
-    const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
-    if (value.length > 0) setSecret(value);
-  }
-  const seen = /* @__PURE__ */ new Set();
-  return entries.map((entry) => {
-    const at = entry.indexOf("=");
-    if (at === -1) throw new Error("api-keys: expected `alias = key`, got an entry with no `=`.");
-    const alias = entry.slice(0, at).trim();
-    const key = entry.slice(at + 1).trim();
-    if (alias.length === 0) throw new Error("api-keys: an entry named no alias.");
-    if (seen.has(alias)) throw new Error(`api-keys: \`${alias}\` is declared more than once.`);
-    seen.add(alias);
-    return { alias, key };
-  });
-}
-function checkApiKeysDeclared(endpoints, apiKeys) {
-  for (const { alias } of apiKeys) {
-    if (!endpoints.some((endpoint2) => endpoint2.alias === alias)) {
-      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
-    }
-  }
-}
-function parseTimeout(name, raw) {
-  const trimmed = raw.trim();
-  const match = /^(\d+)(s|m)$/.exec(trimmed);
-  if (!match) {
-    throw new Error(
-      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
-    );
-  }
-  const [, digits, unit] = match;
-  const value = Number(digits);
-  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
-  const ms = unit === "m" ? value * 6e4 : value * 1e3;
-  if (ms > 2147483647) {
-    throw new Error(
-      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
-    );
-  }
-  return ms;
-}
-function parseTemperature(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return void 0;
-  const value = Number(trimmed);
-  if (!Number.isFinite(value) || value < 0 || value > 2) {
-    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
-  }
-  return value;
-}
-function parseSince(raw) {
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
-  if (dateMatch) {
-    const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new Error(`since: \`${raw}\` is not a real date.`);
-    }
-    return parsed;
-  }
-  const durationMatch = /^(\d+)d$/.exec(trimmed);
-  if (durationMatch) {
-    const days = Number(durationMatch[1]);
-    if (days <= 0) throw new Error(`since: \`${raw}\` names no days at all.`);
-    return new Date(Date.now() - days * 24 * 60 * 60 * 1e3);
-  }
-  throw new Error(
-    `since: expected empty, \`YYYY-MM-DD\`, or a duration like \`90d\`, got \`${raw}\`.`
-  );
-}
-function threadNumber() {
-  const configured = getInput("number");
-  if (configured.length > 0) return whole("number", configured);
-  const triggered = context2.issue.number;
-  if (typeof triggered !== "number" || !Number.isInteger(triggered)) {
-    throw new Error(
-      // Read from the environment rather than from `context.eventName`, which
-      // is typed as always present and is not: it is this variable.
-      `number: this event (${process.env.GITHUB_EVENT_NAME ?? "unknown"}) names no issue or pull request, and no \`number\` input was given.`
-    );
-  }
-  return triggered;
-}
-function whole(name, raw) {
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
-  }
-  return value;
-}
-function bounded(name, raw) {
-  const trimmed = raw.trim();
-  if (trimmed.toLowerCase() === "none") return null;
-  const value = Number(trimmed);
-  if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
-    throw new Error(
-      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
-    );
-  }
-  return value;
-}
-function fraction(name, raw) {
-  const value = Number(raw.trim());
-  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
-  }
-  return value;
-}
-
-// src/core/marker.ts
-import { createHash } from "node:crypto";
-var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
-var SUFFIX = " -->";
-function markerFor(duty) {
-  if (!DUTY_NAME.test(duty)) {
-    throw new Error(
-      `marker: \`${duty}\` is not a duty name (expected lowercase letters, digits and hyphens).`
-    );
-  }
-  const prefix = `<!-- reeve:${duty} source=`;
-  return {
-    duty,
-    render(fingerprint2) {
-      return `${prefix}${fingerprint2}${SUFFIX}`;
-    },
-    split(body) {
-      const at = body.indexOf(prefix);
-      if (at === -1) return { official: authorHalf(body), fingerprint: null };
-      const from = at + prefix.length;
-      const to = body.indexOf(SUFFIX, from);
-      if (to === -1) return { official: authorHalf(body.slice(0, at)), fingerprint: null };
-      return { official: authorHalf(body.slice(0, at)), fingerprint: body.slice(from, to) };
-    }
-  };
-}
-function authorHalf(text2) {
-  return text2.replace(/\s+$/u, "");
-}
-function fingerprint(text2, keys) {
-  const sorted = [...keys].map((key) => key.toLowerCase()).sort();
-  return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
-}
-var PROPOSE_MARKER = markerFor("propose");
-function isReeveProposalPr(thread) {
-  if (!thread.isPullRequest) return false;
-  return PROPOSE_MARKER.split(thread.body).fingerprint !== null;
-}
-
-// src/core/sanitize.ts
-var OPENER = "<!--";
-var CLOSER = "-->";
-var INERT = "<!---->";
-var REFERENCE = new RegExp(
-  [
-    String.raw`(https?://\S+|\]\([^\s)]*\))`,
-    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
-    String.raw`#(?:${INERT})?\d+`,
-    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
-  ].join("|"),
-  "gi"
-);
-function sanitize(markdown) {
-  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
-}
-function defangComments(prose) {
-  const lastCloser = prose.lastIndexOf(CLOSER);
-  let defanged = "";
-  let read = 0;
-  for (; ; ) {
-    const opener = prose.indexOf(OPENER, read);
-    if (opener === -1) return defanged + prose.slice(read);
-    defanged += prose.slice(read, opener);
-    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
-    if (closer === -1) {
-      defanged += `<${INERT}!--`;
-      read = opener + OPENER.length;
-      continue;
-    }
-    defanged += emptied(prose.slice(opener + OPENER.length, closer));
-    read = closer + CLOSER.length;
-  }
-}
-var OPAQUE = /[^`~\\\n\r ]/g;
-function emptied(payload) {
-  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
-}
-function defangReferences(prose) {
-  return prose.replace(REFERENCE, (match, passthrough) => {
-    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
-    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
-  });
-}
-
-// src/core/pivot.ts
-async function translateToPivot(request2) {
-  const { provider, models, title, body, to, weather } = request2;
-  const messages = prompt(title, body, to);
-  const rotation = await rotateModels(
-    models,
-    (model) => answer(provider, model, messages),
-    weather
-  );
-  if (!rotation.success) return { draft: null, failures: rotation.failures };
-  const draft = readAnswer(unwrapped(rotation.success.content));
-  if (draft === null) return { draft: null, failures: rotation.failures };
-  return {
-    draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
-    failures: rotation.failures
-  };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the rendering was cut off before it finished"
-    };
-  }
-  return completion;
-}
-function prompt(title, body, to) {
-  const enclosed = enclose("untrusted-thread", `${title}
-
-${body}`);
-  return [
-    {
-      role: "system",
-      content: [
-        `Translate the title and body of a GitHub thread into ${to.label} (${to.code}).`,
-        "Preserve Markdown formatting, code blocks and links exactly; translate prose only.",
-        "Answer with exactly one JSON object and nothing else, shaped like this:",
-        '{"title": "...", "body": "..."}',
-        "No preamble, no code fence around the JSON, no explanation before or after it.",
-        "",
-        enclosed.rule
-      ].join("\n")
-    },
-    { role: "user", content: enclosed.block }
-  ];
-}
-function unwrapped(answer3) {
-  const trimmed = answer3.trim();
-  const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fence?.[1] ?? trimmed;
-}
-function readAnswer(text2) {
-  let raw;
-  try {
-    raw = JSON.parse(text2);
-  } catch {
-    return null;
-  }
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw;
-  if (typeof record.title !== "string" || typeof record.body !== "string") return null;
-  if (record.title.trim().length === 0) return null;
-  return { title: record.title, body: record.body };
-}
-
-// src/core/summary.ts
-function authSection(failures) {
-  if (failures.length === 0) return "";
-  const named = failures.map((failure) => `\`${failure.endpoint ?? "default"}\``).join(", ");
-  return [
-    "",
-    "",
-    "### Endpoints that failed to authenticate",
-    "",
-    `${named} \u2014 refused this run's key (an HTTP 401 or 403; the log has each refusal's own words). Authority is configuration, not weather: nothing asked these endpoints again after the first refusal, and the run carried on with the endpoints that still authenticated.`
-  ].join("\n");
-}
-async function writeSummary(markdown) {
-  if ((process.env.GITHUB_STEP_SUMMARY ?? "").length === 0) {
-    debug("No step summary to write to (GITHUB_STEP_SUMMARY is unset).");
-    return;
-  }
-  try {
-    await summary.addRaw(markdown).write();
-  } catch (error2) {
-    warning(
-      `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
-    );
-  }
-}
-function starvedWarning(sweep) {
-  return "Every model in `models` failed on capacity this run. " + (sweep ? "The sweep delivered what it could before the roster ran dry, and stopped early \u2014 see `remaining`." : "This run delivered what it could rather than failing red \u2014 weather, not a broken configuration.");
-}
-function warnIfStarved(models, weather, sweep) {
-  const rosterStarved = starved(models, weather);
-  if (rosterStarved) warning(starvedWarning(sweep));
-  return rosterStarved;
-}
-function failIfProtocolExhausted(models, failures) {
-  const exhausted = protocolExhausted(models, failures);
-  if (exhausted) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
-    setFailed(
-      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
-    );
-  }
-  return exhausted;
-}
-async function writeRunSummary(page2, weather) {
-  await writeSummary(page2 + authSection(weather.authFailures));
-}
-function table(headers, rows) {
-  if (rows.length === 0) return "";
-  return [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.join(" | ")} |`)
-  ].join("\n");
-}
-var COUNT = new Intl.NumberFormat("en-US");
-function count(value) {
-  return COUNT.format(value);
-}
-function cell(text2) {
-  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
-}
-function cost(spent, name) {
-  const sum = total(spent);
-  const multiEndpoint = new Set(spent.map((spend) => spend.endpoint)).size > 1;
-  const rows = spent.map((spend) => [
-    STAGE[spend.purpose],
-    cell(name(spend)),
-    ...multiEndpoint ? [cell(spend.endpoint ?? "default")] : [],
-    count(spend.requests),
-    spend.failed === 0 ? "\u2014" : count(spend.failed),
-    count(spend.prompt),
-    count(spend.completion),
-    count(spend.prompt + spend.completion)
-  ]);
-  if (rows.length === 0) {
-    return [
-      "### Cost",
-      "",
-      "No model was asked anything this run \u2014 every decision was made by code."
-    ].join("\n");
-  }
-  rows.push([
-    "**Total**",
-    "",
-    ...multiEndpoint ? [""] : [],
-    `**${count(sum.requests)}**`,
-    sum.failed === 0 ? "\u2014" : `**${count(sum.failed)}**`,
-    `**${count(sum.prompt)}**`,
-    `**${count(sum.completion)}**`,
-    `**${count(sum.prompt + sum.completion)}**`
-  ]);
-  const lines = [
-    "### Cost",
-    "",
-    table(
-      [
-        "Stage",
-        "Model",
-        ...multiEndpoint ? ["Endpoint"] : [],
-        "Requests",
-        "Failed",
-        "Prompt",
-        "Completion",
-        "Tokens"
-      ],
-      rows
-    )
-  ];
-  if (sum.unreported > 0) {
-    lines.push(
-      "",
-      `${count(sum.unreported)} of ${count(sum.requests)} request${sum.requests === 1 ? "" : "s"} came back without a \`usage\` field, so the token counts above are a floor rather than a total.`
-    );
-  }
-  if (sum.failed > 0) {
-    lines.push(
-      "",
-      `${count(sum.failed)} request${sum.failed === 1 ? " was" : "s were"} unusable and rotated past. That is what rotation costs, and it is in the totals because the provider counted it too.`
-    );
-  }
-  return lines.join("\n");
-}
-
-// src/core/sweep.ts
-function newAccumulator() {
-  return { results: [], skipped: 0, starvedRun: false, candidates: 0, ungranted: null };
-}
-function reportNoSweep() {
-  setOutput("processed", "0");
-  setOutput("remaining", "0");
-}
-function remainingOf(acc) {
-  return Math.max(acc.candidates - acc.results.length - acc.skipped, 0);
-}
-function standingFromListing(thread) {
-  return {
-    title: thread.title,
-    body: thread.body,
-    labels: thread.labels,
-    closed: false,
-    author: { login: "", isBot: false },
-    milestone: null,
-    assignees: [],
-    createdAt: thread.createdAt,
-    isPullRequest: thread.isPullRequest
-  };
-}
-async function sweepThreads(acc, candidates, settings, weather, hooks) {
-  acc.candidates = candidates.length;
-  for (const thread of candidates) {
-    if (settings.limit !== null && acc.results.length >= settings.limit) break;
-    if (hooks.alreadyDone?.(thread) === true) {
-      acc.skipped += 1;
-      continue;
-    }
-    if (starved(settings.models, weather)) {
-      acc.starvedRun = true;
-      break;
-    }
-    if (hooks.exhausted?.() === true) break;
-    const row = await hooks.processOne(thread);
-    if (row === null) acc.skipped += 1;
-    else acc.results.push(row);
-    hooks.afterEach?.();
-  }
 }
 
 // src/core/memory.ts
@@ -35170,6 +35182,77 @@ var CHROME = {
     uk: "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F \u0446\u044C\u043E\u0433\u043E \u043F\u043E\u0442\u043E\u043A\u0443 \u0442\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u0438\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u0437\u0430\u043C\u0456\u043D\u044F\u0442\u044C \u0446\u0435\u0439 \u043A\u043E\u043C\u0435\u043D\u0442\u0430\u0440; \u0432\u0456\u043D \u043D\u0456\u043A\u043E\u043B\u0438 \u043D\u0435 \u043F\u0443\u0431\u043B\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F \u0434\u0432\u0456\u0447\u0456.",
     vi: "Ch\u1EC9nh s\u1EEDa ch\u1EE7 \u0111\u1EC1 n\xE0y v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n.",
     zh: "\u7F16\u8F91\u6B64\u8BDD\u9898\u5E76\u91CD\u65B0\u8FD0\u884C\u4F1A\u66FF\u6362\u6B64\u8BC4\u8BBA\uFF1B\u5B83\u7EDD\u4E0D\u4F1A\u88AB\u53D1\u5E03\u4E24\u6B21\u3002"
+  },
+  // review/publish.ts — one review comment per pull request, the thread's own
+  // language when detection found one, English otherwise, via `chrome`.
+  reviewEmpty: {
+    en: "No issues to report \u2014 this review found nothing worth flagging.",
+    ar: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0634\u0643\u0644\u0627\u062A \u0644\u0644\u0625\u0628\u0644\u0627\u063A \u0639\u0646\u0647\u0627 \u2014 \u0644\u0627 \u0634\u064A\u0621 \u064A\u0633\u062A\u062F\u0639\u064A \u0627\u0644\u062A\u0646\u0628\u064A\u0647 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629.",
+    cs: "\u017D\xE1dn\xE9 probl\xE9my k hl\xE1\u0161en\xED \u2014 tato recenze nena\u0161la nic, co by st\xE1lo za upozorn\u011Bn\xED.",
+    de: "Keine Probleme zu melden \u2014 diese \xDCberpr\xFCfung hat nichts gefunden, das eine Erw\xE4hnung wert w\xE4re.",
+    es: "Nada que informar: esta revisi\xF3n no encontr\xF3 nada que valga la pena se\xF1alar.",
+    fr: "Rien \xE0 signaler \u2014 cette revue n'a rien trouv\xE9 qui m\xE9rite d'\xEAtre signal\xE9.",
+    hi: "\u0930\u093F\u092A\u094B\u0930\u094D\u091F \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093F\u090F \u0915\u0941\u091B \u0928\u0939\u0940\u0902 \u2014 \u0907\u0938 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u092E\u0947\u0902 \u0915\u0941\u091B \u092D\u0940 \u0927\u094D\u092F\u093E\u0928 \u0926\u0947\u0928\u0947 \u092F\u094B\u0917\u094D\u092F \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u093E\u0964",
+    id: "Tidak ada masalah untuk dilaporkan \u2014 ulasan ini tidak menemukan hal yang perlu ditandai.",
+    it: "Nessun problema da segnalare \u2014 questa revisione non ha trovato nulla degno di nota.",
+    ja: "\u5831\u544A\u3059\u308B\u554F\u984C\u306F\u3042\u308A\u307E\u305B\u3093 \u2014 \u3053\u306E\u30EC\u30D3\u30E5\u30FC\u3067\u6307\u6458\u3059\u308B\u3082\u306E\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+    ko: "\uBCF4\uACE0\uD560 \uBB38\uC81C\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC774 \uAC80\uD1A0\uC5D0\uC11C \uC9C0\uC801\uD560 \uB9CC\uD55C \uAC83\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+    nl: "Niets te melden \u2014 deze review vond niets dat de moeite van het noemen waard is.",
+    pl: "Brak problem\xF3w do zg\u0142oszenia \u2014 ten przegl\u0105d nie znalaz\u0142 niczego wartego uwagi.",
+    pt: "Nada a relatar \u2014 esta revis\xE3o n\xE3o encontrou nada digno de nota.",
+    ru: "\u041D\u0435\u0447\u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0438\u0442\u044C \u2014 \u044D\u0442\u043E\u0442 \u043E\u0431\u0437\u043E\u0440 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B \u043D\u0438\u0447\u0435\u0433\u043E, \u0447\u0442\u043E \u0441\u0442\u043E\u0438\u0442 \u043E\u0442\u043C\u0435\u0442\u0438\u0442\u044C.",
+    sv: "Ingenting att rapportera \u2014 denna granskning hittade inget v\xE4rt att flagga.",
+    th: "\u0E44\u0E21\u0E48\u0E21\u0E35\u0E1B\u0E31\u0E0D\u0E2B\u0E32\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19 \u2014 \u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E17\u0E32\u0E19\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2A\u0E34\u0E48\u0E07\u0E17\u0E35\u0E48\u0E04\u0E27\u0E23\u0E0A\u0E35\u0E49\u0E43\u0E2B\u0E49\u0E40\u0E2B\u0E47\u0E19",
+    tr: "Bildirilecek bir sorun yok \u2014 bu inceleme i\u015Faret etmeye de\u011Fer bir \u015Fey bulmad\u0131.",
+    uk: "\u041D\u0435\u043C\u0430\u0454 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0434\u043B\u044F \u0437\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F \u2014 \u0446\u0435\u0439 \u043E\u0433\u043B\u044F\u0434 \u043D\u0435 \u0437\u043D\u0430\u0439\u0448\u043E\u0432 \u043D\u0456\u0447\u043E\u0433\u043E \u0432\u0430\u0440\u0442\u043E\u0433\u043E \u0443\u0432\u0430\u0433\u0438.",
+    vi: "Kh\xF4ng c\xF3 v\u1EA5n \u0111\u1EC1 n\xE0o c\u1EA7n b\xE1o c\xE1o \u2014 bu\u1ED5i r\xE0 so\xE1t n\xE0y kh\xF4ng t\xECm th\u1EA5y g\xEC \u0111\xE1ng n\xEAu.",
+    zh: "\u6CA1\u6709\u9700\u8981\u62A5\u544A\u7684\u95EE\u9898 \u2014 \u672C\u6B21\u5BA1\u67E5\u6CA1\u6709\u53D1\u73B0\u503C\u5F97\u6307\u51FA\u7684\u5185\u5BB9\u3002"
+  },
+  reviewFooterFloor: {
+    en: "This review was written by a model, not decided by a maintainer \u2014 read each finding as a lead to check.",
+    ar: "\u0643\u062A\u0628 \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0646\u0645\u0648\u0630\u062C\u060C \u0648\u0644\u0645 \u064A\u0643\u062A\u0628\u0647\u0627 \u0645\u0634\u0631\u0641 \u2014 \u062A\u0639\u0627\u0645\u0644 \u0645\u0639 \u0643\u0644 \u0645\u0644\u0627\u062D\u0638\u0629 \u0643\u0645\u0624\u0634\u0631 \u0644\u0644\u062A\u062D\u0642\u0642.",
+    cs: "Tuto recenzi napsal model, nikoliv spr\xE1vce \u2014 ch\xE1pejte ka\u017Ed\xFD n\xE1lez jako podn\u011Bt k prov\u011B\u0159en\xED.",
+    de: "Diese \xDCberpr\xFCfung wurde von einem Modell geschrieben, nicht von einem Maintainer entschieden \u2014 jeden Befund als Hinweis zum Pr\xFCfen lesen.",
+    es: "Esta revisi\xF3n la escribi\xF3 un modelo, no la decidi\xF3 un mantenedor \u2014 lea cada hallazgo como una pista para verificar.",
+    fr: "Cette revue a \xE9t\xE9 \xE9crite par un mod\xE8le, et non d\xE9cid\xE9e par un responsable \u2014 \xE0 consid\xE9rer comme une piste \xE0 v\xE9rifier.",
+    hi: "\u092F\u0939 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u0915\u093F\u0938\u0940 \u092E\u0949\u0921\u0932 \u0928\u0947 \u0932\u093F\u0916\u0940, \u0915\u093F\u0938\u0940 \u0905\u0928\u0941\u0930\u0915\u094D\u0937\u0915 \u0928\u0947 \u0928\u0939\u0940\u0902 \u2014 \u0939\u0930 \u0928\u093F\u0937\u094D\u0915\u0930\u094D\u0937 \u0915\u094B \u091C\u093E\u0901\u091A \u0915\u0947 \u0938\u0902\u0915\u0947\u0924 \u0915\u0947 \u0930\u0942\u092A \u092E\u0947\u0902 \u0926\u0947\u0916\u0947\u0902\u0964",
+    id: "Ulasan ini ditulis oleh model, bukan diputuskan oleh pengelola \u2014 baca setiap temuan sebagai petunjuk untuk diperiksa.",
+    it: "Questa revisione \xE8 stata scritta da un modello, non decisa da un manutentore \u2014 da considerare ogni osservazione come un indizio da verificare.",
+    ja: "\u3053\u306E\u30EC\u30D3\u30E5\u30FC\u306F\u30E2\u30C7\u30EB\u304C\u66F8\u3044\u305F\u3082\u306E\u3067\u3001\u30E1\u30F3\u30C6\u30CA\u30FC\u306B\u3088\u308B\u6C7A\u5B9A\u3067\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u5404\u6307\u6458\u3092\u78BA\u8A8D\u3059\u3079\u304D\u624B\u304C\u304B\u308A\u3068\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    ko: "\uC774 \uAC80\uD1A0\uB294 \uBAA8\uB378\uC774 \uC791\uC131\uD588\uC73C\uBA70, \uC720\uC9C0\uC790\uAC00 \uACB0\uC815\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4 \u2014 \uAC01 \uBC1C\uACAC\uC744 \uD655\uC778\uD560 \uCC38\uACE0 \uC790\uB8CC\uB85C \uC77D\uC73C\uC2ED\uC2DC\uC624.",
+    nl: "Deze review is door een model geschreven, niet door een beheerder beslist \u2014 lees elke bevinding als een aanwijzing om te controleren.",
+    pl: "T\u0119 recenzj\u0119 napisa\u0142 model, a nie opiekun \u2014 traktuj ka\u017Cdy wynik jako wskaz\xF3wk\u0119 do sprawdzenia.",
+    pt: "Esta revis\xE3o foi escrita por um modelo, n\xE3o decidida por um mantenedor \u2014 trate cada constata\xE7\xE3o como um ind\xEDcio a verificar.",
+    ru: "\u042D\u0442\u043E\u0442 \u043E\u0431\u0437\u043E\u0440 \u043D\u0430\u043F\u0438\u0441\u0430\u043D \u043C\u043E\u0434\u0435\u043B\u044C\u044E, \u0430 \u043D\u0435 \u0441\u043E\u043F\u0440\u043E\u0432\u043E\u0436\u0434\u0430\u044E\u0449\u0438\u043C \u2014 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u0441\u044C \u043A \u043A\u0430\u0436\u0434\u043E\u0439 \u043D\u0430\u0445\u043E\u0434\u043A\u0435 \u043A\u0430\u043A \u043A \u043F\u043E\u0432\u043E\u0434\u0443 \u0434\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438.",
+    sv: "Denna granskning skrevs av en modell, inte av en underh\xE5llare \u2014 l\xE4s varje fynd som en ledtr\xE5d att unders\xF6ka.",
+    th: "\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E17\u0E32\u0E19\u0E19\u0E35\u0E49\u0E40\u0E02\u0E35\u0E22\u0E19\u0E42\u0E14\u0E22\u0E42\u0E21\u0E40\u0E14\u0E25 \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48\u0E01\u0E32\u0E23\u0E15\u0E31\u0E14\u0E2A\u0E34\u0E19\u0E42\u0E14\u0E22\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25 \u2014 \u0E42\u0E1B\u0E23\u0E14\u0E2D\u0E48\u0E32\u0E19\u0E41\u0E15\u0E48\u0E25\u0E30\u0E02\u0E49\u0E2D\u0E04\u0E49\u0E19\u0E1E\u0E1A\u0E40\u0E1B\u0E47\u0E19\u0E40\u0E1A\u0E32\u0E30\u0E41\u0E2A\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A",
+    tr: "Bu inceleme bir model taraf\u0131ndan yaz\u0131ld\u0131, bir bak\u0131c\u0131 taraf\u0131ndan kararla\u015Ft\u0131r\u0131lmad\u0131 \u2014 her bulguyu inceleme ipucu olarak okuyun.",
+    uk: "\u0426\u0435\u0439 \u043E\u0433\u043B\u044F\u0434 \u043D\u0430\u043F\u0438\u0441\u0430\u043D\u043E \u043C\u043E\u0434\u0435\u043B\u043B\u044E, \u0430 \u043D\u0435 \u0432\u0438\u0437\u043D\u0430\u0447\u0435\u043D\u043E \u0441\u0443\u043F\u0440\u043E\u0432\u0456\u0434\u043D\u0438\u043A\u043E\u043C \u2014 \u0441\u043F\u0440\u0438\u0439\u043C\u0430\u0439\u0442\u0435 \u043A\u043E\u0436\u043D\u0443 \u0437\u043D\u0430\u0445\u0456\u0434\u043A\u0443 \u044F\u043A \u043F\u0456\u0434\u043A\u0430\u0437\u043A\u0443 \u0434\u043B\u044F \u043F\u0435\u0440\u0435\u0432\u0456\u0440\u043A\u0438.",
+    vi: "B\u1EA3n r\xE0 so\xE1t n\xE0y do m\u1ED9t model vi\u1EBFt, kh\xF4ng ph\u1EA3i quy\u1EBFt \u0111\u1ECBnh c\u1EE7a maintainer \u2014 h\xE3y xem t\u1EEBng ph\xE1t hi\u1EC7n nh\u01B0 m\u1ED9t g\u1EE3i \xFD c\u1EA7n ki\u1EC3m ch\u1EE9ng.",
+    zh: "\u6B64\u5BA1\u67E5\u7531\u6A21\u578B\u7F16\u5199\uFF0C\u800C\u975E\u7EF4\u62A4\u8005\u7684\u51B3\u5B9A \u2014 \u8BF7\u5C06\u6BCF\u6761\u53D1\u73B0\u89C6\u4E3A\u9700\u8981\u6838\u5B9E\u7684\u7EBF\u7D22\u3002"
+  },
+  reviewFooterEditable: {
+    en: "Editing the pull request and re-running replaces this review comment; it is never posted twice.",
+    ar: "\u062A\u0639\u062F\u064A\u0644 \u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628 \u0648\u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u064A\u0633\u062A\u0628\u062F\u0644 \u062A\u0639\u0644\u064A\u0642 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0647\u0630\u0627\u061B \u0648\u0644\u0627 \u064A\u064F\u0646\u0634\u0631 \u0645\u0631\u062A\u064A\u0646.",
+    cs: "\xDAprava pull requestu a op\u011Btovn\xE9 spu\u0161t\u011Bn\xED nahrad\xED tento koment\xE1\u0159 recenze; nebude publikov\xE1n dvakr\xE1t.",
+    de: "Das Bearbeiten des Pull-Requests und erneutes Ausf\xFChren ersetzt diesen Review-Kommentar; er wird nie zweimal ver\xF6ffentlicht.",
+    es: "Editar el pull request y volver a ejecutar reemplaza este comentario de revisi\xF3n; nunca se publica dos veces.",
+    fr: "Modifier la pull request et relancer remplacera ce commentaire de revue ; il n'est jamais publi\xE9 deux fois.",
+    hi: "\u092A\u0941\u0932 \u0930\u093F\u0915\u094D\u0935\u0947\u0938\u094D\u091F \u0915\u094B \u0938\u0902\u092A\u093E\u0926\u093F\u0924 \u0915\u0930\u0915\u0947 \u092A\u0941\u0928\u0903 \u091A\u0932\u093E\u0928\u0947 \u0938\u0947 \u092F\u0939 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u091F\u093F\u092A\u094D\u092A\u0923\u0940 \u092C\u0926\u0932 \u091C\u093E\u0924\u0940 \u0939\u0948; \u092F\u0939 \u0915\u092D\u0940 \u0926\u094B \u092C\u093E\u0930 \u092A\u094B\u0938\u094D\u091F \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u0940\u0964",
+    id: "Menyunting pull request dan menjalankan ulang akan mengganti komentar ulasan ini; tidak akan diposting dua kali.",
+    it: "La modifica della pull request e una nuova esecuzione sostituiscono questo commento di revisione; non viene mai pubblicato due volte.",
+    ja: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u3092\u7DE8\u96C6\u3057\u3066\u518D\u5B9F\u884C\u3059\u308B\u3068\u3001\u3053\u306E\u30EC\u30D3\u30E5\u30FC\u30B3\u30E1\u30F3\u30C8\u304C\u7F6E\u304D\u63DB\u3048\u3089\u308C\u307E\u3059\u3002\u4E8C\u91CD\u6295\u7A3F\u3055\u308C\u308B\u3053\u3068\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+    ko: "\uD480 \uB9AC\uD018\uC2A4\uD2B8\uB97C \uD3B8\uC9D1\uD558\uACE0 \uB2E4\uC2DC \uC2E4\uD589\uD558\uBA74 \uC774 \uAC80\uD1A0 \uB313\uAE00\uC774 \uAD50\uCCB4\uB429\uB2C8\uB2E4. \uC911\uBCF5 \uAC8C\uC2DC\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
+    nl: "Deze pull request bewerken en opnieuw uitvoeren vervangt dit review-commentaar; het wordt nooit twee keer geplaatst.",
+    pl: "Edycja pull requesta i ponowne uruchomienie zast\u0119puje ten komentarz recenzji; nie jest publikowany dwukrotnie.",
+    pt: "Editar o pull request e executar novamente substitui este coment\xE1rio de revis\xE3o; ele nunca \xE9 publicado duas vezes.",
+    ru: "\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 pull request \u0438 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u0437\u0430\u043C\u0435\u043D\u044F\u0442 \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043E\u0431\u0437\u043E\u0440\u0430; \u043E\u043D \u043D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u043F\u0443\u0431\u043B\u0438\u043A\u0443\u0435\u0442\u0441\u044F \u0434\u0432\u0430\u0436\u0434\u044B.",
+    sv: "Att redigera pull requesten och k\xF6ra igen ers\xE4tter denna granskningskommentar; den postas aldrig tv\xE5 g\xE5nger.",
+    th: "\u0E01\u0E32\u0E23\u0E41\u0E01\u0E49\u0E44\u0E02 pull request \u0E41\u0E25\u0E49\u0E27\u0E40\u0E23\u0E35\u0E22\u0E01\u0E43\u0E0A\u0E49\u0E43\u0E2B\u0E21\u0E48\u0E08\u0E30\u0E41\u0E17\u0E19\u0E17\u0E35\u0E48\u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E17\u0E32\u0E19\u0E19\u0E35\u0E49 \u0E08\u0E30\u0E44\u0E21\u0E48\u0E21\u0E35\u0E01\u0E32\u0E23\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E0B\u0E49\u0E33",
+    tr: "Pull request'i d\xFCzenleyip yeniden \xE7al\u0131\u015Ft\u0131rmak bu inceleme yorumunu de\u011Fi\u015Ftirir; iki kez g\xF6nderilmez.",
+    uk: "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F pull request \u0442\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u0438\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u0437\u0430\u043C\u0456\u043D\u044F\u0442\u044C \u0446\u0435\u0439 \u043A\u043E\u043C\u0435\u043D\u0442\u0430\u0440 \u043E\u0433\u043B\u044F\u0434\u0443; \u0432\u0456\u043D \u043D\u0456\u043A\u043E\u043B\u0438 \u043D\u0435 \u043F\u0443\u0431\u043B\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F \u0434\u0432\u0456\u0447\u0456.",
+    vi: "Ch\u1EC9nh s\u1EEDa pull request v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn r\xE0 so\xE1t n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n.",
+    zh: "\u7F16\u8F91\u62C9\u53D6\u8BF7\u6C42\u5E76\u91CD\u65B0\u8FD0\u884C\u4F1A\u66FF\u6362\u6B64\u5BA1\u67E5\u8BC4\u8BBA\uFF1B\u5B83\u7EDD\u4E0D\u4F1A\u88AB\u53D1\u5E03\u4E24\u6B21\u3002"
   }
 };
 var CHROME_KEYS = Object.keys(CHROME);
@@ -35257,13 +35340,11 @@ function verdict(run2) {
       if (!echoedOnThread) lines.push(...why(run2));
     }
   }
-  const gap = withheld(run2);
-  if (gap.length > 0) lines.push("", gap);
   return lines.join("\n");
 }
 function disposition(run2, duplicateOf) {
   if (run2.posted === null) {
-    return "Nothing was posted \u2014 `apply` does not name `comment`. `duplicate-of` and `score` still carry it.";
+    return "Nothing was posted \u2014 the warrant does not grant `comment`. `duplicate-of` and `score` still carry it.";
   }
   if (run2.posted === "withheld") {
     return `Nothing was posted \u2014 this thread carries more comments than one run reads, and none of the ones read were this duty's own, so whether it already commented could not actually be told. Posting on that unknown risked a stacked comment naming #${String(duplicateOf)}, so this run left the thread alone rather than guess.`;
@@ -35274,10 +35355,6 @@ function disposition(run2, duplicateOf) {
 function why(run2) {
   if (run2.rationale === null || run2.rationale.length === 0) return [];
   return ["", `> ${run2.rationale.replace(/\s+/g, " ").trim()}`];
-}
-function withheld(run2) {
-  if (run2.withheld.length === 0) return "";
-  return `\`apply\` asks for ${run2.withheld.map((capability) => `\`${capability}\``).join(", ")}, which \`${run2.warrant}\` does not grant to this duty. The narrower of the two wins, always.`;
 }
 function summarizeSweep(run2) {
   if (run2.ungranted !== null) {
@@ -35344,7 +35421,6 @@ function page(settings, thread, outcome, done, posted, spent) {
     pivot: outcome.pivot,
     note: outcome.note,
     permitted: outcome.permitted,
-    withheld: outcome.withheld,
     rationale: outcome.rationale,
     done,
     posted,
@@ -35626,12 +35702,12 @@ function excerpt2(body) {
 var DEFAULT_CAPABILITIES = [];
 
 // src/duties/duplicate/main.ts
+var DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 function readSettings() {
   const shared = readShared();
   return {
     ...shared,
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     confidence: fraction("confidence", getInput("confidence")),
     candidates: whole("candidates", getInput("candidates")),
     corpusLimit: bounded("corpus-limit", getInput("corpus-limit")),
@@ -35712,7 +35788,7 @@ async function run() {
     const { authority, denied } = await openAuthority(base.warrant, api, context2.repo, "duplicate");
     settings = {
       ...base,
-      languages: dutyLanguages(authority.warrant, denied, getInput("languages"))
+      languages: dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES)
     };
     if (settings.sweep) {
       bulk = newAccumulator();
@@ -35762,19 +35838,13 @@ async function decide(api, authority, thread, standing, settings, stages, weathe
       `Only the first ${String(settings.maxBodyChars)} characters of the body were read. Raise \`max-body-chars\`, or set it to \`none\`, to read the rest.`
     );
   }
-  const { permitted, withheld: withheld2 } = narrowWarned(
-    warrant.granted("duplicate", DEFAULT_CAPABILITIES),
-    settings.apply,
-    "duplicate",
-    warrant.path
-  );
+  const permitted = warrant.granted("duplicate", DEFAULT_CAPABILITIES);
   const nothing = (language2, rankInfo2, pivotInfo2, note2, confidence) => ({
     language: language2,
     duplicateOf: null,
     confidence,
     lexicalScore: 0,
     permitted,
-    withheld: withheld2,
     note: note2,
     rank: rankInfo2,
     pivot: pivotInfo2,
@@ -35894,7 +35964,6 @@ ${body}`,
     confidence: verdict2.confidence,
     lexicalScore: match.lexicalScore,
     permitted,
-    withheld: withheld2,
     note,
     rank: rankInfo,
     pivot: pivotInfo,
@@ -35911,14 +35980,13 @@ function notGranted(warrant) {
     confidence: 0,
     lexicalScore: 0,
     permitted: [],
-    withheld: [],
     note: null,
     rank: { corpusSize: 0, offered: 0 },
     pivot: { used: false, note: null },
     proposal: null,
     fingerprint: null,
     rationale: null,
-    ungranted: `\`${warrant.path}\`'s \`capabilities:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
+    ungranted: `\`${warrant.path}\`'s \`duties:\` block does not name \`duplicate\`; once that block exists it is the whole answer, so add \`duplicate: [comment]\` to it (or remove the block to return to defaults).`
   };
 }
 function recursionGuardOutcome() {
@@ -35928,7 +35996,6 @@ function recursionGuardOutcome() {
     confidence: 0,
     lexicalScore: 0,
     permitted: [],
-    withheld: [],
     note: null,
     rank: { corpusSize: 0, offered: 0 },
     pivot: { used: false, note: null },

@@ -172,6 +172,36 @@ describe("markStale", () => {
     expect(doc.stale).toContain("vi");
     expect(doc.conflicts).toHaveLength(0);
   });
+
+  it("detects a human edit once the real synced SHA has been recorded", () => {
+    // The regression this guards: `markSynced` used to be called with the
+    // literal "pending" and the real SHA from the write was never recorded —
+    // so every locale stayed forever in the "pending" branch above, and a
+    // human edit was pushed to `stale` and re-drafted instead of to `conflicts`
+    // (D3 — human work is inviolable). Now that `publishSync` returns the
+    // written SHA and `main.ts` records it, a real synced SHA means an
+    // afterwards-different target SHA is a human edit, not a stale locale.
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+      ]),
+      sourceRevision: "old123",
+      synced: new Map(),
+      stale: [],
+      conflicts: [],
+    };
+
+    // Sync: the real SHA the write returned, replacing the "pending" placeholder.
+    markSynced(doc, "vi", "sha-vi-synced");
+
+    // The source changes next run, and a human has meanwhile edited the target.
+    markStale(doc, "new456", new Map([["vi", "sha-vi-human-edit"]]), "en");
+
+    expect(doc.conflicts).toContain("vi");
+    expect(doc.stale).toHaveLength(0);
+  });
 });
 
 describe("markSynced", () => {

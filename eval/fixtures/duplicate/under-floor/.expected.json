@@ -1,0 +1,15 @@
+{
+  "description": "The judge names candidate 7 but at 0.5, under the 0.75 floor. The model is genuinely asked (the whole pipeline runs), but the proposal is ineligible, so nothing is posted — `duplicate-of` and `score` still answer, and the tracker stays untouched.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  duplicate: [comment]\n",
+  "verdict-over": {
+    "confidence": 0.5,
+    "rationale": "Shares some words but may be a different problem."
+  },
+  "expected": {
+    "duplicate-of": "7",
+    "score": "0.50",
+    "effects": {
+      "commented": false
+    }
+  }
+}

@@ -101,7 +101,7 @@ Suppose the injection succeeds completely — the model returns
 `security-cleared` and `close`. Then:
 
 - `security-cleared` is not in the warrant, so it is dropped in code.
-- `close` is not in `capabilities`, so nothing closes.
+- `close` is not in the warrant's `duties:` block, so nothing closes.
 - Both appear in `proposed`, so the attempt is _visible in the outputs_.
 
 The injection defences reduce how often a model is fooled. The warrant makes it
@@ -219,8 +219,9 @@ A change that breaks one of these is a breaking change regardless of what any
 1. **A person's title and body text are never modified.** No input enables it.
 2. **A label outside the warrant is never applied.** Checked in code, against the
    parsed file.
-3. **A capability not granted is never exercised**, and the effective set is the
-   intersection of the file and the workflow input.
+3. **A capability not granted is never exercised.** The `duties:` block in the
+   warrant is the whole authority — a workflow can say when a run happens and
+   how the runtime operates, never that a grant exists.
 4. **An unparseable model answer yields an empty result**, loudly.
 5. **A maintainer's decision is never reverted** — no label removed, no assignment
    overwritten, no closed thread reopened. One bounded exception, and only one:

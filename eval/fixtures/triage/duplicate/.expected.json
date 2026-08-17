@@ -1,0 +1,21 @@
+{
+  "description": "The thread repeats #7 and the warrant grants `close`. The run applies `duplicate`, closes the thread as not-planned, and posts the close comment carrying the attribution marker — the whole close pipeline exercised end to end, hard gate included.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: duplicate\n    description: Repeats an existing thread.\n  - name: question\n    description: Asks for help or guidance.\nduties:\n  triage: [label, comment, close]\n",
+  "verdict-over": {
+    "labels": ["duplicate"],
+    "duplicate_of": 7,
+    "confidence": 0.95,
+    "rationale": "Repeats #7."
+  },
+  "expected": {
+    "duplicate-of": 7,
+    "screened-out": "",
+    "applied-names": ["duplicate"],
+    "effects": {
+      "applied": ["duplicate"],
+      "commented": true,
+      "assigned": [],
+      "closed": true
+    }
+  }
+}

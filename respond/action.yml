@@ -91,52 +91,25 @@ inputs:
     required: false
     default: "1"
 
-  languages:
-    description: >-
-      The languages your contributors write in, comma or newline separated.
-      Detection narrows by script, then by profile, and only then asks a
-      model — so a list of two costs nothing on most threads. The first
-      language named is this project's pivot: what a correction written in
-      another language is bridged into before it is recalled for a thread
-      written in a third.
-
-      Ignored once `warrant`'s own `languages:` key is written — the file is
-      the whole answer from there, and the run says once which of the two it
-      read.
-    required: false
-    default: en, vi, zh
-
   warrant:
     description: >-
       Where the permissions and the taxonomy live. A first reply is the top
       rung of what Reeve may do, and unlike every other duty here it has no
       cheap, reversible default: `respond` is granted nothing until a
       warrant explicitly names it, whether the file is missing entirely or
-      merely silent about this duty. Write `capabilities: { respond: [comment] }`
+      merely silent about this duty. Write `duties: { respond: [comment] }`
       to grant it. It may also carry a `languages:` key, which becomes the
-      whole answer for detection once it is written — see `languages` above.
+      whole answer for detection once it is written.
 
       A file missing at this default path is not a failure — the run
       resolves to granting nothing and says so in the job summary, the same
-      quiet green no-op as a `capabilities:` block that leaves `respond`
+      quiet green no-op as a `duties:` block that leaves `respond`
       out. Point this at a path of your own instead, and a file missing
       there fails the run red, because naming a file that is not there is a
       configuration mistake rather than an absence. A file that exists but
       does not parse always fails red, wherever it lives.
     required: false
     default: .github/reeve.yml
-
-  apply:
-    description: >-
-      What this run may do: `comment`, or `none` for a run that decides and
-      writes nothing but its outputs. The narrower of this and the warrant
-      file wins, always — this is the workflow's half of the answer, useful
-      for turning posting off on one trigger without editing the file, and
-      the file remains the authority. Defaults to `none`, matching the
-      warrant's own default of granting nothing: an unconfigured `respond`
-      never posts by accident.
-    required: false
-    default: none
 
   confidence:
     description: >-
@@ -277,7 +250,7 @@ outputs:
     description: >-
       `true` when a reply was posted this run. `false` on every other path —
       including one that drafted an answer but the floor, the warrant,
-      `apply`, or `dry-run` withheld it — never unset. There is no
+      or `dry-run` withheld it — never unset. There is no
       update-in-place: respond answers a thread once, so `true` always means
       a brand-new comment.
 
@@ -292,7 +265,7 @@ outputs:
     description: >-
       The winning draft's own text, already sanitised, whether or not it was
       posted. Written on every run that reached a verdict, so a repository
-      that withholds `comment` — or sets `apply: none` — can still route a
+      that does not grant `comment` can still route a
       draft to maintainer review. Empty on a run that stopped before
       drafting: a bot-opened issue, a thread a human already answered, or a
       thread already carrying this duty's own reply.

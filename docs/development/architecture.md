@@ -152,15 +152,18 @@ There is an `action.yml` at the repository root as well, and it runs no duty.
 It exists because GitHub reads a Marketplace listing from the root and from
 nowhere else. That leaves a hazard worth handling rather than tolerating:
 `uses: ecoma-io/reeve@v0.6` is the obvious thing for a consumer to write, it
-resolves, and it runs. So the root action **fails red and says what to write
-instead** — `src/refusal.ts`, with the message shaped by what the ref actually
-carries.
+resolves, and it runs. So the root action **explains where each duty ships —
+the eight leaf actions — and then fails red with the corrected `uses:` line**
+— `src/refusal.ts`, with the message shaped by what the ref actually carries,
+and the `leaf-action` output carrying the same corrected line
+machine-readable.
 
 The one thing it may not do is succeed quietly. A green run that did nothing is
 indistinguishable from a duty that found nothing to do, and
 [D5](../doctrine/north-star.md#d5--failure-is-loud-it-is-never-plausible) does not allow
 the two to look alike.
 
-`src/refusal.ts` and the root entry point go away as duties land — the list of
-built duties in it stops being empty, and eventually the refusal becomes only a
-corrected `uses:` line.
+The root is permanently the listing and the refusal — it never becomes a duty
+runner itself. A single action that decides which duty to run from an event is
+Agent Mode, and Agent Mode is the 2.x line, not a role the root grows into;
+see [the 2.x roadmap](roadmap-2x.md).

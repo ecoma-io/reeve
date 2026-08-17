@@ -1,0 +1,16 @@
+{
+  "description": "A `when:` track fires once its label was applied by a human and the `after` elapsed: the run posts the reminder, leaving the label in place.",
+  "warrant": "version: 1\nlanguages:\n  - en\nlifecycle:\n  tracks:\n    - name: review-stale\n      when: review\n      resets: author\n      steps:\n        - after: 5d\n          say: \"Has this review been addressed?\"\n",
+  "labels": ["review"],
+  "repo-labels": ["review"],
+  "reactions": [{ "label": "review", "actor": "maintainer", "created-ago": "10d" }],
+  "expected": {
+    "skipped": "false",
+    "reminded": "true",
+    "labeled": "0",
+    "closed": "false",
+    "unstaled": "0",
+    "due-not-granted": "0",
+    "effects": { "commented": true }
+  }
+}

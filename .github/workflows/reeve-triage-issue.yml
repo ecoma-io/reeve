@@ -8,9 +8,8 @@ name: Issue triage
 #
 # The taxonomy is not here. It is `.github/reeve.yml`, which is the whole point
 # of a warrant: what may be applied is reviewed as a file with a diff, and this
-# workflow only says when to look at it. Narrowing is still possible from here —
-# `apply` below is the workflow's half of the answer and the file remains the
-# authority — but nothing in this file can widen what that one grants.
+# workflow only says when to look at it. Nothing in this file can widen what
+# the warrant grants — the warrant is the whole authority.
 #
 # The provider secrets are the organisation's, and the masking step is there for
 # the reason it is there in the translation workflow: the duty masks its own api
@@ -105,7 +104,6 @@ jobs:
           github.event.action == 'reopened'
         uses: ./triage
         with:
-          apply: "label, record"
           number: ${{ github.event.issue.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           # Empty when the endpoint is keyless, which is a supported

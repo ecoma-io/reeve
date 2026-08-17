@@ -70,7 +70,7 @@ import { DUTIES, PLANNED } from "../refusal.js";
  * write` on the token rather than `issues: write`. It has no duty default and
  * cannot be implied by an implicit warrant: writing to the store is a
  * project's decision to keep a memory at all, and only an explicit
- * `capabilities:` block can make it.
+ * `duties:` block can make it.
  *
  * `edit-file` and `open-pr` are qualitatively different again. They give a
  * duty the ability to write repository files and open pull requests — changes
@@ -253,11 +253,11 @@ export interface Warrant {
    * at all.
    *
    * `null` is deliberately not the same thing as an empty list — an empty
-   * `languages:` is refused by `parseLanguages` the same way an empty
-   * `languages` input already is, because a maintainer who wrote the key at
+   * `languages:` is refused by `parseLanguages` the same way an empty key
+   * already is, because a maintainer who wrote the key at
    * all meant something by it. `null` is what lets `resolveLanguages` below
    * tell "this file is silent" from "this file already answered", before it
-   * has any reason to look at the `languages` input.
+   * has any reason to look at the duty's own default.
    */
   readonly languages: readonly Language[] | null;
   /**
@@ -302,42 +302,43 @@ export interface Warrant {
    * dependa duty's own no-implicit-policy floor, the same pattern
    * `lifecycle` follows. When absent, dependa runs with its own
    * conservative defaults. Written with nothing under it is refused,
-   * the same half-finished-edit shape `lifecycle:`/`capabilities:` refuse.
+   * the same half-finished-edit shape `lifecycle:`/`duties:` refuse.
    */
   readonly dependa: DependaPolicy | null;
   /**
    * What this duty was granted.
    *
-   * Three shapes, not two. No `capabilities:` block at all means the file
-   * never turned its mind to the question, so the duty keeps `fallback` — its
-   * own idea of the least it should be trusted with, which is what a consumer
-   * who has only written a taxonomy expects, unchanged from before this block
-   * existed. A block that exists and does name `duty` means exactly what it
-   * lists, including the empty list `[none]` spells deliberately. A block
-   * that exists and does *not* name `duty` is the shape new here: once a
-   * maintainer has written the block, it is taken as the complete roster of
-   * who may act, so a name missing from it is refused everything rather than
-   * handed the default it would have had before the block was written —
-   * enumerating who may act is a decision, and a duty the enumeration forgot
-   * is not the same thing as a duty nobody had decided about. See `unnamed`,
-   * which is how a caller tells that shape apart from an explicit `[none]`
-   * before either reaches this method.
+   * The `duties:` block is the whole answer, and it has three shapes. No
+   * `duties:` block at all means the file never turned its mind to the
+   * question, so the duty keeps `fallback` — its own idea of the least it
+   * should be trusted with, which is what a consumer who has only written a
+   * taxonomy expects. A block that exists and names `duty` as a list means
+   * exactly what it lists, `[none]` granting nothing deliberately. A block
+   * that exists and names `duty` as `true` means the duty's own documented
+   * default — the same `fallback` — written out by a maintainer who wants the
+   * duty on without restating its grant.
    *
-   * The default belongs to the duty rather than to this module: only `triage`
-   * knows that its cheapest reversible action is a label.
+   * Once the block exists, it is the complete roster of who may act: a name
+   * missing from it is refused everything rather than handed the default it
+   * would have had before the block was written — enumerating who may act is
+   * a decision, and a duty the enumeration forgot is not the same thing as a
+   * duty nobody had decided about. `unnamed` is how a caller tells that shape
+   * apart from an explicit `[none]` or `false` before either reaches this
+   * method.
    */
   granted(duty: string, fallback: readonly Capability[]): readonly Capability[];
   /**
-   * True when the file wrote a `capabilities:` block and that block does not
+   * True when the file wrote a `duties:` block and that block does not
    * mention `duty` by name.
    *
    * Distinct from an absent block, which leaves the duty its own default, and
-   * distinct from the duty being named `[none]`, which is a decision about it
-   * rather than silence about it — `granted` alone cannot tell those two
-   * "nothing" apart, because both return the same empty list. This is the
-   * call that can, and it exists so a duty can stop before spending an
-   * expensive model call on a verdict that could never be applied: once the
-   * block exists and does not name it, no verdict changes the answer.
+   * distinct from the duty being named `[none]` or `false`, which is a
+   * decision about it rather than silence about it — `granted` alone cannot
+   * tell those two "nothing" apart, because both return the same empty list.
+   * This is the call that can, and it exists so a duty can stop before
+   * spending an expensive model call on a verdict that could never be
+   * applied: once the block exists and does not name it, no verdict changes
+   * the answer.
    */
   unnamed(duty: string): boolean;
   /** The entry for a name, or undefined. Case-sensitive, as GitHub applies them. */
@@ -409,13 +410,16 @@ export function parseWarrant(path: string, source: string): Warrant {
     "lifecycle",
     "propose",
     "dependa",
-    "capabilities",
+    "duties",
   ] as const;
   for (const key of Object.keys(document)) {
     if (!(KNOWN_ROOT as readonly string[]).includes(key)) {
+      // `capabilities` names the pre-1.0 shape this key replaced; a typo gets
+      // the nearest valid spellings pointed at, not a wall of every key the
+      // format knows.
       throw new Error(
         `warrant: \`${path}\` has an unrecognized key \`${key}\`. ` +
-          `Expected any of ${KNOWN_ROOT.join(", ")}.`,
+          `Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`,
       );
     }
   }
@@ -438,7 +442,7 @@ export function parseWarrant(path: string, source: string): Warrant {
   const lifecycle = readLifecycle(path, document.lifecycle);
   const propose = readPropose(path, document.propose);
   const dependa = readDependa(path, document.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document.capabilities);
+  const { declared, granted: capabilities } = readDuties(path, document.duties);
 
   // After every entry exists, so `exclusive_with: [bg]` names the typo rather
   // than being resolved against a partly-built map.
@@ -466,7 +470,14 @@ export function parseWarrant(path: string, source: string): Warrant {
     lifecycle,
     propose,
     dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      // `duties: { triage: true }` spells the duty's own documented default
+      // out — which is `fallback`, known only to the calling duty.
+      if (raw === "default") return fallback;
+      if (raw !== undefined) return raw;
+      return declared ? [] : fallback;
+    },
     unnamed: (duty) => declared && !capabilities.has(duty),
     labelNamed: (name) => byName.get(name),
   };
@@ -583,7 +594,7 @@ export interface Implicit {
  * things only a written warrant can say, because none of them can be
  * recovered honestly from a label alone.
  *
- * No `capabilities:` block was ever written, because there is no file, so
+ * No `duties:` block was ever written, because there is no file, so
  * `granted` hands back whatever `fallback` the caller offers — which is what
  * every duty already reaches for when a warrant is silent about it, and here
  * is the whole reason this function does not need to know a single duty's
@@ -697,7 +708,7 @@ export const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 export interface Opened {
   readonly authority: Authority;
   /**
-   * True when a written `capabilities:` block never named this duty at all —
+   * True when a written `duties:` block never named this duty at all —
    * decided once per run, before anything is spent, because no verdict
    * downstream can change it.
    */
@@ -726,47 +737,44 @@ export async function openAuthority(
   return { authority, denied: authority.warrant.unnamed(duty) };
 }
 
-/** What resolving `languages` against the warrant and the input decided. */
+/** What resolving `languages` against the warrant decided. */
 export interface LanguagesResolution {
   readonly languages: readonly Language[];
   /**
-   * Set only when the warrant's key won, so a run can say once why the
-   * `languages` input was never consulted — a maintainer staring at an input
-   * that looks configured and a run that plainly ignored it deserves the one
-   * sentence that explains it, not a warning storm.
+   * Set only when the warrant's key won, so a run can say once that the
+   * file's `languages:` is what a maintainer staring at a workflow that used
+   * to be able to answer this deserves: the one sentence that names the file
+   * as the whole answer, not silence.
    */
   readonly notice: string | null;
 }
 
 /**
- * Which of the two sources answers "what to translate into" or "what a
- * contributor writes in" this run.
+ * What answers "what to translate into" or "what a contributor writes in"
+ * this run.
  *
- * The warrant wins outright when it has an opinion: once `languages:` is
- * written there, the `languages` input is not a fallback to blend with it, it
- * is not consulted at all — the file is the whole answer, the same way a
- * `capabilities:` block is. Only when the file is silent about it — no key,
- * or no warrant at all, which `implicitWarrant` always leaves silent — does
- * the input get asked, exactly as it always has.
+ * The warrant is the only place the question is answered. Once `languages:`
+ * is written there, it is the whole answer — the file is the whole authority,
+ * the same way a `duties:` block is, and there is no input left to argue with
+ * it. Only when the file is silent — no key, or no warrant at all, which
+ * `implicitWarrant` always leaves silent — does the caller's own documented
+ * default answer, which is the least a duty has always been trusted with and
+ * is now the duty's to say (`fallback`). No action input is read anywhere.
  */
-export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesResolution {
+export function resolveLanguages(
+  warrant: Warrant,
+  fallback: readonly Language[],
+): LanguagesResolution {
   if (warrant.languages !== null) {
     return {
       languages: warrant.languages,
       notice:
-        `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` ` +
-        "input — the file is the whole answer once that key is written.",
+        `languages: read from \`${warrant.path}\`'s \`languages:\` key — ` +
+        "the file is the whole answer once that key is written.",
     };
   }
 
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      "languages: no language is configured. Write `languages:` in the warrant " +
-        `(\`${warrant.path}\`), or set the \`languages\` input.`,
-    );
-  }
-
-  return { languages: parseLanguages(rawInput), notice: null };
+  return { languages: fallback, notice: null };
 }
 
 /**
@@ -780,26 +788,26 @@ export function resolveLanguages(warrant: Warrant, rawInput: string): LanguagesR
  * configured a language for it, and the honest answer for a run that will
  * read nothing is that it reads no languages.
  *
- * `rawInput` is passed rather than read here, because a duty's `main.ts` is
- * where its own `action.yml` inputs are read — see any duty's
- * `main.integration.test.ts` for the audit that keeps it that way.
+ * `fallback` is the duty's own documented default, passed rather than read
+ * here because each duty's defaults live beside its `DEFAULT_CAPABILITIES` —
+ * see any duty's `main.integration.test.ts` for the audit that keeps that so.
  */
 export function dutyLanguages(
   warrant: Warrant,
   denied: boolean,
-  rawInput: string,
+  fallback: readonly Language[],
 ): readonly Language[] {
   if (denied) return [];
 
-  const resolution = resolveLanguages(warrant, rawInput);
+  const resolution = resolveLanguages(warrant, fallback);
   if (resolution.notice !== null) core.notice(resolution.notice);
   return resolution.languages;
 }
 
 /**
  * The pivot language corrections are bridged through, resolved against the
- * final list of configured languages — whichever of `languages:` or the
- * `languages` input answered that.
+ * final list of configured languages — the warrant's `languages:` key, or
+ * the duty's documented default when the file is silent.
  *
  * The warrant's `pivot:` wins outright when written, refused if it names a
  * language that is not in `languages` — a pivot nothing translates into or
@@ -994,7 +1002,7 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
   if (raw === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one ` +
-        "language, or delete the key to leave the `languages` input in charge.",
+        "language, or delete the key to leave each duty's own default in charge.",
     );
   }
   if (!Array.isArray(raw)) {
@@ -1021,10 +1029,10 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
 /**
  * The `pivot:` key: a language code, or `null` when the file never wrote one.
  *
- * Not resolved against the final `languages` list here — that list may still
- * come from the `languages` input rather than this file, and `readWarrant`
- * runs before either duty has decided which. `resolvePivot` does that once
- * the caller has the real list in hand.
+ * Not resolved against the final `languages` list here — that list may come
+ * from the warrant's own `languages:` key or from each duty's documented
+ * default, and `readWarrant` runs before any duty has decided which.
+ * `resolvePivot` does that once the caller has the real list in hand.
  *
  * `pivot:` with nothing under it parses as YAML `null`, which is refused
  * rather than read as absence — the same distinction `readLanguages` draws:
@@ -1046,7 +1054,7 @@ function readPivot(path: string, raw: unknown): string | null {
  * default in charge — see {@link Warrant.memory}. Present, `recall` is
  * required: a block with nothing in it — including `memory:` written with
  * nothing under it, which parses as YAML `null` — is the same half-finished-
- * edit shape `capabilities:` and `languages:` both refuse rather than guess
+ * edit shape `duties:` and `languages:` both refuse rather than guess
  * at.
  */
 function readMemory(path: string, raw: unknown): MemorySettings | null {
@@ -1087,7 +1095,7 @@ function readAbout(path: string, raw: unknown): string | null {
 /**
  * The `lifecycle:` key. Absent entirely is `null` — see {@link Warrant.lifecycle}'s
  * no-implicit-policy doc comment. Written with nothing under it is refused,
- * the same half-finished-edit shape `memory:`/`capabilities:` both refuse.
+ * the same half-finished-edit shape `memory:`/`duties:` both refuse.
  */
 function readLifecycle(path: string, raw: unknown): LifecyclePolicy | null {
   if (raw === undefined) return null;
@@ -1364,7 +1372,7 @@ function readLifecycleOverrides(path: string, raw: unknown): readonly LifecycleO
  * The `dependa:` key. Absent entirely is `null` — dependa runs with its own
  * conservative defaults, the same pattern `lifecycle` follows. Written with
  * nothing under it is refused, the same half-finished-edit shape
- * `lifecycle:`/`capabilities:` both refuse rather than guess at.
+ * `lifecycle:`/`duties:` both refuse rather than guess at.
  */
 function readDependa(path: string, raw: unknown): DependaPolicy | null {
   if (raw === undefined) return null;
@@ -1661,50 +1669,80 @@ function optionalWholeNumber(at: string, key: string, raw: unknown, min: number)
 /** Whether the block existed at all, and what it named if it did. */
 interface Capabilities {
   /**
-   * True the moment `capabilities:` is present in the file, even as an empty
+   * True the moment `duties:` is present in the file, even as an empty
    * mapping — `declared` is about whether the question was asked, not about
    * how it was answered. `granted`'s fallback behaviour, and `unnamed`'s
    * whole existence, both turn on this rather than on whether any duty in
    * particular was named.
    */
   readonly declared: boolean;
-  readonly granted: ReadonlyMap<string, readonly Capability[]>;
+  /**
+   * A duty's grant. The special string `"default"` marks `duties: { duty:
+   * true }` — the duty's own documented fallback, resolved against the
+   * `fallback` argument `granted` is handed. Every other value is the exact
+   * list written, `[]` for `[none]`/`false`.
+   */
+  readonly granted: ReadonlyMap<string, readonly Capability[] | "default">;
 }
 
 /**
- * The capability block: which duty may do what.
+ * The `duties:` block: which duty may do what — the whole authority, and the
+ * only place it lives.
+ *
+ * Two shapes a duty entry may take. A list (`triage: [label, record]`) is an
+ * exact grant. `true` means "this duty's own documented default" — the same
+ * fallback an absent block hands the duty, written out by a maintainer who
+ * wants the duty on without restating its grant; the defaults are the
+ * `capabilities.ts` each duty ships (`DEFAULT_CAPABILITIES`), consulted by
+ * doctor and documented per duty, never magic. `false` disables the duty
+ * while the block still enumerates it — a decision, not an omission.
  *
  * `[none]` is the way to grant nothing explicitly, and it has to be explicit —
  * an empty list is the shape a half-finished edit leaves behind, and reading it
  * as "grant nothing" would make a mistake indistinguishable from a decision.
  */
-function readCapabilities(path: string, raw: unknown): Capabilities {
-  const granted = new Map<string, readonly Capability[]>();
+function readDuties(path: string, raw: unknown): Capabilities {
+  const granted = new Map<string, readonly Capability[] | "default">();
   if (raw === undefined) return { declared: false, granted };
   if (raw === null) {
     throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. ` +
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. ` +
         "Use `[none]` to grant nothing, write the mapping, or remove the key " +
         "to keep every duty's own default.",
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, ` +
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, ` +
         "expected a mapping of duty to what it may do.",
     );
   }
 
   for (const [duty, value] of Object.entries(raw as Record<string, unknown>)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
+    const at = `\`${path}\` duties for \`${duty}\``;
 
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
       throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. ` +
-          `Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`,
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. ` +
+          `Expected any of ${available.join(", ")}${closestHint(duty, available)}.`,
       );
     }
 
+    // `true` — the duty's own documented default, spelled out. `false` — the
+    // duty explicitly disabled. Both are decisions, distinct from the entry
+    // never having been written.
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
+    }
+
+    // An explicit list, `[none]` included. A bare capability is one entry —
+    // `triage: label` is what somebody writes when there is one of them.
     const entries = strings(at, duty, value);
     if (entries.length === 0) {
       throw new Error(
@@ -1876,6 +1914,59 @@ function rejectUnknownKeys(
       throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
     }
   }
+}
+
+/**
+ * The valid spellings nearest to what was written, for a "did you mean" hint.
+ *
+ * A small Levenshtein distance, capped so a hint never suggests something
+ * unrelated: `capabilties` (one transposition) suggests `capabilities`; a key
+ * that is nothing like any valid one gets no hint at all and the plain
+ * expected-list error instead.
+ */
+function closestKeys(raw: string, known: readonly string[]): readonly string[] {
+  const best = new Map<number, string[]>();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...(best.get(distance) ?? []), key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+
+/** The `closestKeys` hint, already worded for an error message, or empty. */
+function closestHint(raw: string, known: readonly string[]): string {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0
+    ? ""
+    : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+
+/** Classic Levenshtein, bounded and good enough for spelling hints. */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  let prev = new Array<number>(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array<number>(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] =
+        Math.min(
+          prev[j] ?? Number.POSITIVE_INFINITY,
+          current[j - 1] ?? Number.POSITIVE_INFINITY,
+          prev[j - 1] ?? Number.POSITIVE_INFINITY,
+        ) + cost;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
 }
 
 /** What a wrong value is, for a message that helps rather than quotes YAML at somebody. */

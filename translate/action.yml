@@ -63,29 +63,14 @@ inputs:
       an id is never an assignment and a name may well contain one.
     required: true
 
-  languages:
-    description: >-
-      What to translate into, comma or newline separated. `en`, or
-      `en:English`, or `zh-Hans:简体中文:Hans` — the code alone is enough when
-      the code is enough.
-
-      This says nothing about what an author may write in. The language the
-      thread was written in is detected and left out of its own translation.
-
-      Ignored once `warrant`'s own `languages:` key is written — the file is
-      the whole answer from there, and the run says once which of the two it
-      read.
-    required: false
-    default: en, vi, zh
-
   warrant:
     description: >-
       Where the permissions live. `edit-body` is this duty's whole capability,
-      granted by default — and once a `capabilities:` block is written in this
+      granted by default — and once a `duties:` block is written in this
       file, the enumeration is total: leaving `translate` out of it grants this
       duty nothing, and the run says so rather than guessing. It may also carry
       a `languages:` key, which becomes the whole answer for what to translate
-      into once it is written — see `languages` above.
+      into once it is written.
 
       Missing at this default path, there is no failure: the run keeps its
       defaults, exactly as if the file had granted them explicitly. Point this
@@ -95,23 +80,6 @@ inputs:
       fails red, wherever it lives.
     required: false
     default: .github/reeve.yml
-
-  apply:
-    description: >-
-      What this run may do: `edit-body`, or `none` for a run that drafts,
-      judges and reports without touching the thread. `edit-body` is this
-      duty's only capability, so unlike `triage`'s `apply` there is nothing
-      to comma-separate — the choice is the whole thing or nothing.
-
-      The narrower of this and the warrant file wins, always — the same
-      double-gate every other duty applies, with the same shape: detection,
-      drafting and judging all run and spend whatever they were going to
-      spend regardless of this input, and only the write at the end is
-      gated. A capability the warrant withholds is a reason not to publish,
-      not a reason not to have decided — `none` is a good way to watch what
-      this duty would have written before it is allowed to write it.
-    required: false
-    default: edit-body
 
   drafts:
     description: >-

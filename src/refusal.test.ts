@@ -1,10 +1,10 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DUTIES, PLANNED, normalise, refusal } from "./refusal.js";
+import { DUTIES, PLANNED, leafActionFor, normalise, refusal } from "./refusal.js";
 
 describe("normalise", () => {
   it("lowercases and trims", () => {
@@ -91,10 +91,54 @@ describe("refusal", () => {
   });
 });
 
+describe("leafActionFor", () => {
+  // The corrected line repeats the ref the consumer pinned; the same
+  // envvar dance the refusal suite above uses.
+  const REF = process.env.GITHUB_ACTION_REF;
+  beforeEach(() => {
+    process.env.GITHUB_ACTION_REF = "v0.1";
+  });
+  afterEach(() => {
+    if (REF === undefined) delete process.env.GITHUB_ACTION_REF;
+    else process.env.GITHUB_ACTION_REF = REF;
+  });
+
+  it("names the leaf action for a duty this ref builds", () => {
+    expect(leafActionFor("triage")).toBe("ecoma-io/reeve/triage@v0.1");
+  });
+
+  it("reads a misspelled case the way the corrected spelling would be read", () => {
+    expect(leafActionFor("  TRIAGE ")).toBe("ecoma-io/reeve/triage@v0.1");
+  });
+
+  it("repeats the ref the consumer pinned, not one written down here", () => {
+    process.env.GITHUB_ACTION_REF = "a1b2c3d";
+    expect(leafActionFor("translate")).toBe("ecoma-io/reeve/translate@a1b2c3d");
+  });
+
+  it("is empty when nothing was named", () => {
+    expect(leafActionFor("")).toBe("");
+  });
+
+  it("is empty for a plan-not-built duty and for an unknown word", () => {
+    expect(leafActionFor("someday", ["translate"])).toBe("");
+    expect(leafActionFor("nonsense", ["translate"])).toBe("");
+  });
+});
+
 describe("the duty lists", () => {
   it("covers every duty the documentation gives a contract to", () => {
     expect([...DUTIES, ...PLANNED].sort()).toEqual(
-      ["triage", "translate", "duplicate", "respond", "lifecycle", "harmonise", "dependa"].sort(),
+      [
+        "triage",
+        "translate",
+        "duplicate",
+        "respond",
+        "lifecycle",
+        "harmonise",
+        "dependa",
+        "review",
+      ].sort(),
     );
   });
 
@@ -128,5 +172,22 @@ describe("the duty lists", () => {
       .filter((name) => existsSync(join(repoRoot, name, "action.yml")));
 
     expect(dutyDirs.sort()).toEqual([...DUTIES].sort());
+  });
+
+  it("tells the consumer to run `actions/checkout` on one source line — a folded scalar would render it with a space", () => {
+    // The `warrant` description is a YAML `>` folded scalar: every newline
+    // becomes a space. `actions/` newline `checkout` would therefore render
+    // as `actions/ checkout` in the Marketplace listing, telling a consumer
+    // to run a step that does not exist. The one place the guarantee is real
+    // is the manifest itself — GitHub renders the description live from
+    // `action.yml`, and no built bundle carries this text.
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const text = readFileSync(join(root, "action.yml"), "utf8");
+    const block =
+      /warrant:\n(\s+)description: >-\n([\s\S]*?)\n {4}[a-z][a-z0-9-]*:/.exec(text)?.[2] ?? "";
+
+    expect(block).toContain("`actions/checkout`");
+    expect(block).not.toContain("actions/\n");
+    expect(block).not.toContain("actions/ ");
   });
 });

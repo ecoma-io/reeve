@@ -4,9 +4,10 @@
  * Everything below is orchestration. The pipeline:
  *
  *   1. Read the warrant — or, missing one at the default path, build the
- *      implicit warrant. `languages` comes from whichever of the warrant's
- *      own `languages:` key and the `languages` input answers it.
- *   1a. A written `capabilities:` block that does not name `harmonise` is
+ *      implicit warrant. `languages` comes from the warrant's own
+ *      `languages:` key, or this duty's documented default when the file is
+ *      silent.
+ *   1a. A written `duties:` block that does not name `harmonise` is
  *      checked here, once — the duty does nothing, and the run is green.
  *   2. Discover document groups by scanning for locale suffix files.
  *   3. Read the provenance state file.
@@ -17,9 +18,8 @@
  *      c. Let the judge panel pick between the admitted drafts, or fall
  *         back to the best-scored draft when no panel is configured.
  *   5. Open a PR per document group with the updated locale files — unless
- *      the warrant does not grant `edit-file` + `open-pr`, or `apply` is
- *      `none`, in which case every step above still ran and only the write
- *      is withheld.
+ *      the warrant does not grant `edit-file` + `open-pr`, in which case
+ *      every step above still ran and only the write is withheld.
  *
  * **A locale that fails does not fail the run.** Only a broken configuration
  * and a provenance state that cannot be read are `setFailed` — everything
@@ -34,7 +34,6 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
 import {
   bounded,
@@ -87,8 +86,8 @@ import { publishSync, type PublishApi, type SyncResult } from "./publish.js";
 import { publishState, type StateBranchApi } from "../../core/state-branch.js";
 import { summarize, type GroupResult } from "./summary.js";
 
-/** This duty's `languages` default (target locales only). */
-const DEFAULT_LANGUAGES_INPUT = "vi, zh";
+/** This duty's `languages` default (target locales only), when the warrant is silent. */
+const DEFAULT_LANGUAGES: readonly Language[] = parseLanguages("vi, zh");
 /** This duty's `source-language` default. */
 const DEFAULT_SOURCE_LANGUAGE_INPUT = "en";
 
@@ -99,7 +98,7 @@ export interface Settings {
   readonly sourceLanguage: Language;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  readonly apply: readonly Capability[];
+  /** What the file grants — the sole authority, so the run's only `permitted` list. */
   readonly permitted: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   readonly judgeNames: Names;
@@ -131,7 +130,6 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
   return {
     ...shared,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
@@ -151,7 +149,7 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
  */
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`harmonise\`; once that block ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`harmonise\`; once that block ` +
     "exists it is the whole answer, so add `harmonise: [edit-file, open-pr]` to it " +
     "(or remove the block to return to defaults)."
   );
@@ -191,9 +189,9 @@ export async function run(): Promise<void> {
       denied,
     );
 
-    // Parse target languages — the locales the documentation is translated into.
-    const rawLanguages = core.getInput("languages");
-    const languages = dutyLanguages(authority.warrant, denied, rawLanguages);
+    // Parse target languages — the locales the documentation is translated
+    // into, from the warrant's `languages:` key or this duty's own default.
+    const languages = dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES);
 
     // Validate: source language must not appear in target languages
     if (sourceLanguage !== null && languages.length > 0) {
@@ -212,14 +210,10 @@ export async function run(): Promise<void> {
     );
 
     // Notice when running on the default language config
-    if (
-      !denied &&
-      authority.warrant.languages === null &&
-      rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
-    ) {
+    if (!denied && authority.warrant.languages === null) {
       core.notice(
         "languages: running on the default (`vi, zh`) — nobody has set this yet. " +
-          "Write the `languages` input, or `languages:` in the warrant, to choose on purpose.",
+          "Write `languages:` in the warrant to choose on purpose.",
       );
     }
 
@@ -234,12 +228,7 @@ export async function run(): Promise<void> {
       );
     }
 
-    const { permitted } = narrowWarned(
-      authority.warrant.granted("harmonise", DEFAULT_CAPABILITIES),
-      base.apply,
-      "harmonise",
-      base.warrant,
-    );
+    const permitted = authority.warrant.granted("harmonise", DEFAULT_CAPABILITIES);
 
     const fallbackSource = parseLanguages("en")[0];
     if (fallbackSource === undefined) {
@@ -710,8 +699,9 @@ async function processGroup(
 
     bestDrafts.set(locale, winner);
 
-    // Mark as synced in provenance
-    // The real SHA will come after the write; we'll update later
+    // Marked as pending in provenance — the real SHA comes from the write's
+    // response, applied once `publishSync` returns below. Recording "pending"
+    // now keeps the state honest if the run dies before the write.
     markSynced(doc, locale, "pending");
     synced.push(locale);
   }
@@ -737,6 +727,14 @@ async function processGroup(
     const pr = await publishSync(publishApi, at, syncResult, settings.dryRun);
 
     if (pr !== null) {
+      // Record the real SHA each locale file now has, replacing the "pending"
+      // placeholder set above. A locale whose SHA the write did not answer
+      // stays "pending" — the honest reading of "synced, but to what is not
+      // known", which the next source change treats as stale rather than as a
+      // false conflict.
+      for (const [locale, sha] of pr.shas) {
+        markSynced(doc, locale, sha);
+      }
       core.info(`harmonise: opened PR #${String(pr.pr)} for ${group.id}`);
     }
   }

@@ -1,0 +1,15 @@
+{
+  "description": "The policy's own ecosystems list names only cargo, but the repository's one manifest is npm's package.json. Discovery reads repos.get, the recursive tree, and the manifest through the Contents API, then the ecosystem narrowing filters every dependency away — the datasource loop never runs and the repo's npm registry is never asked.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  dependa: [edit-file, open-pr]\ndependa:\n  ecosystems:\n    - cargo\n",
+  "files": {
+    "package.json": "{\n  \"name\": \"@repos/pkg\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {\n    \"lodash\": \"1.2.3\"\n  }\n}\n"
+  },
+  "expected": {
+    "proposed": "[]",
+    "refused": "[]",
+    "security": "[]",
+    "pull-requests": "[]",
+    "starved": "false",
+    "budget-exhausted": "false"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "The body already carries this duty's marker with the exact fingerprint the run would compute for this text in en + vi, so the run stops at the idempotency check — before detection, before a draft, before a write. The tracker stays untouched and the run is a finding: the fixture declares the clean stop as the expected outcome.",
+  "warrant": "version: 1\nlanguages:\n  - en\n  - vi\nduties:\n  translate: [edit-body]\n",
+  "already-translated": true,
+  "thread": {
+    "body": "Dark mode resets on reload.\n\n<!-- reeve:translate source=71b7791b3620cf71 -->"
+  },
+  "expected": {
+    "translated": [],
+    "source-language": "",
+    "effects": {
+      "edited": false
+    }
+  }
+}

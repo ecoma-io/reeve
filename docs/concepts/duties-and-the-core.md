@@ -2,7 +2,7 @@
 
 _Understand the boundary between the core and a duty, and why it is drawn there. Prerequisites: [The authority model](authority-model.md)._
 
-Every duty — `triage`, `translate`, `duplicate`, `respond`, `lifecycle`, `harmonise`, `dependa` — is a decision
+Every duty — `triage`, `translate`, `duplicate`, `respond`, `lifecycle`, `harmonise`, `dependa`, `review` — is a decision
 sitting on top of the same pipeline, the same warrant, the same guardrails.
 Knowing where that boundary runs is what makes the rest of the model
 predictable: once you have used one duty, you already know what any other
@@ -31,6 +31,7 @@ src/
     lifecycle/     another
     harmonise/     another
     dependa/       another
+    review/        another
 translate/action.yml
 triage/action.yml
 duplicate/action.yml
@@ -38,6 +39,7 @@ respond/action.yml
 lifecycle/action.yml
 harmonise/action.yml
 dependa/action.yml
+review/action.yml
 ```
 
 ## What the core supplies
@@ -70,11 +72,12 @@ everything the core provides: the GitHub API (through `forge.js`), the warrant
 duties also read from the local checkout (corrections, guidance) or the Contents
 API (manifests, blobs), which the core does not gate — but these reads are of
 files the maintainer controls, not of untrusted input. The boundary that matters
-is the one between what the core validates (the verdict, the authority, the
-intersection) and what a duty decides on its own.
+is the one between what the core validates (the verdict, the authority) and
+what a duty decides on its own.
 
 **Decide its own authority.** A duty does not read the warrant file. It is handed
-what it may do, already parsed and already intersected with the workflow's input.
+what it may do, already parsed, and nothing the workflow input does can widen
+that grant.
 
 **Trust its own output.** A duty's parser hands the verdict to the guardrail
 stage, which re-checks it against the file. A duty that validated its own result
@@ -90,8 +93,8 @@ that only reads well in English is not finished.
 
 These are not implementation notes — they are the reason [the warrant](../guides/warrant.md)
 can be a single, small file that governs every duty at once, and the reason
-adding a seventh duty tomorrow changes nothing about how the first six are
-trusted today.
+adding a new duty changes nothing about how the existing ones are trusted
+today.
 
 ---
 

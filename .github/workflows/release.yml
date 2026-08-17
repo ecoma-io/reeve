@@ -156,7 +156,7 @@ jobs:
           # list does not name fails too, or its bytes would go unattested
           # while the release claims otherwise.
           cp -r dist action.yml LICENSE README.md "$staged/"
-          duties="translate triage duplicate respond lifecycle harmonise dependa"
+          duties="translate triage duplicate respond lifecycle harmonise dependa review"
           for duty in $duties; do
             if [ ! -f "$duty/action.yml" ]; then
               echo "::error::expected duty directory '$duty' (with a top-level action.yml) is missing — refusing to cut a release that would break its pin."

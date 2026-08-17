@@ -3,7 +3,7 @@
 _Full warrant YAML schema. Prerequisites: [The warrant](../guides/warrant.md)._
 
 <!-- Source of truth: src/core/warrant.ts (Capability type, CAPABILITIES const,
-     Label and Warrant interfaces, parseWarrant/readLabels/readCapabilities
+     Label and Warrant interfaces, parseWarrant/readLabels/readDuties
      validation). Keep this page in sync with that file by hand — there is no
      automated diff for it. -->
 
@@ -12,18 +12,18 @@ behind each field, see [The warrant](../guides/warrant.md).
 
 ## Top-level keys
 
-| Key            | Required | Type                                    | What it does                                                                                                                                                                                                                                          |
-| -------------- | -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`      | yes      | number                                  | Must be `1`, the only version this build understands.                                                                                                                                                                                                 |
-| `labels`       | no       | list of label entries                   | The taxonomy. Absent is an empty taxonomy, not an error.                                                                                                                                                                                              |
-| `capabilities` | no       | mapping of duty name to capability list | What each duty may do. Absent leaves every duty on its own default.                                                                                                                                                                                   |
-| `languages`    | no       | list of language entries                | What to translate into. Absent leaves the `languages` input on each duty in charge.                                                                                                                                                                   |
-| `pivot`        | no       | one language code                       | The language corrections bridge through for cross-language recall. Must name one of `languages`. Absent is the first-listed language, unchanged from before this key existed.                                                                         |
-| `memory`       | no       | mapping — see below                     | How much of the corrections store one run reads. Absent leaves each duty's own default in charge.                                                                                                                                                     |
-| `about`        | no       | text                                    | What this repository is about, in the maintainer's own words. Read only by `triage` and `respond`, the two duties that reason about content rather than only translate or judge it. Absent falls back to the `about` input those duties already read. |
-| `lifecycle`    | no       | mapping — see below                     | The staleness policy `lifecycle` runs. Absent is a no-op — there is no built-in default track. Present but empty (`null`) is refused.                                                                                                                 |
-| `propose`      | no       | mapping — see below                     | How `triage`'s `propose` capability chooses names and gates evidence. Absent takes the design's own defaults. Present but empty (`null`) is refused — write `workspace:` under it, or remove the key.                                                 |
-| `dependa`      | no       | mapping — see below                     | How `dependa` discovers, groups, and proposes dependency updates. Absent takes the defaults: all non-major update types allowed, grouped by ecosystem, security updates separated. Present but empty (`null`) is refused.                             |
+| Key         | Required | Type                                    | What it does                                                                                                                                                                                                                                          |
+| ----------- | -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`   | yes      | number                                  | Must be `1`, the only version this build understands.                                                                                                                                                                                                 |
+| `labels`    | no       | list of label entries                   | The taxonomy. Absent is an empty taxonomy, not an error.                                                                                                                                                                                              |
+| `duties`    | no       | mapping of duty name to capability list | What each duty may do. Absent leaves every duty on its own default. `true` spells the duty's own default out; `false` and `[none]` mean nothing.                                                                                                      |
+| `languages` | no       | list of language entries                | What to translate into. Absent leaves each duty's own documented default in charge.                                                                                                                                                                   |
+| `pivot`     | no       | one language code                       | The language corrections bridge through for cross-language recall. Must name one of `languages`. Absent is the first-listed language, unchanged from before this key existed.                                                                         |
+| `memory`    | no       | mapping — see below                     | How much of the corrections store one run reads. Absent leaves each duty's own default in charge.                                                                                                                                                     |
+| `about`     | no       | text                                    | What this repository is about, in the maintainer's own words. Read only by `triage` and `respond`, the two duties that reason about content rather than only translate or judge it. Absent falls back to the `about` input those duties already read. |
+| `lifecycle` | no       | mapping — see below                     | The staleness policy `lifecycle` runs. Absent is a no-op — there is no built-in default track. Present but empty (`null`) is refused.                                                                                                                 |
+| `propose`   | no       | mapping — see below                     | How `triage`'s `propose` capability chooses names and gates evidence. Absent takes the design's own defaults. Present but empty (`null`) is refused — write `workspace:` under it, or remove the key.                                                 |
+| `dependa`   | no       | mapping — see below                     | How `dependa` discovers, groups, and proposes dependency updates. Absent takes the defaults: all non-major update types allowed, grouped by ecosystem, security updates separated. Present but empty (`null`) is refused.                             |
 
 ### `memory` fields
 
@@ -143,7 +143,7 @@ Schema only, here:
 | `create`         | no       | `true` lets `checkLabelsExist` create this label in the repository when missing, instead of failing the run red. What `propose` sets on the entries it writes.                    |
 | `color`          | no       | A 6-digit hex color with no `#`, used only when a missing `create: true` label is actually created. Absent takes GitHub's own neutral default.                                    |
 
-## Capabilities
+## The capabilities table
 
 | Capability  | What it permits                                                                                                                                                                                                                                                                                   | Default                      |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
@@ -156,10 +156,9 @@ Schema only, here:
 | `propose`   | Open or update a pull request adding or retiring taxonomy labels, from a monorepo's own package layout. `triage`-only, sweep-only. Needs `contents: write` and `pull-requests: write` on the token.                                                                                               | off                          |
 | `open-pr`   | Open or update a draft PR for state files, when `state-branch` is set. Required alongside the duty's own write capability (`record` for `triage`, `edit-file` for `harmonise` and `dependa`) to write state to a branch instead of the default branch. Needs `pull-requests: write` on the token. | off                          |
 | `edit-file` | Write or modify a file in the repository, through the Contents API. Used by `harmonise` (translated documentation) and `dependa` (dependency manifests and lockfiles). Needs `contents: write` on the token. Must be granted alongside `open-pr` when `state-branch` is set.                      | off                          |
-| `none`      | Run everything, write every output, change nothing.                                                                                                                                                                                                                                               | —                            |
 
-`duplicate` and `respond` are the two exceptions with no default at all — not
-even the cheapest one. See [Capabilities](../guides/warrant.md#capabilities)
+`duplicate`, `respond`, and `review` are the three exceptions with no default
+at all — not even the cheapest one. See [Duties](../guides/warrant.md#duties)
 for why.
 
 ## Validation

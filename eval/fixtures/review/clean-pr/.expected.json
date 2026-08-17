@@ -1,0 +1,22 @@
+{
+  "description": "The diff is shown and the model answers a readable empty verdict at 0.9 — the empty chrome is a real answer about a diff that was actually reviewed, so the run posts it. The model also had nothing deterministic to add.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,1 @@\n+export const VERSION = \"1.0.0\";"
+    }
+  ],
+  "verdict-over": {
+    "findings": [],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "0",
+    "head-sha": "abc123"
+  }
+}

@@ -58,34 +58,15 @@ inputs:
       shows the name instead of the id. A model nobody named shows its id.
     required: true
 
-  languages:
-    description: >-
-      The languages your contributors write in, comma or newline separated.
-      Detection narrows by script, then by profile, and only then asks a model —
-      so a list of two costs nothing on most threads.
-
-      The first language named is also the pivot: when the thread being
-      checked is written in another configured language and the corpus holds a
-      candidate in the pivot language, its title and body are translated into
-      the pivot once so ranking can reach that candidate too. A translation
-      that fails degrades to same-language matching rather than blocking the
-      run.
-
-      Ignored once `warrant`'s own `languages:` key is written — the file is
-      the whole answer from there, and the run says once which of the two it
-      read.
-    required: false
-    default: en, vi, zh
-
   warrant:
     description: >-
       Where the permissions live. This duty is granted nothing by default —
       unlike the rest of Reeve, there is no cheapest-reversible-action
       fallback here, because a comment naming the wrong thread as a duplicate
       is a claim posted in public about somebody else's report. Add
-      `duplicate: [comment]` to this file's `capabilities:` block to let it
+      `duplicate: [comment]` to this file's `duties:` block to let it
       post one. It may also carry a `languages:` key, which becomes the whole
-      answer for detection once it is written — see `languages` above.
+      answer for detection once it is written.
 
       Missing at this default path, there is no failure: the run still
       decides and reports, at the same "nothing granted" authority a written
@@ -96,21 +77,6 @@ inputs:
       wherever it lives.
     required: false
     default: .github/reeve.yml
-
-  apply:
-    description: >-
-      What this run may do: `comment`, or `none` for a run that decides and
-      reports without touching the thread.
-
-      The narrower of this and the warrant file wins, always, and neither
-      half defaults to `comment` on its own — a repository opts a workflow
-      into posting only by setting both this **and** `duplicate: [comment]`
-      in the warrant file. That is deliberate friction: a comment naming the
-      wrong thread as a duplicate is a claim posted in public about somebody
-      else's report, so this is not the cheapest-reversible-action default
-      the rest of Reeve grants for free.
-    required: false
-    default: none
 
   candidates:
     description: >-
@@ -202,7 +168,7 @@ inputs:
       open issue, newest created first, each ranked against the corpus of
       every other open issue. Not an escalation of authority — a sweep
       decides how much work a run looks for, never what it is allowed to do to
-      a thread, so the same warrant and the same `apply` bound it exactly as
+      a thread, so the same warrant bound it exactly as
       they bound a single-thread run.
 
       There is no idempotent skip here the way a sweep in another duty has
@@ -298,7 +264,7 @@ outputs:
   duplicate-of:
     description: >-
       The issue number the verdict thinks this repeats, or empty. Reported
-      whether or not `apply` names `comment`, so a workflow can act on it —
+      whether or not the warrant grants `comment`, so a workflow can act on it —
       close it, label it, anything — without granting this duty the ability to
       touch the thread itself. Unset on a `sweep` run — a sweep answers per
       thread through its own summary table, not through this single-thread

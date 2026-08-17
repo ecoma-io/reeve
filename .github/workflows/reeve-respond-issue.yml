@@ -1,9 +1,10 @@
 name: Issue first reply
 
 # Report-only dogfood: the warrant grants `respond: [comment]`, and this
-# workflow leaves `apply` at its `none` default. Below the posting gate the
-# duty still drafts, and the sanitized draft is rendered in the job summary —
-# that is the read that decides whether this project ever lets it post.
+# workflow runs `dry-run: true`. Below the posting gate the duty still drafts,
+# and the sanitized draft is rendered in the job summary — that is the read
+# that decides whether this project ever lets it post. The dry-run withholds
+# the post; removing it is the act that switches posting on.
 
 on:
   issues:
@@ -61,4 +62,5 @@ jobs:
             language model and acts on them under a warrant committed to the
             repository — translating threads and applying labels from a taxonomy
             the maintainers wrote.
-          # `apply` stays unset: report-only; the draft lives in the job summary.
+          # Report-only; the draft lives in the job summary.
+          dry-run: true

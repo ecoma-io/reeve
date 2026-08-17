@@ -1,0 +1,15 @@
+{
+  "description": "The repository tree holds no recognised dependency manifest — just prose. Discovery reads repos.get and the recursive git tree, selects no manager, and stops: no datasource is ever asked.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  dependa: [edit-file, open-pr]\n",
+  "files": {
+    "README.md": "# The project\n\nA codebase with no dependencies.\n"
+  },
+  "expected": {
+    "proposed": "[]",
+    "refused": "[]",
+    "security": "[]",
+    "pull-requests": "[]",
+    "starved": "false",
+    "budget-exhausted": "false"
+  }
+}

@@ -235,8 +235,18 @@ export function evaluateTrack(
 
     let firedAt: Date | null = null;
     if (talks) {
+      // Two-part attribution, the same way the label path owns a firing: the
+      // comment must carry this duty's real fingerprint *and* be authored by
+      // this run's own login. The fingerprint alone is forgeable — it is a
+      // deterministic public hash over the track name and the anchor, both of
+      // which a stranger can read — so without the authorship half, any
+      // commenter who computes the digest could read a step as fired, anchor
+      // the clock to their own comment, and walk a `when:` track into
+      // permanent suppression. A human's comment (or a second bot's) is not
+      // evidence this duty's own step fired.
       const marker = facts.comments.find(
-        (comment) => MARKER.split(comment.body).fingerprint === fp,
+        (comment) =>
+          comment.login === facts.ownLogin && MARKER.split(comment.body).fingerprint === fp,
       );
       firedAt = marker?.createdAt ?? null;
     } else if (step.label !== null) {

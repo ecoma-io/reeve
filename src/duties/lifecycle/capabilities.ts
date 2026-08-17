@@ -8,7 +8,7 @@
  */
 import type { Capability } from "../../core/warrant.js";
 
-/** `lifecycle`'s own default, once a `lifecycle:` policy exists and no `capabilities:` block says otherwise. */
+/** `lifecycle`'s own default, once a `lifecycle:` policy exists and no `duties:` block says otherwise. */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = ["label", "comment"];
 
 /**

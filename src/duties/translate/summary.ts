@@ -56,7 +56,7 @@ export interface Run {
   /** True when no warrant file existed and this ran on its own defaults. */
   readonly implicit: boolean;
   /**
-   * Why nothing was translated, when a written `capabilities:` block simply
+   * Why nothing was translated, when a written `duties:` block simply
    * does not name this duty. `null` on every ordinary run, including one that
    * translated nothing for a reason of its own.
    */
@@ -69,13 +69,14 @@ export interface Run {
  * Deliberately not triage's "narrowest authority... labels only" sentence —
  * that is about a taxonomy built from label descriptions, and translate has
  * no taxonomy to narrow. What is true for translate is smaller: there was no
- * file, so nothing changed from what `edit-body` and the `languages` input
- * already gave it.
+ * file, so nothing changed from what `edit-body` and the duty's documented
+ * `languages` default already gave it. With no input left to override either,
+ * the file's silence is the whole answer, and so is this sentence.
  */
 function authority(run: Run): string {
   return (
     `No \`${run.warrant}\` — this duty found no warrant file, and ran on its own ` +
-    "defaults (`edit-body`, and whatever `languages` was configured)."
+    "defaults (`edit-body`, and whatever languages were configured)."
   );
 }
 
@@ -223,7 +224,7 @@ export interface SweepRun {
   readonly warrant: string;
   /**
    * Why the sweep never looked at the backlog at all, when a written
-   * `capabilities:` block does not name this duty. Checked once, before the
+   * `duties:` block does not name this duty. Checked once, before the
    * listing — see `runSweep`.
    */
   readonly ungranted: string | null;

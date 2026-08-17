@@ -1,0 +1,12 @@
+{
+  "description": "No `lifecycle:` key in the warrant, and lifecycle has no implicit policy: the run reports a green no-op naming the absent key.",
+  "warrant": "version: 1\nlanguages:\n  - en\n",
+  "expected": {
+    "skipped": "true",
+    "reminded": "false",
+    "labeled": "0",
+    "closed": "false",
+    "unstaled": "0",
+    "due-not-granted": "0"
+  }
+}

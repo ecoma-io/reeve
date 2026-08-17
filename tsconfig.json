@@ -8,6 +8,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    // The eval tree runs its own TypeScript directly under Node's
+    // `--experimental-strip-types`, which resolves relative specifiers exactly
+    // as written — so those imports carry the `.ts` extension, and `tsc` must
+    // accept that. `noEmit` below is what makes this flag legal.
+    "allowImportingTsExtensions": true,
 
     // esbuild emits the bundle the action actually runs; `tsc` only ever
     // judges. Keeping emit off here is what makes `pnpm typecheck` a gate

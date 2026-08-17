@@ -1,0 +1,26 @@
+{
+  "description": "A real report in Japanese scoped to the [bug, docs, duplicate] taxonomy. The warrant configures `languages: [en, vi, zh, ja]`; detection narrows to [zh, ja] by script and resolves to Japanese by profile, so the Han that Japanese shares with Chinese does not cost a wrong answer. The verdict names `duplicate` at 0.95 and points at #7, the warrant grants `label, comment, close`, and the run applies `duplicate`, closes the thread and posts the attribution marker — the whole duplicate-detection-and-close pipeline on a non-Latin thread.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: duplicate\n    description: Repeats an existing thread.\n  - name: question\n    description: Asks for help or guidance.\nlanguages:\n  - en\n  - vi\n  - zh\n  - ja\nduties:\n  triage: [label, comment, close]\n",
+  "thread": {
+    "title": "ページを再読み込みするとダークモードが保存されません",
+    "body": "ページを再読み込みするとダークモードの設定が保存されません。設定画面で確認しましたが、ページを開くたびに初期状態に戻ってしまいます。早急に修正していただきたいです。"
+  },
+  "verdict-over": {
+    "labels": ["duplicate"],
+    "confidence": 0.95,
+    "duplicate_of": 7,
+    "rationale": "既存の報告 #7 と同じ内容です。"
+  },
+  "expected": {
+    "applied-names": ["duplicate"],
+    "duplicate-of": 7,
+    "screened-out": "",
+    "language": "日本語",
+    "effects": {
+      "applied": ["duplicate"],
+      "commented": true,
+      "assigned": [],
+      "closed": true
+    }
+  }
+}

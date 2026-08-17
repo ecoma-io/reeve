@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in Spanish over the 0.75 floor. Detection resolves Spanish by profile among four Latin candidates, the draft answers in Spanish, and `comment` is granted — the run posts a Spanish first reply to a Spanish thread, end to end.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\n  - es\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "El modo oscuro no se guarda al recargar la página",
+    "body": "El modo oscuro no se guarda después de recargar la página. Revisé la configuración, pero siempre vuelve a los valores por defecto cada vez que abro la página. Espero que lo puedan corregir pronto."
+  },
+  "draft-over": {
+    "text": "Gracias por el informe: guardaremos la preferencia del modo oscuro en el almacenamiento local para que no se pierda al recargar la página."
+  },
+  "expected": {
+    "language": "español",
+    "patch": "Gracias por el informe: guardaremos la preferencia del modo oscuro en el almacenamiento local para que no se pierda al recargar la página.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

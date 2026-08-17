@@ -1,0 +1,11 @@
+{
+  "description": "An English body, a warrant that grants edit-body and configures en + vi. Detection identifies the thread as English by profile (no model call), the draft answers in Vietnamese, the score admits it, and the run publishes the translation by PATCHing the body — the tracker records the edit.",
+  "warrant": "version: 1\nlanguages:\n  - en\n  - vi\nduties:\n  translate: [edit-body]\n",
+  "expected": {
+    "translated": ["vi"],
+    "source-language": "en",
+    "effects": {
+      "edited": true
+    }
+  }
+}

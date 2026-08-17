@@ -17,3 +17,15 @@ import type { Capability } from "../../core/warrant.js";
  * work.
  */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = ["edit-body"];
+
+/**
+ * The full ladder this duty ever asks for — anything else a warrant names
+ * for it is inert here, not an error; see `Warrant.granted`'s own doc
+ * comment for why a per-duty enumeration is not this module's to validate.
+ * Exported so `doctor` mode can apply the exact same narrowing a real run
+ * applies, rather than a second guess at which capabilities this duty
+ * actually has a use for. The read-set is every `permitted.includes()`
+ * `translate`'s runtime applies: `edit-body` is the one thing the duty has
+ * ever done.
+ */
+export const TRANSLATE_CAPABILITIES: readonly Capability[] = ["edit-body"];

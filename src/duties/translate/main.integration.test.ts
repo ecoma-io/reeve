@@ -68,9 +68,35 @@ const STRUCTURED_ENGLISH = [
  * A warrant in the shape a maintainer writes one, granting `translate`
  * exactly `edit-body` and nothing else — the same capability the implicit
  * warrant hands it by default, so a case not otherwise concerned with the
- * warrant sees the same behaviour whichever of the two it ran under.
+ * warrant sees the same behaviour whichever of the two it ran under. It also
+ * writes `languages: [en, vi]`, the list this suite used to configure through
+ * the `languages` input — with that input gone, the warrant is the only place
+ * it can come from, and this keeps every case below running against the
+ * targets it always had.
  */
-const WARRANT = ["version: 1", "capabilities:", "  translate: [edit-body]"].join("\n");
+const WARRANT = [
+  "version: 1",
+  "duties:",
+  "  translate: [edit-body]",
+  "languages:",
+  "  - en",
+  "  - vi",
+].join("\n");
+
+/**
+ * The three-language warrant the cases that exercise a provider shortfall on
+ * `zh` run under — the duty's own documented default (`en, vi, zh`) written
+ * out, since the run reads `languages:` from the warrant and nowhere else.
+ */
+const LANGUAGES_WARRANT = [
+  "version: 1",
+  "duties:",
+  "  translate: [edit-body]",
+  "languages:",
+  "  - en",
+  "  - vi",
+  "  - zh",
+].join("\n");
 
 beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
@@ -410,12 +436,9 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "base-url": `${stub.url}/v1`,
     "api-key": "sk-stub-key",
     models: "stub-model",
-    // The short form, so this suite drives the derivation too: the labels and
-    // the scripts below are read off the runtime's own CLDR data inside the
-    // bundle, which is the only place the built artifact's ICU is exercised.
-    languages: "en, vi",
+    // No `languages` input exists anymore — the warrant (via the suite's
+    // `WARRANT` fixture) is where the run reads what to translate into.
     warrant,
-    apply: "edit-body",
     drafts: "1",
     "judge-models": "",
     "max-body-chars": "6000",
@@ -774,7 +797,11 @@ describe("the action", () => {
     // being unavailable must not cost the thread the English one.
     stub.answer = translating({ en: ENGLISH });
 
-    const run = await runAction(stub, { languages: "en, zh, vi" });
+    // The warrant's own `languages:` key supplied the third language; see the
+    // same shift `retries next run` makes below.
+    await writeFile(warrantPath, LANGUAGES_WARRANT);
+
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
@@ -796,13 +823,14 @@ describe("the action", () => {
     // own claim and stops, and the thread never gets it — from a green run,
     // with a warning nobody reads twice.
     stub.answer = translating({ en: ENGLISH });
-    await runAction(stub, { languages: "en, zh, vi" });
+    await writeFile(warrantPath, LANGUAGES_WARRANT);
+    await runAction(stub);
     expect(stub.body).not.toContain(CHINESE);
     stub.asked.length = 0;
 
-    // Same text, same configuration, quota back.
+    // Same text, same warrant, quota back.
     stub.answer = translating({ en: ENGLISH, zh: CHINESE });
-    const run = await runAction(stub, { languages: "en, zh, vi" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.asked).not.toHaveLength(0);
@@ -815,11 +843,12 @@ describe("the action", () => {
     // it was meant to protect. A run that translated everything writes a marker
     // the next run matches, and that run makes no request.
     stub.answer = translating({ en: ENGLISH, zh: CHINESE });
-    await runAction(stub, { languages: "en, zh, vi" });
+    await writeFile(warrantPath, LANGUAGES_WARRANT);
+    await runAction(stub);
     const written = stub.body;
     stub.asked.length = 0;
 
-    const run = await runAction(stub, { languages: "en, zh, vi" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.body).toBe(written);
@@ -940,12 +969,20 @@ describe("the action", () => {
   });
 
   it("fails loudly on a bare code the runtime knows no language by", async () => {
-    // Derivation is what makes `languages: en, vi` legal, and this is the one
+    // Derivation is what makes `languages: en, qqq` legal, and this is the one
     // way it can be wrong: a code CLDR has no name for would otherwise become a
     // language nobody can read the name of. The bundle carries its own ICU, so
     // this is also the only place the derivation is measured against the built
-    // artifact rather than against the test runner's runtime.
-    const run = await runAction(stub, { languages: "en, qqq" });
+    // artifact rather than against the test runner's runtime. With the input
+    // gone, the warrant's `languages:` key is where the derivation lives now.
+    await writeFile(
+      warrantPath,
+      ["version: 1", "duties:", "  translate: [edit-body]", "languages:", "  - en", "  - qqq"].join(
+        "\n",
+      ),
+    );
+
+    const run = await runAction(stub);
 
     expect(run.code).toBe(1);
     expect(run.log).toContain("`qqq` is not a language code");
@@ -1139,8 +1176,9 @@ describe("max-requests", () => {
       "already drafted",
     async () => {
       stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+      await writeFile(warrantPath, LANGUAGES_WARRANT);
 
-      const run = await runAction(stub, { languages: "en, zh, vi", "max-requests": "1" });
+      const run = await runAction(stub, { "max-requests": "1" });
 
       expect(run.code).toBe(0);
       expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
@@ -1202,8 +1240,9 @@ describe("max-requests", () => {
 
   it("never trips on the default (`none`), whatever this run spends", async () => {
     stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+    await writeFile(warrantPath, LANGUAGES_WARRANT);
 
-    const run = await runAction(stub, { languages: "en, zh, vi" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(run.outputs.translated).toBe(JSON.stringify(["en", "zh"]));
@@ -1222,8 +1261,21 @@ describe("max-requests", () => {
       // away — the loop simply runs out of languages to check before it
       // runs out of budget.
       stub.answer = translating({ en: ENGLISH });
+      // `en, vi` — the same two languages the input used to supply — now comes
+      // from the warrant's own `languages:` key.
+      await writeFile(
+        warrantPath,
+        [
+          "version: 1",
+          "duties:",
+          "  translate: [edit-body]",
+          "languages:",
+          "  - en",
+          "  - vi",
+        ].join("\n"),
+      );
 
-      const run = await runAction(stub, { languages: "en, vi", "max-requests": "1" });
+      const run = await runAction(stub, { "max-requests": "1" });
 
       expect(run.code).toBe(0);
       expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
@@ -1245,11 +1297,11 @@ describe("max-requests", () => {
       // itself — catches it anyway.
       stub.issues = [{ number: 101, body: VIETNAMESE, createdAt: "2026-01-01T00:00:00Z" }];
       stub.answer = translating({ en: ENGLISH, zh: CHINESE });
+      await writeFile(warrantPath, LANGUAGES_WARRANT);
 
       const run = await runAction(stub, {
         sweep: "true",
         number: "",
-        languages: "en, vi, zh",
         "max-requests": "1",
       });
 
@@ -1355,10 +1407,12 @@ describe("the sweep", () => {
   });
 
   it("skips a thread whose body already carries this duty's marker, at no cost", async () => {
+    // A real digest — the shape `fingerprint` produces and nothing narrower is
+    // accepted as "already translated"; see the forged-marker test below.
     stub.issues = [
       candidate(
         501,
-        `${VIETNAMESE}\n\n<!-- reeve:translate source=deadbeef -->`,
+        `${VIETNAMESE}\n\n<!-- reeve:translate source=deadbeefdeadbeef -->`,
         "2026-01-02T00:00:00Z",
       ),
       candidate(502, VIETNAMESE, "2026-01-01T00:00:00Z"),
@@ -1375,6 +1429,28 @@ describe("the sweep", () => {
     expect(stub.asked).toHaveLength(1);
     expect(run.summary).toContain("| #502 |");
     expect(run.summary).not.toContain("| #501 |");
+  });
+
+  it("does not let a forged marker permanently withhold a thread from sweeps", async () => {
+    // The marker's shape is public, so `<!-- reeve:translate source= -->` (or
+    // any payload that is not a real digest) carries no evidence a translation
+    // exists. Treating it as "already translated" would let anyone who can edit
+    // a thread body permanently suppress it from every future sweep — the
+    // withholding attack this line guards against.
+    stub.issues = [
+      candidate(511, `${VIETNAMESE}\n\n<!-- reeve:translate source= -->`, "2026-01-02T00:00:00Z"),
+      candidate(512, VIETNAMESE, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs());
+
+    expect(run.code).toBe(0);
+    // Both threads were translated — the forged marker on #511 was not taken
+    // as evidence of prior work.
+    expect(run.outputs.processed).toBe("2");
+    expect(run.outputs.skipped).toBe("0");
+    expect(run.summary).toContain("| #511 |");
+    expect(run.summary).toContain("| #512 |");
   });
 
   it("refuses `sweep` combined with `number`, before spending anything", async () => {
@@ -1407,55 +1483,61 @@ describe("the sweep", () => {
 });
 
 describe("the warrant", () => {
-  it("reads languages from the warrant's own key, ignoring the input entirely", async () => {
-    // The stub only ever answers a request for English — so if the input's
-    // `zh` were consulted at all, the thread's Vietnamese body would have
+  it("reads the target languages from the warrant's own `languages:` key", async () => {
+    // The stub only ever answers a request for English — so if the warrant's
+    // `en, vi` were consulted at all, the thread's Vietnamese body would have
     // nothing to be translated into and this would end with no translation.
-    // The warrant's `en, vi` is the only reason it exists.
+    // The warrant is the whole answer: the run reads `languages:` from it and
+    // nowhere else.
     await writeFile(
       warrantPath,
-      [
-        "version: 1",
-        "capabilities:",
-        "  translate: [edit-body]",
-        "languages:",
-        "  - en",
-        "  - vi",
-      ].join("\n"),
+      ["version: 1", "duties:", "  translate: [edit-body]", "languages:", "  - en", "  - vi"].join(
+        "\n",
+      ),
     );
 
-    const run = await runAction(stub, { languages: "zh" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
     expect(run.log).toContain(
-      `languages: read from \`${warrantPath}\`'s \`languages:\` key, not the \`languages\` input`,
+      `languages: read from \`${warrantPath}\`'s \`languages:\` key — ` +
+        "the file is the whole answer once that key is written.",
     );
   });
 
-  it("falls back to the languages input when the warrant never mentions the key", async () => {
-    // `WARRANT` above carries a `capabilities:` block and no `languages:` key —
-    // the ordinary shape a maintainer who has never heard of this feature
-    // still runs under, and the input answers exactly as it always has.
-    const run = await runAction(stub, { languages: "en, vi" });
+  it("falls back to the duty's documented default when the warrant never mentions the key", async () => {
+    // A `duties:` block with no `languages:` key — the ordinary shape a
+    // maintainer who has never heard of this feature still runs under. The
+    // duty's own default (`en, vi, zh`) answers for it, and the run says once
+    // that nobody has chosen on purpose.
+    await writeFile(warrantPath, ["version: 1", "duties:", "  translate: [edit-body]"].join("\n"));
+
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(run.log).toContain("languages: running on the default (`en, vi, zh`)");
     expect(run.log).not.toContain("read from");
   });
 
-  it("fails red when neither the warrant nor the input names any language", async () => {
-    const run = await runAction(stub, { languages: "" });
+  it("stays green with nothing to translate when the warrant is silent about languages", async () => {
+    // With the `languages` input gone, a warrant that never wrote the key is
+    // not a failure — the duty's documented default always answers. This pins
+    // the other half of that: a written block that does not name translate is
+    // still the whole story, and the run is green rather than red over a
+    // language question that could not have mattered.
+    await writeFile(warrantPath, ["version: 1", "duties:", "  triage: [label]"].join("\n"));
 
-    expect(run.code).toBe(1);
-    expect(run.log).toContain("languages: no language is configured");
-    expect(run.log).toContain(`Write \`languages:\` in the warrant (\`${warrantPath}\`)`);
-    expect(run.log).toContain("or set the `languages` input");
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
     expect(stub.asked).toHaveLength(0);
+    expect(run.summary).toContain("does not name `translate`");
   });
 
   it("grants translate nothing, spends no model call, and says why, when a written block does not name it", async () => {
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+    await writeFile(warrantPath, ["version: 1", "duties:", "  triage: [label]"].join("\n"));
 
     const run = await runAction(stub);
 
@@ -1464,69 +1546,31 @@ describe("the warrant", () => {
     expect(stub.body).toBe(VIETNAMESE);
     expect(run.outputs.translated).toBe(JSON.stringify([]));
     expect(run.summary).toContain(
-      `\`${warrantPath}\`'s \`capabilities:\` block does not name \`translate\`; once that block ` +
+      `\`${warrantPath}\`'s \`duties:\` block does not name \`translate\`; once that block ` +
         "exists it is the whole answer, so add `translate: [edit-body]` to it (or remove the " +
         "block to return to defaults).",
     );
     expect(run.summary).toContain("No model was asked anything. This is a real answer");
   });
 
-  it("stays green when denied, even with no languages configured anywhere", async () => {
-    // The grant question outranks the language question: a denied duty is
-    // promised a green no-op, and `languages` is configuration it was never
-    // going to use — red-failing over it would fail the run for a key that
-    // could not have mattered.
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
-
-    const run = await runAction(stub, { languages: "" });
-
-    expect(run.code).toBe(0);
-    expect(stub.asked).toHaveLength(0);
-    expect(run.summary).toContain("does not name `translate`");
-  });
-
   it("says in the summary why a drafted translation was not published, when `edit-body` is withheld", async () => {
     // `[none]` names the duty and grants it nothing: the pipeline still
-    // detects, drafts and judges — the same spend an `apply: none` narrowing
-    // costs triage — and only the write is withheld. The summary has to say
+    // detects, drafts and judges — the same spend an `edit-body`-withholding
+    // warrant costs — and only the write is withheld. The summary has to say
     // that, because with `posted` emptied a blocked write and a run where no
     // draft survived would otherwise read identically.
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  translate: [none]"].join("\n"));
+    await writeFile(warrantPath, ["version: 1", "duties:", "  translate: [none]"].join("\n"));
 
-    const run = await runAction(stub, { languages: "en, vi" });
+    const run = await runAction(stub);
 
     expect(run.code).toBe(0);
     expect(stub.body).toBe(VIETNAMESE);
     expect(stub.asked.length).toBeGreaterThan(0);
-    expect(run.summary).toContain("`edit-body` is not permitted this run");
-  });
-
-  it("says which half withheld it, once, up front, when `apply` asks for more than the warrant grants", async () => {
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  translate: [none]"].join("\n"));
-
-    const run = await runAction(stub, { languages: "en, vi" });
-
-    expect(run.code).toBe(0);
-    expect(run.log).toContain(
-      `\`apply\` asks for \`edit-body\`, which \`${warrantPath}\` does not grant to translate.`,
-    );
-  });
-
-  it("narrows `edit-body` away when `apply` alone withholds it, warrant granting freely", async () => {
-    const run = await runAction(stub, { apply: "none", languages: "en, vi" });
-
-    expect(run.code).toBe(0);
-    // Detection, drafting and judging still ran and spent — only the write is gated.
-    expect(stub.asked.length).toBeGreaterThan(0);
-    expect(stub.body).toBe(VIETNAMESE);
-    // Nothing was withheld from what `apply` asked for — it asked for nothing —
-    // so the upfront warning never fires; only the generic not-published note does.
-    expect(run.log).not.toContain("does not grant");
     expect(run.summary).toContain("`edit-body` is not permitted this run");
   });
 
   it("grants translate nothing in a sweep too, checked once before the listing", async () => {
-    await writeFile(warrantPath, ["version: 1", "capabilities:", "  triage: [label]"].join("\n"));
+    await writeFile(warrantPath, ["version: 1", "duties:", "  triage: [label]"].join("\n"));
     stub.issues = [{ number: 701, body: VIETNAMESE, createdAt: "2026-01-01T00:00:00Z" }];
 
     const run = await runAction(stub, { sweep: "true", number: "" });
@@ -1551,14 +1595,17 @@ describe("zero config", () => {
    */
   const DEFAULT_WARRANT_PATH = ".github/reeve.yml";
 
-  it("keeps its defaults — edit-body, and languages from the input — when no warrant exists", async () => {
+  it("keeps its defaults — edit-body, and the duty's documented languages — when no warrant exists", async () => {
+    // The warrant is whole authority and whole answer both: with no file, the
+    // duty's documented `en, vi, zh` default answers for the languages, exactly
+    // as it does under a warrant that wrote `duties:` and no `languages:` key.
     const run = await runAction(stub, { warrant: DEFAULT_WARRANT_PATH }, {}, scratch);
 
     expect(run.code).toBe(0);
     expect(stub.body).toContain(ENGLISH);
     expect(run.summary).toContain(
       `No \`${DEFAULT_WARRANT_PATH}\` — this duty found no warrant file, and ran on its own ` +
-        "defaults (`edit-body`, and whatever `languages` was configured).",
+        "defaults (`edit-body`, and whatever languages were configured).",
     );
   });
 });

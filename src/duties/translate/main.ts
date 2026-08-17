@@ -7,10 +7,10 @@
  * in and what a failure at each step means for the run:
  *
  *   1. Read the warrant — or, missing one at the default path, build the
- *      implicit warrant the same way triage does. `languages` comes from
- *      whichever of the warrant's own `languages:` key and the `languages`
- *      input answers it, the file winning outright when it has an opinion.
- *   1a. A written `capabilities:` block that does not name `translate` is
+ *      implicit warrant the same way triage does. `languages` comes from the
+ *      warrant's own `languages:` key — or, the key silent, the duty's
+ *      documented default (`DEFAULT_LANGUAGES` below).
+ *   1a. A written `duties:` block that does not name `translate` is
  *      checked here, once, before a single thread is read — sweep or not,
  *      exactly as triage's own enumeration is total. Nothing below this line
  *      runs; the summary says why, and the run is green.
@@ -28,7 +28,7 @@
  *   6. Translate into every configured language except the one it came from.
  *   7. Let the panel pick between the drafts the score admitted.
  *   8. Append the translations to the body, under the marker — unless the
- *      warrant's `capabilities:` block was written without granting
+ *      warrant's `duties:` block was written without granting
  *      `edit-body`, in which case every step up to here still ran and only
  *      the write is withheld.
  *   9. When `translate-replies` is on, do all of the above again per reply.
@@ -71,8 +71,8 @@
  * that needs it.** Reading the shared inputs (`readCore`), assembling the
  * provider client with its rotation, temperature and metering
  * (`assembleClient`), opening the authority — warrant file or the implicit
- * one — and warning about withheld capabilities (`openAuthority`,
- * `narrowWarned`), walking the backlog (`sweepThreads`), and ending the run
+ * one — and warning about withheld capabilities (`openAuthority`), walking
+ * the backlog (`sweepThreads`), and ending the run
  * (`warnIfStarved`, `writeRunSummary`, `reportNoSweep`). Each of those was a
  * near-copy in four or five duties; each is now one tested module, called
  * from here.
@@ -85,7 +85,6 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
-import { narrowWarned, parseApply } from "../../core/enforce.js";
 import { listOpenThreads, readStanding } from "../../core/forge.js";
 import {
   bounded,
@@ -94,8 +93,8 @@ import {
   type ApiKeySpec,
   type EndpointSpec,
 } from "../../core/inputs.js";
-import { type Language } from "../../core/languages.js";
-import { isReeveProposalPr } from "../../core/marker.js";
+import { type Language, parseLanguages } from "../../core/languages.js";
+import { isFingerprint, isReeveProposalPr } from "../../core/marker.js";
 import {
   assembleClient,
   createWeather,
@@ -133,15 +132,11 @@ import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 type SweepAccumulator = Accumulator<SweptThread>;
 
 /**
- * `languages`'s own default in `action.yml`, repeated here for the same
- * reason `core/warrant.ts` keeps `DEFAULT_WARRANT_PATH`: a default this file
- * has to compare against is a value this file needs. Used only to tell "this
- * is the input nobody touched" from "this is what somebody typed, and it
- * happens to match" — the two are not otherwise distinguishable once the
- * input has already been filled in, and the run treats the coincidence as
- * harmless rather than try to detect it.
+ * What `translate` translates into when the warrant's `languages:` key is
+ * silent — the duty's own documented default, resolved when nothing in the
+ * warrant has an opinion.
  */
-const DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
+const DEFAULT_LANGUAGES: readonly Language[] = parseLanguages("en, vi, zh");
 
 export interface Settings {
   readonly token: string;
@@ -152,12 +147,7 @@ export interface Settings {
   readonly modelNames: Names;
   readonly languages: readonly Language[];
   readonly warrant: string;
-  /** The `apply` input, parsed. This run's half of the double-gate — see `permitted`. */
-  readonly apply: readonly Capability[];
-  /**
-   * The narrower of what the warrant grants and what `apply` asks for.
-   * Checked once per run, not per text — see `core/enforce.ts`'s `narrow`.
-   */
+  /** What the file grants — the sole authority, so the run's only `permitted` list. */
   readonly permitted: readonly Capability[];
   readonly judges: readonly (readonly string[])[];
   /** What to call each seat, keyed by every model that seat may be filled by. */
@@ -209,7 +199,6 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
   return {
     ...shared,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", core.getInput("drafts")),
@@ -246,7 +235,7 @@ function readAttribution(): Attribution {
  */
 function notGranted(warrant: Warrant): string {
   return (
-    `\`${warrant.path}\`'s \`capabilities:\` block does not name \`translate\`; once that block ` +
+    `\`${warrant.path}\`'s \`duties:\` block does not name \`translate\`; once that block ` +
     "exists it is the whole answer, so add `translate: [edit-body]` to it (or remove the block " +
     "to return to defaults)."
   );
@@ -343,10 +332,17 @@ async function runSweep(
       // here calls the tracker or a model, only `marker.split` on text the
       // listing already fetched.
       //
+      // The digest, not the marker: the marker's shape is public and anyone
+      // can type it, so `<!-- reeve:translate source= -->` (or any payload that
+      // is not a real digest) carries no evidence a translation exists — and
+      // counts as untranslated, so a forged empty marker cannot permanently
+      // withhold a thread from sweeps. A real 16-hex digest is the only claim
+      // of prior work this line accepts.
+      //
       // Recursion guard on the same line: Reeve never translates its own
       // proposal pull request, and the listing already carries `isPullRequest`
       // and `body`, so this costs nothing beyond the marker check.
-      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread),
+      isFingerprint(marker.split(thread.body).fingerprint ?? "") || isReeveProposalPr(thread),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
     // thread it cannot even begin — leaving it for `remaining` is cheaper
@@ -407,45 +403,27 @@ export async function run(): Promise<void> {
     authority = opened.authority;
     const denied = opened.denied;
 
-    // Only now, for the same reason triage waits: whether the warrant or the
-    // input answers `languages` is the authority's to decide, and only once it
-    // has can `settings` become the object every stage below already expects.
-    // Except when the same authority already denied this duty outright — that
-    // run is promised a green no-op, and a duty that will never translate has
-    // no business failing red over a `languages` nobody configured for it.
-    const rawLanguages = core.getInput("languages");
-    const languages = dutyLanguages(authority.warrant, denied, rawLanguages);
+    // Only now, for the same reason triage waits: whether the warrant answers
+    // `languages` is the authority's to decide, and only once it has can
+    // `settings` become the object every stage below already expects. Except
+    // when the same authority already denied this duty outright — that run is
+    // promised a green no-op, and a duty that will never translate has no
+    // business failing red over a `languages` nobody configured for it.
+    const languages = dutyLanguages(authority.warrant, denied, DEFAULT_LANGUAGES);
 
     // Once, and only for the run nobody has configured at all: the warrant
-    // never wrote `languages:`, and the input is exactly the default
-    // `action.yml` fills in when a workflow leaves it out. A repository that
-    // typed this on purpose gets the same notice — indistinguishable from
-    // here, and saying so once is cheap next to staying silent forever about
-    // a choice nobody actually made.
-    if (
-      !denied &&
-      authority.warrant.languages === null &&
-      rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT
-    ) {
+    // never wrote `languages:`. Saying so once is cheap next to staying
+    // silent forever about a choice nobody actually made.
+    if (!denied && authority.warrant.languages === null) {
       core.notice(
         "languages: running on the default (`en, vi, zh`) — nobody has set this yet. " +
-          "Write the `languages` input, or `languages:` in the warrant, to choose on purpose.",
+          "Write `languages:` in the warrant to choose on purpose.",
       );
     }
 
-    // The narrower of the two authorities, exactly as triage computes it — the
-    // file may restrict what `apply` asked for, never widen it. `withheld` is
-    // reported once here, up front, rather than per thread: a run that never
-    // reaches a single translatable thread should still say why `apply`'s own
-    // request is not the whole story.
-    const { permitted } = narrowWarned(
-      authority.warrant.granted("translate", DEFAULT_CAPABILITIES),
-      base.apply,
-      "translate",
-      // The raw input, not `authority.warrant.path`, which is what the other
-      // four duties quote. Kept exactly as it was; see `narrowWarned`.
-      base.warrant,
-    );
+    // The file is the whole authority — nothing upstream can widen or narrow
+    // it, so the grant is the permitted list, decided once here for the run.
+    const permitted = authority.warrant.granted("translate", DEFAULT_CAPABILITIES);
 
     settings = {
       ...base,

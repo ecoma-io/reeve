@@ -16,7 +16,6 @@ function settingsWith(maxRequests: number | null): Settings {
     sourceLanguage: { code: "en", label: "English", scripts: ["Latn"] },
     languages: [],
     warrant: "",
-    apply: [],
     permitted: [],
     judges: [],
     judgeNames: new Map(),

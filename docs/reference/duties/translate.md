@@ -63,7 +63,8 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          languages: en, vi
+          # Not an action input — the languages to translate into live under
+          # the warrant's `languages:` key (see Configuration below).
           dry-run: true # safe first run — remove when you trust it
 ```
 
@@ -86,19 +87,19 @@ start another `GITHUB_TOKEN`-triggered run. A PAT or a GitHub App
 installation does not get that suppression from the platform, so the
 fingerprint in the published marker is what stops the loop instead.
 
-**Warrant capability:** `edit-body` is granted by default, at level 0, with
-no warrant file at all. Once a `capabilities:` block is written into
+**Warrant grant:** `edit-body` is granted by default, at level 0, with
+no warrant file at all. Once a `duties:` block is written into
 `.github/reeve.yml`, the enumeration becomes total: leaving `translate` out
 of it grants this duty nothing, and the run says so rather than guessing. See
-[the capabilities table](../../guides/warrant.md#capabilities).
+[the duties table](../../guides/warrant.md#duties).
 
-**`apply`** is the workflow's own half of the same gate — `edit-body`, or
-`none` for a run that detects, drafts and judges but never writes. The
-narrower of `apply` and the warrant always wins: a capability the warrant
-withholds is a reason not to publish, not a reason not to have decided, so
-detection, drafting and judging spend exactly what they would spend either
-way and only the write at the end is gated. `apply: none` is a good way to
-watch what a run would have published before it is allowed to.
+A run that should detect, draft and judge but never write is a
+[`dry-run`](../../guides/dry-run.md) — the pipeline runs, every output is
+written, nothing is published. A capability the warrant withholds is a
+reason not to publish, not a reason not to have decided, so detection,
+drafting and judging spend exactly what they would spend either way and only
+the write at the end is gated. Watch what a run would have published before
+you grant it anything.
 
 ## Required inputs
 
@@ -112,32 +113,30 @@ a supported configuration), but almost every real provider needs one — see
 
 Every input `translate/action.yml` declares.
 
-| Input               | Required | Default                     | What it does                                                                                                                                                               |
-| ------------------- | -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`      | no       | `${{ github.token }}`       | Token used to read and write the thread. Also what gives recursion prevention on `GITHUB_TOKEN`.                                                                           |
-| `number`            | no       | _(empty)_                   | The issue or pull request to translate. Defaults to the thread that triggered the workflow.                                                                                |
-| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                         |
-| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                            |
-| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                      |
-| `languages`         | no       | `en, vi, zh`                | What to translate **into**. Says nothing about what an author may write in. Ignored once the warrant's own `languages:` key is written.                                    |
-| `warrant`           | no       | `.github/reeve.yml`         | Where `edit-body` is granted, and optionally where `languages` lives instead. Missing at this default path is not a failure.                                               |
-| `apply`             | no       | `edit-body`                 | What this run may do: `edit-body`, or `none` to decide and report without touching the thread. The narrower of this and the warrant file wins.                             |
-| `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                 |
-| `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                                                              |
-| `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                   |
-| `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                     |
-| `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                           |
-| `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                          |
-| `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                         |
-| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                |
-| `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                 |
-| `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                    |
-| `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                            |
-| `max-requests`      | no       | `none`                      | How many provider requests — detection, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                         |
-| `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                            |
-| `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated. |
-| `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                           |
-| `temperature`       | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                               |
+| Input               | Required | Default                     | What it does                                                                                                                                                                                        |
+| ------------------- | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`      | no       | `${{ github.token }}`       | Token used to read and write the thread. Also what gives recursion prevention on `GITHUB_TOKEN`.                                                                                                    |
+| `number`            | no       | _(empty)_                   | The issue or pull request to translate. Defaults to the thread that triggered the workflow.                                                                                                         |
+| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                  |
+| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                     |
+| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                               |
+| `warrant`           | no       | `.github/reeve.yml`         | Where the permissions live. `edit-body` is granted here, under `duties:`; the warrant's `languages:` key optionally supplies what to translate into. Missing at this default path is not a failure. |
+| `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                                          |
+| `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                                                                                       |
+| `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                                            |
+| `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                                              |
+| `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                                                    |
+| `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                                                   |
+| `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                                                  |
+| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                         |
+| `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                          |
+| `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                                             |
+| `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                                                     |
+| `max-requests`      | no       | `none`                      | How many provider requests — detection, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                  |
+| `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                     |
+| `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                          |
+| `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                    |
+| `temperature`       | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                        |
 
 **`max-body-chars`** bounds what is read from the thread, not what the model
 answers. When the body is longer, the tail is left behind and the published
@@ -172,7 +171,7 @@ same way regardless of `max-body-chars`.
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **`judge-models` has two levels, and they mean opposite things.** `models`
 is one rotation chain: the first model that answers is used and the rest are
@@ -281,12 +280,13 @@ A skipped language is not in the fingerprint, so the next run tries it
 again rather than reading its own claim and stopping.
 
 **Running on the unconfigured `languages` default is noted, once, rather
-than left silent.** `en, vi, zh` is `languages`'s own default in
-`action.yml`, meant to make a first run cheap to try — but a project that
-never comes back to choose on purpose is making a decision without knowing
-it made one. A run that reaches this default with no `languages:` key in the
-warrant either logs a `notice` saying so; writing either one, to whatever
-value, clears it for good.
+than left silent.** `en, vi, zh` is the duty's own default, decided in code —
+`DEFAULT_LANGUAGES = parseLanguages("en, vi, zh")` in `src/duties/translate/main.ts` —
+applied whenever the warrant's `languages:` key is silent, and meant to make a
+first run cheap to try. But a project that never comes back to choose on
+purpose is making a decision without knowing it made one. A run that reaches
+this default with no `languages:` key in the warrant logs a `notice` saying
+so; writing the key, to whatever value, clears it for good.
 
 ## Dry-run behavior
 

@@ -1,0 +1,15 @@
+{
+  "description": "A real report in English, scoped to the [bug, docs] taxonomy. The verdict names `bug` with 0.9 confidence, over the 0.75 floor. The warrant grants `label`, `comment` and `assign`, so the run applies the label, assigns its owner `ana`, and posts the triaged comment.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n    owner: '@ana'\n  - name: docs\n    description: The documentation is wrong or missing.\nduties:\n  triage: [label, comment, assign]\n",
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": ["ana"],
+      "closed": false
+    }
+  }
+}

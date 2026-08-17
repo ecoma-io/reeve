@@ -9,7 +9,10 @@ verdicts to job summaries and touching nothing; `lifecycle` observes in
 dry-run; and `dependa` maintains this repository's own dependencies.
 `harmonise` is configured to watch `README.md`, whose sync to
 Vietnamese/Chinese is pending the bootstrap of its first translations — see
-[the harmonise reference](../reference/duties/harmonise.md#bootstrap). This
+[the harmonise reference](../reference/duties/harmonise.md#bootstrap).
+`review` is the newest: it has no live workflow here yet, and its whole duty
+is driven end to end by its own integration suite against a stub API — see
+[the review reference](../reference/duties/review.md). This
 is not self-modification; it is **proving the execution path**. A duty that
 labels a stranger's issue and a duty that labels its own follow the same code,
 the same warrant, and the same guardrails.
@@ -23,27 +26,29 @@ tree — the same files any other repository would write, reviewed the same way
 any other repository would review them.
 
 The warrant constrains dogfood exactly as it constrains any consumer: the
-narrower of the warrant and the workflow's `apply` always wins, a label the
-warrant does not name is never applied, and `gateClose` refuses a duplicate
-close that a human reversed — whether the thread belongs to this repository
-or to someone else's.
+warrant is the whole authority — what the `duties:` block does not grant is
+never done — and `gateClose` refuses a duplicate close that a human reversed,
+whether the thread belongs to this repository or to someone else's.
 
 ## The workflows
 
-| Duty      | Workflow                                      | Trigger                                      | `apply`                    | Status      |
-| --------- | --------------------------------------------- | -------------------------------------------- | -------------------------- | ----------- |
-| triage    | `.github/workflows/reeve-triage-issue.yml`    | `opened`, `labeled`, `unlabeled`, `reopened` | `label, record`            | Active      |
-| translate | `.github/workflows/reeve-translate-issue.yml` | `opened`, `edited`                           | `edit-body`                | Active      |
-| duplicate | `.github/workflows/reeve-duplicate-issue.yml` | `opened`                                     | `none`                     | Report-only |
-| respond   | `.github/workflows/reeve-respond-issue.yml`   | `opened`                                     | `none`                     | Report-only |
-| lifecycle | `.github/workflows/reeve-lifecycle-issue.yml` | schedule, `workflow_dispatch`                | `label, comment` (dry-run) | Observing   |
-| harmonise | `.github/workflows/reeve-harmonise.yml`       | `push` (README.md)                           | `edit-file, open-pr`       | Active      |
-| dependa   | `.github/workflows/reeve-dependa.yml`         | schedule, `workflow_dispatch`                | `edit-file, open-pr`       | Active      |
+| Duty      | Workflow                                      | Trigger                                      | Gate                         | Status      |
+| --------- | --------------------------------------------- | -------------------------------------------- | ---------------------------- | ----------- |
+| triage    | `.github/workflows/reeve-triage-issue.yml`    | `opened`, `labeled`, `unlabeled`, `reopened` | —                            | Active      |
+| translate | `.github/workflows/reeve-translate-issue.yml` | `opened`, `edited`                           | —                            | Active      |
+| duplicate | `.github/workflows/reeve-duplicate-issue.yml` | `opened`                                     | `dry-run: true`              | Report-only |
+| respond   | `.github/workflows/reeve-respond-issue.yml`   | `opened`                                     | `dry-run: true`              | Report-only |
+| lifecycle | `.github/workflows/reeve-lifecycle-issue.yml` | schedule, `workflow_dispatch`                | `dry-run: true`              | Observing   |
+| harmonise | `.github/workflows/reeve-harmonise.yml`       | `push` (README.md)                           | —                            | Active      |
+| dependa   | `.github/workflows/reeve-dependa.yml`         | schedule, `workflow_dispatch`                | omitted from `duties:` block | Shadow      |
 
-`duplicate` and `respond` write their verdicts to the job summary without
-touching a thread — the same path any consumer would walk when `apply: none`
-is set. `lifecycle` starts in `dry-run: true`, so a maintainer can observe
-what the policy would do before allowing it to act.
+`duplicate` and `respond` run with `dry-run: true`, writing their verdicts to
+the job summary without touching a thread — the same path any consumer walks
+before letting a duty post. `lifecycle` starts in `dry-run: true`, so a
+maintainer can observe what the policy would do before allowing it to act.
+`dependa` is deliberately omitted from the `duties:` block, so it runs in
+shadow mode — it discovers and classifies, but there is no grant for it to act
+on.
 
 ## The feedback loop
 
@@ -56,10 +61,10 @@ Subsequent runs read the nearest few corrections and deliver them to the
 model as examples of decisions this project has already made. That is how
 a taxonomy's edges get learned without anybody rewriting the taxonomy.
 
-The `record` capability needs both halves of the double-gate: the warrant
-must grant it, and the workflow's `apply` must name it. This repository
-grants `triage: [label, record]` in the warrant and sets `apply: "label,
-record"` in the workflow.
+The `record` capability is granted by the warrant alone: `triage: [label,
+record]` in `.github/reeve.yml` is what lets a label change be written to
+`.reeve/corrections/`. There is no second permission to set — the warrant is
+the whole authority, and removing `record` from it turns recording off.
 
 ### Reversals (S3)
 
@@ -130,9 +135,9 @@ An unreadable answer is never converted into authority.
 | Action                    | How                                                                          |
 | ------------------------- | ---------------------------------------------------------------------------- |
 | Disable a duty            | Remove or disable its workflow file.                                         |
-| Narrow what a duty may do | Remove a capability from the warrant, or remove it from `apply`.             |
-| Turn off recording        | Remove `record` from either the warrant or `apply` (one half is enough).     |
-| Turn off everything       | Set `apply: none` in the workflow.                                           |
+| Narrow what a duty may do | Remove a capability from the `duties:` block in the warrant.                 |
+| Turn off recording        | Remove `record` from the `duties:` block in the warrant.                     |
+| Turn off everything       | Remove the duty from the `duties:` block, or omit the block entirely.        |
 | Observe before acting     | Set `dry-run: true` — the pipeline runs, nothing is written.                 |
 | Remove a past correction  | Delete or edit the NDJSON file in `.reeve/corrections/` like any other file. |
 

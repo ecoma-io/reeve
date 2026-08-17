@@ -1,0 +1,26 @@
+{
+  "description": "A real report in Spanish scoped to the [bug, docs] taxonomy. The warrant configures `languages: [en, vi, zh, es]`; detection resolves Spanish by profile among four Latin candidates. The verdict names `bug` over the floor, and the warrant grants `label` and `comment` — triage applied end to end on a Romance-language thread.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\n  - name: docs\n    description: The documentation is wrong or missing.\nlanguages:\n  - en\n  - vi\n  - zh\n  - es\nduties:\n  triage: [label, comment]\n",
+  "thread": {
+    "title": "El modo oscuro no se guarda al recargar la página",
+    "body": "El modo oscuro no se guarda después de recargar la página. Revisé la configuración, pero siempre vuelve a los valores por defecto cada vez que abro la página. Espero que lo puedan corregir pronto."
+  },
+  "verdict-over": {
+    "labels": ["bug"],
+    "confidence": 0.9,
+    "duplicate_of": null,
+    "rationale": "La configuración no se conserva al recargar la página."
+  },
+  "expected": {
+    "applied-names": ["bug"],
+    "duplicate-of": null,
+    "screened-out": "",
+    "language": "español",
+    "effects": {
+      "applied": ["bug"],
+      "commented": true,
+      "assigned": [],
+      "closed": false
+    }
+  }
+}

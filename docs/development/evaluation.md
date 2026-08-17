@@ -133,10 +133,14 @@ measuring, not the raw count.
 
 ## Running it
 
-`pnpm eval` needs a provider, which means it needs a key or a keyless endpoint,
-which means **it does not run in CI on a pull request.** A fork's PR has no
-secrets, and a required check that cannot pass on a fork is a check that closes
-the project to contributors.
+**Measuring accuracy needs a provider**, which means it needs a key or a
+keyless endpoint — a fork's PR has no secrets, and a required check that
+cannot pass on a fork is a check that closes the project to contributors.
+Measuring is therefore split from the CI gate: the stub harness **does** run
+in CI (`pnpm eval all`, on every push) and exercises the fail-closed
+contract — a fixture run must exit 0 only when every outcome was a finding
+and none failed or skipped. Accuracy itself is the other register: a real
+provider, run deliberately.
 
 So:
 

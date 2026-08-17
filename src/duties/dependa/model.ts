@@ -448,8 +448,9 @@ export interface GroupResult {
   /**
    * What happened. `"opened"` = new PR created. `"updated"` = existing PR
    * updated. `"unchanged"` = existing PR already has this content. `"draft"` =
-   * proposals classified but PR not opened (capabilities/apply/dry-run).
-   * `"refused"` = all proposals blocked by enforcement.
+   * proposals classified but PR not opened (dry-run, or the warrant not
+   * granting `edit-file` + `open-pr`). `"refused"` = all proposals blocked by
+   * enforcement.
    */
   readonly outcome: "opened" | "updated" | "unchanged" | "draft" | "refused";
   /** Proposals that were refused by enforcement, with reasons. */

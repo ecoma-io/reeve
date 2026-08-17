@@ -15,7 +15,6 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mockInputs: Record<string, string> = {
   "github-token": "mock-token",
   warrant: ".github/reeve.yml",
-  apply: "none",
   ecosystems: "",
   drafts: "0",
   "dry-run": "false",
@@ -47,7 +46,6 @@ beforeEach(() => {
   Object.assign(mockInputs, {
     "github-token": "mock-token",
     warrant: ".github/reeve.yml",
-    apply: "none",
     ecosystems: "",
     drafts: "0",
     "dry-run": "false",

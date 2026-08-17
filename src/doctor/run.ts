@@ -16,9 +16,60 @@ import { context, getOctokit } from "@actions/github";
 import { writeSummary } from "../core/summary.js";
 import { DEFAULT_WARRANT_PATH } from "../core/warrant.js";
 import { normalise } from "../refusal.js";
+import { parseModels } from "../core/provider.js";
+import { parseApiKeys, parseEndpoints, parseTimeout } from "../core/inputs.js";
 
-import { diagnose, problems } from "./diagnose.js";
+/** The one default `parseTimeout` must not assume but doctor can: nothing declared is 120s, the duty default. */
+const DEFAULT_REQUEST_TIMEOUT = "120s";
+
+import { diagnose, problems, type ProviderProbe } from "./diagnose.js";
 import { summarize } from "./summary.js";
+
+/**
+ * The provider inputs this run actually received, or `undefined` when nobody
+ * configured one.
+ *
+ * The root action's `action.yml` declares no provider inputs — its contract
+ * is the refusal and the doctor report, and the probe is an addition, not a
+ * promise. Anything a workflow does pass under the duty names comes through
+ * the runner's `INPUT_*` mechanism whether or not the manifest declared it,
+ * so a consumer who configures `base-url`/`api-key`/`models` alongside
+ * `doctor: true` gets the probe for free, and one who does not still gets a
+ * clean, provider-free report. A probe needs both an endpoint and at least
+ * one model; either missing means there is nothing to probe, and this
+ * returns `undefined` — the report then never touches a provider.
+ */
+export function providerConfig(): ProviderProbe | undefined {
+  // Masked before anything else can run, the same standard every duty's own
+  // inputs reader keeps: a provider's `reason` quotes the response body, and
+  // a gateway that echoes a request it just refused would otherwise put the
+  // key in a public workflow log. The `api-keys` lines' values are masked
+  // inside `parseApiKeys`; this is the default endpoint's key, which nothing
+  // else in this path would ever mask.
+  const apiKey = core.getInput("api-key");
+  if (apiKey.length > 0) core.setSecret(apiKey);
+
+  const baseUrl = core.getInput("base-url");
+  const roster = parseModels(core.getInput("models"));
+
+  if (baseUrl.length === 0 || roster.models.length === 0) {
+    return undefined;
+  }
+
+  const timeoutRaw = core.getInput("request-timeout");
+  return {
+    baseUrl,
+    apiKey,
+    requestTimeoutMs: parseTimeout(
+      "request-timeout",
+      timeoutRaw.length > 0 ? timeoutRaw : DEFAULT_REQUEST_TIMEOUT,
+    ),
+    models: roster.models,
+    modelNames: roster.names,
+    endpoints: parseEndpoints(core.getInput("endpoints")),
+    apiKeys: parseApiKeys(core.getInput("api-keys")),
+  };
+}
 
 export async function runDoctor(): Promise<void> {
   try {
@@ -27,12 +78,14 @@ export async function runDoctor(): Promise<void> {
     const duty = normalise(core.getInput("duty"));
 
     const api = getOctokit(token);
+    const provider = providerConfig();
     const report = await diagnose({
       api,
       at: context.repo,
       warrantPath,
       defaultWarrantPath: DEFAULT_WARRANT_PATH,
       duty: duty.length === 0 ? null : duty,
+      ...(provider === undefined ? {} : { provider }),
     });
 
     const count = problems(report);

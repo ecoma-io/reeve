@@ -82,7 +82,6 @@ export function page(
     pivot: outcome.pivot,
     note: outcome.note,
     permitted: outcome.permitted,
-    withheld: outcome.withheld,
     rationale: outcome.rationale,
     done,
     posted,

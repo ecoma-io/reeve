@@ -49,9 +49,9 @@ refuses to do before installing anything. Start at
 contract without installing it.
 
 **Running it day to day.** Already installed, need to write a warrant, add a
-language, run a sweep, control cost, or work out why a run did not do what you
-expected. Start at [the guides](guides/warrant.md), and keep
-[the duty reference pages](reference/duties/) open beside them.
+language, configure a provider, run a sweep, control cost, or work out why a
+run did not do what you expected. Start at [the guides](guides/warrant.md),
+and keep [the duty reference pages](reference/duties/) open beside them.
 
 **Reviewing it for security.** Deciding how much authority to grant, or
 auditing what is already granted. Start at
@@ -76,19 +76,21 @@ section true. Where a document describes something not yet built, it says so
 in that section rather than in a global disclaimer you would have to
 remember.
 
-Seven duties ship — [`triage`](reference/duties/triage.md),
+Eight duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
 [`duplicate`](reference/duties/duplicate.md),
 [`respond`](reference/duties/respond.md),
 [`lifecycle`](reference/duties/lifecycle.md),
-[`harmonise`](reference/duties/harmonise.md), and
-[`dependa`](reference/duties/dependa.md) — and all seven are
-dogfooded on this repository: `triage` and `translate` acting on real
-threads, `duplicate` and `respond` in report-only mode, writing verdicts to
-job summaries and touching nothing, `lifecycle` observing in dry-run,
+[`harmonise`](reference/duties/harmonise.md),
+[`dependa`](reference/duties/dependa.md), and
+[`review`](reference/duties/review.md) — seven dogfooded on this repository
+via their own workflows: `triage` and `translate` acting on real threads,
+`duplicate` and `respond` in report-only mode, writing verdicts to job
+summaries and touching nothing, `lifecycle` observing in dry-run,
 `harmonise` configured to watch `README.md` (the first translation is
 bootstrap-pending), and `dependa` maintaining this repository's own
-dependencies.
+dependencies. `review` is the newest: its whole duty is driven end to end by
+its own integration suite against a stub API.
 See [Self-dogfood](guides/dogfood.md) for how the feedback loop works.
 
 ## Full index
@@ -97,13 +99,14 @@ Every page, one row each, for anyone the five paths above didn't fit.
 
 | Page                                                                       | Doc type                 | What it's for                                                                     |
 | -------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| [`README.md`](../README.md)                                                | overview                 | Say what Reeve is, prove it with a working quick start, name what it refuses.     |
+| [`README.md`](../README.md)                                                | overview                 | What Reeve is, a five-minute quick start, the duties, and what it refuses.        |
 | [`doctrine/north-star.md`](doctrine/north-star.md)                         | doctrine                 | Normative doctrine — the document the others answer to. Unchanged.                |
 | [`getting-started/installation.md`](getting-started/installation.md)       | tutorial                 | Get a first workflow running in five minutes.                                     |
 | [`getting-started/first-workflow.md`](getting-started/first-workflow.md)   | tutorial                 | Walk a complete two-duty workflow end to end.                                     |
 | [`guides/warrant.md`](guides/warrant.md)                                   | how-to                   | Write and extend a warrant file for your repository.                              |
 | [`guides/languages.md`](guides/languages.md)                               | how-to                   | Configure which languages Reeve recognizes and how detection works in practice.   |
 | [`guides/sweep.md`](guides/sweep.md)                                       | how-to                   | Run Reeve against a backlog instead of one thread.                                |
+| [`guides/providers.md`](guides/providers.md)                               | how-to                   | Configure the model endpoint a duty talks to, and the runtime inputs around it.   |
 | [`guides/cost.md`](guides/cost.md)                                         | how-to                   | Control and predict what a run costs.                                             |
 | [`guides/troubleshooting.md`](guides/troubleshooting.md)                   | how-to                   | Diagnose a run that didn't do what you expected.                                  |
 | [`guides/dry-run.md`](guides/dry-run.md)                                   | how-to                   | Rehearse a run with nothing written.                                              |
@@ -119,6 +122,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`reference/duties/lifecycle.md`](reference/duties/lifecycle.md)           | reference                | Full contract for the lifecycle duty.                                             |
 | [`reference/duties/harmonise.md`](reference/duties/harmonise.md)           | reference                | Full contract for the harmonise duty.                                             |
 | [`reference/duties/dependa.md`](reference/duties/dependa.md)               | reference                | Full contract for the dependa duty.                                               |
+| [`reference/duties/review.md`](reference/duties/review.md)                 | reference                | Full contract for the review duty.                                                |
 | [`reference/warrant-format.md`](reference/warrant-format.md)               | reference                | Full warrant YAML schema.                                                         |
 | [`reference/platform-limits.md`](reference/platform-limits.md)             | reference                | Enumerate GitHub/provider platform behaviors Reeve works around.                  |
 | [`reference/root-action.md`](reference/root-action.md)                     | reference                | Contract for the root signpost action and its `doctor: true` diagnostic mode.     |

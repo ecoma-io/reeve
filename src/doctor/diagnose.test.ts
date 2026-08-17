@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrackerApi } from "../core/forge.js";
 import { DUTIES } from "../refusal.js";
 
-import { diagnose, problems, type Report } from "./diagnose.js";
+import { diagnose, problems, type ProviderProbe, type Report } from "./diagnose.js";
 
 const AT = { owner: "ecoma-io", repo: "reeve" };
 
@@ -19,7 +19,7 @@ const TAXONOMY =
   "  - name: docs\n" +
   "    description: Documentation is wrong or missing.\n";
 
-const WITH_CAPABILITIES = `${TAXONOMY}capabilities:\n  triage: [label]\n`;
+const WITH_DUTIES = `${TAXONOMY}duties:\n  triage: [label]\n`;
 
 const WITH_LIFECYCLE =
   TAXONOMY +
@@ -58,14 +58,36 @@ function failingApi(error: Error): TrackerApi {
 let scratch: string;
 let warrantPath: string;
 
+const probeFetch = vi.fn<typeof fetch>();
+
+/** A keyed, single-endpoint probe against a stub endpoint. */
+function keyedProbe(): ProviderProbe {
+  return {
+    baseUrl: "http://provider.test/v1",
+    apiKey: "probe-key",
+    requestTimeoutMs: 5_000,
+    models: ["probe-model"],
+    modelNames: new Map(),
+    endpoints: [],
+    apiKeys: [],
+  };
+}
+
 beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "reeve-doctor-"));
   warrantPath = join(scratch, "reeve.yml");
+  probeFetch.mockReset();
+  vi.stubGlobal("fetch", probeFetch);
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await rm(scratch, { recursive: true, force: true });
 });
+
+function probeJson(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), { status });
+}
 
 async function report(
   source: string,
@@ -110,16 +132,73 @@ describe("diagnose", () => {
 
   it("is green, and reports the narrowest authority, when the file is absent at the default path", async () => {
     const missing = join(scratch, "reeve.yml");
+    // A checkout marker, standing for the repository the runner checked out —
+    // the genuine level-0 absence is a file this repository never wrote, not a
+    // runner that never had the repository.
+    await writeFile(join(scratch, "README.md"), "some repository file");
     const result = await diagnose({
       api: labelsApi(["bug"]),
       at: AT,
       warrantPath: missing,
       defaultWarrantPath: missing,
       duty: null,
+      workspaceDir: scratch,
     });
 
     expect(problems(result)).toBe(0);
     expect(result.implicit).toBe(true);
+    expect(result.findings.some((finding) => finding.text.includes("narrowest authority"))).toBe(
+      true,
+    );
+    expect(result.findings.some((finding) => finding.text.includes("checkout"))).toBe(false);
+  });
+
+  it("is red when the file is absent at the default path but no checkout ever reached the workspace", async () => {
+    const missing = join(scratch, "reeve.yml");
+    await mkdir(join(scratch, "empty-workspace"));
+    const result = await diagnose({
+      api: labelsApi(["bug"]),
+      at: AT,
+      warrantPath: missing,
+      defaultWarrantPath: missing,
+      duty: null,
+      workspaceDir: join(scratch, "empty-workspace"),
+    });
+
+    expect(problems(result)).toBe(1);
+    expect(result.implicit).toBe(true);
+    expect(result.findings.some((finding) => finding.text.includes("actions/checkout"))).toBe(true);
+  });
+
+  it("is red when the file is absent at the default path and the workspace never existed at all", async () => {
+    const missing = join(scratch, "reeve.yml");
+    const result = await diagnose({
+      api: labelsApi(["bug"]),
+      at: AT,
+      warrantPath: missing,
+      defaultWarrantPath: missing,
+      duty: null,
+      workspaceDir: join(scratch, "no-such-workspace"),
+    });
+
+    expect(problems(result)).toBe(1);
+    expect(result.findings.some((finding) => finding.text.includes("actions/checkout"))).toBe(true);
+  });
+
+  it("is green on a genuine level-0 absence when the workspace holds a checkout", async () => {
+    const missing = join(scratch, "reeve.yml");
+    await mkdir(join(scratch, ".git"));
+    await writeFile(join(scratch, ".git", "HEAD"), "ref: refs/heads/main\n");
+    const result = await diagnose({
+      api: labelsApi(["bug"]),
+      at: AT,
+      warrantPath: missing,
+      defaultWarrantPath: missing,
+      duty: null,
+      workspaceDir: scratch,
+    });
+
+    expect(problems(result)).toBe(0);
     expect(result.findings.some((finding) => finding.text.includes("narrowest authority"))).toBe(
       true,
     );
@@ -247,8 +326,8 @@ describe("diagnose", () => {
     });
   });
 
-  it("marks a duty denied when a written `capabilities:` block does not name it", async () => {
-    const result = await report(WITH_CAPABILITIES, labelsApi(["bug", "docs"]));
+  it("marks a duty denied when a written `duties:` block does not name it", async () => {
+    const result = await report(WITH_DUTIES, labelsApi(["bug", "docs"]));
 
     const respond = result.authority.find((row) => row.duty === "respond");
     expect(respond).toEqual({
@@ -270,7 +349,7 @@ describe("diagnose", () => {
   });
 
   it("narrows lifecycle's granted capabilities to its own ladder, and notes what was filtered", async () => {
-    const source = `${TAXONOMY}capabilities:\n  lifecycle: [label, comment, edit-body]\n`;
+    const source = `${TAXONOMY}duties:\n  lifecycle: [label, comment, edit-body]\n`;
     const result = await report(source, labelsApi(["bug", "docs"]));
 
     const lifecycle = result.authority.find((row) => row.duty === "lifecycle");
@@ -284,7 +363,7 @@ describe("diagnose", () => {
   });
 
   it("leaves `unused` empty when the warrant grants nothing outside a duty's own ladder", async () => {
-    const source = `${TAXONOMY}capabilities:\n  lifecycle: [label]\n`;
+    const source = `${TAXONOMY}duties:\n  lifecycle: [label]\n`;
     const result = await report(source, labelsApi(["bug", "docs"]));
 
     const lifecycle = result.authority.find((row) => row.duty === "lifecycle");
@@ -295,6 +374,84 @@ describe("diagnose", () => {
       isDefault: false,
       unused: [],
     });
+  });
+
+  it("narrows every duty's grant to its own ladder, not just lifecycle's", async () => {
+    const source = `${TAXONOMY}duties:\n  translate: [edit-body, comment]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const translate = result.authority.find((row) => row.duty === "translate");
+    expect(translate).toEqual({
+      duty: "translate",
+      granted: ["edit-body"],
+      denied: false,
+      isDefault: true,
+      unused: ["comment"],
+    });
+
+    // The inert grant is red — the same misspelled-capability discipline the
+    // warrant reader applies at parse time, narrowed per duty by doctor.
+    expect(problems(result)).toBe(1);
+    const red = result.findings.find((finding) => finding.severity === "red");
+    expect(red?.text).toContain("`translate`");
+    expect(red?.text).toContain("`comment`");
+  });
+
+  it("is red when a duty is granted a capability its whole ladder filters out — duplicate: [close]", async () => {
+    const source = `${TAXONOMY}duties:\n  duplicate: [close]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const duplicate = result.authority.find((row) => row.duty === "duplicate");
+    // `close` is not `comment` — the ladder filters it out entirely. The
+    // effective grant equals duplicate's own built-in default (`[]`), so
+    // `isDefault` reads true the same way the lifecycle test below reads it.
+    expect(duplicate).toEqual({
+      duty: "duplicate",
+      granted: [],
+      denied: false,
+      isDefault: true,
+      unused: ["close"],
+    });
+
+    expect(problems(result)).toBe(1);
+    const red = result.findings.find((finding) => finding.severity === "red");
+    expect(red?.text).toContain("`duplicate`");
+    expect(red?.text).toContain("`close`");
+  });
+
+  it("flags no inert grant when a written block grants within every duty's ladder", async () => {
+    const source = `${TAXONOMY}duties:\n  duplicate: [comment]\n  harmonise: [edit-file, open-pr]\n  triage: [label, assign]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    expect(result.authority.every((row) => row.unused.length === 0)).toBe(true);
+    expect(problems(result)).toBe(0);
+    expect(
+      result.findings.some(
+        (finding) => finding.severity === "red" && /unused|no use for/.test(finding.text),
+      ),
+    ).toBe(false);
+  });
+
+  it("notes, green, configured languages outside the byte-ngram profile set", async () => {
+    const source = `${TAXONOMY}\nlanguages: [pt-BR, zh-Hans]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    expect(problems(result)).toBe(0);
+    const note = result.findings.find((finding) => finding.text.includes("`pt-BR`"));
+    expect(note?.severity).toBe("green");
+    expect(note?.text).toContain("`zh-Hans`");
+    expect(note?.text).toContain("detectByProfile");
+    // The remedy is real: the long form keeps the code verbatim, so it must
+    // not promise that spelling `pt-BR:Português:Latin` restores profile reach.
+    expect(note?.text).toContain("base profiled code");
+    expect(note?.text).not.toContain("profile's reach");
+  });
+
+  it("says nothing about profile coverage when `languages:` names only profiled codes", async () => {
+    const source = `${TAXONOMY}\nlanguages: [en, vi, zh]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    expect(result.findings.some((finding) => finding.text.includes("profile set"))).toBe(false);
   });
 
   it("scopes the authority table to one duty when `duty` names it", async () => {
@@ -312,18 +469,166 @@ describe("diagnose", () => {
     for (const duty of DUTIES) expect(note?.text).toContain(`\`${duty}\``);
   });
 
+  it("leaves a duty with an inert grant out of the default note — it carries its own red finding", async () => {
+    const source = `${TAXONOMY}duties:\n  duplicate: [close]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const note = result.findings.find((finding) => finding.text.includes("built-in default"));
+    // `duplicate`'s effective grant (`[]`) equals its own built-in default,
+    // so `isDefault` is true — but `close` was granted and filtered out,
+    // which is the red finding just above. "Exactly its own built-in default
+    // right now" next to that red would read as the report contradicting
+    // itself, so `unused` rows are never named here.
+    // The note may be gone entirely — no duty qualifies — which is fine; the
+    // point is `duplicate` is never in it.
+    expect(note?.text.includes("`duplicate`")).toBeFalsy();
+  });
+
   it("leaves a duty a written block denies out of the default note — denied is not default", async () => {
-    const result = await report(WITH_CAPABILITIES, labelsApi(["bug", "docs"]));
+    const result = await report(WITH_DUTIES, labelsApi(["bug", "docs"]));
 
     const note = result.findings.find((finding) => finding.text.includes("built-in default"));
     // `triage` is named with exactly its own default (`[label]`), so it is
     // still `isDefault: true` and belongs in the note. `respond` and the
-    // other three duties this block does not name are `denied: true` — a
+    // other duties this block does not name are `denied: true` — a
     // real, designed answer, not a default, so they must not appear here.
     expect(note?.text).toContain("`triage`");
     expect(note?.text).not.toContain("`respond`");
     expect(note?.text).not.toContain("`duplicate`");
     expect(note?.text).not.toContain("`translate`");
     expect(note?.text).not.toContain("`lifecycle`");
+    expect(note?.text).not.toContain("`harmonise`");
+    expect(note?.text).not.toContain("`dependa`");
+  });
+
+  describe("the provider probe", () => {
+    async function probed(
+      provider: ProviderProbe,
+      api: TrackerApi = labelsApi(["bug", "docs"]),
+      duty: string | null = null,
+    ): Promise<Report> {
+      await mkdir(join(scratch, ".git"));
+      await writeFile(join(scratch, ".git", "HEAD"), "ref: refs/heads/main\n");
+      return diagnose({
+        api,
+        at: AT,
+        warrantPath: warrantPath,
+        defaultWarrantPath: warrantPath,
+        duty,
+        provider,
+      });
+    }
+
+    it("is green when the probe sent no request at all for a keyless provider", async () => {
+      probeFetch.mockRejectedValue(
+        new Error("must not be called: keyless provider sends no probe"),
+      );
+      const result = await probed({ ...keyedProbe(), apiKey: "" });
+
+      expect(probeFetch).not.toHaveBeenCalled();
+      expect(problems(result)).toBe(0);
+      expect(result.findings.some((finding) => finding.text.includes("keyless"))).toBe(true);
+    });
+
+    it("is green, not red, when every configured model answers", async () => {
+      probeFetch.mockResolvedValueOnce(
+        probeJson({
+          choices: [{ message: { role: "assistant", content: "pong" }, finish_reason: "stop" }],
+        }),
+      );
+
+      const result = await probed(keyedProbe());
+
+      expect(probeFetch).toHaveBeenCalledTimes(1);
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("first configured model answered");
+    });
+
+    it("is green, never red, when the key is refused — weather, not authority", async () => {
+      probeFetch.mockResolvedValueOnce(probeJson({ error: { message: "bad key" } }, 401));
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("HTTP 401 or 403");
+      expect(note?.severity).toBe("green");
+    });
+
+    it("is green, never red, when the endpoint is unreachable — weather, not authority", async () => {
+      probeFetch.mockRejectedValueOnce(
+        Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      );
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("could not be reached");
+      expect(note?.severity).toBe("green");
+    });
+
+    it("is green, and names the models rotated past, when a model answers only after others fail", async () => {
+      probeFetch
+        .mockResolvedValueOnce(probeJson({ error: { message: "quota" } }, 429))
+        .mockResolvedValueOnce(
+          probeJson({
+            choices: [{ message: { role: "assistant", content: "pong" }, finish_reason: "stop" }],
+          }),
+        );
+
+      const result = await probed({
+        ...keyedProbe(),
+        models: ["a", "b"],
+        modelNames: new Map([["a", "A"]]),
+      });
+
+      expect(problems(result)).toBe(0);
+      const note = result.findings.find((finding) => finding.text.includes("Provider probe"));
+      expect(note?.text).toContain("first configured model answered");
+      expect(note?.text).toContain("rotated past before it");
+    });
+
+    it("reports a provider refusal without ever printing a key", async () => {
+      probeFetch.mockResolvedValueOnce(probeJson({ error: { message: "bad key" } }, 401));
+
+      const result = await probed(keyedProbe());
+
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
+
+    it("keeps a key out of the summary even when a rate-limit body echoes it", async () => {
+      probeFetch.mockResolvedValueOnce(
+        probeJson({ error: { message: "quota exceeded for key probe-key" } }, 429),
+      );
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
+
+    it("keeps a key out of the summary even when a server-error body echoes it", async () => {
+      probeFetch.mockResolvedValueOnce(probeJson({ error: { message: "boom probe-key" } }, 500));
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
+
+    it("keeps a key out of the summary even when a fetch rejection mentions it", async () => {
+      probeFetch.mockRejectedValueOnce(new Error("request failed — key probe-key rejected"));
+
+      const result = await probed(keyedProbe());
+
+      expect(problems(result)).toBe(0);
+      const page = result.findings.map((finding) => finding.text).join("\n");
+      expect(page).not.toContain("probe-key");
+    });
   });
 });

@@ -18,3 +18,16 @@ import type { Capability } from "../../core/warrant.js";
  * should reach for on a repository that never wrote an opinion about it.
  */
 export const DEFAULT_CAPABILITIES: readonly Capability[] = [];
+
+/**
+ * The full ladder this duty ever asks for — anything else a warrant names
+ * for it is inert here, not an error; see `Warrant.granted`'s own doc
+ * comment for why a per-duty enumeration is not this module's to validate.
+ * Exported so `doctor` mode can apply the exact same narrowing a real run
+ * applies, rather than a second guess at which capabilities this duty
+ * actually has a use for. The read-set is every `permitted.includes()`
+ * `duplicate`'s runtime applies: `comment` is the one effect posting a
+ * duplicate claim needs — a claim posted in public about somebody else's
+ * report.
+ */
+export const DUPLICATE_CAPABILITIES: readonly Capability[] = ["comment"];

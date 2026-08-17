@@ -40,19 +40,21 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          languages: en, vi
+# `languages` is not an action input — the languages to translate
+# into live under the warrant's `languages:` key. See
+# ../reference/duties/translate.md.
 ```
 
 Both jobs trigger off the same event and run independently — `triage` never
 waits on `translate`, and either can fail or rotate through its model list
 without touching the other. Each keeps its own inputs: `triage` reads nothing
-about `languages`, and `translate` reads nothing about a taxonomy, because
-neither is meaningless to the other's job.
+about the warrant's languages, and `translate` reads nothing about a taxonomy,
+because neither is meaningless to the other's job.
 
 An issue opened against this workflow gets sorted against the labels your
 repository already has, and gets a translated block appended below its own
-text in every language `translate` was told to produce — without either duty
-being told anything about what the other decided.
+text in every language the warrant's `languages:` key names — without either
+duty being told anything about what the other decided.
 
 **Climbing the ladder from here means writing things down, not switching
 anything on:** decide what each duty is allowed to do —

@@ -15,7 +15,6 @@ import {
 } from "../../core/inputs.js";
 import type { Capability } from "../../core/warrant.js";
 import type { Names } from "../../core/provider.js";
-import { parseApply } from "../../core/enforce.js";
 import type { Ecosystem } from "./model.js";
 import { ECOSYSTEMS } from "./model.js";
 
@@ -24,7 +23,6 @@ export interface Settings {
   readonly models: readonly string[];
   readonly modelNames: Names;
   readonly warrant: string;
-  readonly apply: readonly Capability[];
   readonly ecosystems: readonly Ecosystem[];
   readonly drafts: number;
   readonly dryRun: boolean;
@@ -36,7 +34,7 @@ export interface Settings {
   readonly apiKeys: readonly ApiKeySpec[];
   readonly requestTimeoutMs: number;
   readonly temperature: number | undefined;
-  /** Capabilities permitted by the warrant, narrowed with `apply`. Set after authority step. */
+  /** What the file grants — the sole authority, so the run's only `permitted` list. */
   readonly permitted: readonly Capability[];
 }
 
@@ -49,7 +47,6 @@ export function readSettings(): Omit<Settings, "permitted"> {
   return {
     ...coreInputs,
     warrant: core.getInput("warrant", { required: true }),
-    apply: parseApply(core.getInput("apply", { required: true })),
     ecosystems: parseEcosystems(core.getInput("ecosystems")),
     drafts: counted("drafts", core.getInput("drafts")),
     dryRun: core.getBooleanInput("dry-run"),

@@ -13,7 +13,7 @@ function settingsWith(maxRequests: number | null): Settings {
     modelNames: new Map(),
     languages: [],
     warrant: "",
-    apply: [],
+
     permitted: [],
     judges: [["judge-a"]],
     judgeNames: new Map(),

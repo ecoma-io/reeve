@@ -1,0 +1,18 @@
+{
+  "description": "A fresh unanswered thread in Portuguese over the 0.75 floor. Detection resolves Portuguese by profile among three Latin candidates, the draft answers in Portuguese, and `comment` is granted — the run posts a Portuguese first reply to a Portuguese thread, end to end.",
+  "warrant": "version: 1\nlabels:\n  - name: bug\n    description: Something that used to work and does not.\nlanguages:\n  - en\n  - vi\n  - zh\n  - pt\nduties:\n  respond: [comment]\n",
+  "thread": {
+    "title": "O modo escuro não é salvo ao recarregar a página",
+    "body": "O modo escuro não é salvo depois de recarregar a página. Verifiquei as configurações, mas ele sempre volta ao padrão quando abro a página novamente. Gostaria que isso fosse corrigido."
+  },
+  "draft-over": {
+    "text": "Obrigado pelo relato — vamos salvar a escolha do modo escuro no armazenamento local para que ela permaneça depois de recarregar a página."
+  },
+  "expected": {
+    "language": "português",
+    "patch": "Obrigado pelo relato — vamos salvar a escolha do modo escuro no armazenamento local para que ela permaneça depois de recarregar a página.",
+    "effects": {
+      "commented": true
+    }
+  }
+}

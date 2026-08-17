@@ -31575,10 +31575,6 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
-// src/core/warrant.ts
-import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
-
 // src/core/forge.ts
 function createThread(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
@@ -31757,1102 +31753,9 @@ async function listOpenThreads(api, at, since, state = "open", maxPages) {
   return listed;
 }
 
-// src/core/script.ts
-var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
-var matchers = /* @__PURE__ */ new Map();
-function matcher(script, exempt) {
-  const names = [script, ...exempt];
-  if (!names.every((name) => SCRIPT_NAME.test(name))) return null;
-  const key = names.join(" ");
-  const cached = matchers.get(key);
-  if (cached !== void 0) return cached;
-  let compiled;
-  try {
-    const excluded = exempt.map((name) => `\\p{Script=${name}}`).join("");
-    const guard = excluded.length === 0 ? "" : `(?![${excluded}])`;
-    compiled = new RegExp(`${guard}\\p{Script=${script}}`, "u");
-  } catch {
-    compiled = null;
-  }
-  matchers.set(key, compiled);
-  return compiled;
-}
-function isScriptName(script) {
-  return matcher(script, []) !== null;
-}
-function containsScript(text2, script, exempt = []) {
-  return matcher(script, exempt)?.test(text2) ?? false;
-}
-
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code.toLowerCase() ? null : name;
-}
-
 // src/core/list.ts
 function parseList(raw) {
   return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-}
-
-// src/core/languages.ts
-function parseLanguages(raw) {
-  const entries = typeof raw === "string" ? parseList(raw) : raw;
-  if (entries.length === 0) {
-    throw new Error("languages: no entries. Expected at least one language code.");
-  }
-  const languages = [];
-  const seen = /* @__PURE__ */ new Map();
-  for (const entry of entries) {
-    const language = entry.includes(":") ? spelled(entry) : derived(entry);
-    const previous = seen.get(language.code.toLowerCase());
-    if (previous !== void 0) {
-      throw new Error(
-        `languages: \`${language.code}\` is listed twice (already seen as \`${previous}\`).`
-      );
-    }
-    seen.set(language.code.toLowerCase(), language.code);
-    languages.push(language);
-  }
-  return languages;
-}
-function derived(code) {
-  const language = deriveLanguage(code);
-  if (language === null) {
-    throw new Error(
-      `languages: \`${code}\` is not a language code this runtime knows a name and a script for. Write it as \`code:Label:Script\` instead, such as \`` + code + ":Label:Latin`."
-    );
-  }
-  return { code, label: language.label, scripts: language.scripts };
-}
-function spelled(entry) {
-  const fields = entry.split(":");
-  if (fields.length !== 3) {
-    throw new Error(
-      `languages: \`${entry}\` has ${String(fields.length)} colon-separated fields, expected 3 (\`code:Label:Script\`).`
-    );
-  }
-  const [code, label, scriptField] = fields.map((field) => field.trim());
-  if (code.length === 0) throw new Error(`languages: \`${entry}\` has an empty code.`);
-  if (label.length === 0) throw new Error(`languages: \`${entry}\` has an empty label.`);
-  const scripts = scriptField.split("+").map((script) => script.trim()).filter((script) => script.length > 0);
-  if (scripts.length === 0) throw new Error(`languages: \`${entry}\` names no script.`);
-  for (const script of scripts) {
-    if (!isScriptName(script)) {
-      throw new Error(
-        `languages: \`${entry}\` names \`${script}\`, which is not a Unicode script. Use a Unicode script name or its four-letter alias, such as \`Latin\`, \`Han\` or \`Cyrl\`.`
-      );
-    }
-  }
-  return { code, label, scripts };
-}
-function findLanguage(languages, code) {
-  const wanted = code.toLowerCase();
-  return languages.find((language) => language.code.toLowerCase() === wanted);
-}
-
-// src/duties/dependa/model.ts
-var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
-var UPDATE_TYPES = [
-  "major",
-  "minor",
-  "patch",
-  "pin",
-  "digest",
-  "rollback",
-  "security"
-];
-
-// src/refusal.ts
-var DUTIES = [
-  "translate",
-  "triage",
-  "duplicate",
-  "respond",
-  "lifecycle",
-  "harmonise",
-  "dependa"
-];
-var PLANNED = [];
-
-// src/core/warrant.ts
-var CAPABILITIES = [
-  "label",
-  "edit-body",
-  "comment",
-  "close",
-  "assign",
-  "record",
-  "propose",
-  "edit-file",
-  "open-pr"
-];
-var VERSION7 = 1;
-var DEFAULT_PROPOSE_WORKSPACE = {
-  name: "area:{package}",
-  except: [],
-  evidence: 3,
-  window: 90 * 24 * 60 * 60 * 1e3,
-  retire: false
-};
-var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
-async function readWarrant(path, options) {
-  let source;
-  try {
-    source = await readFile(path, "utf8");
-  } catch (error2) {
-    if (path === options.defaultPath && isNotFound(error2)) return null;
-    const reason = error2 instanceof Error ? error2.message : String(error2);
-    throw new Error(
-      `warrant: \`${path}\` could not be read, so this run has no authority \u2014 ${reason}. Write one, or point \`warrant\` at where yours lives.`,
-      { cause: error2 }
-    );
-  }
-  return parseWarrant(path, source);
-}
-function isNotFound(error2) {
-  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
-}
-function parseWarrant(path, source) {
-  const document2 = load(path, source);
-  const KNOWN_ROOT = [
-    "version",
-    "labels",
-    "languages",
-    "pivot",
-    "memory",
-    "about",
-    "lifecycle",
-    "propose",
-    "dependa",
-    "capabilities"
-  ];
-  for (const key of Object.keys(document2)) {
-    if (!KNOWN_ROOT.includes(key)) {
-      throw new Error(
-        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.`
-      );
-    }
-  }
-  const version = document2.version;
-  if (version !== VERSION7) {
-    throw new Error(
-      `warrant: \`${path}\` declares version ${describe(version)}, and this build understands ${String(VERSION7)}.`
-    );
-  }
-  const labels = readLabels(path, document2.labels);
-  const languages = readLanguages(path, document2.languages);
-  const pivot = readPivot(path, document2.pivot);
-  const memory = readMemory(path, document2.memory);
-  const about = readAbout(path, document2.about);
-  const lifecycle = readLifecycle(path, document2.lifecycle);
-  const propose = readPropose(path, document2.propose);
-  const dependa = readDependa(path, document2.dependa);
-  const { declared, granted: capabilities } = readCapabilities(path, document2.capabilities);
-  const names = new Set(labels.map((label) => label.name));
-  for (const label of labels) {
-    for (const other of label.exclusiveWith) {
-      if (!names.has(other)) {
-        throw new Error(
-          `warrant: \`${path}\` has \`${label.name}\` exclusive with \`${other}\`, which is not a label in this file.`
-        );
-      }
-    }
-  }
-  const byName = new Map(labels.map((label) => [label.name, label]));
-  return {
-    path,
-    labels,
-    languages,
-    pivot,
-    memory,
-    about,
-    lifecycle,
-    propose,
-    dependa,
-    granted: (duty, fallback) => capabilities.get(duty) ?? (declared ? [] : fallback),
-    unnamed: (duty) => declared && !capabilities.has(duty),
-    labelNamed: (name) => byName.get(name)
-  };
-}
-function implicitWarrant(path, repositoryLabels) {
-  const labels = [];
-  const excluded = [];
-  for (const label of repositoryLabels) {
-    const description = label.description?.trim() ?? "";
-    if (description.length === 0) {
-      excluded.push(label.name);
-      continue;
-    }
-    labels.push({
-      name: label.name,
-      description,
-      not: null,
-      examples: [],
-      owner: null,
-      exclusiveWith: [],
-      confidence: null,
-      paths: [],
-      create: false,
-      color: null
-    });
-  }
-  const byName = new Map(labels.map((label) => [label.name, label]));
-  return {
-    warrant: {
-      path,
-      labels,
-      languages: null,
-      pivot: null,
-      memory: null,
-      about: null,
-      lifecycle: null,
-      dependa: null,
-      propose: DEFAULT_PROPOSE_WORKSPACE,
-      granted: (_duty, fallback) => fallback,
-      unnamed: () => false,
-      labelNamed: (name) => byName.get(name)
-    },
-    excluded
-  };
-}
-async function resolveAuthority(read2, path, api, at) {
-  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
-  const repositoryLabels = await listRepositoryLabels(api, at);
-  const built = implicitWarrant(path, repositoryLabels);
-  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
-}
-var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
-async function openAuthority(path, api, at, duty) {
-  const read2 = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
-  const authority2 = await resolveAuthority(read2, path, api, at);
-  return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
-}
-function resolveLanguages(warrant, rawInput) {
-  if (warrant.languages !== null) {
-    return {
-      languages: warrant.languages,
-      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key, not the \`languages\` input \u2014 the file is the whole answer once that key is written.`
-    };
-  }
-  if (rawInput.trim().length === 0) {
-    throw new Error(
-      `languages: no language is configured. Write \`languages:\` in the warrant (\`${warrant.path}\`), or set the \`languages\` input.`
-    );
-  }
-  return { languages: parseLanguages(rawInput), notice: null };
-}
-function dutyLanguages(warrant, denied, rawInput) {
-  if (denied) return [];
-  const resolution = resolveLanguages(warrant, rawInput);
-  if (resolution.notice !== null) notice(resolution.notice);
-  return resolution.languages;
-}
-function load(path, source) {
-  let document2;
-  try {
-    document2 = (0, import_yaml.parse)(source);
-  } catch (error2) {
-    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
-    throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
-  }
-  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
-    throw new Error(
-      `warrant: \`${path}\` is not a warrant \u2014 expected a YAML mapping with \`version\` and \`labels\`.`
-    );
-  }
-  return document2;
-}
-function readLabels(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`labels\` as ${describe(raw)}, expected a list.`);
-  }
-  const labels = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const [index, entry] of raw.entries()) {
-    const at = `\`${path}\` label ${String(index + 1)}`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
-    }
-    const fields = entry;
-    const KNOWN_LABEL = [
-      "name",
-      "description",
-      "not",
-      "examples",
-      "owner",
-      "exclusive_with",
-      "confidence",
-      "paths",
-      "create",
-      "color"
-    ];
-    for (const key of Object.keys(fields)) {
-      if (!KNOWN_LABEL.includes(key)) {
-        throw new Error(
-          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
-        );
-      }
-    }
-    const name = text(at, "name", fields.name, { required: true });
-    if (seen.has(name.toLowerCase())) {
-      throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
-    }
-    seen.add(name.toLowerCase());
-    const owner = text(`${at} (\`${name}\`)`, "owner", fields.owner, { required: false });
-    if (owner.length > 0 && !HANDLE.test(owner)) {
-      throw new Error(
-        `warrant: \`${path}\` gives \`${name}\` the owner \`${owner}\`, which is not a handle. Expected \`@user\` or \`@org/team\`.`
-      );
-    }
-    labels.push({
-      name,
-      description: text(`${at} (\`${name}\`)`, "description", fields.description, {
-        required: true
-      }),
-      not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
-      examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
-      owner: nullable(owner),
-      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
-      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence),
-      paths: strings(`${at} (\`${name}\`)`, "paths", fields.paths),
-      create: booleanField(`${at} (\`${name}\`)`, "create", fields.create, false),
-      color: colorField(`${at} (\`${name}\`)`, "color", fields.color)
-    });
-  }
-  return labels;
-}
-function readLanguages(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave the \`languages\` input in charge.`
-    );
-  }
-  if (!Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
-  }
-  const entries = raw.map((entry, index) => {
-    if (typeof entry !== "string") {
-      throw new Error(
-        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
-      );
-    }
-    if (entry.trim().length === 0) {
-      throw new Error(
-        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
-      );
-    }
-    return entry.trim();
-  });
-  return parseLanguages(entries);
-}
-function readPivot(path, raw) {
-  if (raw === void 0) return null;
-  if (typeof raw !== "string" || raw.trim().length === 0) {
-    throw new Error(
-      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
-    );
-  }
-  return raw.trim();
-}
-function readMemory(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
-    );
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
-  }
-  const fields = raw;
-  const recall = fields.recall;
-  if (recall === void 0 || recall === null) {
-    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
-  }
-  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
-    );
-  }
-  return { recall };
-}
-function readAbout(path, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string") {
-    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
-  }
-  const value = raw.trim();
-  return value.length === 0 ? null : value;
-}
-function readLifecycle(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`lifecycle:\` with nothing under it. Write \`tracks:\` under it, or remove the key to leave the duty unwired.`
-    );
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw)}, expected a mapping.`
-    );
-  }
-  const fields = raw;
-  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
-    "tracks",
-    "exempt",
-    "overrides",
-    "threads"
-  ]);
-  const tracks = readLifecycleTracks(path, fields.tracks);
-  const exempt = readLifecycleExempt(path, fields.exempt);
-  const overrides = readLifecycleOverrides(path, fields.overrides);
-  const threadsRaw = fields.threads;
-  const threads = threadsRaw === void 0 ? "issues" : threadsRaw;
-  if (threads !== "issues" && threads !== "prs" && threads !== "both") {
-    throw new Error(
-      `warrant: \`${path}\`'s \`lifecycle.threads\` is ${describe(threadsRaw)}, expected \`issues\`, \`prs\`, or \`both\`.`
-    );
-  }
-  const hasClose = tracks.some((track) => track.steps.some((step) => step.close));
-  if (hasClose && exempt.labels.length === 0) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`lifecycle:\` configures a \`close\` step, but \`exempt.labels\` is empty. A permanent escape hatch must exist before closing may be configured at all.`
-    );
-  }
-  return { tracks, exempt, overrides, threads };
-}
-function readLifecycleTracks(path, raw) {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`lifecycle:\` has no \`tracks\` \u2014 a lifecycle with no tracks decides nothing. Delete the key, or write a track.`
-    );
-  }
-  const seen = /* @__PURE__ */ new Set();
-  return raw.map((entry, index) => {
-    const at = `\`${path}\`'s \`lifecycle.tracks\` entry ${String(index + 1)}`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
-    }
-    const fields = entry;
-    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
-    const name = text(at, "name", fields.name, { required: true });
-    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
-      throw new Error(
-        `warrant: ${at} names the track \`${name}\`, expected lowercase letters, digits and hyphens, starting with a letter.`
-      );
-    }
-    if (seen.has(name)) {
-      throw new Error(
-        `warrant: \`${path}\`'s \`lifecycle.tracks\` names \`${name}\` more than once.`
-      );
-    }
-    seen.add(name);
-    const named = `${at} (\`${name}\`)`;
-    const when = nullable(text(named, "when", fields.when, { required: false }));
-    const resets = resetsField(named, fields.resets, when !== null ? "author" : "any");
-    const stepsRaw = fields.steps;
-    if (!Array.isArray(stepsRaw) || stepsRaw.length === 0) {
-      throw new Error(
-        `warrant: ${named} has no \`steps\` \u2014 a track with no steps decides nothing.`
-      );
-    }
-    const steps = stepsRaw.map(
-      (step, stepIndex) => readLifecycleStep(
-        `${named} step ${String(stepIndex + 1)}`,
-        step,
-        stepIndex === stepsRaw.length - 1
-      )
-    );
-    if (when === null && steps[0]?.close === true) {
-      throw new Error(
-        `warrant: ${named} is an inactivity track whose first step closes \u2014 a close with no prior warning is refused. Add a \`when:\` start, or a warning step before the close.`
-      );
-    }
-    return { name, when, resets, steps };
-  });
-}
-function resetsField(at, raw, fallback) {
-  if (raw === void 0 || raw === null) return fallback;
-  if (raw === "author" || raw === "any") return raw;
-  throw new Error(
-    `warrant: ${at} has \`resets\` as ${describe(raw)}, expected \`author\` or \`any\`.`
-  );
-}
-function readLifecycleStep(at, raw, isLast) {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
-  }
-  const fields = raw;
-  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
-  const after = durationField(at, "after", fields.after, { allowNever: false });
-  const label = nullable(text(at, "label", fields.label, { required: false }));
-  const say = readSay(at, fields.say);
-  const close = closeField(at, fields.close);
-  if (close && !isLast) {
-    throw new Error(
-      `warrant: ${at} has \`close\` on a step that is not the track's last \u2014 close must be the terminal step.`
-    );
-  }
-  if (label === null && say === null && !close) {
-    throw new Error(
-      `warrant: ${at} carries none of \`label\`, \`say\`, \`close\` \u2014 a step must do something.`
-    );
-  }
-  return { after, label, say, close };
-}
-function readSay(at, raw) {
-  if (raw === void 0 || raw === null || raw === false) return null;
-  if (raw === true) return { kind: "built-in" };
-  if (typeof raw === "string") {
-    const value = raw.trim();
-    if (value.length === 0) throw new Error(`warrant: ${at} has an empty \`say\`.`);
-    return { kind: "text", text: value };
-  }
-  if (typeof raw === "object" && !Array.isArray(raw)) {
-    const map = /* @__PURE__ */ new Map();
-    for (const [lang, value] of Object.entries(raw)) {
-      if (typeof value !== "string" || value.trim().length === 0) {
-        throw new Error(`warrant: ${at}'s \`say.${lang}\` is ${describe(value)}, expected text.`);
-      }
-      map.set(lang, value.trim());
-    }
-    if (map.size === 0) throw new Error(`warrant: ${at} writes \`say:\` with nothing under it.`);
-    return { kind: "map", map };
-  }
-  throw new Error(
-    `warrant: ${at} has \`say\` as ${describe(raw)}, expected true, text, or a mapping of language to text.`
-  );
-}
-function closeField(at, raw) {
-  if (raw === void 0 || raw === null || raw === false) return false;
-  if (raw === true || raw === "not_planned") return true;
-  if (raw === "completed") {
-    throw new Error(
-      `warrant: ${at} has \`close: completed\` \u2014 Reeve closes only as \`not_planned\`. Write \`close: true\`.`
-    );
-  }
-  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw)}, expected true or false.`);
-}
-function readLifecycleExempt(path, raw) {
-  const at = `\`${path}\`'s \`lifecycle.exempt\``;
-  if (raw === void 0 || raw === null) {
-    return {
-      labels: [],
-      milestones: true,
-      assignees: true,
-      taxonomy: true,
-      comments: null,
-      drafts: true
-    };
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
-  }
-  const fields = raw;
-  rejectUnknownKeys(at, fields, [
-    "labels",
-    "milestones",
-    "assignees",
-    "taxonomy",
-    "comments",
-    "drafts"
-  ]);
-  return {
-    labels: strings(at, "labels", fields.labels),
-    milestones: guardField(at, "milestones", fields.milestones, true),
-    assignees: guardField(at, "assignees", fields.assignees, true),
-    taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
-    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
-    drafts: booleanField(at, "drafts", fields.drafts, true)
-  };
-}
-function guardField(at, key, raw, fallback) {
-  if (raw === void 0 || raw === null) return fallback;
-  if (typeof raw === "boolean") return raw;
-  if (typeof raw === "string" || Array.isArray(raw)) return strings(at, key, raw);
-  throw new Error(
-    `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true, false, or a list of names.`
-  );
-}
-function readLifecycleOverrides(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw)}, expected a list.`
-    );
-  }
-  return raw.map((entry, index) => {
-    const at = `\`${path}\`'s \`lifecycle.overrides\` entry ${String(index + 1)}`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
-    }
-    const fields = entry;
-    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
-    const label = text(at, "label", fields.label, { required: true });
-    const hasAfter = fields.after !== void 0 && fields.after !== null;
-    const never = booleanField(at, "never", fields.never, false);
-    if (hasAfter && never) {
-      throw new Error(
-        `warrant: ${at} (\`${label}\`) has both \`after\` and \`never\` \u2014 write one.`
-      );
-    }
-    if (!hasAfter && !never) {
-      throw new Error(`warrant: ${at} (\`${label}\`) has neither \`after\` nor \`never\`.`);
-    }
-    const after = hasAfter ? durationField(at, "after", fields.after, { allowNever: false }) : null;
-    return { label, after, never };
-  });
-}
-function readDependa(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`dependa:\` with nothing under it. Write \`allowed-types:\` under it, or remove the key to leave dependa's own defaults in charge.`
-    );
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\` has \`dependa\` as ${describe(raw)}, expected a mapping.`
-    );
-  }
-  const fields = raw;
-  rejectUnknownKeys(`\`${path}\`'s \`dependa\``, fields, [
-    "ecosystems",
-    "allowed-types",
-    "ignore",
-    "grouping",
-    "security-separate",
-    "auto-approve",
-    "auto-close",
-    "auto-rebase",
-    "schedule"
-  ]);
-  return {
-    ecosystems: readDependaEcosystems(path, fields.ecosystems),
-    allowedTypes: readDependaAllowedTypes(path, fields["allowed-types"]),
-    ignore: readDependaIgnore(path, fields.ignore),
-    grouping: readDependaGrouping(path, fields.grouping),
-    securitySeparate: booleanField(
-      `\`${path}\`'s \`dependa\``,
-      "security-separate",
-      fields["security-separate"],
-      true
-    ),
-    autoApprove: readDependaAutoApprove(path, fields["auto-approve"]),
-    autoClose: booleanField(`\`${path}\`'s \`dependa\``, "auto-close", fields["auto-close"], false),
-    autoRebase: booleanField(
-      `\`${path}\`'s \`dependa\``,
-      "auto-rebase",
-      fields["auto-rebase"],
-      true
-    ),
-    schedule: readDependaSchedule(path, fields.schedule)
-  };
-}
-function readDependaEcosystems(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = strings(`\`${path}\`'s \`dependa\``, "ecosystems", raw);
-  const ecosystems = [];
-  for (const entry of list) {
-    const eco = ECOSYSTEMS.find((e) => e === entry);
-    if (eco === void 0) {
-      throw new Error(
-        `warrant: \`${path}\`'s \`dependa.ecosystems\` names \`${entry}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
-      );
-    }
-    if (!ecosystems.includes(eco)) ecosystems.push(eco);
-  }
-  return ecosystems;
-}
-function readDependaAllowedTypes(path, raw) {
-  if (raw === void 0 || raw === null) {
-    return ["patch", "minor", "pin", "digest", "rollback", "security"];
-  }
-  const list = strings(`\`${path}\`'s \`dependa\``, "allowed-types", raw);
-  if (list.length === 0) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`dependa.allowed-types\` is empty. Write at least one, or remove the key to take the defaults.`
-    );
-  }
-  const types = [];
-  for (const entry of list) {
-    const ut = UPDATE_TYPES.find((t) => t === entry);
-    if (ut === void 0) {
-      throw new Error(
-        `warrant: \`${path}\`'s \`dependa.allowed-types\` names \`${entry}\`, which is not a known update type. Expected any of ${UPDATE_TYPES.join(", ")}.`
-      );
-    }
-    if (!types.includes(ut)) types.push(ut);
-  }
-  return types;
-}
-function readDependaIgnore(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`dependa.ignore\` is ${describe(raw)}, expected a list.`
-    );
-  }
-  return raw.map((entry, index) => {
-    const at = `\`${path}\`'s \`dependa.ignore\` entry ${String(index + 1)}`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
-    }
-    const fields = entry;
-    rejectUnknownKeys(at, fields, ["name", "ecosystem", "types"]);
-    const name = text(at, "name", fields.name, { required: true });
-    const ecosystem = readIgnoreEcosystem(at, fields.ecosystem);
-    const types = readIgnoreTypes(at, fields.types);
-    return { name, ecosystem, types };
-  });
-}
-function readIgnoreEcosystem(at, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string") {
-    throw new Error(
-      `warrant: ${at} has \`ecosystem\` as ${describe(raw)}, expected an ecosystem name.`
-    );
-  }
-  const eco = ECOSYSTEMS.find((e) => e === raw.trim());
-  if (eco === void 0) {
-    throw new Error(
-      `warrant: ${at} has \`ecosystem: ${raw}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
-    );
-  }
-  return eco;
-}
-function readIgnoreTypes(at, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = strings(at, "types", raw);
-  const types = [];
-  for (const entry of list) {
-    const ut = UPDATE_TYPES.find((t) => t === entry);
-    if (ut === void 0) {
-      throw new Error(
-        `warrant: ${at} has \`types\` naming \`${entry}\`, which is not a known update type. Expected any of ${UPDATE_TYPES.join(", ")}.`
-      );
-    }
-    if (!types.includes(ut)) types.push(ut);
-  }
-  return types;
-}
-function readDependaGrouping(path, raw) {
-  if (raw === void 0 || raw === null) return "by-ecosystem";
-  if (raw !== "by-ecosystem" && raw !== "by-package" && raw !== "single") {
-    throw new Error(
-      `warrant: \`${path}\`'s \`dependa.grouping\` is ${describe(raw)}, expected \`by-ecosystem\`, \`by-package\`, or \`single\`.`
-    );
-  }
-  return raw;
-}
-function readDependaAutoApprove(path, raw) {
-  if (raw === void 0 || raw === null) return "minor";
-  if (raw === "none") return "none";
-  const ut = UPDATE_TYPES.find((t) => t === raw);
-  if (ut === void 0) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`dependa.auto-approve\` is ${describe(raw)}, expected an update type or \`none\`.`
-    );
-  }
-  return ut;
-}
-function readDependaSchedule(path, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (/^\d+d$/.test(trimmed)) {
-      const days = Number(trimmed.slice(0, -1));
-      if (days === 0) {
-        throw new Error(
-          `warrant: \`${path}\`'s \`dependa.schedule: 0d\` is not a schedule. Write a duration like \`7d\`, a cron expression, or remove the key.`
-        );
-      }
-      return { kind: "interval", days };
-    }
-    return { kind: "cron", expression: trimmed };
-  }
-  if (typeof raw === "object" && !Array.isArray(raw)) {
-    const fields = raw;
-    rejectUnknownKeys(`\`${path}\`'s \`dependa.schedule\``, fields, ["interval", "cron"]);
-    const interval = fields.interval;
-    const cron = fields.cron;
-    if (interval !== void 0 && cron !== void 0) {
-      throw new Error(
-        `warrant: \`${path}\`'s \`dependa.schedule\` has both \`interval\` and \`cron\` \u2014 write one.`
-      );
-    }
-    if (interval !== void 0 && interval !== null) {
-      const days = wholeNumber(`\`${path}\`'s \`dependa.schedule\``, "interval", interval, 1);
-      return { kind: "interval", days };
-    }
-    if (cron !== void 0 && cron !== null) {
-      if (typeof cron !== "string" || cron.trim().length === 0) {
-        throw new Error(
-          `warrant: \`${path}\`'s \`dependa.schedule.cron\` is ${describe(cron)}, expected a cron expression.`
-        );
-      }
-      return { kind: "cron", expression: cron.trim() };
-    }
-    throw new Error(
-      `warrant: \`${path}\`'s \`dependa.schedule\` writes a mapping with neither \`interval\` nor \`cron\`.`
-    );
-  }
-  throw new Error(
-    `warrant: \`${path}\`'s \`dependa.schedule\` is ${describe(raw)}, expected a duration, a cron expression, or a mapping.`
-  );
-}
-function readPropose(path, raw) {
-  if (raw === void 0) return DEFAULT_PROPOSE_WORKSPACE;
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`propose:\` with nothing under it. Write \`workspace:\` under it, or remove the key to take the defaults.`
-    );
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\` has \`propose\` as ${describe(raw)}, expected a mapping.`
-    );
-  }
-  const fields = raw;
-  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
-  const workspaceRaw = fields.workspace;
-  if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
-  if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
-    throw new Error(
-      `warrant: \`${path}\`'s \`propose.workspace\` is ${describe(workspaceRaw)}, expected a mapping.`
-    );
-  }
-  const w = workspaceRaw;
-  const at = `\`${path}\`'s \`propose.workspace\``;
-  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
-  const nameRaw = text(at, "name", w.name, { required: false });
-  const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
-  if ((name.match(/\{package\}/g) ?? []).length !== 1) {
-    throw new Error(
-      `warrant: ${at} has \`name: ${name}\`, expected exactly one \`{package}\` placeholder.`
-    );
-  }
-  const except = strings(at, "except", w.except);
-  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
-  const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
-  const retire = booleanField(at, "retire", w.retire, false);
-  return { name, except, evidence, window: window2, retire };
-}
-function wholeNumber(at, key, raw, min) {
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min) {
-    throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a whole number of ${String(min)} or more.`
-    );
-  }
-  return raw;
-}
-function optionalWholeNumber(at, key, raw, min) {
-  if (raw === void 0 || raw === null) return null;
-  return wholeNumber(at, key, raw, min);
-}
-function readCapabilities(path, raw) {
-  const granted = /* @__PURE__ */ new Map();
-  if (raw === void 0) return { declared: false, granted };
-  if (raw === null) {
-    throw new Error(
-      `warrant: \`${path}\` writes \`capabilities:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
-    );
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(
-      `warrant: \`${path}\` has \`capabilities\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
-    );
-  }
-  for (const [duty, value] of Object.entries(raw)) {
-    const at = `\`${path}\` capabilities for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      throw new Error(
-        `warrant: \`${path}\` capabilities names \`${duty}\`, which is not a known duty. Expected any of ${[...DUTIES, ...PLANNED].join(", ")}.`
-      );
-    }
-    const entries = strings(at, duty, value);
-    if (entries.length === 0) {
-      throw new Error(
-        `warrant: ${at} is empty. Use \`[none]\` to grant nothing, explicitly, or remove the entry to take this duty's own default.`
-      );
-    }
-    if (entries.length === 1 && entries[0] === "none") {
-      granted.set(duty, []);
-      continue;
-    }
-    const permitted = [];
-    for (const entry of entries) {
-      const capability = CAPABILITIES.find((known) => known === entry);
-      if (capability === void 0) {
-        throw new Error(
-          `warrant: ${at} names \`${entry}\`, which is not something a duty can be granted. Expected any of ${CAPABILITIES.join(", ")}, or \`none\` on its own.`
-        );
-      }
-      if (!permitted.includes(capability)) permitted.push(capability);
-    }
-    granted.set(duty, permitted);
-  }
-  return { declared: true, granted };
-}
-function text(at, key, raw, options) {
-  if (raw === void 0 || raw === null) {
-    if (!options.required) return "";
-    throw new Error(`warrant: ${at} has no \`${key}\`.`);
-  }
-  if (typeof raw !== "string") {
-    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected text.`);
-  }
-  const value = raw.trim();
-  if (value.length === 0 && options.required) {
-    throw new Error(`warrant: ${at} has an empty \`${key}\`.`);
-  }
-  return value;
-}
-function strings(at, key, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.map((entry, index) => {
-    if (typeof entry !== "string") {
-      throw new Error(
-        `warrant: ${at} has \`${key}\` entry ${String(index + 1)} as ${describe(entry)}, expected text.`
-      );
-    }
-    const value = entry.trim();
-    if (value.length === 0) {
-      throw new Error(`warrant: ${at} has an empty \`${key}\` entry.`);
-    }
-    return value;
-  });
-}
-function nullable(value) {
-  return value.length === 0 ? null : value;
-}
-function confidenceField(at, key, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
-    throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
-    );
-  }
-  return raw;
-}
-function booleanField(at, key, raw, fallback) {
-  if (raw === void 0 || raw === null) return fallback;
-  if (typeof raw !== "boolean") {
-    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true or false.`);
-  }
-  return raw;
-}
-var HEX_COLOR = /^[0-9a-fA-F]{6}$/;
-function colorField(at, key, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string" || !HEX_COLOR.test(raw.trim())) {
-    throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a 6-digit hex color with no \`#\`.`
-    );
-  }
-  return raw.trim().toLowerCase();
-}
-function durationField(at, key, raw, options) {
-  if (options.allowNever && raw === "never") return null;
-  if (typeof raw !== "string" || !/^\d+d$/.test(raw.trim())) {
-    throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a duration like \`14d\`` + (options.allowNever ? " or `never`." : ".")
-    );
-  }
-  const days = Number(raw.trim().slice(0, -1));
-  if (days === 0) {
-    throw new Error(
-      `warrant: ${at} has \`${key}: 0d\`, which is not a duration. Write \`never\`, or remove the step.`
-    );
-  }
-  return days * 24 * 60 * 60 * 1e3;
-}
-function rejectUnknownKeys(at, fields, known) {
-  for (const key of Object.keys(fields)) {
-    if (!known.includes(key)) {
-      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
-    }
-  }
-}
-function describe(value) {
-  if (value === null) return "empty";
-  if (value === void 0) return "absent";
-  if (Array.isArray(value)) return "a list";
-  if (typeof value === "object") return "a mapping";
-  if (typeof value === "string") return `the text \`${value}\``;
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return `\`${String(value)}\``;
-  }
-  return "a value of a kind this file cannot hold";
-}
-
-// src/core/enforce.ts
-function parseApply(raw) {
-  const value = raw.trim().toLowerCase();
-  if (value === "none") return [];
-  const requested = value.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (requested.length === 0) {
-    throw new Error("apply: no entries. Use `none` to grant nothing, explicitly.");
-  }
-  const granted = [];
-  for (const entry of requested) {
-    const capability = CAPABILITIES.find((known) => known === entry);
-    if (capability === void 0) {
-      throw new Error(
-        `apply: \`${entry}\` is not something a duty can be asked to do. Expected any of ${CAPABILITIES.join(", ")}, or \`none\`.`
-      );
-    }
-    if (!granted.includes(capability)) granted.push(capability);
-  }
-  return granted;
-}
-function narrow(granted, requested) {
-  return {
-    permitted: granted.filter((capability) => requested.includes(capability)),
-    withheld: requested.filter((capability) => !granted.includes(capability))
-  };
-}
-function narrowWarned(granted, requested, duty, warrantPath) {
-  const narrowed = narrow(granted, requested);
-  for (const capability of narrowed.withheld) {
-    warning(
-      `\`apply\` asks for \`${capability}\`, which \`${warrantPath}\` does not grant to ${duty}. The narrower of the two wins.`
-    );
-  }
-  return narrowed;
 }
 
 // src/core/meter.ts
@@ -32865,7 +31768,8 @@ var STAGE = {
   triage: "Triage",
   pivot: "Pivot translation",
   duplicate: "Duplicate check",
-  risk: "Risk assessment"
+  risk: "Risk assessment",
+  review: "Review"
 };
 function createMeter() {
   const spends = /* @__PURE__ */ new Map();
@@ -33451,6 +32355,124 @@ function bounded(name, raw) {
   return value;
 }
 
+// src/core/script.ts
+var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
+var matchers = /* @__PURE__ */ new Map();
+function matcher(script, exempt) {
+  const names = [script, ...exempt];
+  if (!names.every((name) => SCRIPT_NAME.test(name))) return null;
+  const key = names.join(" ");
+  const cached = matchers.get(key);
+  if (cached !== void 0) return cached;
+  let compiled;
+  try {
+    const excluded = exempt.map((name) => `\\p{Script=${name}}`).join("");
+    const guard = excluded.length === 0 ? "" : `(?![${excluded}])`;
+    compiled = new RegExp(`${guard}\\p{Script=${script}}`, "u");
+  } catch {
+    compiled = null;
+  }
+  matchers.set(key, compiled);
+  return compiled;
+}
+function isScriptName(script) {
+  return matcher(script, []) !== null;
+}
+function containsScript(text2, script, exempt = []) {
+  return matcher(script, exempt)?.test(text2) ?? false;
+}
+
+// src/core/derive.ts
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function deriveLanguage(code) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code);
+  return label === null ? null : { label, scripts };
+}
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code.toLowerCase() ? null : name;
+}
+
+// src/core/languages.ts
+function parseLanguages(raw) {
+  const entries = typeof raw === "string" ? parseList(raw) : raw;
+  if (entries.length === 0) {
+    throw new Error("languages: no entries. Expected at least one language code.");
+  }
+  const languages = [];
+  const seen = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    const language = entry.includes(":") ? spelled(entry) : derived(entry);
+    const previous = seen.get(language.code.toLowerCase());
+    if (previous !== void 0) {
+      throw new Error(
+        `languages: \`${language.code}\` is listed twice (already seen as \`${previous}\`).`
+      );
+    }
+    seen.set(language.code.toLowerCase(), language.code);
+    languages.push(language);
+  }
+  return languages;
+}
+function derived(code) {
+  const language = deriveLanguage(code);
+  if (language === null) {
+    throw new Error(
+      `languages: \`${code}\` is not a language code this runtime knows a name and a script for. Write it as \`code:Label:Script\` instead, such as \`` + code + ":Label:Latin`."
+    );
+  }
+  return { code, label: language.label, scripts: language.scripts };
+}
+function spelled(entry) {
+  const fields = entry.split(":");
+  if (fields.length !== 3) {
+    throw new Error(
+      `languages: \`${entry}\` has ${String(fields.length)} colon-separated fields, expected 3 (\`code:Label:Script\`).`
+    );
+  }
+  const [code, label, scriptField] = fields.map((field) => field.trim());
+  if (code.length === 0) throw new Error(`languages: \`${entry}\` has an empty code.`);
+  if (label.length === 0) throw new Error(`languages: \`${entry}\` has an empty label.`);
+  const scripts = scriptField.split("+").map((script) => script.trim()).filter((script) => script.length > 0);
+  if (scripts.length === 0) throw new Error(`languages: \`${entry}\` names no script.`);
+  for (const script of scripts) {
+    if (!isScriptName(script)) {
+      throw new Error(
+        `languages: \`${entry}\` names \`${script}\`, which is not a Unicode script. Use a Unicode script name or its four-letter alias, such as \`Latin\`, \`Han\` or \`Cyrl\`.`
+      );
+    }
+  }
+  return { code, label, scripts };
+}
+function findLanguage(languages, code) {
+  const wanted = code.toLowerCase();
+  return languages.find((language) => language.code.toLowerCase() === wanted);
+}
+
 // src/core/marker.ts
 import { createHash } from "node:crypto";
 var DUTY_NAME = /^[a-z][a-z0-9-]*$/;
@@ -33479,6 +32501,9 @@ function markerFor(duty) {
 }
 function authorHalf(text2) {
   return text2.replace(/\s+$/u, "");
+}
+function isFingerprint(payload) {
+  return /^[0-9a-f]{16}$/.test(payload);
 }
 function fingerprint(text2, keys) {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
@@ -33642,6 +32667,996 @@ async function sweepThreads(acc, candidates, settings, weather, hooks) {
     else acc.results.push(row);
     hooks.afterEach?.();
   }
+}
+
+// src/core/warrant.ts
+import { readFile } from "node:fs/promises";
+var import_yaml = __toESM(require_dist2(), 1);
+
+// src/duties/dependa/model.ts
+var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
+var UPDATE_TYPES = [
+  "major",
+  "minor",
+  "patch",
+  "pin",
+  "digest",
+  "rollback",
+  "security"
+];
+
+// src/refusal.ts
+var DUTIES = [
+  "translate",
+  "triage",
+  "duplicate",
+  "respond",
+  "lifecycle",
+  "harmonise",
+  "dependa",
+  "review"
+];
+var PLANNED = [];
+
+// src/core/warrant.ts
+var CAPABILITIES = [
+  "label",
+  "edit-body",
+  "comment",
+  "close",
+  "assign",
+  "record",
+  "propose",
+  "edit-file",
+  "open-pr"
+];
+var VERSION7 = 1;
+var DEFAULT_PROPOSE_WORKSPACE = {
+  name: "area:{package}",
+  except: [],
+  evidence: 3,
+  window: 90 * 24 * 60 * 60 * 1e3,
+  retire: false
+};
+var HANDLE = /^@[A-Za-z0-9][A-Za-z0-9-]{0,38}(\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})?$/;
+async function readWarrant(path, options) {
+  let source;
+  try {
+    source = await readFile(path, "utf8");
+  } catch (error2) {
+    if (path === options.defaultPath && isNotFound(error2)) return null;
+    const reason = error2 instanceof Error ? error2.message : String(error2);
+    throw new Error(
+      `warrant: \`${path}\` could not be read, so this run has no authority \u2014 ${reason}. Write one, or point \`warrant\` at where yours lives.`,
+      { cause: error2 }
+    );
+  }
+  return parseWarrant(path, source);
+}
+function isNotFound(error2) {
+  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
+}
+function parseWarrant(path, source) {
+  const document2 = load(path, source);
+  const KNOWN_ROOT = [
+    "version",
+    "labels",
+    "languages",
+    "pivot",
+    "memory",
+    "about",
+    "lifecycle",
+    "propose",
+    "dependa",
+    "duties"
+  ];
+  for (const key of Object.keys(document2)) {
+    if (!KNOWN_ROOT.includes(key)) {
+      throw new Error(
+        `warrant: \`${path}\` has an unrecognized key \`${key}\`. Expected any of ${KNOWN_ROOT.join(", ")}.${closestHint(key, KNOWN_ROOT)}`
+      );
+    }
+  }
+  const version = document2.version;
+  if (version !== VERSION7) {
+    throw new Error(
+      `warrant: \`${path}\` declares version ${describe(version)}, and this build understands ${String(VERSION7)}.`
+    );
+  }
+  const labels = readLabels(path, document2.labels);
+  const languages = readLanguages(path, document2.languages);
+  const pivot = readPivot(path, document2.pivot);
+  const memory = readMemory(path, document2.memory);
+  const about = readAbout(path, document2.about);
+  const lifecycle = readLifecycle(path, document2.lifecycle);
+  const propose = readPropose(path, document2.propose);
+  const dependa = readDependa(path, document2.dependa);
+  const { declared, granted: capabilities } = readDuties(path, document2.duties);
+  const names = new Set(labels.map((label) => label.name));
+  for (const label of labels) {
+    for (const other of label.exclusiveWith) {
+      if (!names.has(other)) {
+        throw new Error(
+          `warrant: \`${path}\` has \`${label.name}\` exclusive with \`${other}\`, which is not a label in this file.`
+        );
+      }
+    }
+  }
+  const byName = new Map(labels.map((label) => [label.name, label]));
+  return {
+    path,
+    labels,
+    languages,
+    pivot,
+    memory,
+    about,
+    lifecycle,
+    propose,
+    dependa,
+    granted: (duty, fallback) => {
+      const raw = capabilities.get(duty);
+      if (raw === "default") return fallback;
+      if (raw !== void 0) return raw;
+      return declared ? [] : fallback;
+    },
+    unnamed: (duty) => declared && !capabilities.has(duty),
+    labelNamed: (name) => byName.get(name)
+  };
+}
+function implicitWarrant(path, repositoryLabels) {
+  const labels = [];
+  const excluded = [];
+  for (const label of repositoryLabels) {
+    const description = label.description?.trim() ?? "";
+    if (description.length === 0) {
+      excluded.push(label.name);
+      continue;
+    }
+    labels.push({
+      name: label.name,
+      description,
+      not: null,
+      examples: [],
+      owner: null,
+      exclusiveWith: [],
+      confidence: null,
+      paths: [],
+      create: false,
+      color: null
+    });
+  }
+  const byName = new Map(labels.map((label) => [label.name, label]));
+  return {
+    warrant: {
+      path,
+      labels,
+      languages: null,
+      pivot: null,
+      memory: null,
+      about: null,
+      lifecycle: null,
+      dependa: null,
+      propose: DEFAULT_PROPOSE_WORKSPACE,
+      granted: (_duty, fallback) => fallback,
+      unnamed: () => false,
+      labelNamed: (name) => byName.get(name)
+    },
+    excluded
+  };
+}
+async function resolveAuthority(read2, path, api, at) {
+  if (read2 !== null) return { warrant: read2, implicit: false, excludedLabels: [] };
+  const repositoryLabels = await listRepositoryLabels(api, at);
+  const built = implicitWarrant(path, repositoryLabels);
+  return { warrant: built.warrant, implicit: true, excludedLabels: built.excluded };
+}
+var DEFAULT_WARRANT_PATH = ".github/reeve.yml";
+async function openAuthority(path, api, at, duty) {
+  const read2 = await readWarrant(path, { defaultPath: DEFAULT_WARRANT_PATH });
+  const authority2 = await resolveAuthority(read2, path, api, at);
+  return { authority: authority2, denied: authority2.warrant.unnamed(duty) };
+}
+function resolveLanguages(warrant, fallback) {
+  if (warrant.languages !== null) {
+    return {
+      languages: warrant.languages,
+      notice: `languages: read from \`${warrant.path}\`'s \`languages:\` key \u2014 the file is the whole answer once that key is written.`
+    };
+  }
+  return { languages: fallback, notice: null };
+}
+function dutyLanguages(warrant, denied, fallback) {
+  if (denied) return [];
+  const resolution = resolveLanguages(warrant, fallback);
+  if (resolution.notice !== null) notice(resolution.notice);
+  return resolution.languages;
+}
+function load(path, source) {
+  let document2;
+  try {
+    document2 = (0, import_yaml.parse)(source);
+  } catch (error2) {
+    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
+  }
+  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
+    throw new Error(
+      `warrant: \`${path}\` is not a warrant \u2014 expected a YAML mapping with \`version\` and \`labels\`.`
+    );
+  }
+  return document2;
+}
+function readLabels(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`labels\` as ${describe(raw)}, expected a list.`);
+  }
+  const labels = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const [index, entry] of raw.entries()) {
+    const at = `\`${path}\` label ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    const KNOWN_LABEL = [
+      "name",
+      "description",
+      "not",
+      "examples",
+      "owner",
+      "exclusive_with",
+      "confidence",
+      "paths",
+      "create",
+      "color"
+    ];
+    for (const key of Object.keys(fields)) {
+      if (!KNOWN_LABEL.includes(key)) {
+        throw new Error(
+          `warrant: ${at} has an unrecognized key \`${key}\`. Expected any of ${KNOWN_LABEL.join(", ")}.`
+        );
+      }
+    }
+    const name = text(at, "name", fields.name, { required: true });
+    if (seen.has(name.toLowerCase())) {
+      throw new Error(`warrant: \`${path}\` names \`${name}\` more than once.`);
+    }
+    seen.add(name.toLowerCase());
+    const owner = text(`${at} (\`${name}\`)`, "owner", fields.owner, { required: false });
+    if (owner.length > 0 && !HANDLE.test(owner)) {
+      throw new Error(
+        `warrant: \`${path}\` gives \`${name}\` the owner \`${owner}\`, which is not a handle. Expected \`@user\` or \`@org/team\`.`
+      );
+    }
+    labels.push({
+      name,
+      description: text(`${at} (\`${name}\`)`, "description", fields.description, {
+        required: true
+      }),
+      not: nullable(text(`${at} (\`${name}\`)`, "not", fields.not, { required: false })),
+      examples: strings(`${at} (\`${name}\`)`, "examples", fields.examples),
+      owner: nullable(owner),
+      exclusiveWith: strings(`${at} (\`${name}\`)`, "exclusive_with", fields.exclusive_with),
+      confidence: confidenceField(`${at} (\`${name}\`)`, "confidence", fields.confidence),
+      paths: strings(`${at} (\`${name}\`)`, "paths", fields.paths),
+      create: booleanField(`${at} (\`${name}\`)`, "create", fields.create, false),
+      color: colorField(`${at} (\`${name}\`)`, "color", fields.color)
+    });
+  }
+  return labels;
+}
+function readLanguages(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
+    );
+  }
+  if (!Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
+  }
+  const entries = raw.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
+      );
+    }
+    if (entry.trim().length === 0) {
+      throw new Error(
+        `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is empty, expected a language.`
+      );
+    }
+    return entry.trim();
+  });
+  return parseLanguages(entries);
+}
+function readPivot(path, raw) {
+  if (raw === void 0) return null;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
+    );
+  }
+  return raw.trim();
+}
+function readMemory(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  const recall = fields.recall;
+  if (recall === void 0 || recall === null) {
+    throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
+  }
+  if (typeof recall !== "number" || !Number.isInteger(recall) || recall < 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`memory.recall\` is ${describe(recall)}, expected a whole number of 0 or more.`
+    );
+  }
+  return { recall };
+}
+function readAbout(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  return value.length === 0 ? null : value;
+}
+function readLifecycle(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`lifecycle:\` with nothing under it. Write \`tracks:\` under it, or remove the key to leave the duty unwired.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
+    "tracks",
+    "exempt",
+    "overrides",
+    "threads"
+  ]);
+  const tracks = readLifecycleTracks(path, fields.tracks);
+  const exempt = readLifecycleExempt(path, fields.exempt);
+  const overrides = readLifecycleOverrides(path, fields.overrides);
+  const threadsRaw = fields.threads;
+  const threads = threadsRaw === void 0 ? "issues" : threadsRaw;
+  if (threads !== "issues" && threads !== "prs" && threads !== "both") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.threads\` is ${describe(threadsRaw)}, expected \`issues\`, \`prs\`, or \`both\`.`
+    );
+  }
+  const hasClose = tracks.some((track) => track.steps.some((step) => step.close));
+  if (hasClose && exempt.labels.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` configures a \`close\` step, but \`exempt.labels\` is empty. A permanent escape hatch must exist before closing may be configured at all.`
+    );
+  }
+  return { tracks, exempt, overrides, threads };
+}
+function readLifecycleTracks(path, raw) {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle:\` has no \`tracks\` \u2014 a lifecycle with no tracks decides nothing. Delete the key, or write a track.`
+    );
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.tracks\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "when", "resets", "steps"]);
+    const name = text(at, "name", fields.name, { required: true });
+    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+      throw new Error(
+        `warrant: ${at} names the track \`${name}\`, expected lowercase letters, digits and hyphens, starting with a letter.`
+      );
+    }
+    if (seen.has(name)) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`lifecycle.tracks\` names \`${name}\` more than once.`
+      );
+    }
+    seen.add(name);
+    const named = `${at} (\`${name}\`)`;
+    const when = nullable(text(named, "when", fields.when, { required: false }));
+    const resets = resetsField(named, fields.resets, when !== null ? "author" : "any");
+    const stepsRaw = fields.steps;
+    if (!Array.isArray(stepsRaw) || stepsRaw.length === 0) {
+      throw new Error(
+        `warrant: ${named} has no \`steps\` \u2014 a track with no steps decides nothing.`
+      );
+    }
+    const steps = stepsRaw.map(
+      (step, stepIndex) => readLifecycleStep(
+        `${named} step ${String(stepIndex + 1)}`,
+        step,
+        stepIndex === stepsRaw.length - 1
+      )
+    );
+    if (when === null && steps[0]?.close === true) {
+      throw new Error(
+        `warrant: ${named} is an inactivity track whose first step closes \u2014 a close with no prior warning is refused. Add a \`when:\` start, or a warning step before the close.`
+      );
+    }
+    return { name, when, resets, steps };
+  });
+}
+function resetsField(at, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (raw === "author" || raw === "any") return raw;
+  throw new Error(
+    `warrant: ${at} has \`resets\` as ${describe(raw)}, expected \`author\` or \`any\`.`
+  );
+}
+function readLifecycleStep(at, raw, isLast) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
+  const after = durationField(at, "after", fields.after, { allowNever: false });
+  const label = nullable(text(at, "label", fields.label, { required: false }));
+  const say = readSay(at, fields.say);
+  const close = closeField(at, fields.close);
+  if (close && !isLast) {
+    throw new Error(
+      `warrant: ${at} has \`close\` on a step that is not the track's last \u2014 close must be the terminal step.`
+    );
+  }
+  if (label === null && say === null && !close) {
+    throw new Error(
+      `warrant: ${at} carries none of \`label\`, \`say\`, \`close\` \u2014 a step must do something.`
+    );
+  }
+  return { after, label, say, close };
+}
+function readSay(at, raw) {
+  if (raw === void 0 || raw === null || raw === false) return null;
+  if (raw === true) return { kind: "built-in" };
+  if (typeof raw === "string") {
+    const value = raw.trim();
+    if (value.length === 0) throw new Error(`warrant: ${at} has an empty \`say\`.`);
+    return { kind: "text", text: value };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const map = /* @__PURE__ */ new Map();
+    for (const [lang, value] of Object.entries(raw)) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`warrant: ${at}'s \`say.${lang}\` is ${describe(value)}, expected text.`);
+      }
+      map.set(lang, value.trim());
+    }
+    if (map.size === 0) throw new Error(`warrant: ${at} writes \`say:\` with nothing under it.`);
+    return { kind: "map", map };
+  }
+  throw new Error(
+    `warrant: ${at} has \`say\` as ${describe(raw)}, expected true, text, or a mapping of language to text.`
+  );
+}
+function closeField(at, raw) {
+  if (raw === void 0 || raw === null || raw === false) return false;
+  if (raw === true || raw === "not_planned") return true;
+  if (raw === "completed") {
+    throw new Error(
+      `warrant: ${at} has \`close: completed\` \u2014 Reeve closes only as \`not_planned\`. Write \`close: true\`.`
+    );
+  }
+  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw)}, expected true or false.`);
+}
+function readLifecycleExempt(path, raw) {
+  const at = `\`${path}\`'s \`lifecycle.exempt\``;
+  if (raw === void 0 || raw === null) {
+    return {
+      labels: [],
+      milestones: true,
+      assignees: true,
+      taxonomy: true,
+      comments: null,
+      drafts: true
+    };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  }
+  const fields = raw;
+  rejectUnknownKeys(at, fields, [
+    "labels",
+    "milestones",
+    "assignees",
+    "taxonomy",
+    "comments",
+    "drafts"
+  ]);
+  return {
+    labels: strings(at, "labels", fields.labels),
+    milestones: guardField(at, "milestones", fields.milestones, true),
+    assignees: guardField(at, "assignees", fields.assignees, true),
+    taxonomy: booleanField(at, "taxonomy", fields.taxonomy, true),
+    comments: optionalWholeNumber(at, "comments", fields.comments, 1),
+    drafts: booleanField(at, "drafts", fields.drafts, true)
+  };
+}
+function guardField(at, key, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "string" || Array.isArray(raw)) return strings(at, key, raw);
+  throw new Error(
+    `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true, false, or a list of names.`
+  );
+}
+function readLifecycleOverrides(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw)}, expected a list.`
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`lifecycle.overrides\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
+    }
+    const fields = entry;
+    rejectUnknownKeys(at, fields, ["label", "after", "never"]);
+    const label = text(at, "label", fields.label, { required: true });
+    const hasAfter = fields.after !== void 0 && fields.after !== null;
+    const never = booleanField(at, "never", fields.never, false);
+    if (hasAfter && never) {
+      throw new Error(
+        `warrant: ${at} (\`${label}\`) has both \`after\` and \`never\` \u2014 write one.`
+      );
+    }
+    if (!hasAfter && !never) {
+      throw new Error(`warrant: ${at} (\`${label}\`) has neither \`after\` nor \`never\`.`);
+    }
+    const after = hasAfter ? durationField(at, "after", fields.after, { allowNever: false }) : null;
+    return { label, after, never };
+  });
+}
+function readDependa(path, raw) {
+  if (raw === void 0) return null;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`dependa:\` with nothing under it. Write \`allowed-types:\` under it, or remove the key to leave dependa's own defaults in charge.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`dependa\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`dependa\``, fields, [
+    "ecosystems",
+    "allowed-types",
+    "ignore",
+    "grouping",
+    "security-separate",
+    "auto-approve",
+    "auto-close",
+    "auto-rebase",
+    "schedule"
+  ]);
+  return {
+    ecosystems: readDependaEcosystems(path, fields.ecosystems),
+    allowedTypes: readDependaAllowedTypes(path, fields["allowed-types"]),
+    ignore: readDependaIgnore(path, fields.ignore),
+    grouping: readDependaGrouping(path, fields.grouping),
+    securitySeparate: booleanField(
+      `\`${path}\`'s \`dependa\``,
+      "security-separate",
+      fields["security-separate"],
+      true
+    ),
+    autoApprove: readDependaAutoApprove(path, fields["auto-approve"]),
+    autoClose: booleanField(`\`${path}\`'s \`dependa\``, "auto-close", fields["auto-close"], false),
+    autoRebase: booleanField(
+      `\`${path}\`'s \`dependa\``,
+      "auto-rebase",
+      fields["auto-rebase"],
+      true
+    ),
+    schedule: readDependaSchedule(path, fields.schedule)
+  };
+}
+function readDependaEcosystems(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  const list = strings(`\`${path}\`'s \`dependa\``, "ecosystems", raw);
+  const ecosystems = [];
+  for (const entry of list) {
+    const eco = ECOSYSTEMS.find((e) => e === entry);
+    if (eco === void 0) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.ecosystems\` names \`${entry}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
+      );
+    }
+    if (!ecosystems.includes(eco)) ecosystems.push(eco);
+  }
+  return ecosystems;
+}
+function readDependaAllowedTypes(path, raw) {
+  if (raw === void 0 || raw === null) {
+    return ["patch", "minor", "pin", "digest", "rollback", "security"];
+  }
+  const list = strings(`\`${path}\`'s \`dependa\``, "allowed-types", raw);
+  if (list.length === 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.allowed-types\` is empty. Write at least one, or remove the key to take the defaults.`
+    );
+  }
+  const types = [];
+  for (const entry of list) {
+    const ut = UPDATE_TYPES.find((t) => t === entry);
+    if (ut === void 0) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.allowed-types\` names \`${entry}\`, which is not a known update type. Expected any of ${UPDATE_TYPES.join(", ")}.`
+      );
+    }
+    if (!types.includes(ut)) types.push(ut);
+  }
+  return types;
+}
+function readDependaIgnore(path, raw) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.ignore\` is ${describe(raw)}, expected a list.`
+    );
+  }
+  return raw.map((entry, index) => {
+    const at = `\`${path}\`'s \`dependa.ignore\` entry ${String(index + 1)}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
+    }
+    const fields = entry;
+    rejectUnknownKeys(at, fields, ["name", "ecosystem", "types"]);
+    const name = text(at, "name", fields.name, { required: true });
+    const ecosystem = readIgnoreEcosystem(at, fields.ecosystem);
+    const types = readIgnoreTypes(at, fields.types);
+    return { name, ecosystem, types };
+  });
+}
+function readIgnoreEcosystem(at, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") {
+    throw new Error(
+      `warrant: ${at} has \`ecosystem\` as ${describe(raw)}, expected an ecosystem name.`
+    );
+  }
+  const eco = ECOSYSTEMS.find((e) => e === raw.trim());
+  if (eco === void 0) {
+    throw new Error(
+      `warrant: ${at} has \`ecosystem: ${raw}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
+    );
+  }
+  return eco;
+}
+function readIgnoreTypes(at, raw) {
+  if (raw === void 0 || raw === null) return [];
+  const list = strings(at, "types", raw);
+  const types = [];
+  for (const entry of list) {
+    const ut = UPDATE_TYPES.find((t) => t === entry);
+    if (ut === void 0) {
+      throw new Error(
+        `warrant: ${at} has \`types\` naming \`${entry}\`, which is not a known update type. Expected any of ${UPDATE_TYPES.join(", ")}.`
+      );
+    }
+    if (!types.includes(ut)) types.push(ut);
+  }
+  return types;
+}
+function readDependaGrouping(path, raw) {
+  if (raw === void 0 || raw === null) return "by-ecosystem";
+  if (raw !== "by-ecosystem" && raw !== "by-package" && raw !== "single") {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.grouping\` is ${describe(raw)}, expected \`by-ecosystem\`, \`by-package\`, or \`single\`.`
+    );
+  }
+  return raw;
+}
+function readDependaAutoApprove(path, raw) {
+  if (raw === void 0 || raw === null) return "minor";
+  if (raw === "none") return "none";
+  const ut = UPDATE_TYPES.find((t) => t === raw);
+  if (ut === void 0) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.auto-approve\` is ${describe(raw)}, expected an update type or \`none\`.`
+    );
+  }
+  return ut;
+}
+function readDependaSchedule(path, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (/^\d+d$/.test(trimmed)) {
+      const days = Number(trimmed.slice(0, -1));
+      if (days === 0) {
+        throw new Error(
+          `warrant: \`${path}\`'s \`dependa.schedule: 0d\` is not a schedule. Write a duration like \`7d\`, a cron expression, or remove the key.`
+        );
+      }
+      return { kind: "interval", days };
+    }
+    return { kind: "cron", expression: trimmed };
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const fields = raw;
+    rejectUnknownKeys(`\`${path}\`'s \`dependa.schedule\``, fields, ["interval", "cron"]);
+    const interval = fields.interval;
+    const cron = fields.cron;
+    if (interval !== void 0 && cron !== void 0) {
+      throw new Error(
+        `warrant: \`${path}\`'s \`dependa.schedule\` has both \`interval\` and \`cron\` \u2014 write one.`
+      );
+    }
+    if (interval !== void 0 && interval !== null) {
+      const days = wholeNumber(`\`${path}\`'s \`dependa.schedule\``, "interval", interval, 1);
+      return { kind: "interval", days };
+    }
+    if (cron !== void 0 && cron !== null) {
+      if (typeof cron !== "string" || cron.trim().length === 0) {
+        throw new Error(
+          `warrant: \`${path}\`'s \`dependa.schedule.cron\` is ${describe(cron)}, expected a cron expression.`
+        );
+      }
+      return { kind: "cron", expression: cron.trim() };
+    }
+    throw new Error(
+      `warrant: \`${path}\`'s \`dependa.schedule\` writes a mapping with neither \`interval\` nor \`cron\`.`
+    );
+  }
+  throw new Error(
+    `warrant: \`${path}\`'s \`dependa.schedule\` is ${describe(raw)}, expected a duration, a cron expression, or a mapping.`
+  );
+}
+function readPropose(path, raw) {
+  if (raw === void 0) return DEFAULT_PROPOSE_WORKSPACE;
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`propose:\` with nothing under it. Write \`workspace:\` under it, or remove the key to take the defaults.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`propose\` as ${describe(raw)}, expected a mapping.`
+    );
+  }
+  const fields = raw;
+  rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
+  const workspaceRaw = fields.workspace;
+  if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
+  if (typeof workspaceRaw !== "object" || Array.isArray(workspaceRaw)) {
+    throw new Error(
+      `warrant: \`${path}\`'s \`propose.workspace\` is ${describe(workspaceRaw)}, expected a mapping.`
+    );
+  }
+  const w = workspaceRaw;
+  const at = `\`${path}\`'s \`propose.workspace\``;
+  rejectUnknownKeys(at, w, ["name", "except", "evidence", "window", "retire"]);
+  const nameRaw = text(at, "name", w.name, { required: false });
+  const name = nameRaw.length === 0 ? DEFAULT_PROPOSE_WORKSPACE.name : nameRaw;
+  if ((name.match(/\{package\}/g) ?? []).length !== 1) {
+    throw new Error(
+      `warrant: ${at} has \`name: ${name}\`, expected exactly one \`{package}\` placeholder.`
+    );
+  }
+  const except = strings(at, "except", w.except);
+  const evidence = w.evidence === void 0 ? DEFAULT_PROPOSE_WORKSPACE.evidence : wholeNumber(at, "evidence", w.evidence, 1);
+  const window2 = w.window === void 0 ? DEFAULT_PROPOSE_WORKSPACE.window : durationField(at, "window", w.window, { allowNever: false });
+  const retire = booleanField(at, "retire", w.retire, false);
+  return { name, except, evidence, window: window2, retire };
+}
+function wholeNumber(at, key, raw, min) {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a whole number of ${String(min)} or more.`
+    );
+  }
+  return raw;
+}
+function optionalWholeNumber(at, key, raw, min) {
+  if (raw === void 0 || raw === null) return null;
+  return wholeNumber(at, key, raw, min);
+}
+function readDuties(path, raw) {
+  const granted = /* @__PURE__ */ new Map();
+  if (raw === void 0) return { declared: false, granted };
+  if (raw === null) {
+    throw new Error(
+      `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
+    );
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+    );
+  }
+  for (const [duty, value] of Object.entries(raw)) {
+    const at = `\`${path}\` duties for \`${duty}\``;
+    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
+      const available = [...DUTIES, ...PLANNED];
+      throw new Error(
+        `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
+      );
+    }
+    if (value === true) {
+      granted.set(duty, "default");
+      continue;
+    }
+    if (value === false) {
+      granted.set(duty, []);
+      continue;
+    }
+    const entries = strings(at, duty, value);
+    if (entries.length === 0) {
+      throw new Error(
+        `warrant: ${at} is empty. Use \`[none]\` to grant nothing, explicitly, or remove the entry to take this duty's own default.`
+      );
+    }
+    if (entries.length === 1 && entries[0] === "none") {
+      granted.set(duty, []);
+      continue;
+    }
+    const permitted = [];
+    for (const entry of entries) {
+      const capability = CAPABILITIES.find((known) => known === entry);
+      if (capability === void 0) {
+        throw new Error(
+          `warrant: ${at} names \`${entry}\`, which is not something a duty can be granted. Expected any of ${CAPABILITIES.join(", ")}, or \`none\` on its own.`
+        );
+      }
+      if (!permitted.includes(capability)) permitted.push(capability);
+    }
+    granted.set(duty, permitted);
+  }
+  return { declared: true, granted };
+}
+function text(at, key, raw, options) {
+  if (raw === void 0 || raw === null) {
+    if (!options.required) return "";
+    throw new Error(`warrant: ${at} has no \`${key}\`.`);
+  }
+  if (typeof raw !== "string") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected text.`);
+  }
+  const value = raw.trim();
+  if (value.length === 0 && options.required) {
+    throw new Error(`warrant: ${at} has an empty \`${key}\`.`);
+  }
+  return value;
+}
+function strings(at, key, raw) {
+  if (raw === void 0 || raw === null) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map((entry, index) => {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `warrant: ${at} has \`${key}\` entry ${String(index + 1)} as ${describe(entry)}, expected text.`
+      );
+    }
+    const value = entry.trim();
+    if (value.length === 0) {
+      throw new Error(`warrant: ${at} has an empty \`${key}\` entry.`);
+    }
+    return value;
+  });
+}
+function nullable(value) {
+  return value.length === 0 ? null : value;
+}
+function confidenceField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
+    );
+  }
+  return raw;
+}
+function booleanField(at, key, raw, fallback) {
+  if (raw === void 0 || raw === null) return fallback;
+  if (typeof raw !== "boolean") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true or false.`);
+  }
+  return raw;
+}
+var HEX_COLOR = /^[0-9a-fA-F]{6}$/;
+function colorField(at, key, raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string" || !HEX_COLOR.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a 6-digit hex color with no \`#\`.`
+    );
+  }
+  return raw.trim().toLowerCase();
+}
+function durationField(at, key, raw, options) {
+  if (options.allowNever && raw === "never") return null;
+  if (typeof raw !== "string" || !/^\d+d$/.test(raw.trim())) {
+    throw new Error(
+      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a duration like \`14d\`` + (options.allowNever ? " or `never`." : ".")
+    );
+  }
+  const days = Number(raw.trim().slice(0, -1));
+  if (days === 0) {
+    throw new Error(
+      `warrant: ${at} has \`${key}: 0d\`, which is not a duration. Write \`never\`, or remove the step.`
+    );
+  }
+  return days * 24 * 60 * 60 * 1e3;
+}
+function rejectUnknownKeys(at, fields, known) {
+  for (const key of Object.keys(fields)) {
+    if (!known.includes(key)) {
+      throw new Error(`warrant: ${at} has an unrecognized key \`${key}\`.`);
+    }
+  }
+}
+function closestKeys(raw, known) {
+  const best = /* @__PURE__ */ new Map();
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const key of known) {
+    const distance = levenshtein(raw, key);
+    if (distance > bestDistance) continue;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best.clear();
+    }
+    best.set(distance, [...best.get(distance) ?? [], key]);
+  }
+  const suggestions = best.get(bestDistance) ?? [];
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+}
+function closestHint(raw, known) {
+  const suggestions = closestKeys(raw, known);
+  return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
+}
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  let prev = new Array(b.length + 1).fill(0).map((_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = new Array(b.length + 1).fill(0);
+    current[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost2 = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(
+        prev[j] ?? Number.POSITIVE_INFINITY,
+        current[j - 1] ?? Number.POSITIVE_INFINITY,
+        prev[j - 1] ?? Number.POSITIVE_INFINITY
+      ) + cost2;
+    }
+    prev = current;
+  }
+  return prev[b.length] ?? 0;
+}
+function describe(value) {
+  if (value === null) return "empty";
+  if (value === void 0) return "absent";
+  if (Array.isArray(value)) return "a list";
+  if (typeof value === "object") return "a mapping";
+  if (typeof value === "string") return `the text \`${value}\``;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return `\`${String(value)}\``;
+  }
+  return "a value of a kind this file cannot hold";
 }
 
 // src/duties/translate/budget.ts
@@ -35600,6 +35615,77 @@ var CHROME = {
     uk: "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F \u0446\u044C\u043E\u0433\u043E \u043F\u043E\u0442\u043E\u043A\u0443 \u0442\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u0438\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u0437\u0430\u043C\u0456\u043D\u044F\u0442\u044C \u0446\u0435\u0439 \u043A\u043E\u043C\u0435\u043D\u0442\u0430\u0440; \u0432\u0456\u043D \u043D\u0456\u043A\u043E\u043B\u0438 \u043D\u0435 \u043F\u0443\u0431\u043B\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F \u0434\u0432\u0456\u0447\u0456.",
     vi: "Ch\u1EC9nh s\u1EEDa ch\u1EE7 \u0111\u1EC1 n\xE0y v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n.",
     zh: "\u7F16\u8F91\u6B64\u8BDD\u9898\u5E76\u91CD\u65B0\u8FD0\u884C\u4F1A\u66FF\u6362\u6B64\u8BC4\u8BBA\uFF1B\u5B83\u7EDD\u4E0D\u4F1A\u88AB\u53D1\u5E03\u4E24\u6B21\u3002"
+  },
+  // review/publish.ts — one review comment per pull request, the thread's own
+  // language when detection found one, English otherwise, via `chrome`.
+  reviewEmpty: {
+    en: "No issues to report \u2014 this review found nothing worth flagging.",
+    ar: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0634\u0643\u0644\u0627\u062A \u0644\u0644\u0625\u0628\u0644\u0627\u063A \u0639\u0646\u0647\u0627 \u2014 \u0644\u0627 \u0634\u064A\u0621 \u064A\u0633\u062A\u062F\u0639\u064A \u0627\u0644\u062A\u0646\u0628\u064A\u0647 \u0641\u064A \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629.",
+    cs: "\u017D\xE1dn\xE9 probl\xE9my k hl\xE1\u0161en\xED \u2014 tato recenze nena\u0161la nic, co by st\xE1lo za upozorn\u011Bn\xED.",
+    de: "Keine Probleme zu melden \u2014 diese \xDCberpr\xFCfung hat nichts gefunden, das eine Erw\xE4hnung wert w\xE4re.",
+    es: "Nada que informar: esta revisi\xF3n no encontr\xF3 nada que valga la pena se\xF1alar.",
+    fr: "Rien \xE0 signaler \u2014 cette revue n'a rien trouv\xE9 qui m\xE9rite d'\xEAtre signal\xE9.",
+    hi: "\u0930\u093F\u092A\u094B\u0930\u094D\u091F \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093F\u090F \u0915\u0941\u091B \u0928\u0939\u0940\u0902 \u2014 \u0907\u0938 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u092E\u0947\u0902 \u0915\u0941\u091B \u092D\u0940 \u0927\u094D\u092F\u093E\u0928 \u0926\u0947\u0928\u0947 \u092F\u094B\u0917\u094D\u092F \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u093E\u0964",
+    id: "Tidak ada masalah untuk dilaporkan \u2014 ulasan ini tidak menemukan hal yang perlu ditandai.",
+    it: "Nessun problema da segnalare \u2014 questa revisione non ha trovato nulla degno di nota.",
+    ja: "\u5831\u544A\u3059\u308B\u554F\u984C\u306F\u3042\u308A\u307E\u305B\u3093 \u2014 \u3053\u306E\u30EC\u30D3\u30E5\u30FC\u3067\u6307\u6458\u3059\u308B\u3082\u306E\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F\u3002",
+    ko: "\uBCF4\uACE0\uD560 \uBB38\uC81C\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC774 \uAC80\uD1A0\uC5D0\uC11C \uC9C0\uC801\uD560 \uB9CC\uD55C \uAC83\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.",
+    nl: "Niets te melden \u2014 deze review vond niets dat de moeite van het noemen waard is.",
+    pl: "Brak problem\xF3w do zg\u0142oszenia \u2014 ten przegl\u0105d nie znalaz\u0142 niczego wartego uwagi.",
+    pt: "Nada a relatar \u2014 esta revis\xE3o n\xE3o encontrou nada digno de nota.",
+    ru: "\u041D\u0435\u0447\u0435\u0433\u043E \u0441\u043E\u043E\u0431\u0449\u0438\u0442\u044C \u2014 \u044D\u0442\u043E\u0442 \u043E\u0431\u0437\u043E\u0440 \u043D\u0435 \u043D\u0430\u0448\u0451\u043B \u043D\u0438\u0447\u0435\u0433\u043E, \u0447\u0442\u043E \u0441\u0442\u043E\u0438\u0442 \u043E\u0442\u043C\u0435\u0442\u0438\u0442\u044C.",
+    sv: "Ingenting att rapportera \u2014 denna granskning hittade inget v\xE4rt att flagga.",
+    th: "\u0E44\u0E21\u0E48\u0E21\u0E35\u0E1B\u0E31\u0E0D\u0E2B\u0E32\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19 \u2014 \u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E17\u0E32\u0E19\u0E19\u0E35\u0E49\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2A\u0E34\u0E48\u0E07\u0E17\u0E35\u0E48\u0E04\u0E27\u0E23\u0E0A\u0E35\u0E49\u0E43\u0E2B\u0E49\u0E40\u0E2B\u0E47\u0E19",
+    tr: "Bildirilecek bir sorun yok \u2014 bu inceleme i\u015Faret etmeye de\u011Fer bir \u015Fey bulmad\u0131.",
+    uk: "\u041D\u0435\u043C\u0430\u0454 \u043F\u0440\u043E\u0431\u043B\u0435\u043C \u0434\u043B\u044F \u0437\u0432\u0456\u0442\u0443\u0432\u0430\u043D\u043D\u044F \u2014 \u0446\u0435\u0439 \u043E\u0433\u043B\u044F\u0434 \u043D\u0435 \u0437\u043D\u0430\u0439\u0448\u043E\u0432 \u043D\u0456\u0447\u043E\u0433\u043E \u0432\u0430\u0440\u0442\u043E\u0433\u043E \u0443\u0432\u0430\u0433\u0438.",
+    vi: "Kh\xF4ng c\xF3 v\u1EA5n \u0111\u1EC1 n\xE0o c\u1EA7n b\xE1o c\xE1o \u2014 bu\u1ED5i r\xE0 so\xE1t n\xE0y kh\xF4ng t\xECm th\u1EA5y g\xEC \u0111\xE1ng n\xEAu.",
+    zh: "\u6CA1\u6709\u9700\u8981\u62A5\u544A\u7684\u95EE\u9898 \u2014 \u672C\u6B21\u5BA1\u67E5\u6CA1\u6709\u53D1\u73B0\u503C\u5F97\u6307\u51FA\u7684\u5185\u5BB9\u3002"
+  },
+  reviewFooterFloor: {
+    en: "This review was written by a model, not decided by a maintainer \u2014 read each finding as a lead to check.",
+    ar: "\u0643\u062A\u0628 \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0646\u0645\u0648\u0630\u062C\u060C \u0648\u0644\u0645 \u064A\u0643\u062A\u0628\u0647\u0627 \u0645\u0634\u0631\u0641 \u2014 \u062A\u0639\u0627\u0645\u0644 \u0645\u0639 \u0643\u0644 \u0645\u0644\u0627\u062D\u0638\u0629 \u0643\u0645\u0624\u0634\u0631 \u0644\u0644\u062A\u062D\u0642\u0642.",
+    cs: "Tuto recenzi napsal model, nikoliv spr\xE1vce \u2014 ch\xE1pejte ka\u017Ed\xFD n\xE1lez jako podn\u011Bt k prov\u011B\u0159en\xED.",
+    de: "Diese \xDCberpr\xFCfung wurde von einem Modell geschrieben, nicht von einem Maintainer entschieden \u2014 jeden Befund als Hinweis zum Pr\xFCfen lesen.",
+    es: "Esta revisi\xF3n la escribi\xF3 un modelo, no la decidi\xF3 un mantenedor \u2014 lea cada hallazgo como una pista para verificar.",
+    fr: "Cette revue a \xE9t\xE9 \xE9crite par un mod\xE8le, et non d\xE9cid\xE9e par un responsable \u2014 \xE0 consid\xE9rer comme une piste \xE0 v\xE9rifier.",
+    hi: "\u092F\u0939 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u0915\u093F\u0938\u0940 \u092E\u0949\u0921\u0932 \u0928\u0947 \u0932\u093F\u0916\u0940, \u0915\u093F\u0938\u0940 \u0905\u0928\u0941\u0930\u0915\u094D\u0937\u0915 \u0928\u0947 \u0928\u0939\u0940\u0902 \u2014 \u0939\u0930 \u0928\u093F\u0937\u094D\u0915\u0930\u094D\u0937 \u0915\u094B \u091C\u093E\u0901\u091A \u0915\u0947 \u0938\u0902\u0915\u0947\u0924 \u0915\u0947 \u0930\u0942\u092A \u092E\u0947\u0902 \u0926\u0947\u0916\u0947\u0902\u0964",
+    id: "Ulasan ini ditulis oleh model, bukan diputuskan oleh pengelola \u2014 baca setiap temuan sebagai petunjuk untuk diperiksa.",
+    it: "Questa revisione \xE8 stata scritta da un modello, non decisa da un manutentore \u2014 da considerare ogni osservazione come un indizio da verificare.",
+    ja: "\u3053\u306E\u30EC\u30D3\u30E5\u30FC\u306F\u30E2\u30C7\u30EB\u304C\u66F8\u3044\u305F\u3082\u306E\u3067\u3001\u30E1\u30F3\u30C6\u30CA\u30FC\u306B\u3088\u308B\u6C7A\u5B9A\u3067\u306F\u3042\u308A\u307E\u305B\u3093\u3002\u5404\u6307\u6458\u3092\u78BA\u8A8D\u3059\u3079\u304D\u624B\u304C\u304B\u308A\u3068\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+    ko: "\uC774 \uAC80\uD1A0\uB294 \uBAA8\uB378\uC774 \uC791\uC131\uD588\uC73C\uBA70, \uC720\uC9C0\uC790\uAC00 \uACB0\uC815\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4 \u2014 \uAC01 \uBC1C\uACAC\uC744 \uD655\uC778\uD560 \uCC38\uACE0 \uC790\uB8CC\uB85C \uC77D\uC73C\uC2ED\uC2DC\uC624.",
+    nl: "Deze review is door een model geschreven, niet door een beheerder beslist \u2014 lees elke bevinding als een aanwijzing om te controleren.",
+    pl: "T\u0119 recenzj\u0119 napisa\u0142 model, a nie opiekun \u2014 traktuj ka\u017Cdy wynik jako wskaz\xF3wk\u0119 do sprawdzenia.",
+    pt: "Esta revis\xE3o foi escrita por um modelo, n\xE3o decidida por um mantenedor \u2014 trate cada constata\xE7\xE3o como um ind\xEDcio a verificar.",
+    ru: "\u042D\u0442\u043E\u0442 \u043E\u0431\u0437\u043E\u0440 \u043D\u0430\u043F\u0438\u0441\u0430\u043D \u043C\u043E\u0434\u0435\u043B\u044C\u044E, \u0430 \u043D\u0435 \u0441\u043E\u043F\u0440\u043E\u0432\u043E\u0436\u0434\u0430\u044E\u0449\u0438\u043C \u2014 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u0441\u044C \u043A \u043A\u0430\u0436\u0434\u043E\u0439 \u043D\u0430\u0445\u043E\u0434\u043A\u0435 \u043A\u0430\u043A \u043A \u043F\u043E\u0432\u043E\u0434\u0443 \u0434\u043B\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438.",
+    sv: "Denna granskning skrevs av en modell, inte av en underh\xE5llare \u2014 l\xE4s varje fynd som en ledtr\xE5d att unders\xF6ka.",
+    th: "\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E17\u0E32\u0E19\u0E19\u0E35\u0E49\u0E40\u0E02\u0E35\u0E22\u0E19\u0E42\u0E14\u0E22\u0E42\u0E21\u0E40\u0E14\u0E25 \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48\u0E01\u0E32\u0E23\u0E15\u0E31\u0E14\u0E2A\u0E34\u0E19\u0E42\u0E14\u0E22\u0E1C\u0E39\u0E49\u0E14\u0E39\u0E41\u0E25 \u2014 \u0E42\u0E1B\u0E23\u0E14\u0E2D\u0E48\u0E32\u0E19\u0E41\u0E15\u0E48\u0E25\u0E30\u0E02\u0E49\u0E2D\u0E04\u0E49\u0E19\u0E1E\u0E1A\u0E40\u0E1B\u0E47\u0E19\u0E40\u0E1A\u0E32\u0E30\u0E41\u0E2A\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E15\u0E23\u0E27\u0E08\u0E2A\u0E2D\u0E1A",
+    tr: "Bu inceleme bir model taraf\u0131ndan yaz\u0131ld\u0131, bir bak\u0131c\u0131 taraf\u0131ndan kararla\u015Ft\u0131r\u0131lmad\u0131 \u2014 her bulguyu inceleme ipucu olarak okuyun.",
+    uk: "\u0426\u0435\u0439 \u043E\u0433\u043B\u044F\u0434 \u043D\u0430\u043F\u0438\u0441\u0430\u043D\u043E \u043C\u043E\u0434\u0435\u043B\u043B\u044E, \u0430 \u043D\u0435 \u0432\u0438\u0437\u043D\u0430\u0447\u0435\u043D\u043E \u0441\u0443\u043F\u0440\u043E\u0432\u0456\u0434\u043D\u0438\u043A\u043E\u043C \u2014 \u0441\u043F\u0440\u0438\u0439\u043C\u0430\u0439\u0442\u0435 \u043A\u043E\u0436\u043D\u0443 \u0437\u043D\u0430\u0445\u0456\u0434\u043A\u0443 \u044F\u043A \u043F\u0456\u0434\u043A\u0430\u0437\u043A\u0443 \u0434\u043B\u044F \u043F\u0435\u0440\u0435\u0432\u0456\u0440\u043A\u0438.",
+    vi: "B\u1EA3n r\xE0 so\xE1t n\xE0y do m\u1ED9t model vi\u1EBFt, kh\xF4ng ph\u1EA3i quy\u1EBFt \u0111\u1ECBnh c\u1EE7a maintainer \u2014 h\xE3y xem t\u1EEBng ph\xE1t hi\u1EC7n nh\u01B0 m\u1ED9t g\u1EE3i \xFD c\u1EA7n ki\u1EC3m ch\u1EE9ng.",
+    zh: "\u6B64\u5BA1\u67E5\u7531\u6A21\u578B\u7F16\u5199\uFF0C\u800C\u975E\u7EF4\u62A4\u8005\u7684\u51B3\u5B9A \u2014 \u8BF7\u5C06\u6BCF\u6761\u53D1\u73B0\u89C6\u4E3A\u9700\u8981\u6838\u5B9E\u7684\u7EBF\u7D22\u3002"
+  },
+  reviewFooterEditable: {
+    en: "Editing the pull request and re-running replaces this review comment; it is never posted twice.",
+    ar: "\u062A\u0639\u062F\u064A\u0644 \u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628 \u0648\u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u062A\u0634\u063A\u064A\u0644 \u064A\u0633\u062A\u0628\u062F\u0644 \u062A\u0639\u0644\u064A\u0642 \u0627\u0644\u0645\u0631\u0627\u062C\u0639\u0629 \u0647\u0630\u0627\u061B \u0648\u0644\u0627 \u064A\u064F\u0646\u0634\u0631 \u0645\u0631\u062A\u064A\u0646.",
+    cs: "\xDAprava pull requestu a op\u011Btovn\xE9 spu\u0161t\u011Bn\xED nahrad\xED tento koment\xE1\u0159 recenze; nebude publikov\xE1n dvakr\xE1t.",
+    de: "Das Bearbeiten des Pull-Requests und erneutes Ausf\xFChren ersetzt diesen Review-Kommentar; er wird nie zweimal ver\xF6ffentlicht.",
+    es: "Editar el pull request y volver a ejecutar reemplaza este comentario de revisi\xF3n; nunca se publica dos veces.",
+    fr: "Modifier la pull request et relancer remplacera ce commentaire de revue ; il n'est jamais publi\xE9 deux fois.",
+    hi: "\u092A\u0941\u0932 \u0930\u093F\u0915\u094D\u0935\u0947\u0938\u094D\u091F \u0915\u094B \u0938\u0902\u092A\u093E\u0926\u093F\u0924 \u0915\u0930\u0915\u0947 \u092A\u0941\u0928\u0903 \u091A\u0932\u093E\u0928\u0947 \u0938\u0947 \u092F\u0939 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u091F\u093F\u092A\u094D\u092A\u0923\u0940 \u092C\u0926\u0932 \u091C\u093E\u0924\u0940 \u0939\u0948; \u092F\u0939 \u0915\u092D\u0940 \u0926\u094B \u092C\u093E\u0930 \u092A\u094B\u0938\u094D\u091F \u0928\u0939\u0940\u0902 \u0939\u094B\u0924\u0940\u0964",
+    id: "Menyunting pull request dan menjalankan ulang akan mengganti komentar ulasan ini; tidak akan diposting dua kali.",
+    it: "La modifica della pull request e una nuova esecuzione sostituiscono questo commento di revisione; non viene mai pubblicato due volte.",
+    ja: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u3092\u7DE8\u96C6\u3057\u3066\u518D\u5B9F\u884C\u3059\u308B\u3068\u3001\u3053\u306E\u30EC\u30D3\u30E5\u30FC\u30B3\u30E1\u30F3\u30C8\u304C\u7F6E\u304D\u63DB\u3048\u3089\u308C\u307E\u3059\u3002\u4E8C\u91CD\u6295\u7A3F\u3055\u308C\u308B\u3053\u3068\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+    ko: "\uD480 \uB9AC\uD018\uC2A4\uD2B8\uB97C \uD3B8\uC9D1\uD558\uACE0 \uB2E4\uC2DC \uC2E4\uD589\uD558\uBA74 \uC774 \uAC80\uD1A0 \uB313\uAE00\uC774 \uAD50\uCCB4\uB429\uB2C8\uB2E4. \uC911\uBCF5 \uAC8C\uC2DC\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
+    nl: "Deze pull request bewerken en opnieuw uitvoeren vervangt dit review-commentaar; het wordt nooit twee keer geplaatst.",
+    pl: "Edycja pull requesta i ponowne uruchomienie zast\u0119puje ten komentarz recenzji; nie jest publikowany dwukrotnie.",
+    pt: "Editar o pull request e executar novamente substitui este coment\xE1rio de revis\xE3o; ele nunca \xE9 publicado duas vezes.",
+    ru: "\u0420\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 pull request \u0438 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u044B\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u0437\u0430\u043C\u0435\u043D\u044F\u0442 \u044D\u0442\u043E\u0442 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439 \u043E\u0431\u0437\u043E\u0440\u0430; \u043E\u043D \u043D\u0438\u043A\u043E\u0433\u0434\u0430 \u043D\u0435 \u043F\u0443\u0431\u043B\u0438\u043A\u0443\u0435\u0442\u0441\u044F \u0434\u0432\u0430\u0436\u0434\u044B.",
+    sv: "Att redigera pull requesten och k\xF6ra igen ers\xE4tter denna granskningskommentar; den postas aldrig tv\xE5 g\xE5nger.",
+    th: "\u0E01\u0E32\u0E23\u0E41\u0E01\u0E49\u0E44\u0E02 pull request \u0E41\u0E25\u0E49\u0E27\u0E40\u0E23\u0E35\u0E22\u0E01\u0E43\u0E0A\u0E49\u0E43\u0E2B\u0E21\u0E48\u0E08\u0E30\u0E41\u0E17\u0E19\u0E17\u0E35\u0E48\u0E04\u0E27\u0E32\u0E21\u0E04\u0E34\u0E14\u0E40\u0E2B\u0E47\u0E19\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E17\u0E32\u0E19\u0E19\u0E35\u0E49 \u0E08\u0E30\u0E44\u0E21\u0E48\u0E21\u0E35\u0E01\u0E32\u0E23\u0E42\u0E1E\u0E2A\u0E15\u0E4C\u0E0B\u0E49\u0E33",
+    tr: "Pull request'i d\xFCzenleyip yeniden \xE7al\u0131\u015Ft\u0131rmak bu inceleme yorumunu de\u011Fi\u015Ftirir; iki kez g\xF6nderilmez.",
+    uk: "\u0420\u0435\u0434\u0430\u0433\u0443\u0432\u0430\u043D\u043D\u044F pull request \u0442\u0430 \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u0438\u0439 \u0437\u0430\u043F\u0443\u0441\u043A \u0437\u0430\u043C\u0456\u043D\u044F\u0442\u044C \u0446\u0435\u0439 \u043A\u043E\u043C\u0435\u043D\u0442\u0430\u0440 \u043E\u0433\u043B\u044F\u0434\u0443; \u0432\u0456\u043D \u043D\u0456\u043A\u043E\u043B\u0438 \u043D\u0435 \u043F\u0443\u0431\u043B\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F \u0434\u0432\u0456\u0447\u0456.",
+    vi: "Ch\u1EC9nh s\u1EEDa pull request v\xE0 ch\u1EA1y l\u1EA1i s\u1EBD thay th\u1EBF b\xECnh lu\u1EADn r\xE0 so\xE1t n\xE0y; n\xF3 kh\xF4ng bao gi\u1EDD \u0111\u01B0\u1EE3c \u0111\u0103ng hai l\u1EA7n.",
+    zh: "\u7F16\u8F91\u62C9\u53D6\u8BF7\u6C42\u5E76\u91CD\u65B0\u8FD0\u884C\u4F1A\u66FF\u6362\u6B64\u5BA1\u67E5\u8BC4\u8BBA\uFF1B\u5B83\u7EDD\u4E0D\u4F1A\u88AB\u53D1\u5E03\u4E24\u6B21\u3002"
   }
 };
 var CHROME_KEYS = Object.keys(CHROME);
@@ -35750,7 +35836,7 @@ function parseChunkChars(raw) {
 
 // src/duties/translate/summary.ts
 function authority(run2) {
-  return `No \`${run2.warrant}\` \u2014 this duty found no warrant file, and ran on its own defaults (\`edit-body\`, and whatever \`languages\` was configured).`;
+  return `No \`${run2.warrant}\` \u2014 this duty found no warrant file, and ran on its own defaults (\`edit-body\`, and whatever languages were configured).`;
 }
 function summarize(run2) {
   if (run2.ungranted !== null) {
@@ -36116,14 +36202,13 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
 var DEFAULT_CAPABILITIES = ["edit-body"];
 
 // src/duties/translate/main.ts
-var DEFAULT_LANGUAGES_INPUT = "en, vi, zh";
+var DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 function readSettings() {
   const shared2 = readShared();
   const panel = parseSeats(getInput("judge-models"));
   return {
     ...shared2,
     warrant: getInput("warrant", { required: true }),
-    apply: parseApply(getInput("apply", { required: true })),
     judges: panel.seats,
     judgeNames: panel.names,
     drafts: whole("drafts", getInput("drafts")),
@@ -36141,7 +36226,7 @@ function readAttribution() {
   throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
 function notGranted(warrant) {
-  return `\`${warrant.path}\`'s \`capabilities:\` block does not name \`translate\`; once that block exists it is the whole answer, so add \`translate: [edit-body]\` to it (or remove the block to return to defaults).`;
+  return `\`${warrant.path}\`'s \`duties:\` block does not name \`translate\`; once that block exists it is the whole answer, so add \`translate: [edit-body]\` to it (or remove the block to return to defaults).`;
 }
 function skippedResult(number, reason) {
   return {
@@ -36190,10 +36275,17 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
       // here calls the tracker or a model, only `marker.split` on text the
       // listing already fetched.
       //
+      // The digest, not the marker: the marker's shape is public and anyone
+      // can type it, so `<!-- reeve:translate source= -->` (or any payload that
+      // is not a real digest) carries no evidence a translation exists — and
+      // counts as untranslated, so a forged empty marker cannot permanently
+      // withhold a thread from sweeps. A real 16-hex digest is the only claim
+      // of prior work this line accepts.
+      //
       // Recursion guard on the same line: Reeve never translates its own
       // proposal pull request, and the listing already carries `isPullRequest`
       // and `body`, so this costs nothing beyond the marker check.
-      marker.split(thread.body).fingerprint !== null || isReeveProposalPr(thread)
+      isFingerprint(marker.split(thread.body).fingerprint ?? "") || isReeveProposalPr(thread)
     ),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
@@ -36240,21 +36332,13 @@ async function run() {
     const opened = await openAuthority(base.warrant, api, context2.repo, "translate");
     authority2 = opened.authority;
     const denied = opened.denied;
-    const rawLanguages = getInput("languages");
-    const languages = dutyLanguages(authority2.warrant, denied, rawLanguages);
-    if (!denied && authority2.warrant.languages === null && rawLanguages.trim() === DEFAULT_LANGUAGES_INPUT) {
+    const languages = dutyLanguages(authority2.warrant, denied, DEFAULT_LANGUAGES);
+    if (!denied && authority2.warrant.languages === null) {
       notice(
-        "languages: running on the default (`en, vi, zh`) \u2014 nobody has set this yet. Write the `languages` input, or `languages:` in the warrant, to choose on purpose."
+        "languages: running on the default (`en, vi, zh`) \u2014 nobody has set this yet. Write `languages:` in the warrant to choose on purpose."
       );
     }
-    const { permitted } = narrowWarned(
-      authority2.warrant.granted("translate", DEFAULT_CAPABILITIES),
-      base.apply,
-      "translate",
-      // The raw input, not `authority.warrant.path`, which is what the other
-      // four duties quote. Kept exactly as it was; see `narrowWarned`.
-      base.warrant
-    );
+    const permitted = authority2.warrant.granted("translate", DEFAULT_CAPABILITIES);
     settings = {
       ...base,
       languages,

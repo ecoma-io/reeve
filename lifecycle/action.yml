@@ -17,7 +17,7 @@ inputs:
   github-token:
     description: >-
       The token used to read a thread's comments and events, and to apply
-      whatever `apply` and the warrant both grant. `GITHUB_TOKEN` is enough.
+      whatever the warrant grants. `GITHUB_TOKEN` is enough.
     required: false
     default: ${{ github.token }}
 
@@ -48,33 +48,6 @@ inputs:
       does not parse always fails red, wherever it lives.
     required: false
     default: .github/reeve.yml
-
-  apply:
-    description: >-
-      What this run may do: any of `label`, `comment`, `close`, comma or
-      newline separated, or `none`.
-
-      The narrower of this and the warrant file wins, always. A step whose
-      action needs a capability either half withholds is skipped whole —
-      never partially applied — so a run under-permitted for `close` still
-      posts the reminder a step before it asked for, and only the close
-      itself waits.
-    required: false
-    default: "label, comment"
-
-  languages:
-    description: >-
-      The languages your contributors write in, comma or newline separated —
-      used only to pick which `say:` text a step posts, when a track's
-      `say:` is a built-in reminder or a per-language map. Unlike every
-      other duty, an unconfigured pair is not refused here: a repository
-      whose tracks all use plain `say:` text, or stick to the English
-      built-in, never had a reason to write this.
-
-      Ignored once `warrant`'s own `languages:` key is written — the file is
-      the whole answer from there.
-    required: false
-    default: ""
 
   dry-run:
     description: >-
@@ -139,7 +112,7 @@ outputs:
   skipped:
     description: >-
       Outside `sweep`: `true` when this thread had no policy to run against
-      (no `lifecycle:` key, `capabilities:` not naming this duty, the
+      (no `lifecycle:` key, `duties:` not naming this duty, the
       recursion guard, a closed thread, an unreadable creation date,
       `threads:` kind mismatch, a draft exemption, or a permanent
       exemption), `false` otherwise. Under `sweep`: every thread skipped for
@@ -176,7 +149,7 @@ outputs:
   due-not-granted:
     description: >-
       Outside `sweep`: how many steps were due this run but skipped whole
-      because `apply` or the warrant withheld a capability the step's
+      because the warrant does not grant a capability the step.s
       action needed. Under `sweep`: the same count, summed across every
       thread examined. Identical under `dry-run` — the grant check runs the
       same either way.

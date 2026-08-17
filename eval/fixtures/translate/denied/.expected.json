@@ -1,0 +1,11 @@
+{
+  "description": "The warrant's duties: block exists but never names translate, so the run is denied outright — before the thread is read, before any model call, before any write. The run reports nothing under translated and source-language, and the tracker stays untouched.",
+  "warrant": "version: 1\nlanguages:\n  - en\n  - vi\nduties:\n  triage: [label]\n",
+  "expected": {
+    "translated": [],
+    "source-language": "",
+    "effects": {
+      "edited": false
+    }
+  }
+}
