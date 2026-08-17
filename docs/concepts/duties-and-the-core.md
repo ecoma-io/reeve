@@ -93,8 +93,8 @@ that only reads well in English is not finished.
 
 These are not implementation notes — they are the reason [the warrant](../guides/warrant.md)
 can be a single, small file that governs every duty at once, and the reason
-adding an eighth duty tomorrow changes nothing about how the first seven are
-trusted today.
+adding a new duty changes nothing about how the existing ones are trusted
+today.
 
 ---
 
