@@ -10,6 +10,7 @@ import type { Capability } from "../../core/warrant.js";
 
 import type { Disposition, Finding, Status } from "./findings.js";
 import type { Posted } from "./publish.js";
+import { describeRisk, type RiskAssessment } from "./risk.js";
 import type { ThreadSync } from "./threads.js";
 
 export interface Run {
@@ -42,6 +43,8 @@ export interface Run {
   readonly ungranted: string | null;
   readonly malformedAnswers: number;
   readonly readRules: string | null;
+  /** The risk assessment, when the run reached one — `null` on early stops. */
+  readonly risk: RiskAssessment | null;
   /** One row per model pass that ran, for the verdict table's "Passes" row. */
   readonly passes: readonly {
     readonly id: string;
@@ -80,6 +83,7 @@ export function summarize(run: Run): string {
     "",
     ...(run.implicit ? [authority(run), ""] : []),
     verdict(run),
+    ...(run.risk !== null && run.risk.signals.length > 0 ? ["", riskSection(run)] : []),
     ...(run.memoryNote !== null ? ["", `> ⚠️ ${run.memoryNote}`, ""] : []),
     ...(run.findings.length > 0 ? ["", findingsTable(run)] : []),
     ...(run.skipped.length > 0 ? ["", coverage(run)] : []),
@@ -113,6 +117,7 @@ function verdict(run: Run): string {
   const rows = [
     ["Head", run.headSha === "" ? "unknown" : `\`${run.headSha}\``],
     ["Language", run.language === null ? "not identified" : cell(run.language)],
+    ["Risk", run.risk === null ? "not assessed" : `${run.risk.tier} — ${describeRisk(run.risk)}`],
     ["Findings", String(run.findings.length)],
     ["Confidence", run.confidence === null ? "not measured" : run.confidence.toFixed(2)],
     ["Posted", run.posted ?? "nothing to post"],
@@ -169,6 +174,24 @@ function threadsCell(threads: ThreadSync): string {
   ].filter((part) => part.length > 0);
   const text = parts.length > 0 ? parts.join(", ") : "none";
   return threads.uncertain ? `${text} — listing uncertain` : text;
+}
+
+function riskSection(run: Run): string {
+  const risk = run.risk;
+  if (risk === null) return "";
+  const passes = risk.tier === "high" ? 3 : risk.tier === "medium" ? 2 : 1;
+  const rows = risk.signals.map((signal) => [
+    signal.signal.replace(/_/g, "-"),
+    String(signal.weight),
+    signal.evidence.join(", "),
+  ]);
+  return [
+    `### Risk: ${risk.tier}`,
+    "",
+    table(["Signal", "Weight", "Evidence"], rows),
+    "",
+    `Score ${String(risk.score)} — medium ≥ ${String(risk.thresholds.medium)}, high ≥ ${String(risk.thresholds.high)} — ${String(passes)} review pass${passes === 1 ? "" : "es"}.`,
+  ].join("\n");
 }
 
 function findingsTable(run: Run): string {

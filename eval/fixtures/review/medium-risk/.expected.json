@@ -1,0 +1,31 @@
+{
+  "description": "A dependency manifest change prices the review medium — two model passes, one posted finding.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "package-lock.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -1 +1 @@\n+  \"version\": \"1.2.3\","
+    }
+  ],
+  "risk": "version: 1\n",
+  "review-passes": [
+    {
+      "findings": [
+        {
+          "rule": "dedup",
+          "severity": "info",
+          "path": "package-lock.json",
+          "line": 1,
+          "snippet": "\"version\": \"1.2.3\",",
+          "body": "A named constant is worth considering."
+        }
+      ],
+      "confidence": 0.8
+    },
+    { "findings": [], "confidence": 0.7 }
+  ],
+  "expected": { "commented": "true", "findings": "1", "head-sha": "abc123", "risk": "medium" }
+}

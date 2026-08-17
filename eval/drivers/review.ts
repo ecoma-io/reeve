@@ -102,10 +102,12 @@ export interface ReviewScenario {
    * scratch checkout itself.
    */
   readonly workspace: Record<string, string>;
+  /** The risk profile the run reads from the checkout, or null for the default. */
+  readonly risk: string | null;
   /** The review-stage model answer. */
   readonly verdict: string;
-  /** The security pass's answer, when the fixture runs the `deep` profile. */
-  readonly securityVerdict: string;
+  /** The review-stage model answers per pass, in pass order — overrides `verdict` when present. */
+  readonly passes: readonly string[];
   /** The language-detection answer, when detection reaches a model. */
   readonly detect: string;
   /** A review comment a previous run left, or null on the first review. */
@@ -122,8 +124,6 @@ export interface ReviewScenario {
     readonly line: number;
     readonly user: { readonly login: string; readonly type: string };
   }[];
-  /** The review profile the run is given — `default` when the fixture is silent. */
-  readonly profile: string;
   /**
    * Human replies on the thread, served after the owned comment. A reply
    * carries its `author_association` so the run's disposition reader can
@@ -160,12 +160,12 @@ export interface ReviewFixture {
    * ships its own base-branch source here. Absent for fixtures that do not.
    */
   readonly workspace?: Record<string, string>;
+  /** The risk profile to write into the checkout, or absent for the default profile. */
+  readonly risk?: string;
   /** Fields the review-stage verdict JSON spreads over an empty verdict. */
   readonly "verdict-over"?: Record<string, unknown>;
-  /** Fields the security pass's verdict JSON spreads over an empty verdict. */
-  readonly "security-verdict-over"?: Record<string, unknown>;
-  /** The profile the run is given (`default` when absent). */
-  readonly profile?: string;
+  /** One review-stage answer per pass, in pass order — replaces `verdict-over`. */
+  readonly "review-passes"?: readonly Record<string, unknown>[];
   /** The language detection must answer when it reaches a model. */
   readonly detect?: string;
   /**
@@ -217,7 +217,6 @@ export interface ReviewAssertions {
    */
   readonly "workspace-evidence"?: string;
   /**
-/**
    * A disposition the summary's `### Findings` table must show for the run's
    * findings — `wont-fix by @octocat`. Pins the human-disposition axis: the
    * run read a maintainer's eligible reply off the thread and rendered it
@@ -230,6 +229,8 @@ export interface ReviewAssertions {
    * does not pin the thread surface.
    */
   readonly threads?: string;
+  /** The risk tier the run must have assessed this diff as. */
+  readonly risk?: string;
 }
 
 /** A verdict, in the shape the review prompt asks for. */
@@ -241,12 +242,17 @@ export function verdictOf(over: Record<string, unknown> = {}): string {
 export function scriptReview(
   scenario: ReviewScenario,
 ): (ask: { readonly model: string; readonly system: string; readonly user: string }) => Answer {
+  let reviewAsks = 0;
   return (ask) => {
-    if (ask.system.includes("You are a security review pass for a pull request")) {
-      return saying(scenario.securityVerdict);
-    }
-    if (ask.system.includes("You are reviewing a pull request on a GitHub repository.")) {
-      return saying(scenario.verdict);
+    if (
+      ask.system.includes("You are the adversarial verification pass") ||
+      ask.system.includes("This is an independent second opinion") ||
+      ask.system.includes("You are reviewing a pull request on a GitHub repository.")
+    ) {
+      const i = reviewAsks;
+      reviewAsks += 1;
+      if (scenario.passes.length > 0) return saying(scenario.passes[i] ?? verdictOf());
+      return saying(i === 0 ? scenario.verdict : verdictOf());
     }
     if (ask.system.includes("You identify which language")) {
       return saying(scenario.detect);
@@ -396,12 +402,12 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     rules: fixture.rules ?? null,
     packs: fixture.packs ?? {},
     workspace: fixture.workspace ?? {},
+    risk: fixture.risk ?? null,
     verdict: verdictOf(fixture["verdict-over"] ?? {}),
-    securityVerdict: verdictOf(fixture["security-verdict-over"] ?? {}),
+    passes: (fixture["review-passes"] ?? []).map((over) => verdictOf(over)),
     detect: fixture.detect ?? "en",
     previous: fixture.previous ?? null,
     threads: fixture.threads ?? [],
-    profile: fixture.profile ?? "default",
     replies: fixture.replies ?? [],
     expected: fixture.expected ?? {},
   };

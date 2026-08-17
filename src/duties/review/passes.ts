@@ -161,7 +161,13 @@ const SEVERITY_ORDER: Record<ReviewFinding["severity"], number> = {
   info: 2,
 };
 
-/** The cost-conscious default runs one model pass; `deep` adds a security pass. */
+/**
+ * The pass roster a review profile names. The `default` profile runs one
+ * correctness pass — the cheapest correct review — and `deep` adds a security
+ * pass. Risk-tiered reviews (see `risk.ts` and `main.ts`) build their roster
+ * from `secondOpinionPass` and `adversarialPass` instead, so this function
+ * stays the profile knob PR77 shipped, not the whole roster vocabulary.
+ */
 export type Profile = "default" | "deep";
 
 /** The pass roster a profile names, in run order. */
@@ -262,12 +268,50 @@ export function securityPass(): ReviewPass {
 }
 
 /**
+ * The second-opinion pass — a fresh, independent read that only a medium- or
+ * high-risk review pays for. Told to prefer ground the first reviewer missed;
+ * it may confirm, but new ground is worth more.
+ */
+export function secondOpinionPass(): ReviewPass {
+  return {
+    id: "second-opinion",
+    name: "Second opinion",
+    models: [],
+    prompt: (context) => secondOpinionPrompt(context),
+    parse: (answer, files) => parseVerdict(answer, files),
+  };
+}
+
+/**
+ * The adversarial verification pass — the top rung a high-risk diff pays for.
+ * Reads the same diff a third time, shown the earlier passes' findings (the
+ * `prior` threaded in at construction) and told to attack each one before
+ * reporting it again. The prior block rides inside the same nonce fence as the
+ * diff — untrusted material from a model, never instructions.
+ */
+export function adversarialPass(prior: readonly RawFinding[]): ReviewPass {
+  return {
+    id: "adversarial",
+    name: "Adversarial",
+    models: [],
+    prompt: (context) => adversarialPrompt(context, prior),
+    parse: (answer, files) => parseVerdict(answer, files),
+  };
+}
+
+/**
  * The shared material every pass's prompt carries: the untrusted diff behind
  * `enclose`, the trusted rules unwrapped, the strict JSON answer shape. Each
  * pass's system prompt leads with its own focus and then cites this common
- * discipline.
+ * discipline. `prior` — the earlier passes' findings — is only ever carried by
+ * the adversarial pass, inside the same fence as the diff: it came from a
+ * model, so it is untrusted material, never instructions.
  */
-function material(context: PassContext, lead: readonly string[]): Message[] {
+function material(
+  context: PassContext,
+  lead: readonly string[],
+  prior?: readonly RawFinding[],
+): Message[] {
   const { prTitle, prBody, headSha, files, rules, language } = context;
   const repoContext = context.context;
 
@@ -287,6 +331,16 @@ function material(context: PassContext, lead: readonly string[]): Message[] {
             : `+${String(file.additions)} -${String(file.deletions)}\n`) +
           patchExcerpt(file.patch),
       ),
+      ...(prior !== undefined && prior.length > 0
+        ? [
+            "",
+            "--- PREVIOUS FINDINGS (untrusted, from earlier passes) ---",
+            ...prior.map(
+              (finding) =>
+                `- ${finding.rule} @ ${finding.path}:${String(finding.line ?? 0)} — ${finding.body}`,
+            ),
+          ]
+        : []),
       ...(repoContext.text === null || repoContext.text.length === 0
         ? []
         : [
@@ -364,6 +418,34 @@ export function securityPrompt(context: PassContext): Message[] {
     "in the diff. Report only what the diff itself supports — a finding must name one of the",
     "proven lines below.",
   ]);
+}
+
+/** The second-opinion pass's prompt: a fresh read told to prefer new ground. */
+export function secondOpinionPrompt(context: PassContext): Message[] {
+  return material(context, [
+    "You are reviewing a pull request on a GitHub repository.",
+    "",
+    "This is an independent second opinion. Read the diff with fresh eyes and prefer",
+    "reporting ground the first reviewer would have missed. You may confirm, but new",
+    "ground is worth more.",
+  ]);
+}
+
+/** The adversarial pass's prompt: the earlier findings shown and told to attack each one. */
+export function adversarialPrompt(context: PassContext, prior: readonly RawFinding[]): Message[] {
+  return material(
+    context,
+    [
+      "You are the adversarial verification pass for a pull request on a GitHub repository.",
+      "",
+      "You are shown the findings earlier reviewers made. Attack each one: is its line proven",
+      "by the diff? is its claim overstated? Report a finding again only if it survives your",
+      "attack, and report anything they missed. An empty list is legitimate only if you",
+      "genuinely could not disprove the diff's claims and found nothing new. You never run",
+      "tests or edit code — the diff is the whole universe.",
+    ],
+    prior,
+  );
 }
 
 const PATCH_EXCERPT = 4000;

@@ -887,10 +887,11 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, text);
     }
+    await writeFile(join(scratch, ".github", "reeve-risk.yml"), scenario.risk ?? "");
     const run = await runBundle(
       "review",
       stub.url,
-      reviewInputs(stub.url, warrant, scenario.profile),
+      reviewInputs(stub.url, warrant),
       scratchFiles(scratch),
       { GITHUB_WORKSPACE: scratch },
     );
@@ -934,6 +935,7 @@ const REVIEW_INPUTS: Record<string, string> = {
   warrant: "",
   "rules-path": ".github/reeve-rules.yml",
   "packs-path": ".github/reeve-packs",
+  "risk-path": ".github/reeve-risk.yml",
   trigger: "pr",
   "max-diff-chars": "none",
   "max-context-chars": "4000",
@@ -943,19 +945,13 @@ const REVIEW_INPUTS: Record<string, string> = {
   "api-keys": "",
   "request-timeout": "120s",
   temperature: "",
-  profile: "default",
 };
 
-function reviewInputs(
-  stubUrl: string,
-  warrant: string,
-  profile = "default",
-): Record<string, string> {
+function reviewInputs(stubUrl: string, warrant: string): Record<string, string> {
   return {
     ...REVIEW_INPUTS,
     "base-url": `${stubUrl}/v1`,
     warrant,
-    ...(profile === "default" ? {} : { profile }),
   };
 }
 
@@ -973,10 +969,12 @@ function reviewLine(
   const echoed = run.outputs.commented ?? "";
   const findings = run.outputs.findings ?? "";
   const headSha = run.outputs["head-sha"] ?? "";
+  const risk = run.outputs.risk ?? "";
   const finding =
     echoed === (expected.commented ?? "false") &&
     findings === (expected.findings ?? "0") &&
     headSha === (expected["head-sha"] ?? "") &&
+    (expected.risk === undefined || risk === expected.risk) &&
     effect.commented === (expected.commented === "true") &&
     // A fixture that pins the update path asserts the run PATCHed its own
     // previous comment rather than POSTing a second one.
@@ -1029,7 +1027,7 @@ function reviewLine(
   return {
     fixture,
     outcome: "skipped",
-    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)} wrote=${JSON.stringify(effect.wrote)} threads=${JSON.stringify(effect.threads)}`,
+    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)} risk=${JSON.stringify(risk)} wrote=${JSON.stringify(effect.wrote)} threads=${JSON.stringify(effect.threads)}`,
   };
 }
 
