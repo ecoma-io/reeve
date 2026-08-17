@@ -91,6 +91,13 @@ export interface ReviewScenario {
   readonly rules: string | null;
   /** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
   readonly packs: Record<string, string>;
+  /**
+   * Checkout files planted into the workspace the run reads from — the
+   * repository context engine's own source. The base branch is pinned and
+   * trusted, so a fixture that exercises the engine writes these into the
+   * scratch checkout itself.
+   */
+  readonly workspace: Record<string, string>;
   /** The review-stage model answer. */
   readonly verdict: string;
   /** The security pass's answer, when the fixture runs the `deep` profile. */
@@ -115,6 +122,12 @@ export interface ReviewFixture {
   readonly rules?: string;
   /** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
   readonly packs?: Record<string, string>;
+  /**
+   * Checkout files planted beside the rules file — the repository context
+   * engine reads from `GITHUB_WORKSPACE`, so a fixture that exercises it
+   * ships its own base-branch source here. Absent for fixtures that do not.
+   */
+  readonly workspace?: Record<string, string>;
   /** Fields the review-stage verdict JSON spreads over an empty verdict. */
   readonly "verdict-over"?: Record<string, unknown>;
   /** Fields the security pass's verdict JSON spreads over an empty verdict. */
@@ -159,6 +172,14 @@ export interface ReviewAssertions {
    * evidence engine ran and its verdict, not just the finding count.
    */
   readonly verified?: string;
+  /**
+   * A substring the review-stage prompt must carry, proving the repository
+   * context engine surfaced workspace evidence the diff never showed. Pins
+   * the engine independently of the finding ladder — a fixture with a path
+   * or symbol only the workspace holds cannot pass on the deterministic
+   * finding alone.
+   */
+  readonly "workspace-evidence"?: string;
 }
 
 /** A verdict, in the shape the review prompt asks for. */
@@ -293,6 +314,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     files: fixture.files,
     rules: fixture.rules ?? null,
     packs: fixture.packs ?? {},
+    workspace: fixture.workspace ?? {},
     verdict: verdictOf(fixture["verdict-over"] ?? {}),
     securityVerdict: verdictOf(fixture["security-verdict-over"] ?? {}),
     detect: fixture.detect ?? "en",

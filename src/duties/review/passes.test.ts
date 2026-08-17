@@ -46,6 +46,12 @@ const CONTEXT: PassContext = {
     { id: "dedup", name: "Repeated code", marker: "", body: "", severity: "warning" as const },
   ],
   language: null,
+  context: {
+    sections: [],
+    text: null,
+    totalChars: 0,
+    readFiles: 0,
+  },
 };
 
 /** A provider that answers every pass the same content — the seam most tests need. */

@@ -26,7 +26,7 @@ import { spawn, execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -355,6 +355,7 @@ function baseInputs(
     "packs-path": packs,
     trigger: "pr",
     "max-diff-chars": "4000",
+    "max-context-chars": "4000",
     confidence: "0.6",
     profile: "default",
     endpoints: "",
@@ -1223,6 +1224,140 @@ describe("the action", () => {
     expect(run.outputs.commented).toBe("false");
     expect(run.outputs.findings).toBe("0");
     expect(run.log).toContain("would have received");
+  });
+});
+
+describe("the context engine", () => {
+  /** Writes a workspace source tree into the scratch checkout and lets the run read it. */
+  async function withWorkspace(files: Record<string, string>): Promise<NodeJS.ProcessEnv> {
+    for (const [rel, text] of Object.entries(files)) {
+      const path = join(scratch, rel);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, text);
+    }
+    return { GITHUB_WORKSPACE: scratch };
+  }
+
+  it("reads the workspace and carries bounded context into the review prompt", async () => {
+    const extra = await withWorkspace({
+      "src/util.ts": "export function keeper(): void {}\n",
+      "src/util.test.ts": "import { keeper } from './util';\nit('runs', () => { keeper(); });\n",
+    });
+    stub.pull.files = [
+      {
+        filename: "src/util.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export function keeper(): void {}",
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub, {}, extra);
+
+    expect(run.code).toBe(0);
+    const ask = stub.asked.find((entry) => stageOf(entry) === "review");
+    expect(ask?.user).toContain("keeper");
+    expect(ask?.user).toContain("src/util.test.ts");
+    // The context is evidence inside the same nonce fence, never a second header shape.
+    expect(ask?.user).toContain("untrusted-diff");
+  });
+
+  it("drops the context sections when the diff is capped, never half-showing one", async () => {
+    const extra = await withWorkspace({
+      "src/util.ts": "export function keeper(): void {}\n",
+    });
+    stub.pull.files = [
+      {
+        filename: "src/util.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export function keeper(): void {}",
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub, { "max-context-chars": "1" }, extra);
+
+    expect(run.code).toBe(0);
+    const ask = stub.asked.find((entry) => stageOf(entry) === "review");
+    // The diff still shows; the supplementary sections are dropped whole.
+    expect(ask?.user).toContain("DIFF");
+    expect(ask?.user).not.toContain("SYMBOLS DEFINED");
+    // The summary names the context reads.
+    expect(run.summary).toContain("Context");
+  });
+
+  it("never surfaces a secret file in the context", async () => {
+    const extra = await withWorkspace({
+      "src/util.ts": "export function keeper(): void {}\n",
+      ".env": "API_KEY=super-secret-value\n",
+      "credentials.yml": "user: pass\n",
+    });
+    stub.pull.files = [
+      {
+        filename: "src/util.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export function keeper(): void {}",
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub, {}, extra);
+
+    expect(run.code).toBe(0);
+    const ask = stub.asked.find((entry) => stageOf(entry) === "review");
+    expect(ask?.user).not.toContain("super-secret-value");
+    expect(ask?.user).not.toContain("API_KEY=");
+  });
+
+  it("still requires a finding to be diff-proven even when context names other files", async () => {
+    const extra = await withWorkspace({
+      "src/util.ts": "export function keeper(): void {}\n",
+      "context-only.ts": "export const unproven = 1;\n",
+    });
+    stub.pull.files = [
+      {
+        filename: "src/util.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export function keeper(): void {}",
+      },
+    ];
+    // The model overreaches to a file the diff never showed — the answer is unreadable.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "context-only.ts",
+            line: 1,
+            snippet: "x",
+            body: "Context must not authorise a finding about a file the diff never showed.",
+          },
+        ],
+        confidence: 0.9,
+      }),
+    });
+
+    const run = await runAction(stub, {}, extra);
+
+    expect(run.code).toBe(0);
+    // No finding about the unproven file was posted.
+    expect(stub.comments[0]?.body ?? "").not.toContain("context-only.ts");
+    expect(run.outputs.findings).toBe("0");
   });
 });
 

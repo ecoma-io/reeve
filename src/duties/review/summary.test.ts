@@ -24,6 +24,7 @@ function run(overrides: Partial<Run> = {}): Run {
     malformedAnswers: 0,
     readRules: null,
     passes: [],
+    contextReadFiles: 0,
     ...overrides,
   };
 }
@@ -148,5 +149,11 @@ describe("summarize", () => {
     const text = summarize(run({ skipped: [{ path: "big.ts", reason: "capped" }] }));
     expect(text).toContain("### Coverage");
     expect(text).toContain("capped");
+  });
+
+  it("renders the context read count when the engine read files", () => {
+    const text = summarize(run({ contextReadFiles: 4 }));
+    expect(text).toContain("Context");
+    expect(text).toContain("4 workspace file(s)");
   });
 });

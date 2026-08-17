@@ -139,6 +139,20 @@ inputs:
     required: false
     default: "4000"
 
+  max-context-chars:
+    description: >-
+      The whole-run budget of assembled repository context one review may carry
+      to the model, in characters, or `none` for no bound at all. The context
+      engine reads the workflow's own base-ref checkout and assembles bounded
+      sections — changed symbols, imports, related tests, configuration,
+      surrounding base-branch source, callers, and change history — in a fixed
+      priority order after the diff. Anything past the budget is dropped whole
+      with a visible truncation mark, so the model is never shown a half section.
+      The diff itself is already bounded by `max-diff-chars`. `0` is refused —
+      write `none` for that meaning instead.
+    required: false
+    default: "4000"
+
   confidence:
     description: >-
       The floor for the whole review's reported confidence, between 0 and 1.
