@@ -393,7 +393,7 @@ async function decide(
   for (const file of bounded.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-const final = reconcile([...deterministic, ...verified], previous, diffStanding);
+  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
   const confidence = synthesis.confidence;
 
   const next = remember(final, pr.headSha, previous);
@@ -576,7 +576,7 @@ function toFinding(
     severity: claim.severity,
     body: claim.body,
     marker: "",
-    snippet: raw.snippet,
+    snippet: claim.snippet,
   };
 }
 
