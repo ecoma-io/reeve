@@ -256,10 +256,10 @@ Reeve reads your project's own words, in three places:
   warrant, is what `review` enforces before its model pass: which files a PR
   may touch, what a diff must contain, what a merge may never do.
   [`review`'s configuration](docs/reference/duties/review.md#configuration).
-- **Guidance** — `.github/reeve-guidance.md` is what `respond` (and `review`)
-  reads for tone and policy: what the project promises, where to point an
-  unanswerable question. It is your own file, read from the checkout and
-  trusted.
+- **Guidance** — `.github/reeve-guidance.md` is what `respond` reads for tone
+  and policy: what the project promises, where to point an unanswerable
+  question. It is your own file, read from the checkout and trusted.
+  [`respond`'s configuration](docs/reference/duties/respond.md#configuration).
 
 None of these are prompts to the model. They are the file the model's output is
 checked against — see [Security](#security) below.
