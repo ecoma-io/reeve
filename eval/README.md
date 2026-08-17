@@ -53,12 +53,14 @@ duplicate fixture drives the duplicate-detection-and-close pipeline on a
 non-Latin thread. The Indonesian fixtures spell out the provider-based
 identification step (the script step cannot narrow a Latin thread, and the
 bundled profile data does not cover the language), so an answer that
-misidentified it would break the fixture as `failed`. The review duty's
-PR-language dimension is not covered — review's language detection and its
-review stage share the same profile/script/model ladder as the thread duties,
-and review's own fixtures stick to English, so the model-identification
-surface for PR language stays unevaluated; that surface belongs to its own
-task.
+misidentified it would break the fixture as `failed`. The review duty now
+covers the same provider-identified surface for PR language: `review/id-pr`
+carries an Indonesian pull request whose detection must reach the model and
+answer `id` (asserted against the summary's `| Language | id |` row), so a
+misidentifying answer breaks that fixture as `failed` the same way. The
+`review/update-pr` fixture additionally pins the synchronize flow — a rerun
+that finds its own previous marker comment replaces it in place (the PATCH
+`issues/comments/{id}` path) instead of POSTing a second review.
 
 ## Running
 

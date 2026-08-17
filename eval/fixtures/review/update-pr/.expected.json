@@ -1,0 +1,39 @@
+{
+  "description": "The synchronize/rerun flow: the stub serves an existing review comment under this duty's own marker (a bot author, a prior review of the same pull request at an earlier head SHA). The model's finding at the same rule/path/line carries a different claim, so reconcile marks it `changed` and the run replaces its own comment in place — the PATCH `issues/comments/{id}` path, never a second POST. The `wrote: patch` assertion pins exactly that: a rerun must update, not stack.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "pr": {
+    "title": "Handle the debugger edge case",
+    "body": "This pull request hardens the save handler against a stray debugger statement."
+  },
+  "files": [
+    {
+      "filename": "src/settings.ts",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,5 @@\n+export function debug(): void {\n+  const x = 1;\n+  debugger;\n+  console.log(x);\n+}"
+    }
+  ],
+  "previous": {
+    "body": "<!-- reeve:review source=10de8a02dcb1bd1e eyJmaW5kaW5ncyI6W3sicnVsZUlkIjoiZGVkdXAiLCJwYXRoIjoic3JjL3NldHRpbmdzLnRzIiwibGluZSI6MywiYm9keSI6IlByZXZpb3VzIGNsYWltIGFib3V0IGRlYnVnZ2VyIHN0YXRlbWVudHMuIiwid2FzUmVzb2x2ZWQiOmZhbHNlfV0sInJldmlld2VkU2hhcyI6WyJhYmMxMjIiXX0= -->\n\n## Reeve · review\n\n### Verdict\n\n| Field | Value |\n| --- | --- |\n| Head | `abc122` |\n| Language | en |\n| Findings | 1 |\n| Posted | posted |\n\n### Findings\n\n| State | Location | Severity | Finding |\n| --- | --- | --- | --- |\n| persists | `src/settings.ts`:3 | warning | Previous claim about debugger statements. |"
+  },
+  "verdict-over": {
+    "findings": [
+      {
+        "rule": "dedup",
+        "severity": "warning",
+        "path": "src/settings.ts",
+        "line": 3,
+        "snippet": "debugger;",
+        "body": "A debugger statement was committed."
+      }
+    ],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "1",
+    "head-sha": "abc123",
+    "wrote": "patch"
+  }
+}

@@ -17,7 +17,7 @@
  * is never mistaken for a passing one.
  */
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -80,7 +80,7 @@ import {
   scenarioOf as reviewScenarioOf,
   scriptReview,
 } from "./drivers/review.ts";
-import type { ReviewScenario } from "./drivers/review.ts";
+import type { ReviewEffect, ReviewScenario } from "./drivers/review.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -106,30 +106,14 @@ const DUTIES = [
   "review",
 ] as const;
 
-/** Whether a duty has fixtures on disk to run. */
-async function hasFixtures(duty: string): Promise<boolean> {
-  try {
-    const entries = await readdir(join(FIXTURES, duty));
-    for (const entry of entries) {
-      const s = await stat(join(FIXTURES, duty, entry));
-      if (s.isDirectory()) return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-/** The fixture names under one duty, in listing order. */
-async function fixturesFor(duty: string): Promise<string[]> {
-  const entries = await readdir(join(FIXTURES, duty));
-  const fixtures: string[] = [];
-  for (const entry of entries) {
-    const s = await stat(join(FIXTURES, duty, entry));
-    if (s.isDirectory()) fixtures.push(entry);
-  }
-  return fixtures;
-}
+/**
+ * Fixture discovery — extracted to `./fixtures.ts` so the contract suite can
+ * pin it without importing the runner. Imported locally so `main()` below can
+ * call it, and re-exported for any caller that wants it without the runner's
+ * side effects.
+ */
+import { fixturesFor as discoverFixtures, hasFixtures as dutyHasFixtures } from "./fixtures.ts";
+export { fixturesFor as discoverFixtures, hasFixtures as dutyHasFixtures } from "./fixtures.ts";
 
 /** Builds one duty's bundle so the run measures this source, not the committed dist. */
 async function build(duty: string): Promise<void> {
@@ -888,7 +872,7 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
       scratchFiles(scratch),
       { GITHUB_WORKSPACE: scratch },
     );
-    return reviewLine(fixture, scenario, tracker.effect.commented, run);
+    return reviewLine(fixture, scenario, tracker.effect, run);
   } finally {
     await stub.close();
   }
@@ -921,7 +905,12 @@ function reviewInputs(stubUrl: string, warrant: string): Record<string, string> 
 }
 
 /** The outcome for one review fixture. */
-function reviewLine(fixture: string, scenario: ReviewScenario, commented: boolean, run: Run): Line {
+function reviewLine(
+  fixture: string,
+  scenario: ReviewScenario,
+  effect: ReviewEffect,
+  run: Run,
+): Line {
   if (run.code !== 0)
     return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
 
@@ -933,19 +922,52 @@ function reviewLine(fixture: string, scenario: ReviewScenario, commented: boolea
     echoed === (expected.commented ?? "false") &&
     findings === (expected.findings ?? "0") &&
     headSha === (expected["head-sha"] ?? "") &&
-    commented === (expected.commented === "true");
+    effect.commented === (expected.commented === "true") &&
+    // A fixture that pins the update path asserts the run PATCHed its own
+    // previous comment rather than POSTing a second one.
+    (expected.wrote === undefined || effect.wrote === expected.wrote);
+
+  // The language dimension wins over both: a pull request the pipeline
+  // identified as the wrong language was handled wrong, and that can never be
+  // a clean stop — the same fail-closed pairing the thread duties' `language`
+  // assertion uses, read off the summary's `| Language | <code> |` row.
+  if (expected.language !== undefined) {
+    const identified = languageFromSummary(run.summary);
+    if (identified !== expected.language) {
+      return {
+        fixture,
+        outcome: "failed",
+        detail: `identified the pull request as \`${identified}\`; fixture expects \`${expected.language}\``,
+      };
+    }
+  }
 
   if (finding) {
-    const detail = commented
-      ? `posted ${findings} finding(s) — comments: ${echoed}`
+    const detail = effect.commented
+      ? `${effect.wrote === "patch" ? "replaced" : "posted"} ${findings} finding(s) — comments: ${echoed}`
       : `clean stop — ${echoed === "false" ? "warrant denies review" : "nothing posted"}`;
     return { fixture, outcome: "finding", detail };
   }
   return {
     fixture,
     outcome: "skipped",
-    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)}`,
+    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)} wrote=${JSON.stringify(effect.wrote)}`,
   };
+}
+
+/**
+ * The language code a review run identified, off its summary's `| Language | id |` row.
+ *
+ * `cell()` only escapes `\`, `|` and newlines — it does not backtick-wrap — so
+ * the code stands bare in the value column. An unidentified run renders
+ * "not identified", which reads as no code.
+ */
+function languageFromSummary(summary: string): string {
+  const row = /^\|\s*Language\s*\|\s*([^|]+?)\s*\|$/m.exec(summary);
+  if (row?.[1] === undefined) return "";
+  const code = row[1];
+  if (code === "not identified") return "";
+  return code;
 }
 
 /** The outcome for one lifecycle fixture. */
@@ -1067,7 +1089,7 @@ async function main(): Promise<void> {
   let all: Line[] = [];
   try {
     for (const duty of duties) {
-      if (!(await hasFixtures(duty))) {
+      if (!(await dutyHasFixtures(duty, FIXTURES))) {
         // eslint-disable-next-line no-console -- CLI output
         console.error(`eval: no fixtures for \`${duty}\` under ${FIXTURES}/${duty} — add some.`);
         process.exit(1);
@@ -1083,7 +1105,7 @@ async function main(): Promise<void> {
         console.error(`eval: no driver implemented for \`${duty}\`.`);
         process.exit(1);
       }
-      for (const fixture of await fixturesFor(duty)) {
+      for (const fixture of await discoverFixtures(duty, FIXTURES)) {
         const line = await runFixture(fixture, scratch);
         // eslint-disable-next-line no-console -- CLI output
         console.log(`  [${line.outcome.padEnd(7)}] ${duty}/${fixture}: ${line.detail}`);
