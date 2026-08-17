@@ -738,6 +738,94 @@ describe("the action", () => {
     expect(run.outputs.findings).toBe("1");
   });
 
+  it("fires the architecture pre-check before any model is asked", async () => {
+    await writeFile(
+      rulesPath,
+      [
+        "version: 1",
+        "architecture:",
+        "  layers:",
+        "    domain: [src/domain/**]",
+        "    infrastructure: [src/infra/**]",
+        "  edges:",
+        "    - from: domain",
+        "      to: infrastructure",
+        "      severity: critical",
+        "      note: Domain must not depend on infra.",
+      ].join("\n"),
+    );
+    stub.pull.files = [
+      {
+        filename: "src/domain/svc.ts",
+        status: "modified",
+        additions: 2,
+        deletions: 0,
+        patch:
+          '@@ -1 +12,2 @@\n+import { db } from "../infra/db";\n+export function run(): void {}',
+      },
+    ];
+    // The deterministic architecture finding is guaranteed; the model has
+    // nothing to add.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(1);
+    const posted = stub.comments[0]?.body ?? "";
+    expect(posted).toContain("### New findings (1)");
+    expect(posted).toContain("critical");
+    expect(posted).toContain("Domain must not depend on infra.");
+    expect(posted).toContain("imports src/infra/db");
+    // The model still saw the diff — the deterministic finding is decided
+    // before it, not instead of it.
+    expect(stub.asked.some((ask) => stageOf(ask) === "review")).toBe(true);
+    expect(run.outputs.findings).toBe("1");
+  });
+
+  it("reports no architecture finding for a dependency in the allowed direction", async () => {
+    await writeFile(
+      rulesPath,
+      [
+        "version: 1",
+        "architecture:",
+        "  layers:",
+        "    domain: [src/domain/**]",
+        "    infrastructure: [src/infra/**]",
+        "  edges:",
+        "    - from: domain",
+        "      to: infrastructure",
+        "      severity: critical",
+        "      note: Domain must not depend on infra.",
+      ].join("\n"),
+    );
+    stub.pull.files = [
+      {
+        filename: "src/infra/db.ts",
+        status: "modified",
+        additions: 2,
+        deletions: 0,
+        patch:
+          '@@ -1 +12,2 @@\n+import { svc } from "../domain/svc";\n+export function db(): void {}',
+      },
+    ];
+    // infra → domain is allowed by the rule (direction matters), and the
+    // model has nothing to add — the run posts the empty chrome.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.commented).toBe("true");
+    expect(run.outputs.findings).toBe("0");
+    const posted = stub.comments[0]?.body ?? "";
+    expect(posted).toContain("No issues to report");
+  });
+
   it("withholds when a rules value is the sole reason nothing was shown — a rules-skipped diff is never stamped clean", async () => {
     // The rules file's own list is the only thing keeping every file from the
     // model. The empty chrome must not vouch for a diff nothing was shown of.

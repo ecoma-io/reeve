@@ -67,6 +67,7 @@ import {
   type RawFinding,
   type Reconciled,
 } from "./findings.js";
+import { architectureFindings } from "./architecture.js";
 import {
   decodeEnvelope,
   findMarked,
@@ -287,17 +288,30 @@ async function decide(
   // model is asked; its findings are guaranteed by construction (a line the
   // patch contains), which is why they enter the finding pool with the same
   // lifecycle as everything else.
-  const deterministic: Finding[] = preflight(bounded, rules).map((entry) => ({
-    id: entry.id,
-    ruleId: entry.id,
-    ruleName: entry.kind === "blocked" ? "Blocked text" : "Generated file",
-    ruleBody: entry.body,
-    path: entry.path,
-    line: entry.line,
-    severity: entry.severity,
-    body: entry.body,
-    marker: entry.marker,
-  }));
+  const deterministic: Finding[] = [
+    ...preflight(bounded, rules).map((entry) => ({
+      id: entry.id,
+      ruleId: entry.id,
+      ruleName: entry.kind === "blocked" ? "Blocked text" : "Generated file",
+      ruleBody: entry.body,
+      path: entry.path,
+      line: entry.line,
+      severity: entry.severity,
+      body: entry.body,
+      marker: entry.marker,
+    })),
+    ...architectureFindings(bounded, rules).map((entry) => ({
+      id: entry.id,
+      ruleId: entry.id,
+      ruleName: "Architecture boundary",
+      ruleBody: entry.body,
+      path: entry.path,
+      line: entry.line,
+      severity: entry.severity,
+      body: entry.body,
+      marker: entry.marker,
+    })),
+  ];
 
   // The expensive half, only when there is a diff to ask about.
   let reviewed: Reviewed = { verdict: NOTHING, failures: [], unreadable: null, model: null };

@@ -34393,6 +34393,361 @@ function remember(reconciled, headSha, previous) {
   return { findings, reviewedShas: shas };
 }
 
+// src/duties/review/architecture.ts
+import { posix } from "node:path";
+
+// src/duties/review/pr.ts
+var FILE_PAGE = 100;
+var FILE_PAGES = 10;
+var STATUS = {
+  added: "added",
+  modified: "modified",
+  removed: "removed",
+  renamed: "renamed"
+};
+async function readPr(api, at) {
+  const { data } = await api.rest.pulls.get({
+    owner: at.owner,
+    repo: at.repo,
+    pull_number: at.number
+  });
+  return {
+    title: data.title ?? "",
+    body: data.body ?? "",
+    state: data.state ?? "open",
+    draft: data.draft === true,
+    merged: data.merged === true,
+    headSha: data.head?.sha ?? "",
+    baseSha: data.base?.sha ?? "",
+    author: {
+      login: data.user?.login ?? "",
+      isBot: isBotAuthor(data.user)
+    },
+    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0)
+  };
+}
+async function listPrFiles(api, at) {
+  const files = [];
+  for (let page2 = 1; page2 <= FILE_PAGES; page2 += 1) {
+    const { data } = await api.rest.pulls.listFiles({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: at.number,
+      per_page: FILE_PAGE,
+      page: page2
+    });
+    files.push(
+      ...data.map((file) => ({
+        path: file.filename ?? "",
+        status: STATUS[file.status ?? ""] ?? "unknown",
+        previousPath: file.previous_filename ?? null,
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+        patch: file.patch ?? null
+      }))
+    );
+    if (data.length < FILE_PAGE) break;
+  }
+  return files;
+}
+function matchesGlob(pattern, path) {
+  let re = "";
+  let rest = pattern;
+  while (rest.length > 0) {
+    if (rest.startsWith("**")) {
+      re += ".*";
+      rest = rest.slice(2);
+    } else if (rest.startsWith("*")) {
+      re += "[^/]*";
+      rest = rest.slice(1);
+    } else if (rest.startsWith("?")) {
+      re += "[^/]";
+      rest = rest.slice(1);
+    } else {
+      const char = rest.charAt(0);
+      re += escapeGlob(char);
+      rest = rest.slice(1);
+    }
+  }
+  return new RegExp(`^${re}$`).test(path);
+}
+function escapeGlob(chunk) {
+  return chunk.replace(/[.?+^${}()|[\]\\]/g, "\\$&");
+}
+function classify(files, bounds) {
+  const shown2 = [];
+  const skipped = [];
+  let budget = bounds.maxDiffChars;
+  for (const file of files) {
+    const ignore = bounds.ignoreFiles.some((name) => name === file.path) || bounds.ignorePaths.some((pattern) => matchesGlob(pattern, file.path));
+    if (ignore) {
+      skipped.push({ path: file.path, reason: "ignored" });
+      continue;
+    }
+    if (isGenerated(file.path, bounds.generatedExtensions)) {
+      skipped.push({ path: file.path, reason: "generated" });
+      continue;
+    }
+    if (file.status === "removed") {
+      skipped.push({ path: file.path, reason: "removed" });
+      continue;
+    }
+    if (file.patch === null || file.patch.length === 0) {
+      skipped.push({ path: file.path, reason: "binary" });
+      continue;
+    }
+    if (file.patch.length > budget) {
+      skipped.push({ path: file.path, reason: "capped" });
+      budget = 0;
+      continue;
+    }
+    budget -= file.patch.length;
+    shown2.push({
+      path: file.path,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      patch: file.patch,
+      lines: lineNumbers(file.patch)
+    });
+  }
+  return {
+    shown: shown2,
+    skipped,
+    allFiles: files,
+    // A cap that never cut anything is invisible: the review makes the choice
+    // to show less than the diff honest in the one place readers look for it.
+    capped: skipped.some((entry) => entry.reason === "capped")
+  };
+}
+function isGenerated(path, extensions) {
+  return extensions.some((extension) => path.endsWith(extension));
+}
+function lineNumbers(patch) {
+  const lines = /* @__PURE__ */ new Map();
+  let current = null;
+  for (const raw of patch.split("\n")) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (hunk !== null) {
+      current = Number(hunk[1]);
+      continue;
+    }
+    if (current === null) continue;
+    const plus = raw.startsWith("+") && !raw.startsWith("+++");
+    const context3 = raw.startsWith(" ") || raw.startsWith("	");
+    if (plus || context3) {
+      const text2 = raw.slice(1);
+      lines.set(current, text2);
+      current += 1;
+    }
+  }
+  return lines;
+}
+
+// src/duties/review/architecture.ts
+function emptyArchitecture() {
+  return { layers: {}, edges: [], aliases: {} };
+}
+var IMPORT_TYPE = /\bimport\s+type\b[\s\S]*?from\s+(["'])([^"']+)\1/g;
+var IMPORT_FROM = /\bimport\s*[\s\S]*?\bfrom\s+(["'])([^"']+)\1/g;
+var IMPORT_DYNAMIC = /\bimport\s*\(\s*(["'])([^"']+)\1/g;
+var IMPORT_SIDE_EFFECT = /\bimport\s+(["'])([^"']+)\1/g;
+var EXPORT_FROM = /\bexport\s+(?:\*|\{[^}]*\})[\s\S]*?\bfrom\s+(["'])([^"']+)\1/g;
+var REQUIRE_RESOLVE = /\brequire\s*\.?\s*resolve\s*\(\s*(["'])([^"']+)\1/g;
+var REQUIRE = /\brequire\s*\(\s*(["'])([^"']+)\1/g;
+var FROM_CLAUSE = /\bfrom\s+(["'])([^"']+)\1/g;
+function opaqueRanges(line) {
+  const ranges = [];
+  let i = 0;
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const start = i;
+      const quote = ch;
+      i += 1;
+      while (i < line.length) {
+        if (line[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (line[i] === quote) {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      ranges.push({ start, end: i });
+      continue;
+    }
+    if (ch === "/" && line[i + 1] === "/") {
+      ranges.push({ start: i, end: line.length });
+      break;
+    }
+    if (ch === "/" && line[i + 1] === "*") {
+      const start = i;
+      i += 2;
+      while (i < line.length && !(line[i] === "*" && line[i + 1] === "/")) i += 1;
+      i = Math.min(i + 2, line.length);
+      ranges.push({ start, end: i });
+      continue;
+    }
+    i += 1;
+  }
+  return ranges;
+}
+function collect(text2, regex, kind, out) {
+  for (const match of text2.matchAll(regex)) {
+    const specifier = match[2];
+    if (specifier === void 0) continue;
+    const index = match.index;
+    out.push({ kind, specifier, index, end: index + match[0].length });
+  }
+}
+function extractEdges(file, aliases = {}) {
+  const edges = [];
+  let blockComment = false;
+  for (const [line, text2] of file.lines) {
+    const trimmed = text2.trimStart();
+    if (trimmed.startsWith("//")) continue;
+    if (blockComment) {
+      blockComment = !text2.includes("*/");
+      continue;
+    }
+    if (trimmed.startsWith("* ")) continue;
+    if (trimmed.startsWith("/*")) {
+      const closer = text2.indexOf("*/", 2);
+      if (closer < 0) {
+        blockComment = true;
+        continue;
+      }
+      if (trimmed.slice(closer + 2).trim() === "") continue;
+    }
+    const opaque = opaqueRanges(text2);
+    const candidates = [];
+    collect(text2, IMPORT_TYPE, "type", candidates);
+    collect(text2, IMPORT_FROM, "import", candidates);
+    collect(text2, IMPORT_DYNAMIC, "dynamic", candidates);
+    collect(text2, IMPORT_SIDE_EFFECT, "import", candidates);
+    collect(text2, EXPORT_FROM, "export", candidates);
+    collect(text2, REQUIRE_RESOLVE, "require", candidates);
+    collect(text2, REQUIRE, "require", candidates);
+    collect(text2, FROM_CLAUSE, "import", candidates);
+    const kept = [];
+    for (const candidate of candidates) {
+      if (opaque.some((range) => candidate.index >= range.start && candidate.index < range.end)) {
+        continue;
+      }
+      if (kept.some((k) => candidate.index >= k.index && candidate.index < k.end)) continue;
+      kept.push(candidate);
+      edges.push({
+        fromFile: file.path,
+        line,
+        specifier: candidate.specifier,
+        kind: candidate.kind,
+        target: resolveTarget(file.path, candidate.specifier, aliases)
+      });
+    }
+  }
+  return edges;
+}
+function resolveTarget(fromFile, specifier, aliases) {
+  if (specifier === "nodejs:" || specifier.startsWith("node:")) return null;
+  if (specifier.startsWith("http://") || specifier.startsWith("https://") || specifier.startsWith("data:") || specifier.startsWith("#")) {
+    return null;
+  }
+  if (specifier.startsWith(".")) {
+    const resolved = posix.normalize(posix.join(posix.dirname(fromFile), specifier));
+    if (resolved.startsWith("../")) return null;
+    return resolved;
+  }
+  if (specifier.startsWith("/")) {
+    return specifier.slice(1);
+  }
+  const prefixes = Object.keys(aliases).filter(
+    (prefix) => prefix.length > 0 && specifier.startsWith(prefix)
+  );
+  if (prefixes.length > 0) {
+    prefixes.sort((a, b) => b.length - a.length);
+    const prefix = prefixes[0];
+    if (prefix !== void 0) {
+      const rest = specifier.slice(prefix.length);
+      const base = aliases[prefix] ?? "";
+      const resolved = posix.normalize(posix.join(base, rest));
+      if (resolved.startsWith("../")) return null;
+      return resolved;
+    }
+  }
+  return null;
+}
+function firstLayer(path, layers) {
+  for (const [name, globs] of Object.entries(layers)) {
+    if (globs.some((glob) => matchesGlob(glob, path))) return name;
+  }
+  return null;
+}
+function isLayerName(value, layers) {
+  return Object.prototype.hasOwnProperty.call(layers, value);
+}
+function assess(edges, architecture) {
+  const violations = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const edge of edges) {
+    if (edge.target === null) continue;
+    const fromLayer = firstLayer(edge.fromFile, architecture.layers);
+    const toLayer = firstLayer(edge.target, architecture.layers);
+    for (let ruleIndex = 0; ruleIndex < architecture.edges.length; ruleIndex += 1) {
+      const rule = architecture.edges[ruleIndex];
+      if (rule === void 0) continue;
+      const fromOk = isLayerName(rule.from, architecture.layers) ? fromLayer === rule.from : matchesGlob(rule.from, edge.fromFile);
+      const toOk = isLayerName(rule.to, architecture.layers) ? toLayer === rule.to : matchesGlob(rule.to, edge.target);
+      if (!fromOk || !toOk) continue;
+      const key = `${String(ruleIndex)}:${edge.fromFile}:${String(edge.line)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      violations.push({ ruleIndex, edge, fromMatched: rule.from, toMatched: rule.to });
+    }
+  }
+  return violations;
+}
+var MAX_ARCH_FINDINGS = 40;
+function architectureFindings(snapshot, rules) {
+  const findings = [];
+  let capped = false;
+  outer: for (const file of snapshot.shown) {
+    const edges = extractEdges(file, rules.architecture.aliases);
+    for (const violation of assess(edges, rules.architecture)) {
+      if (findings.length >= MAX_ARCH_FINDINGS) {
+        capped = true;
+        break outer;
+      }
+      findings.push(findingFromViolation(violation, rules.architecture));
+    }
+  }
+  if (capped) {
+    warning(
+      `architecture: capped at ${String(MAX_ARCH_FINDINGS)} findings; further violations were not reported.`
+    );
+  }
+  return findings;
+}
+function findingFromViolation(violation, architecture) {
+  const rule = architecture.edges[violation.ruleIndex];
+  const edge = violation.edge;
+  const from = rule?.from ?? "";
+  const to = rule?.to ?? "";
+  const note = rule?.note ?? "";
+  const body = `${from} (${edge.fromFile}) imports ${edge.target ?? edge.specifier} (${edge.kind}) which the repository's architecture rules forbid: ${from} must not depend on ${to}.` + (note.length > 0 ? ` ${note}` : "");
+  return {
+    id: "review-arch",
+    kind: "architecture",
+    path: edge.fromFile,
+    line: edge.line,
+    severity: rule?.severity ?? "warning",
+    marker: "preflight:arch",
+    body
+  };
+}
+
 // src/core/chrome.ts
 var CHROME_LANGUAGES = [
   "en",
@@ -35034,7 +35389,7 @@ function publicationFor(pub) {
   const payload = `${renderFingerprint(pub.reconciled)} ${encodeEnvelope(pub.next)}`;
   return { payload, body: render(pub.reconciled) };
 }
-async function classify(api, at, pub) {
+async function classify2(api, at, pub) {
   const { payload, body } = publicationFor(pub);
   const full = [marker.render(payload), body].join("\n\n");
   const { marked: existing, uncertain } = await findMarked(api, at);
@@ -35053,7 +35408,7 @@ function renderFingerprintMarker(_pub, payload) {
   return at === -1 ? payload : payload.slice(0, at);
 }
 async function postOrReplace(api, at, pub) {
-  const { disposition, body, existing } = await classify(api, at, pub);
+  const { disposition, body, existing } = await classify2(api, at, pub);
   if (disposition === "withheld") return disposition;
   if (existing === null) {
     await api.rest.issues.createComment({
@@ -35074,7 +35429,7 @@ async function postOrReplace(api, at, pub) {
   return disposition;
 }
 async function rehearse(api, at, pub) {
-  return (await classify(api, at, pub)).disposition;
+  return (await classify2(api, at, pub)).disposition;
 }
 function render(reconciled) {
   if (reconciled.length === 0) {
@@ -35134,154 +35489,6 @@ function escapeHtml(text2) {
   return text2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// src/duties/review/pr.ts
-var FILE_PAGE = 100;
-var FILE_PAGES = 10;
-var STATUS = {
-  added: "added",
-  modified: "modified",
-  removed: "removed",
-  renamed: "renamed"
-};
-async function readPr(api, at) {
-  const { data } = await api.rest.pulls.get({
-    owner: at.owner,
-    repo: at.repo,
-    pull_number: at.number
-  });
-  return {
-    title: data.title ?? "",
-    body: data.body ?? "",
-    state: data.state ?? "open",
-    draft: data.draft === true,
-    merged: data.merged === true,
-    headSha: data.head?.sha ?? "",
-    baseSha: data.base?.sha ?? "",
-    author: {
-      login: data.user?.login ?? "",
-      isBot: isBotAuthor(data.user)
-    },
-    labels: (data.labels ?? []).map((label) => typeof label === "string" ? label : label.name ?? "").filter((name) => name.length > 0)
-  };
-}
-async function listPrFiles(api, at) {
-  const files = [];
-  for (let page2 = 1; page2 <= FILE_PAGES; page2 += 1) {
-    const { data } = await api.rest.pulls.listFiles({
-      owner: at.owner,
-      repo: at.repo,
-      pull_number: at.number,
-      per_page: FILE_PAGE,
-      page: page2
-    });
-    files.push(
-      ...data.map((file) => ({
-        path: file.filename ?? "",
-        status: STATUS[file.status ?? ""] ?? "unknown",
-        previousPath: file.previous_filename ?? null,
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        patch: file.patch ?? null
-      }))
-    );
-    if (data.length < FILE_PAGE) break;
-  }
-  return files;
-}
-function matchesGlob(pattern, path) {
-  let re = "";
-  let rest = pattern;
-  while (rest.length > 0) {
-    if (rest.startsWith("**")) {
-      re += ".*";
-      rest = rest.slice(2);
-    } else if (rest.startsWith("*")) {
-      re += "[^/]*";
-      rest = rest.slice(1);
-    } else if (rest.startsWith("?")) {
-      re += "[^/]";
-      rest = rest.slice(1);
-    } else {
-      const char = rest.charAt(0);
-      re += escapeGlob(char);
-      rest = rest.slice(1);
-    }
-  }
-  return new RegExp(`^${re}$`).test(path);
-}
-function escapeGlob(chunk) {
-  return chunk.replace(/[.?+^${}()|[\]\\]/g, "\\$&");
-}
-function classify2(files, bounds) {
-  const shown2 = [];
-  const skipped = [];
-  let budget = bounds.maxDiffChars;
-  for (const file of files) {
-    const ignore = bounds.ignoreFiles.some((name) => name === file.path) || bounds.ignorePaths.some((pattern) => matchesGlob(pattern, file.path));
-    if (ignore) {
-      skipped.push({ path: file.path, reason: "ignored" });
-      continue;
-    }
-    if (isGenerated(file.path, bounds.generatedExtensions)) {
-      skipped.push({ path: file.path, reason: "generated" });
-      continue;
-    }
-    if (file.status === "removed") {
-      skipped.push({ path: file.path, reason: "removed" });
-      continue;
-    }
-    if (file.patch === null || file.patch.length === 0) {
-      skipped.push({ path: file.path, reason: "binary" });
-      continue;
-    }
-    if (file.patch.length > budget) {
-      skipped.push({ path: file.path, reason: "capped" });
-      budget = 0;
-      continue;
-    }
-    budget -= file.patch.length;
-    shown2.push({
-      path: file.path,
-      status: file.status,
-      additions: file.additions,
-      deletions: file.deletions,
-      patch: file.patch,
-      lines: lineNumbers(file.patch)
-    });
-  }
-  return {
-    shown: shown2,
-    skipped,
-    allFiles: files,
-    // A cap that never cut anything is invisible: the review makes the choice
-    // to show less than the diff honest in the one place readers look for it.
-    capped: skipped.some((entry) => entry.reason === "capped")
-  };
-}
-function isGenerated(path, extensions) {
-  return extensions.some((extension) => path.endsWith(extension));
-}
-function lineNumbers(patch) {
-  const lines = /* @__PURE__ */ new Map();
-  let current = null;
-  for (const raw of patch.split("\n")) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
-    if (hunk !== null) {
-      current = Number(hunk[1]);
-      continue;
-    }
-    if (current === null) continue;
-    const plus = raw.startsWith("+") && !raw.startsWith("+++");
-    const context3 = raw.startsWith(" ") || raw.startsWith("	");
-    if (plus || context3) {
-      const text2 = raw.slice(1);
-      lines.set(current, text2);
-      current += 1;
-    }
-  }
-  return lines;
-}
-
 // src/duties/review/rules.ts
 var import_yaml2 = __toESM(require_dist2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
@@ -35329,6 +35536,7 @@ function emptyRules() {
     ignorePaths: [],
     generatedExtensions: DEFAULT_GENERATED,
     blocked: [],
+    architecture: emptyArchitecture(),
     raw: "",
     warnings: []
   };
@@ -35338,7 +35546,8 @@ var KNOWN_RULE_KEYS = /* @__PURE__ */ new Set([
   "rules",
   "ignore",
   "generated",
-  "blocked"
+  "blocked",
+  "architecture"
 ]);
 function parseRules(text2) {
   const warnings = [];
@@ -35365,6 +35574,7 @@ function parseRules(text2) {
     ignorePaths: ignore.paths,
     generatedExtensions: readGenerated(map.generated, warnings),
     blocked: readBlocked(map.blocked, warnings),
+    architecture: readArchitecture(map.architecture, warnings),
     raw: text2,
     warnings
   };
@@ -35496,6 +35706,110 @@ function preflight(snapshot, rules) {
     }
   }
   return findings;
+}
+function readArchitecture(raw, warnings) {
+  if (raw === void 0 || raw === null) return emptyArchitecture();
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`architecture:` is not a mapping; ignoring");
+    return emptyArchitecture();
+  }
+  const map = raw;
+  return {
+    layers: readArchLayers(map.layers, warnings),
+    edges: readArchEdges(map.edges, warnings),
+    aliases: readArchAliases(map.aliases, warnings)
+  };
+}
+function readArchLayers(raw, warnings) {
+  if (raw === void 0 || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`architecture.layers:` is not a mapping; ignoring");
+    return {};
+  }
+  const map = raw;
+  const layers = {};
+  for (const [name, value] of Object.entries(map)) {
+    if (name.length === 0) {
+      warnings.push("`architecture.layers` has an empty layer name; dropped");
+      continue;
+    }
+    if (value === void 0 || value === null) {
+      warnings.push(`\`architecture.layers.${name}:\` has no glob list; dropped`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      warnings.push(`\`architecture.layers.${name}:\` is not a list; dropped`);
+      continue;
+    }
+    const globs = value.map((entry, index) => {
+      if (typeof entry !== "string" || entry.length === 0) {
+        warnings.push(
+          `\`architecture.layers.${name}\` entry ${String(index + 1)} is not a non-empty string; dropped`
+        );
+        return null;
+      }
+      return entry;
+    }).filter((entry) => entry !== null);
+    if (globs.length > 0) layers[name] = globs;
+  }
+  return layers;
+}
+function readArchEdges(raw, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push("`architecture.edges:` is not a list; ignoring");
+    return [];
+  }
+  const out = [];
+  raw.forEach((entry, index) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(`\`architecture.edges\` entry ${String(index + 1)} is not a mapping; dropped`);
+      return;
+    }
+    const map = entry;
+    const from = typeof map.from === "string" ? map.from : "";
+    const to = typeof map.to === "string" ? map.to : "";
+    if (from.length === 0 || to.length === 0) {
+      warnings.push(
+        `\`architecture.edges\` entry ${String(index + 1)} is missing \`from\`/\`to\`; dropped`
+      );
+      return;
+    }
+    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    if (typeof map.severity === "string" && !SEVERITY.has(map.severity)) {
+      warnings.push(
+        `\`architecture.edges\` entry ${String(index + 1)} has unknown severity \`${map.severity}\`; using warning`
+      );
+    }
+    out.push({
+      from,
+      to,
+      severity,
+      note: typeof map.note === "string" ? map.note : ""
+    });
+  });
+  return out;
+}
+function readArchAliases(raw, warnings) {
+  if (raw === void 0 || raw === null) return {};
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    warnings.push("`architecture.aliases:` is not a mapping; ignoring");
+    return {};
+  }
+  const map = raw;
+  const aliases = {};
+  for (const [prefix, value] of Object.entries(map)) {
+    if (prefix.length === 0) {
+      warnings.push("`architecture.aliases` has an empty prefix; dropped");
+      continue;
+    }
+    if (typeof value !== "string" || value.length === 0) {
+      warnings.push(`\`architecture.aliases.${prefix}:\` is not a non-empty string; dropped`);
+      continue;
+    }
+    aliases[prefix] = value;
+  }
+  return aliases;
 }
 function blockedNote(blocked) {
   const note = blocked.note.length > 0 ? ` ${blocked.note}` : "";
@@ -35826,7 +36140,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     }
   }
   const budget = settings.maxDiffChars ?? Number.MAX_SAFE_INTEGER;
-  const snapshot = classify2(await listPrFiles(prApi, at), {
+  const snapshot = classify(await listPrFiles(prApi, at), {
     ignoreFiles: [],
     ignorePaths: [],
     generatedExtensions: DEFAULT_GENERATED2,
@@ -35834,7 +36148,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   });
   const rules = await readRules(resolveRulesPath(settings));
   for (const warning2 of rules.warnings) warning(`rules: ${warning2}`);
-  const bounded2 = classify2(snapshot.allFiles, {
+  const bounded2 = classify(snapshot.allFiles, {
     ignoreFiles: rules.ignoreFiles,
     ignorePaths: rules.ignorePaths,
     generatedExtensions: rules.generatedExtensions,
@@ -35856,17 +36170,30 @@ async function decide(api, at, warrant, settings, stages, weather) {
       `#${String(at.number)}: previous review read (${String(previous.findings.length)} finding(s)).`
     );
   }
-  const deterministic = preflight(bounded2, rules).map((entry) => ({
-    id: entry.id,
-    ruleId: entry.id,
-    ruleName: entry.kind === "blocked" ? "Blocked text" : "Generated file",
-    ruleBody: entry.body,
-    path: entry.path,
-    line: entry.line,
-    severity: entry.severity,
-    body: entry.body,
-    marker: entry.marker
-  }));
+  const deterministic = [
+    ...preflight(bounded2, rules).map((entry) => ({
+      id: entry.id,
+      ruleId: entry.id,
+      ruleName: entry.kind === "blocked" ? "Blocked text" : "Generated file",
+      ruleBody: entry.body,
+      path: entry.path,
+      line: entry.line,
+      severity: entry.severity,
+      body: entry.body,
+      marker: entry.marker
+    })),
+    ...architectureFindings(bounded2, rules).map((entry) => ({
+      id: entry.id,
+      ruleId: entry.id,
+      ruleName: "Architecture boundary",
+      ruleBody: entry.body,
+      path: entry.path,
+      line: entry.line,
+      severity: entry.severity,
+      body: entry.body,
+      marker: entry.marker
+    }))
+  ];
   let reviewed = { verdict: NOTHING, failures: [], unreadable: null, model: null };
   if (bounded2.shown.length > 0) {
     reviewed = await review({

@@ -1,0 +1,23 @@
+{
+  "description": "The rules file's architecture section forbids domain importing infrastructure; the import in the diff is a deterministic finding before any model is asked, and the run posts it.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/domain/service.ts",
+      "status": "added",
+      "additions": 2,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,2 @@\n+import { db } from \"../infra/db\";\n+export function run(): void {}"
+    }
+  ],
+  "rules": "version: 1\narchitecture:\n  layers:\n    domain: [\"src/domain/**\"]\n    infrastructure: [\"src/infra/**\"]\n  edges:\n    - from: domain\n      to: infrastructure\n      severity: critical\n      note: Domain must not depend on infrastructure.\n",
+  "verdict-over": {
+    "findings": [],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "1",
+    "head-sha": "abc123"
+  }
+}
