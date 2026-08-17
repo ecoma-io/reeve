@@ -26,6 +26,7 @@
 import { chrome } from "../../core/chrome.js";
 import { isBotAuthor, type Author, type Location } from "../../core/forge.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
+import { sanitize } from "../../core/sanitize.js";
 import type { Finding, Previous } from "./findings.js";
 import { findingFingerprint } from "./findings.js";
 
@@ -361,7 +362,13 @@ function statusLabel(status: string): string {
 function findingLine(finding: Finding): string {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${finding.body}`;
+  // The finding's body is the one piece of model prose this duty prints on the
+  // pull request, so it is defanged the same way every other duty's published
+  // text is (see `core/sanitize.ts`): `@alice` and `#42` inside a finding must
+  // not become link events the model never intended. Deterministic pre-check
+  // bodies are constant strings and pass through unchanged.
+  const body = sanitize(finding.body);
+  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}`;
 }
 
 function footer(): string {

@@ -217,6 +217,22 @@ describe("render", () => {
     expect(body).toContain("<sub>");
     expect(body).toContain("</sub>");
   });
+
+  it("defangs references in a model-written finding body before it is printed", () => {
+    // The one piece of model prose this duty publishes must not create link
+    // events the model never intended — the same defang every other duty
+    // applies to published text (see core/sanitize.ts).
+    const body = render([
+      { finding: finding({ body: "Mention @alice and see #42 and GH-7." }), status: "created" },
+    ]);
+    expect(body).toContain("@<!---->alice");
+    expect(body).toContain("#<!---->42");
+    // `GH-7` is defanged at its first letter — `G<!---->H-7` — the same
+    // insertion point core/sanitize uses for every `GH-N` reference.
+    expect(body).toContain("G<!---->H-7");
+    expect(body).not.toContain("@alice");
+    expect(body).not.toContain("#42");
+  });
 });
 
 describe("postOrReplace", () => {

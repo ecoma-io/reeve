@@ -343,6 +343,18 @@ async function decide(
   // which is precisely the false all-clear an injected pull request is best
   // served by. Withhold instead; the job summary still says what happened.
   const silentNoVerdict = bounded.shown.length > 0 && !verdictMeasured && final.length === 0;
+  // A diff whose every file the rules file's `ignore:` lists removed. The one
+  // rules value that may not act alone: a stale or hostile `ignore.paths`
+  // like `["**"]` would remove every file, and the empty chrome would then
+  // stamp a diff nothing was shown of as clean (deterministic pre-checks fire
+  // only on shown files, so nothing fires here). `generated` skips still post
+  // the empty chrome — a generated-only PR is a real answer — and `capped`,
+  // `removed` and `binary` are facts of the diff, not configuration. The job
+  // summary's coverage table names every file and why; the write stays silent.
+  const allShownIgnored =
+    bounded.shown.length === 0 &&
+    bounded.skipped.length > 0 &&
+    bounded.skipped.every((entry) => entry.reason === "ignored");
 
   if (!permitted.includes("comment")) {
     core.warning(
@@ -388,6 +400,24 @@ async function decide(
       findings: final,
       confidence,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      rulesPath: rulesLabel(settings),
+      shown: bounded.shown,
+      skipped: bounded.skipped,
+    });
+  }
+
+  if (allShownIgnored) {
+    core.warning(
+      `#${String(at.number)}: every file was skipped by the rules file's \`ignore:\` list — ` +
+        "nothing was posted, so a diff nothing was shown of is not stamped all-clear. " +
+        "The coverage table names each file and why.",
+    );
+    return settled({
+      ...settledBase,
+      language: language?.code ?? null,
+      findings: final,
+      confidence,
+      malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,

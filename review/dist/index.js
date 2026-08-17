@@ -32418,6 +32418,9 @@ function segments(markdown) {
   }
   return out;
 }
+function mapProse(markdown, rewrite) {
+  return segments(markdown).map((segment) => segment.kind === "prose" ? rewrite(segment.text) : segment.text).join("");
+}
 function terminatedLines(markdown) {
   const raw = markdown.split("\n");
   return raw.map((line, index) => index < raw.length - 1 ? `${line}
@@ -34917,6 +34920,51 @@ function chrome(key, code2, params = {}) {
   return fill(CHROME[key][resolve(code2)], params);
 }
 
+// src/core/sanitize.ts
+var OPENER = "<!--";
+var CLOSER = "-->";
+var INERT = "<!---->";
+var REFERENCE = new RegExp(
+  [
+    String.raw`(https?://\S+|\]\([^\s)]*\))`,
+    String.raw`(?<![A-Za-z0-9_-])@(?:${INERT})?[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,38})?`,
+    String.raw`#(?:${INERT})?\d+`,
+    String.raw`(?<![A-Za-z0-9_])G(?:${INERT})?H-\d+`
+  ].join("|"),
+  "gi"
+);
+function sanitize(markdown) {
+  return mapProse(markdown, (prose) => defangReferences(defangComments(prose)));
+}
+function defangComments(prose) {
+  const lastCloser = prose.lastIndexOf(CLOSER);
+  let defanged = "";
+  let read = 0;
+  for (; ; ) {
+    const opener = prose.indexOf(OPENER, read);
+    if (opener === -1) return defanged + prose.slice(read);
+    defanged += prose.slice(read, opener);
+    const closer = opener + OPENER.length > lastCloser ? -1 : prose.indexOf(CLOSER, opener + OPENER.length);
+    if (closer === -1) {
+      defanged += `<${INERT}!--`;
+      read = opener + OPENER.length;
+      continue;
+    }
+    defanged += emptied(prose.slice(opener + OPENER.length, closer));
+    read = closer + CLOSER.length;
+  }
+}
+var OPAQUE = /[^`~\\\n\r ]/g;
+function emptied(payload) {
+  return `${OPENER}${payload.replace(OPAQUE, "-")}${CLOSER}`;
+}
+function defangReferences(prose) {
+  return prose.replace(REFERENCE, (match, passthrough) => {
+    if (passthrough !== void 0 || match.slice(1).startsWith(INERT)) return match;
+    return `${match.slice(0, 1)}${INERT}${match.slice(1)}`;
+  });
+}
+
 // src/duties/review/publish.ts
 var marker = markerFor("review");
 function encodeEnvelope(previous) {
@@ -35056,7 +35104,8 @@ function statusLabel(status) {
 function findingLine(finding) {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${finding.body}`;
+  const body = sanitize(finding.body);
+  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}`;
 }
 function footer() {
   const parts = [chrome("reviewFooterFloor", null), chrome("reviewFooterEditable", null)];
@@ -35823,6 +35872,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
   const silentNoVerdict = bounded2.shown.length > 0 && !verdictMeasured && final.length === 0;
+  const allShownIgnored = bounded2.shown.length === 0 && bounded2.skipped.length > 0 && bounded2.skipped.every((entry) => entry.reason === "ignored");
   if (!permitted.includes("comment")) {
     warning(
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`
@@ -35863,6 +35913,21 @@ async function decide(api, at, warrant, settings, stages, weather) {
       findings: final,
       confidence,
       malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      rulesPath: rulesLabel(settings),
+      shown: bounded2.shown,
+      skipped: bounded2.skipped
+    });
+  }
+  if (allShownIgnored) {
+    warning(
+      `#${String(at.number)}: every file was skipped by the rules file's \`ignore:\` list \u2014 nothing was posted, so a diff nothing was shown of is not stamped all-clear. The coverage table names each file and why.`
+    );
+    return settled({
+      ...settledBase,
+      language: language?.code ?? null,
+      findings: final,
+      confidence,
+      malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
       skipped: bounded2.skipped

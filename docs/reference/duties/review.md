@@ -74,7 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # The rules file is part of the job's own pinned checkout, so a pull
+      # request cannot replace it before the review reads it. Without `ref:`,
+      # `checkout` would check out the pull request's merge ref — and until the
+      # PR is merged, that ref carries the PR author's own `.github/reeve-rules.yml`.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
       - uses: ecoma-io/reeve/review@v0.6 <!-- roadmap ref -->
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -149,12 +155,20 @@ same four provider inputs every duty takes — the full grammar, the
 auth failures are all in
 [Installation](../../getting-started/installation.md#more-than-one-endpoint).
 
-**`rules-path` is read from the checkout and trusted.** It is your own
-maintainers' text, reviewed like any other change, so it enters the model's
-instructions unwrapped — the same shelf the taxonomy sits on. The diff, and
-the pull request it came from, are a stranger's words and stay behind the
-sanitising boundary regardless. A repository that has not written the file
-yet is the cold start — reviewed by the built-in default rules alone — not a
+**`rules-path` is read from the checkout and trusted — and the checkout is
+the workflow's own, pinned to the base branch.** You have to be able to say
+_who wrote the rules the model is following_, and nothing here can prove that
+if the workflow checks out the pull request's merge ref: until the PR is
+merged, that ref carries the PR author's own rules file. So review.md's
+example checks out `github.event.pull_request.base.ref` — the rules a model
+ever follows are the ones that already survived a review of their own. The
+file is your own maintainers' text, reviewed like any other change, so it
+enters the model's instructions unwrapped — the same shelf the taxonomy sits
+on — but its values are never authority on their own (see
+[Security considerations](#security-considerations)). The diff, and the pull
+request it came from, are a stranger's words and stay behind the sanitising
+boundary regardless. A repository that has not written the file yet is the
+cold start — reviewed by the built-in default rules alone — not a
 misconfiguration.
 
 **`confidence` is a floor worth measuring, not inheriting.** [Measure
@@ -277,6 +291,7 @@ watch how it does.
 | Confidence below the floor                                       | Findings reconciled and on the summary, `commented: false`, **green** |
 | `comment` not granted                                            | Findings on the summary, `commented: false`, **green**                |
 | No readable verdict, files were shown                            | Comment withheld, summary says why, **green**                         |
+| Every file skipped by the rules file                             | Comment withheld, coverage names each file and why, **green**         |
 | Every model failed on capacity                                   | `starved: true`, whatever survived, **green**                         |
 | A draft under `trigger: pr`, merged, closed, a Reeve proposal PR | `note` set, no model asked, **green**                                 |
 | The warrant or a readable rules file does not parse              | **Red**, naming the file                                              |
@@ -313,7 +328,16 @@ full arithmetic.
 - **The diff is untrusted and framed as untrusted**: every line entered the
   prompt behind `enclose`, and a pull request that quotes "ignore this rule"
   at the model stays a quotation. Only the repository's own rules file enters
-  unwrapped.
+  unwrapped **— and its contents are pre-injected bare strings, never
+  authority.** A path in `ignore:` matching a file is one skip among the
+  diff's own facts, decided in code against the parsed file; the rules file's
+  values and its `MAX_RULES_CHARS` (20,000) cap are documented in
+  [Deterministic findings](#deterministic-findings-before-any-model), and a
+  file's `blocked` phrases and `rules` enter the model's system prompt exactly
+  as the maintainer wrote them — never as instructions the diff can act on
+  alone. When a rules value would be the sole reason the review has nothing to
+  say, the review is withheld rather than stamped clean (see
+  [Failure behavior](#failure-behavior)).
 - **The review comment is visibly machine-written, unconditionally.** The
   fixed closing line — "This review was written by a model, not decided by a
   maintainer — read each finding as a lead to check" — is unstrippable: there

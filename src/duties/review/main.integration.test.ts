@@ -699,6 +699,48 @@ describe("the action", () => {
     expect(run.outputs.findings).toBe("1");
   });
 
+  it("withholds when a rules value is the sole reason nothing was shown — a rules-skipped diff is never stamped clean", async () => {
+    // The rules file's own list is the only thing keeping every file from the
+    // model. The empty chrome must not vouch for a diff nothing was shown of.
+    await writeFile(rulesPath, ["version: 1", "ignore:", "  paths:", "    - src/**"].join("\n"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(0);
+    expect(run.outputs.commented).toBe("false");
+    expect(run.outputs.findings).toBe("0");
+    expect(run.summary).toContain("### Coverage");
+    expect(run.summary).toContain("ignored");
+    expect(run.summary).toContain("src/a.ts");
+  });
+
+  it("defangs a mention inside a model-written finding before it is posted", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "Mention @alice and see #42.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    const posted = stub.comments[0]?.body ?? "";
+    expect(posted).toContain("@<!---->alice");
+    expect(posted).toContain("#<!---->42");
+    expect(posted).not.toContain("@alice");
+  });
+
   it("skips a generated file under the built-in suffixes, and the repo's rules can add their own", async () => {
     stub.pull.files = [
       {
