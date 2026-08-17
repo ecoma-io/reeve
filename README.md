@@ -315,7 +315,7 @@ release pins `v0.$MINOR` (there is deliberately no `v0`), and the `v0.6` line
 is where this README's examples point.
 
 The roadmap itself, the doctrine that decides what ships, and what stays
-deliberately unsounded, are all one document:
+deliberately out of scope, are all one document:
 [the north star](docs/doctrine/north-star.md#7-roadmap).
 
 ## Cost

@@ -88,8 +88,8 @@ everyone, rather than left open to be reasoned around by a well-crafted
 prompt.
 
 That is the whole model: nothing assumed at install, everything legible in
-one file, the file the whole authority, and a small set of
-actions no file can ever unlock.
+one file, that file the sole authority, and a small set of actions no file can
+ever unlock.
 
 ---
 
