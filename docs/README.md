@@ -99,7 +99,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 
 | Page                                                                       | Doc type                 | What it's for                                                                     |
 | -------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| [`README.md`](../README.md)                                                | overview                 | Say what Reeve is, prove it with a working quick start, name what it refuses.     |
+| [`README.md`](../README.md)                                                | overview                 | What Reeve is, a five-minute quick start, the duties, and what it refuses.        |
 | [`doctrine/north-star.md`](doctrine/north-star.md)                         | doctrine                 | Normative doctrine — the document the others answer to. Unchanged.                |
 | [`getting-started/installation.md`](getting-started/installation.md)       | tutorial                 | Get a first workflow running in five minutes.                                     |
 | [`getting-started/first-workflow.md`](getting-started/first-workflow.md)   | tutorial                 | Walk a complete two-duty workflow end to end.                                     |
