@@ -1,0 +1,32 @@
+{
+  "description": "Two findings land on proven diff lines, so the run posts each as its own owned inline review thread (the pulls/{n}/comments POSTs) beside the one summary comment — and the rerun's relisting finds them, writes nothing new, and the assertion pins exactly two threads.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "added",
+      "additions": 6,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,6 @@\n+export function debug(): void {\n+  const x = 1;\n+  debugger;\n+  console.log(x);\n+  todo();\n+}"
+    }
+  ],
+  "rules": "version: 1\nblocked:\n  - phrase: debugger;\n    severity: warning\n    note: Do not commit debugger statements.\n  - phrase: todo();\n    severity: warning\n    note: Do not commit TODO calls.\n",
+  "verdict-over": {
+    "findings": [
+      {
+        "rule": "dedup",
+        "severity": "warning",
+        "path": "src/app.ts",
+        "line": 3,
+        "snippet": "debugger;",
+        "body": "Do not commit debugger statements."
+      }
+    ]
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "3",
+    "head-sha": "abc123",
+    "threads": "3"
+  }
+}

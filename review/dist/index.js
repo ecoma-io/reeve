@@ -33025,6 +33025,9 @@ function markerFor(duty) {
 function authorHalf(text2) {
   return text2.replace(/\s+$/u, "");
 }
+function isFingerprint(payload) {
+  return /^[0-9a-f]{16}$/.test(payload);
+}
 function fingerprint(text2, keys) {
   const sorted = [...keys].map((key) => key.toLowerCase()).sort();
   return createHash("sha256").update([text2, ...sorted].join("\0")).digest("hex").slice(0, 16);
@@ -35641,7 +35644,7 @@ var DISPOSITION_LABELS = {
   "wont-fix": "wont-fix",
   rejected: "rejected"
 };
-function findingLine(finding, disposition) {
+function findingLine(finding, disposition = null) {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   const body = sanitize(finding.body);
@@ -37260,6 +37263,160 @@ function verifyFindings(request2) {
   });
 }
 
+// src/duties/review/threads.ts
+var THREAD_MARKER = "<!-- reeve:review:thread source=";
+var CLOSER2 = " -->";
+var PAGE = 100;
+var MAX_THREAD_PAGES = 10;
+var THREAD_BODY_CAP = 8e3;
+function keyOf(finding) {
+  return `${finding.ruleId}|${finding.path}|${finding.line === null ? "" : String(finding.line)}`;
+}
+function threadMarker(finding) {
+  return `${THREAD_MARKER}${findingFingerprint(finding)}.${keyOf(finding)}${CLOSER2}`;
+}
+function ownedThreadKey(body) {
+  const at = body.indexOf(THREAD_MARKER);
+  if (at === -1) return null;
+  const from = at + THREAD_MARKER.length;
+  const to = body.indexOf(CLOSER2, from);
+  if (to === -1) return null;
+  const payload = body.slice(from, to);
+  const dot = payload.indexOf(".");
+  if (dot <= 0) return null;
+  const fp = payload.slice(0, dot);
+  const key = payload.slice(dot + 1);
+  if (!isFingerprint(fp) || key.length === 0) return null;
+  return key;
+}
+function anchorable(entry, standing) {
+  const { finding, status } = entry;
+  if (finding.line === null || status === "resolved") return false;
+  const lines = standing.files.get(finding.path);
+  if (lines === void 0 || lines === null) return false;
+  return lines.has(finding.line);
+}
+function threadBody(finding) {
+  const tail = `
+
+${threadMarker(finding)}
+
+${chrome("reviewFooterFloor", null)}`;
+  const prefix = findingLine({ ...finding, body: "" });
+  const budget = THREAD_BODY_CAP - prefix.length - tail.length;
+  const body = budget > 0 && finding.body.length > budget ? finding.body.slice(0, budget) : finding.body;
+  return `${findingLine({ ...finding, body })}${tail}`;
+}
+async function listOwnedThreads(api, at) {
+  const threads = [];
+  let lastFull = false;
+  for (let page2 = 1; page2 <= MAX_THREAD_PAGES; page2 += 1) {
+    const { data } = await api.rest.pulls.listReviewComments({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: at.number,
+      per_page: PAGE,
+      page: page2
+    });
+    for (const comment of data) {
+      if (!isBotAuthor(comment.user)) continue;
+      const key = ownedThreadKey(comment.body ?? "");
+      if (key === null) continue;
+      threads.push({
+        id: comment.id,
+        key,
+        body: comment.body ?? "",
+        path: comment.path ?? "",
+        line: comment.line ?? null
+      });
+    }
+    lastFull = data.length === PAGE;
+    if (!lastFull) break;
+  }
+  return { threads, uncertain: threads.length === 0 && lastFull };
+}
+function planThreads(reconciled, standing, owned) {
+  const creates = [];
+  const updates = [];
+  const claimed = /* @__PURE__ */ new Set();
+  for (const entry of reconciled) {
+    if (!anchorable(entry, standing)) continue;
+    const key = keyOf(entry.finding);
+    if (claimed.has(key)) continue;
+    claimed.add(key);
+    const at = owned.find((thread) => thread.key === key);
+    if (at === void 0) {
+      creates.push({ key, finding: entry.finding });
+      continue;
+    }
+    if (at.line !== entry.finding.line || at.path !== entry.finding.path) {
+      creates.push({ key, finding: entry.finding });
+      continue;
+    }
+    if (at.body === threadBody(entry.finding)) continue;
+    updates.push({ id: at.id, finding: entry.finding });
+  }
+  return { creates, updates, fallback: [] };
+}
+function isUnprocessable(error2) {
+  return error2.status === 422;
+}
+async function syncThreads(api, at, reconciled, standing, headSha) {
+  const { threads, uncertain } = await listOwnedThreads(api, at);
+  const plan = planThreads(reconciled, standing, threads);
+  const fallback = [];
+  let created = 0;
+  let updated = 0;
+  for (const entry of plan.creates) {
+    try {
+      await api.rest.pulls.createReviewComment({
+        owner: at.owner,
+        repo: at.repo,
+        pull_number: at.number,
+        body: threadBody(entry.finding),
+        commit_id: headSha,
+        path: entry.finding.path,
+        line: entry.finding.line ?? 0
+      });
+      created += 1;
+    } catch (error2) {
+      if (isUnprocessable(error2)) {
+        fallback.push(entry.key);
+        continue;
+      }
+      throw error2;
+    }
+  }
+  for (const entry of plan.updates) {
+    try {
+      await api.rest.pulls.updateReviewComment({
+        owner: at.owner,
+        repo: at.repo,
+        comment_id: entry.id,
+        body: threadBody(entry.finding)
+      });
+      updated += 1;
+    } catch (error2) {
+      if (isUnprocessable(error2)) {
+        fallback.push(keyOf(entry.finding));
+        continue;
+      }
+      throw error2;
+    }
+  }
+  return { created, updated, fallback, uncertain };
+}
+async function dryRunThreads(api, at, reconciled, standing) {
+  const { threads, uncertain } = await listOwnedThreads(api, at);
+  const plan = planThreads(reconciled, standing, threads);
+  return {
+    created: plan.creates.length,
+    updated: plan.updates.length,
+    fallback: [],
+    uncertain
+  };
+}
+
 // src/duties/review/summary.ts
 function summarize(run2) {
   if (run2.ungranted !== null) {
@@ -37344,7 +37501,19 @@ function verdict(run2) {
       `${String(verified)} verified \xB7 ${String(unverified)} not verified`
     ]);
   }
+  if (run2.threads !== null) {
+    rows.push(["Threads", threadsCell(run2.threads)]);
+  }
   return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
+}
+function threadsCell(threads) {
+  const parts = [
+    threads.created > 0 ? `${String(threads.created)} inline` : "",
+    threads.updated > 0 ? `${String(threads.updated)} updated` : "",
+    threads.fallback.length > 0 ? `${String(threads.fallback.length)} to summary` : ""
+  ].filter((part) => part.length > 0);
+  const text2 = parts.length > 0 ? parts.join(", ") : "none";
+  return threads.uncertain ? `${text2} \u2014 listing uncertain` : text2;
 }
 function findingsTable(run2) {
   const rows = run2.findings.map(({ finding, status, disposition }) => [
@@ -37451,6 +37620,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     malformedAnswers: 0,
     rulesPath: null,
     contextReadFiles: 0,
+    threads: null,
     previous: null,
     memoryNote: null,
     shown: [],
@@ -37696,6 +37866,10 @@ async function decide(api, at, warrant, settings, stages, weather) {
     const would = await rehearse(api, at, publication);
     info(`Dry run \u2014 #${String(at.number)} would have received:
 ${would}`);
+    const rehearsal = await dryRunThreads(api, at, final, diffStanding);
+    info(
+      `Dry run \u2014 #${String(at.number)} thread sync would create ${String(rehearsal.created)} and update ${String(rehearsal.updated)}.`
+    );
     return settled({
       ...withMemory,
       language: language?.code ?? null,
@@ -37706,12 +37880,24 @@ ${would}`);
       // that already announces the run wrote nothing. The rehearsal's
       // disposition stays in the log.
       posted: null,
+      threads: rehearsal,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
       skipped: bounded2.skipped,
       passes: synthesis.passes
     });
+  }
+  const threads = await syncThreads(api, at, final, diffStanding, pr.headSha);
+  if (threads.created > 0 || threads.updated > 0) {
+    info(
+      `#${String(at.number)}: ${String(threads.created)} thread(s) posted, ${String(threads.updated)} updated` + (threads.fallback.length > 0 ? `, ${String(threads.fallback.length)} fell back to the summary` : "") + "."
+    );
+  }
+  if (threads.uncertain) {
+    warning(
+      `#${String(at.number)}: review threads could not be listed with certainty, so none were written this run.`
+    );
   }
   const posted = await postOrReplace(api, at, publication);
   info(`#${String(at.number)}: review comment ${posted}.`);
@@ -37721,6 +37907,7 @@ ${would}`);
     findings: final,
     confidence,
     posted,
+    threads,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded2.shown,
@@ -37856,6 +38043,7 @@ function page(settings, authority2, outcome, ungranted, spent) {
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
+    threads: outcome?.threads ?? null,
     passes: outcome?.passes ?? [],
     contextReadFiles: outcome?.contextReadFiles ?? 0
   });

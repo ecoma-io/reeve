@@ -594,7 +594,7 @@ const DISPOSITION_LABELS: Record<Disposition["value"], string> = {
   rejected: "rejected",
 };
 
-function findingLine(finding: Finding, disposition: Disposition | null): string {
+export function findingLine(finding: Finding, disposition: Disposition | null = null): string {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   // The finding's body is the one piece of model prose this duty prints on the

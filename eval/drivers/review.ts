@@ -73,6 +73,10 @@ export interface ReviewEffect {
    * and not a second post.
    */
   wrote: "post" | "patch" | null;
+  /** How many inline review threads the run posted (the `pulls/{n}/comments` POSTs). */
+  threads: number;
+  /** How many owned inline threads the run updated (the `pulls/comments/{id}` PATCHes). */
+  threadUpdates: number;
 }
 
 /** What the run did to the pull request, as the stub routes saw it. */
@@ -106,6 +110,18 @@ export interface ReviewScenario {
   readonly detect: string;
   /** A review comment a previous run left, or null on the first review. */
   readonly previous: { readonly body: string } | null;
+  /**
+   * Inline review threads a previous run left, as the `pulls/{n}/comments`
+   * listing serves them — the thread sync's own memory, the same way the
+   * `previous` comment is the summary's. An empty list is the default.
+   */
+  readonly threads: readonly {
+    readonly id: number;
+    readonly body: string;
+    readonly path: string;
+    readonly line: number;
+    readonly user: { readonly login: string; readonly type: string };
+  }[];
   /** The review profile the run is given — `default` when the fixture is silent. */
   readonly profile: string;
   /**
@@ -163,6 +179,8 @@ export interface ReviewFixture {
   };
   /** Human replies on the thread after the owned comment — the disposition path. */
   readonly replies?: readonly ReviewThreadReply[];
+  /** Inline review threads a previous run left, as the listing would serve them. */
+  readonly threads?: ReviewScenario["threads"];
   readonly expected?: ReviewAssertions;
 }
 
@@ -199,12 +217,19 @@ export interface ReviewAssertions {
    */
   readonly "workspace-evidence"?: string;
   /**
+/**
    * A disposition the summary's `### Findings` table must show for the run's
    * findings — `wont-fix by @octocat`. Pins the human-disposition axis: the
    * run read a maintainer's eligible reply off the thread and rendered it
    * beside the finding.
    */
   readonly disposition?: string;
+  /**
+   * How many inline review threads the run must have posted, read off the
+   * tracker's `pulls/{n}/comments` POST count. Undefined means the fixture
+   * does not pin the thread surface.
+   */
+  readonly threads?: string;
 }
 
 /** A verdict, in the shape the review prompt asks for. */
@@ -264,6 +289,28 @@ export function reviewRoutes(scenario: ReviewScenario, tracker: ReviewTracker): 
           200,
           scenario.files.map((file) => ({ ...file })),
         );
+        return true;
+      }
+
+      // The inline-thread trio: list (the thread sync reads it), create, update.
+      // A run's thread sync lists every pull request's review comments; the
+      // default fixture starts with none, and the `inline-threads` fixture
+      // plants its owned thread here.
+      if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/comments$/.exec(url) !== null) {
+        send(response, 200, scenario.threads);
+        return true;
+      }
+      if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/pulls\/\d+\/comments$/.exec(url) !== null) {
+        tracker.effect.threads = tracker.effect.threads + 1;
+        send(response, 201, { id: 99 });
+        return true;
+      }
+      if (
+        method === "PATCH" &&
+        /^\/repos\/[^/]+\/[^/]+\/pulls\/comments\/\d+$/.exec(url) !== null
+      ) {
+        tracker.effect.threadUpdates = tracker.effect.threadUpdates + 1;
+        send(response, 200, { id: 7 });
         return true;
       }
 
@@ -353,6 +400,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     securityVerdict: verdictOf(fixture["security-verdict-over"] ?? {}),
     detect: fixture.detect ?? "en",
     previous: fixture.previous ?? null,
+    threads: fixture.threads ?? [],
     profile: fixture.profile ?? "default",
     replies: fixture.replies ?? [],
     expected: fixture.expected ?? {},
@@ -361,5 +409,5 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
 
 /** A fresh tracker for one fixture run. */
 export function newTracker(): ReviewTracker {
-  return { effect: { commented: false, wrote: null } };
+  return { effect: { commented: false, wrote: null, threads: 0, threadUpdates: 0 } };
 }

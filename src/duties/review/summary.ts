@@ -10,6 +10,7 @@ import type { Capability } from "../../core/warrant.js";
 
 import type { Disposition, Finding, Status } from "./findings.js";
 import type { Posted } from "./publish.js";
+import type { ThreadSync } from "./threads.js";
 
 export interface Run {
   readonly number: number;
@@ -52,6 +53,8 @@ export interface Run {
   }[];
   /** How many workspace reads the context engine made this run. */
   readonly contextReadFiles: number;
+  /** What this run's inline-thread sync did, when one ran — for the "Threads" row. */
+  readonly threads: ThreadSync | null;
 }
 
 export function summarize(run: Run): string {
@@ -150,8 +153,22 @@ function verdict(run: Run): string {
       `${String(verified)} verified · ${String(unverified)} not verified`,
     ]);
   }
+  if (run.threads !== null) {
+    rows.push(["Threads", threadsCell(run.threads)]);
+  }
 
   return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
+}
+
+/** The "Threads" verdict row: what the inline sync did, when one ran. */
+function threadsCell(threads: ThreadSync): string {
+  const parts = [
+    threads.created > 0 ? `${String(threads.created)} inline` : "",
+    threads.updated > 0 ? `${String(threads.updated)} updated` : "",
+    threads.fallback.length > 0 ? `${String(threads.fallback.length)} to summary` : "",
+  ].filter((part) => part.length > 0);
+  const text = parts.length > 0 ? parts.join(", ") : "none";
+  return threads.uncertain ? `${text} — listing uncertain` : text;
 }
 
 function findingsTable(run: Run): string {

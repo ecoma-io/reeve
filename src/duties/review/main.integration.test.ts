@@ -95,6 +95,14 @@ interface Comment {
   readonly type: "User" | "Bot";
 }
 
+/** One inline review thread, as the stub's `pulls/{n}/comments` listing holds it. */
+interface Thread {
+  readonly id: number;
+  body: string;
+  path: string;
+  line: number | null;
+}
+
 interface Pull {
   title: string;
   body: string;
@@ -118,6 +126,11 @@ interface State {
   pull: Pull;
   comments: Comment[];
   nextCommentId: number;
+  /** The inline review threads this run owns — the second write beside the summary. */
+  threads: Thread[];
+  nextThreadId: number;
+  /** Whether the thread-listing walk should report an uncertain listing. */
+  threadFails?: { create?: boolean; update?: boolean; list?: boolean };
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
 }
@@ -184,6 +197,8 @@ async function startStub(): Promise<Stub> {
     },
     comments: [],
     nextCommentId: 1,
+    threads: [],
+    nextThreadId: 1,
     answer: stageAnswer(),
     asked: [],
   };
@@ -279,6 +294,60 @@ async function route(
     const found = stub.comments.find((comment) => comment.id === Number(update[1]));
     if (found) found.body = payload.body ?? "";
     send(response, 200, { id: Number(update[1]), body: found?.body ?? "" });
+    return;
+  }
+
+  // Inline review threads: the run's second write. `pulls/{n}/comments` lists
+  // and creates (GET/POST), and `pulls/comments/{id}` updates (PATCH). Every
+  // review case reaches this listing now that findings anchor inline, so the
+  // stub has to serve all three before any case can stay green.
+  const pullComments = /^\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/comments$/.exec(path);
+  if (method === "GET" && pullComments) {
+    if (stub.threadFails?.list) {
+      send(response, 403, { message: "scope missing" });
+      return;
+    }
+    send(
+      response,
+      200,
+      stub.threads.map((thread) => ({
+        id: thread.id,
+        body: thread.body,
+        path: thread.path,
+        line: thread.line,
+        user: { login: "reeve[bot]", type: "Bot" },
+      })),
+    );
+    return;
+  }
+  if (method === "POST" && pullComments) {
+    if (stub.threadFails?.create) {
+      send(response, 422, { message: "line must be part of the diff" });
+      return;
+    }
+    const payload = parsed(raw) as { body?: string; path?: string; line?: number };
+    const thread: Thread = {
+      id: stub.nextThreadId,
+      body: payload.body ?? "",
+      path: payload.path ?? "",
+      line: payload.line ?? null,
+    };
+    stub.nextThreadId += 1;
+    stub.threads.push(thread);
+    send(response, 201, { id: thread.id, body: thread.body });
+    return;
+  }
+
+  const pullUpdate = /^\/repos\/[^/]+\/[^/]+\/pulls\/comments\/(\d+)$/.exec(path);
+  if (method === "PATCH" && pullUpdate) {
+    if (stub.threadFails?.update) {
+      send(response, 422, { message: "line must be part of the diff" });
+      return;
+    }
+    const payload = parsed(raw) as { body?: string };
+    const found = stub.threads.find((thread) => thread.id === Number(pullUpdate[1]));
+    if (found) found.body = payload.body ?? "";
+    send(response, 200, { id: Number(pullUpdate[1]), body: found?.body ?? "" });
     return;
   }
 
@@ -1226,6 +1295,239 @@ describe("the action", () => {
     expect(run.outputs.commented).toBe("false");
     expect(run.outputs.findings).toBe("0");
     expect(run.log).toContain("would have received");
+  });
+
+  it("anchors each anchorable finding as one inline thread, and the summary comment stays the one owned write", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    // The owned summary comment is still exactly one — threads are the second,
+    // distinct write, never a replacement for the summary.
+    expect(stub.comments).toHaveLength(1);
+    expect(stub.comments[0]?.body).toContain("<!-- reeve:review source=");
+    // One inline thread for the one anchorable finding, on the proven line.
+    expect(stub.threads).toHaveLength(1);
+    expect(stub.threads[0]).toMatchObject({ path: "src/a.ts", line: 13 });
+    expect(stub.threads[0]?.body).toContain("<!-- reeve:review:thread source=");
+    // A rerun with the same diff does not stack a second thread.
+    const second = await runAction(stub);
+    expect(second.code).toBe(0);
+    expect(stub.threads).toHaveLength(1);
+  });
+
+  it("adds a thread and updates it in place when the finding's body moves — never a second thread", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    await runAction(stub);
+    expect(stub.threads).toHaveLength(1);
+    const threadId = stub.threads[0]?.id ?? 0;
+
+    // Same position, new claim: the thread body moves, the thread does not.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "A sharper way to put it.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    const second = await runAction(stub);
+    expect(second.code).toBe(0);
+    expect(stub.threads).toHaveLength(1);
+    expect(stub.threads[0]?.id).toBe(threadId);
+    expect(stub.threads[0]?.body).toContain("A sharper way to put it.");
+  });
+
+  it("creates a fresh thread at the finding's new line when the position moves — the old thread is left for GitHub to mark outdated", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "First claim.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+    await runAction(stub);
+    expect(stub.threads).toHaveLength(1);
+
+    stub.pull.files = [
+      {
+        filename: "src/a.ts",
+        status: "modified",
+        additions: 3,
+        deletions: 1,
+        patch: PATCH_TWO,
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 14,
+            snippet: "const three = 3;",
+            body: "First claim.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    const second = await runAction(stub);
+    expect(second.code).toBe(0);
+    // The old thread stays (GitHub marks it outdated), the new line gets its own.
+    expect(stub.threads).toHaveLength(2);
+    expect(stub.threads.map((t) => t.line)).toContain(13);
+    expect(stub.threads.map((t) => t.line)).toContain(14);
+  });
+
+  it("falls a thread GitHub cannot anchor back to the summary, keeping every finding rendered", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+    stub.threadFails = { create: true };
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    // No thread was created — the finding fell back to the summary.
+    expect(stub.threads).toHaveLength(0);
+    // The owned summary comment still carries the finding — never lost.
+    expect(stub.comments).toHaveLength(1);
+    expect(stub.comments[0]?.body).toContain("This repeats the constant above.");
+    expect(run.summary).toContain("1 to summary");
+  });
+
+  it("fails red when a thread write is denied — the summary is never written after a failed thread", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+    // A listing failure is a permission failure — the run must throw before
+    // touching the summary, so nothing half-written and nothing duplicated.
+    stub.threadFails = { list: true };
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+    expect(stub.comments).toHaveLength(0);
+    expect(stub.threads).toHaveLength(0);
+    expect(run.log).toContain("scope missing");
+  });
+
+  it("leaves a resolved finding summary-only — the moved-on line gets a Resolved row, never a thread", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+    await runAction(stub);
+    expect(stub.threads).toHaveLength(1);
+
+    // The diff moves past line 13 — nothing proves it now — so the finding
+    // becomes `resolved`: it renders in the summary's Resolved section and no
+    // new thread is anchored. The old thread is left for GitHub to mark
+    // outdated, never deleted and never re-created at a dead line.
+    stub.pull.files = [
+      {
+        filename: "src/a.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 3,
+        patch: "@@ -1 +12,1 @@\n+const one = 1;" + "\n@@ -18 +14,1 @@\n+const four = 4;",
+      },
+    ];
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(1);
+    expect(stub.comments[0]?.body).toContain("### Resolved (1)");
+    expect(stub.threads).toHaveLength(1);
+    expect(stub.threads[0]?.line).toBe(13);
   });
 });
 

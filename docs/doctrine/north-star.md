@@ -28,17 +28,17 @@ deterministic scoring, a language layer that knows who wrote in what and who
 reads in what, a sanitiser that assumes the thread is hostile, an allowlist
 checked in code, and state kept as plain files in the user's own repository.
 
-| Duty          | Status | Does                                                                                                                                                                                                                                   |
-| ------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `triage`      | ships  | Sorts the backlog against a taxonomy the project wrote.                                                                                                                                                                                |
-| `translate`   | ships  | Puts every issue and pull request in the languages the project reads.                                                                                                                                                                  |
-| `duplicate`   | ships  | Finds the thread that already asked this — across the language it was asked in.                                                                                                                                                        |
-| `respond`     | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.                                                                                                                                                            |
-| `lifecycle`   | ships  | Runs the staleness policy the project wrote — from timestamps and labels alone.                                                                                                                                                        |
-| `harmonise`   | ships  | Synchronises documentation across languages and formats.                                                                                                                                                                               |
-| `dependa`     | ships  | Maintains dependencies — discovers updates, assesses risk, opens reviewable PRs.                                                                                                                                                       |
-| `review`      | ships  | Reviews a pull request — deterministic pre-checks plus one or more model passes by profile, with model findings verified against deterministic evidence before they are reported, kept as one owned comment across synchronize events. |
-| `remediation` | ships  | Derives deterministic remediation proposals for the review's standing findings — proposal-only, never written to the repository.                                                                                                       |
+| Duty          | Status | Does                                                                                                                                                                                                                                                                                               |
+| ------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `triage`      | ships  | Sorts the backlog against a taxonomy the project wrote.                                                                                                                                                                                                                                            |
+| `translate`   | ships  | Puts every issue and pull request in the languages the project reads.                                                                                                                                                                                                                              |
+| `duplicate`   | ships  | Finds the thread that already asked this — across the language it was asked in.                                                                                                                                                                                                                    |
+| `respond`     | ships  | Gives a stranger a first, useful reply in the language they wrote to us in.                                                                                                                                                                                                                        |
+| `lifecycle`   | ships  | Runs the staleness policy the project wrote — from timestamps and labels alone.                                                                                                                                                                                                                    |
+| `harmonise`   | ships  | Synchronises documentation across languages and formats.                                                                                                                                                                                                                                           |
+| `dependa`     | ships  | Maintains dependencies — discovers updates, assesses risk, opens reviewable PRs.                                                                                                                                                                                                                   |
+| `review`      | ships  | Reviews a pull request — deterministic pre-checks plus one or more model passes by profile, with model findings verified against deterministic evidence before they are reported, kept as one owned summary comment plus an owned inline thread per diff-proven finding across synchronize events. |
+| `remediation` | ships  | Derives deterministic remediation proposals for the review's standing findings — proposal-only, never written to the repository.                                                                                                                                                                   |
 
 ## 2. The end state
 
@@ -625,9 +625,11 @@ warrant granted.
 ### Stage 5c — Pull request review · **landed**
 
 `review` — the useful half of what a review bot does, without the part that
-makes review bots noise. It answers a pull request with exactly one comment,
-idempotent under its marker, that tracks its findings across `synchronize`
-events instead of reposting them — `created`, `persists`, `changed`, `resolved`
+makes review bots noise. It answers a pull request with one owned summary
+comment, idempotent under its marker, plus an owned inline review thread per
+finding whose line the diff proves, and tracks its findings across
+`synchronize` events instead of reposting them — `created`, `persists`,
+`changed`, `resolved`
 and `reopened`, the same ladder a human review leaves — and it never becomes a
 coding agent. Like `duplicate` and `respond` before it, `review` is granted
 nothing by default: `DEFAULT_CAPABILITIES` is empty, so nothing short of an

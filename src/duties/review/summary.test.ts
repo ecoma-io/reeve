@@ -26,6 +26,7 @@ function run(overrides: Partial<Run> = {}): Run {
     readRules: null,
     passes: [],
     contextReadFiles: 0,
+    threads: null,
     ...overrides,
   };
 }
