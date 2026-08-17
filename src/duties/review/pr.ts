@@ -259,6 +259,22 @@ export interface ReviewBounds {
  * `binary` and `removed` are the incidental silences (there is no text to
  * review), and everything that survives reaches either `shown` or `capped`.
  */
+// The cap is a whole-run budget, not a per-file ceiling: `max-diff-chars`
+// bounds the total text a single review may carry to the model, which is what
+// keeps one absurd file from blowing the prompt as it is now — the cumulative
+// shape is the point. It is documented as such in `action.yml` and
+// `docs/reference/duties/review.md`; callers who want a per-file ceiling sit
+// `verdict.ts`'s own `PATCH_EXCERPT` — a separate, per-file cap — underneath
+// this one.
+//
+// The "once capped, everything after is capped" shape is deliberate: walking
+// the listing in order and zeroing the budget on the first file that exceeds
+// it means the files the review does report are exactly the files it could
+// fully show, and the coverage table then names every file after the cut as
+// `capped` — honest about a diet the model never saw — rather than silently
+// re-ordering the listing by size and showing a stranger's idea of the
+// important files. A reviewer that shows the first files and names the rest
+// admits its own cap; a reviewer that hides the cut does not.
 export function classify(files: readonly PrFile[], bounds: ReviewBounds): Snapshot {
   const shown: ShownFile[] = [];
   const skipped: { path: string; reason: string }[] = [];
@@ -285,6 +301,8 @@ export function classify(files: readonly PrFile[], bounds: ReviewBounds): Snapsh
       continue;
     }
     if (file.patch.length > budget) {
+      // The first file that does not fit zeroes the budget for every file
+      // after it, by design — see the comment above the function signature.
       skipped.push({ path: file.path, reason: "capped" });
       budget = 0;
       continue;

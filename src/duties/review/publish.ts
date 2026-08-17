@@ -95,10 +95,18 @@ export function decodeEnvelope(payload: string | null): Previous | null {
           typeof f.wasResolved === "boolean"
         );
       })
-      .map((entry) => ({
-        ...(entry as unknown as Omit<Previous["findings"][number], "wasResolved">),
-        wasResolved: (entry as { wasResolved: unknown }).wasResolved === true,
-      }));
+      .map((entry) => {
+        const raw = entry as Findable & { readonly resolvedAtSha?: unknown };
+        const resolvedAtSha =
+          typeof raw.resolvedAtSha === "string"
+            ? ({ resolvedAtSha: raw.resolvedAtSha } as const)
+            : {};
+        return {
+          ...(entry as unknown as Omit<Previous["findings"][number], "wasResolved">),
+          wasResolved: (entry as { wasResolved: unknown }).wasResolved === true,
+          ...resolvedAtSha,
+        };
+      });
     const shas = Array.isArray(map.reviewedShas)
       ? map.reviewedShas.filter((sha): sha is string => typeof sha === "string")
       : [];

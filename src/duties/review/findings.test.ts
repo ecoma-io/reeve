@@ -5,6 +5,7 @@ import {
   reconcile,
   remember,
   sameIntention,
+  type DiffStanding,
   type Finding,
   type Previous,
 } from "./findings.js";
@@ -26,6 +27,18 @@ function finding(overrides: Partial<Finding> = {}): Finding {
 
 function previous(overrides: Partial<Previous> = {}): Previous {
   return { findings: [], reviewedShas: ["old1"], ...overrides };
+}
+
+/** A diff standing where `a.ts` is shown at line 12 and `gone.ts` left the PR. */
+function standing(overrides: Partial<DiffStanding> = {}): DiffStanding {
+  return {
+    files: new Map([
+      ["a.ts", new Set([12])],
+      ["gone.ts", null],
+    ]),
+    headSha: "head2",
+    ...overrides,
+  };
 }
 
 function previousFinding(
@@ -63,60 +76,105 @@ describe("sameIntention", () => {
 
 describe("reconcile", () => {
   it("makes a newborn finding `created` against an empty memory", () => {
-    const out = reconcile([finding()], previous());
+    const out = reconcile([finding()], previous(), standing());
     expect(out).toEqual([{ finding: finding(), status: "created" }]);
   });
 
   it("keeps an unchanged same-position finding `persists`", () => {
     const old = previousFinding({}, false);
-    const out = reconcile([finding()], previous({ findings: [old] }));
+    const out = reconcile([finding()], previous({ findings: [old] }), standing());
     expect(out[0]).toMatchObject({ status: "persists" });
   });
 
   it("marks a same-position finding with new text `changed`", () => {
     const old = previousFinding({}, false);
-    const out = reconcile([finding({ body: "New text." })], previous({ findings: [old] }));
+    const out = reconcile(
+      [finding({ body: "New text." })],
+      previous({ findings: [old] }),
+      standing(),
+    );
     expect(out[0]).toMatchObject({ status: "changed" });
   });
 
   it("reopens a finding whose intention a previously-resolved memory matches", () => {
     const old = previousFinding({}, true);
-    const out = reconcile([finding()], previous({ findings: [old] }));
+    const out = reconcile([finding()], previous({ findings: [old] }), standing());
     expect(out[0]).toMatchObject({ status: "reopened" });
   });
 
   it("never collapses a same-position claim into `created`", () => {
     const old = previousFinding({}, false);
-    const statuses = reconcile([finding({ body: "New text." })], previous({ findings: [old] })).map(
-      ({ status }) => status,
-    );
+    const statuses = reconcile(
+      [finding({ body: "New text." })],
+      previous({ findings: [old] }),
+      standing(),
+    ).map(({ status }) => status);
     expect(statuses).toContain("changed");
     expect(statuses).not.toContain("created");
   });
 
-  it("resolves every previously-active finding this run has no evidence for", () => {
-    const lost = previousFinding({ id: "lost", ruleId: "nope" }, false);
+  it("resolves an active finding whose file left the pull request", () => {
     const moved = previousFinding({ id: "moved", path: "gone.ts" }, false);
-    const out = reconcile([finding()], previous({ findings: [lost, moved] }));
-    expect(out.map(({ status }) => status).sort()).toEqual(["created", "resolved", "resolved"]);
+    const out = reconcile([finding()], previous({ findings: [moved] }), standing());
+    expect(out).toEqual([
+      { finding: finding(), status: "created" },
+      expect.objectContaining({ status: "resolved" }),
+    ]);
+  });
+
+  it("resolves an active finding whose line the patch no longer proves", () => {
+    const old = previousFinding({ line: 13 }, false);
+    // The diff still shows a.ts, but only line 12 is proven now.
+    const out = reconcile([], previous({ findings: [old] }), standing());
+    expect(out).toEqual([expect.objectContaining({ status: "resolved" })]);
+  });
+
+  it("carries a stale active finding forward as `persists` when its position still stands", () => {
+    // Same diff reread, model omitted the finding: the position still exists,
+    // so the review must not report a resolution the diff did not earn.
+    const old = previousFinding({}, false);
+    const out = reconcile([], previous({ findings: [old] }), standing());
+    expect(out).toEqual([{ finding: old, status: "persists" }]);
+  });
+
+  it("resolves a stale active finding on a checked-away file the diff no longer proves", () => {
+    const old = previousFinding({ id: "gone", path: "gone.ts", line: 12 }, false);
+    const out = reconcile([], previous({ findings: [old] }), standing());
+    expect(out).toEqual([{ finding: old, status: "resolved" }]);
   });
 
   it("deduplicates matched candidates against the same old finding once", () => {
-    const out = reconcile([], previous());
-    // Empty candidates → every active old finding resolves.
+    const out = reconcile([], previous(), standing());
+    // Empty candidates with no standing → the position still stands, so
+    // nothing resolves and nothing churns.
     const old = previousFinding({}, false);
-    const res = reconcile([], previous({ findings: [old] }));
-    expect(res).toEqual([{ finding: old, status: "resolved" }]);
+    const res = reconcile([], previous({ findings: [old] }), standing());
+    expect(res).toEqual([{ finding: old, status: "persists" }]);
     expect(out).toEqual([]);
   });
 });
 
 describe("remember", () => {
-  it("marks resolved findings and keeps previously-resolved memory", () => {
+  it("marks resolved findings, ties them to the resolving SHA, and keeps previously-resolved memory", () => {
     const resolved = previousFinding({}, false);
     const reconciled = [{ finding: resolved, status: "resolved" as const }];
     const next = remember(reconciled, "head2", previous({ findings: [resolved] }));
     expect(next.findings[0]?.wasResolved).toBe(true);
+    expect(next.findings[0]?.resolvedAtSha).toBe("head2");
+  });
+
+  it("caps the resolved findings kept as memory", () => {
+    const olds = Array.from({ length: 30 }, (_, i) =>
+      previousFinding({ id: `r${String(i)}`, ruleId: `rule-${String(i)}` }, true),
+    );
+    const out = remember([], "head2", previous({ findings: olds }));
+    const kept = out.findings.filter((f) => f.wasResolved);
+    expect(kept).toHaveLength(8);
+    // The payload keeps its order and the cap trims the tail, so the oldest
+    // resolved findings survive and the newest resolution evidence rolls off —
+    // a long-lived pull request's memory stays bounded.
+    expect(kept[0]?.id).toBe("r0");
+    expect(kept[7]?.id).toBe("r7");
   });
 
   it("appends the reviewed SHA, capped at eight", () => {

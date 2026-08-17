@@ -34323,11 +34323,17 @@ ${finding.body}`,
 function sameIntention(a, b) {
   return a.ruleId === b.ruleId && a.path === b.path;
 }
-function reconcile(candidates, previous) {
+function reconcile(candidates, previous, diff) {
   const out = [];
   const active = previous.findings.filter((old) => !old.wasResolved);
   const resolved = previous.findings.filter((old) => old.wasResolved);
   const matched = /* @__PURE__ */ new Set();
+  const doesNotStand = (old) => {
+    const lines = diff.files.get(old.path);
+    if (lines === void 0) return true;
+    if (lines === null) return true;
+    return old.line !== null && !lines.has(old.line);
+  };
   for (const candidate of candidates) {
     const fp = findingFingerprint(candidate);
     const atPosition = active.find(
@@ -34351,28 +34357,36 @@ function reconcile(candidates, previous) {
     out.push({ finding: candidate, status: "created" });
   }
   for (const old of active) {
-    if (!matched.has(findingFingerprint(old))) {
+    const fp = findingFingerprint(old);
+    if (matched.has(fp)) continue;
+    if (doesNotStand(old)) {
       out.push({ finding: old, status: "resolved" });
+      continue;
     }
+    out.push({ finding: old, status: "persists" });
   }
   return out;
 }
+var MAX_REMEMBERED_RESOLVED = 8;
 function remember(reconciled, headSha, previous) {
   const seen = /* @__PURE__ */ new Set();
   const findings = [];
   for (const entry of reconciled) {
     if (entry.status === "resolved") {
-      findings.push({ ...entry.finding, wasResolved: true });
+      findings.push({ ...entry.finding, wasResolved: true, resolvedAtSha: headSha });
       seen.add(findingFingerprint(entry.finding));
       continue;
     }
     findings.push({ ...entry.finding, wasResolved: false });
     seen.add(findingFingerprint(entry.finding));
   }
+  let keptResolved = 0;
   for (const old of previous.findings) {
-    if (old.wasResolved && !seen.has(findingFingerprint(old))) {
+    const fp = findingFingerprint(old);
+    if (old.wasResolved && !seen.has(fp) && keptResolved < MAX_REMEMBERED_RESOLVED) {
       findings.push(old);
-      seen.add(findingFingerprint(old));
+      seen.add(fp);
+      keptResolved += 1;
     }
   }
   const shas = previous.reviewedShas.includes(headSha) ? previous.reviewedShas : [...previous.reviewedShas, headSha].slice(-8);
@@ -34984,10 +34998,15 @@ function decodeEnvelope(payload) {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
       const f = entry;
       return typeof f.id === "string" && typeof f.ruleId === "string" && typeof f.ruleName === "string" && typeof f.ruleBody === "string" && typeof f.path === "string" && (f.line === null || Number.isInteger(f.line)) && typeof f.severity === "string" && typeof f.body === "string" && typeof f.marker === "string" && typeof f.wasResolved === "boolean";
-    }).map((entry) => ({
-      ...entry,
-      wasResolved: entry.wasResolved === true
-    }));
+    }).map((entry) => {
+      const raw = entry;
+      const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
+      return {
+        ...entry,
+        wasResolved: entry.wasResolved === true,
+        ...resolvedAtSha
+      };
+    });
     const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
     return { findings, reviewedShas: shas };
   } catch {
@@ -35689,6 +35708,9 @@ function verdict(run2) {
     ["Confidence", run2.confidence === null ? "not measured" : run2.confidence.toFixed(2)],
     ["Posted", run2.posted ?? "nothing to post"]
   ];
+  if (run2.permitted.length > 0) {
+    rows.push(["Granted", run2.permitted.join(", ")]);
+  }
   if (run2.malformedAnswers > 0) {
     rows.push(["Unreadable", `${String(run2.malformedAnswers)} answer(s) discarded`]);
   }
@@ -35768,6 +35790,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    previous: null,
     shown: [],
     skipped: [],
     permitted,
@@ -35827,6 +35850,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     language === null ? `#${String(at.number)}: language not identified (${String(detection.candidates.length)} candidate(s)).` : `#${String(at.number)}: language ${language.code} (by ${detection.by}).`
   );
   const previous = await readEnvelope(api, at);
+  const withMemory = { previous, ...settledBase };
   if (previous.findings.length > 0) {
     info(
       `#${String(at.number)}: previous review read (${String(previous.findings.length)} finding(s)).`
@@ -35866,7 +35890,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
     }
   }
   const raw = reviewed.verdict.findings.map((entry) => toFinding(entry, rules)).filter((finding) => finding !== null);
-  const final = reconcile([...deterministic, ...raw], previous);
+  const StandingFiles = /* @__PURE__ */ new Map();
+  for (const file of bounded2.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
+  for (const file of bounded2.skipped) StandingFiles.set(file.path, null);
+  const diffStanding = { files: StandingFiles, headSha: pr.headSha };
+  const final = reconcile([...deterministic, ...raw], previous, diffStanding);
   const confidence = reviewed.verdict.confidence;
   const next = remember(final, pr.headSha, previous);
   const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
@@ -35878,7 +35906,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -35893,7 +35921,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       `#${String(at.number)}: review confidence ${confidence.toFixed(2)} is below the ${settings.confidence.toFixed(2)} floor, so this run's review was not posted.`
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -35908,7 +35936,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       `#${String(at.number)}: no readable verdict and no deterministic findings \u2014 nothing was posted, so a diff nobody reviewed is not stamped all-clear.`
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -35923,7 +35951,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
       `#${String(at.number)}: every file was skipped by the rules file's \`ignore:\` list \u2014 nothing was posted, so a diff nothing was shown of is not stamped all-clear. The coverage table names each file and why.`
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -35943,7 +35971,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     info(`Dry run \u2014 #${String(at.number)} would have received:
 ${would}`);
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -35961,7 +35989,7 @@ ${would}`);
   const posted = await postOrReplace(api, at, publication);
   info(`#${String(at.number)}: review comment ${posted}.`);
   return settled({
-    ...settledBase,
+    ...withMemory,
     language: language?.code ?? null,
     findings: final,
     confidence,
@@ -36053,18 +36081,19 @@ function report(outcome, rosterStarved) {
   setOutput("findings", String(outcome?.findings.length ?? 0));
 }
 function page(settings, authority2, outcome, ungranted, spent) {
+  const previousSha = outcome?.previous?.reviewedShas.at(-1) ?? "";
   return summarize({
     number: settings.number,
     dryRun: settings.dryRun,
     headSha: outcome?.headSha ?? "",
     note: outcome?.note ?? null,
-    previousSha: "",
+    previousSha,
     shown: outcome?.shown ?? [],
     skipped: outcome?.skipped ?? [],
     findings: outcome?.findings ?? [],
     confidence: outcome?.confidence ?? null,
     posted: outcome?.posted ?? null,
-    permitted: [],
+    permitted: outcome?.permitted ?? [],
     spent,
     modelNames: settings.modelNames,
     language: outcome?.language ?? null,

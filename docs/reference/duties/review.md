@@ -131,23 +131,23 @@ required by the schema, but almost every real provider needs one — see
 
 Every input `review/action.yml` declares.
 
-| Input             | Required | Default                     | What it does                                                                                                                                                                                              |
-| ----------------- | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`    | no       | `${{ github.token }}`       | Token used to read the pull request and write the single owned comment. `pull-requests: write` on the token covers both; the warrant decides whether a comment is written at all.                         |
-| `number`          | no       | _(empty)_                   | The pull request to review. Defaults to the one that triggered the workflow — meant to run on `pull_request` events, not on a backfill. An event that carries no pull request fails red naming the event. |
-| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                        |
-| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                           |
-| `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that reads the diff.                                                                                                               |
-| `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `comment` is granted here, under `duties:`. A missing file grants `review` nothing, same as one that is silent about it.                                                      |
-| `rules-path`      | no       | `.github/reeve-rules.yml`   | The repository's own review rules, in the same YAML grammar the warrant uses. Missing is an empty rules set, not an error — the built-in default rules alone review the diff.                             |
-| `trigger`         | no       | `pr`                        | `pr` — the default — waits for ready-for-review and skips a draft green, with the reason in the job summary. `prod` also reviews drafts.                                                                  |
-| `max-diff-chars`  | no       | `4000`                      | How much diff one file may contribute before it is skipped as capped, or `none` for no bound at all. The comment's coverage table names every skipped file and why. `0` is refused.                       |
-| `confidence`      | no       | `0.6`                       | How sure a finding has to be before it is reported, between 0 and 1. Below the floor, findings are still reconciled and shown in the job summary, but the comment is withheld.                            |
-| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, post nothing. The review comment that would have been posted is printed to the log, and the job summary still shows the full verdict.                         |
-| `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                           |
-| `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                |
-| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                          |
-| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                              |
+| Input             | Required | Default                     | What it does                                                                                                                                                                                                                                                      |
+| ----------------- | -------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`    | no       | `${{ github.token }}`       | Token used to read the pull request and write the single owned comment. `pull-requests: write` on the token covers both; the warrant decides whether a comment is written at all.                                                                                 |
+| `number`          | no       | _(empty)_                   | The pull request to review. Defaults to the one that triggered the workflow — meant to run on `pull_request` events, not on a backfill. An event that carries no pull request fails red naming the event.                                                         |
+| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                                |
+| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                                   |
+| `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that reads the diff.                                                                                                                                                                       |
+| `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `comment` is granted here, under `duties:`. A missing file grants `review` nothing, same as one that is silent about it.                                                                                                              |
+| `rules-path`      | no       | `.github/reeve-rules.yml`   | The repository's own review rules, in the same YAML grammar the warrant uses. Missing is an empty rules set, not an error — the built-in default rules alone review the diff.                                                                                     |
+| `trigger`         | no       | `pr`                        | `pr` — the default — waits for ready-for-review and skips a draft green, with the reason in the job summary. `prod` also reviews drafts.                                                                                                                          |
+| `max-diff-chars`  | no       | `4000`                      | The whole-run budget of diff text one review may carry to the model, in characters — cumulative across files, walked in listing order, with the first file that does not fit and everything after it skipped as capped. `none` removes the bound. `0` is refused. |
+| `confidence`      | no       | `0.6`                       | The floor for the whole review's reported confidence, between 0 and 1 — one number for the whole answer, not a per-finding bar. Below it, findings are still reconciled and shown in the job summary, but the comment is withheld.                                |
+| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, post nothing. The review comment that would have been posted is printed to the log, and the job summary still shows the full verdict.                                                                                 |
+| `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                   |
+| `api-keys`        | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                        |
+| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                                  |
+| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                      |
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
@@ -171,7 +171,9 @@ boundary regardless. A repository that has not written the file yet is the
 cold start — reviewed by the built-in default rules alone — not a
 misconfiguration.
 
-**`confidence` is a floor worth measuring, not inheriting.** [Measure
+**`confidence` is a whole-answer floor worth measuring, not inheriting.**
+The model states one confidence for the entire review — not a per-finding
+number — and the floor admits or withholds the comment as a whole. [Measure
 it](../../development/evaluation.md) against your own diffs before you move
 it — what `0.6` means for one project's tolerance for a slightly-off finding
 is not what it means for another's.
@@ -204,6 +206,21 @@ Reeve's own. When a pull request has so many comments that this duty's own
 cannot be found with certainty, the review is withheld — `withheld` — rather
 than risk a duplicate. Neither guard is configurable, because an input can be
 misconfigured and these two cannot be.
+
+**The ladder stops at `resolved` — a human resolving the conversation is
+invisible to it.** `reopened` is driven only by the model re-citing a finding
+this duty's own memory recorded as resolved; the duty never reads GitHub's
+thread or response state, so when a human or another bot replies "done",
+`out of scope`, or marks the thread resolved, this review does not observe it.
+A finding the diff has truly moved past is `resolved` by evidence — the line
+or file it named left this run's review — not by anything anyone said. The
+statuses a finding passes through are therefore always this duty's own claims
+about the diff, and "resolved" never means "the author agreed with the
+reviewer". Reopening an old claim is the newest model saying it again against
+new evidence, not a reply-based waking of the thread. This keeps the ladder
+honest (the duty documents only what its single owned comment decided) at the
+cost of the last rung a human review thread has — conversation itself. See
+[what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 
 ## Deterministic findings, before any model
 
@@ -314,9 +331,9 @@ was written. See [Rehearsing a run](../../guides/dry-run.md).
 
 One model pass reads the whole diff, once, and nothing repeats it — a
 `synchronize` event that changed nothing is recognised by the marker's
-fingerprint and skipped at the write, and the diff cap keeps one absurd file
-from blowing the prompt. `max-diff-chars` (default `4000` per file, `none`
-for no bound) is the lever that bounds one file's contribution, and
+fingerprint and skipped at the write, and the diff cap keeps a huge diff from
+blowing the prompt. `max-diff-chars` (default `4000` for the whole run, `none`
+for no bound) is the lever that bounds the total text a review may carry, and
 `endpoints` spreads a roster across providers so a capacity failure demotes
 only the `model@alias` that hit it. See [Cost](../../guides/cost.md) for the
 full arithmetic.

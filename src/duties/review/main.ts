@@ -135,6 +135,8 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
+  /** What this run's comment memory carried in — for the page's "reviewed at" row. */
+  readonly previous: Previous | null;
   /** What the diff showed the model, for the summary's coverage table. */
   readonly shown: readonly { path: string }[];
   readonly skipped: readonly { path: string; reason: string }[];
@@ -153,6 +155,7 @@ type Settled = Partial<
     | "headSha"
     | "malformedAnswers"
     | "rulesPath"
+    | "previous"
     | "shown"
     | "skipped"
   >
@@ -188,6 +191,7 @@ async function decide(
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
+    previous: null,
     shown: [],
     skipped: [],
     permitted,
@@ -269,6 +273,10 @@ async function decide(
   // The memory half: what the previous run's comment left this run — read
   // from its own marker's envelope, or empty on the first review.
   const previous = await readEnvelope(api, at);
+  // The memory a later return's page will say "reviewed at" against — carried
+  // on every outcome from here on, so the summary's "Previously" row names the
+  // last SHA this thread was reviewed against, not the current one.
+  const withMemory: Settled = { previous, ...settledBase };
   if (previous.findings.length > 0) {
     core.info(
       `#${String(at.number)}: previous review read (${String(previous.findings.length)} finding(s)).`,
@@ -320,7 +328,14 @@ async function decide(
     .filter((finding): finding is Finding => finding !== null);
 
   // Merge deterministic + model findings, reconcile against the memory once.
-  const final = reconcile([...deterministic, ...raw], previous);
+  // The diff standing is what makes the resolved rung honest: a finding is
+  // resolved only when the diff moved past it (see findings.ts), never because
+  // a model happened not to re-mention it on a reread of the same diff.
+  const StandingFiles = new Map<string, ReadonlySet<number> | null>();
+  for (const file of bounded.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
+  for (const file of bounded.skipped) StandingFiles.set(file.path, null);
+  const diffStanding = { files: StandingFiles, headSha: pr.headSha };
+  const final = reconcile([...deterministic, ...raw], previous, diffStanding);
   const confidence = reviewed.verdict.confidence;
 
   const next = remember(final, pr.headSha, previous);
@@ -361,7 +376,7 @@ async function decide(
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`,
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -378,7 +393,7 @@ async function decide(
         `${settings.confidence.toFixed(2)} floor, so this run's review was not posted.`,
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -395,7 +410,7 @@ async function decide(
         "nothing was posted, so a diff nobody reviewed is not stamped all-clear.",
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -413,7 +428,7 @@ async function decide(
         "The coverage table names each file and why.",
     );
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -434,7 +449,7 @@ async function decide(
     const would = await rehearse(api, at, publication);
     core.info(`Dry run — #${String(at.number)} would have received:\n${would}`);
     return settled({
-      ...settledBase,
+      ...withMemory,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -453,7 +468,7 @@ async function decide(
   const posted = await postOrReplace(api, at, publication);
   core.info(`#${String(at.number)}: review comment ${posted}.`);
   return settled({
-    ...settledBase,
+    ...withMemory,
     language: language?.code ?? null,
     findings: final,
     confidence,
@@ -578,18 +593,22 @@ function page(
   ungranted: string | null,
   spent: Run["spent"],
 ): string {
+  // The previous head SHA the envelope carried — the last time this thread was
+  // reviewed against a different diff than this one — or "" when the thread
+  // has no history yet. The "Previously" row is only meaningful then.
+  const previousSha = outcome?.previous?.reviewedShas.at(-1) ?? "";
   return summarize({
     number: settings.number,
     dryRun: settings.dryRun,
     headSha: outcome?.headSha ?? "",
     note: outcome?.note ?? null,
-    previousSha: "",
+    previousSha,
     shown: outcome?.shown ?? [],
     skipped: outcome?.skipped ?? [],
     findings: outcome?.findings ?? [],
     confidence: outcome?.confidence ?? null,
     posted: outcome?.posted ?? null,
-    permitted: [],
+    permitted: outcome?.permitted ?? [],
     spent,
     modelNames: settings.modelNames,
     language: outcome?.language ?? null,

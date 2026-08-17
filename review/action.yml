@@ -116,21 +116,23 @@ inputs:
 
   max-diff-chars:
     description: >-
-      How much diff one file may contribute before it is skipped as capped,
-      or `none` for no bound at all. A cap keeps one absurd file from
-      blowing the prompt; the review comment's coverage table names every
-      skipped file and why. `0` is refused — write `none` for that meaning
-      instead.
+      The whole-run budget of diff text one review may carry to the model, in
+      characters, or `none` for no bound at all. It is cumulative across the
+      files: the listing is walked in order, and the first file that does not
+      fit is skipped as capped along with every file after it — the coverage
+      table names each one and why. A cap keeps an enormous diff from blowing
+      the prompt, and it stops at a boundary the review reports rather than
+      hiding. `0` is refused — write `none` for that meaning instead.
     required: false
     default: "4000"
 
   confidence:
     description: >-
-      How sure a finding has to be before it is reported, between 0 and 1.
-      The model states the whole review's confidence in its answer; below
-      the floor, findings are still reconciled and shown in the job summary,
-      but the comment is withheld — which is how a maintainer tunes this
-      against real diffs before letting it write to one.
+      The floor for the whole review's reported confidence, between 0 and 1.
+      The model states one confidence for its entire answer — not a per-finding
+      number — and below the floor the findings are still reconciled and shown
+      in the job summary, but the comment is withheld: which is how a
+      maintainer tunes this against real diffs before letting it write to one.
 
       Refused rather than clamped: `75` is a typo that would otherwise mean
       `1`.

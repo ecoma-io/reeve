@@ -62,6 +62,8 @@ export type Status = "created" | "persists" | "changed" | "resolved" | "reopened
  */
 export interface PreviousFinding extends Finding {
   readonly wasResolved: boolean;
+  /** The head SHA the review resolved this finding at — ties the status claim to a real change. */
+  readonly resolvedAtSha?: string;
 }
 
 /** What the previous run left in the owned comment's fingerprint payload. */
@@ -75,6 +77,24 @@ export interface Previous {
 export interface Reconciled {
   readonly finding: Finding;
   readonly status: Status;
+}
+
+/**
+ * What this run's review actually covers, as the diff stood at its head SHA.
+ *
+ * A resolved finding has to be provably tied to a diff that moved: a model
+ * omission alone is not evidence that code changed. `reconcile` consults this
+ * standing before it marks anything resolved, so a reread of the same diff
+ * never churns a finding's status — see `reconcile` for the exact gate.
+ *
+ * `files` maps every path the PR names to its proven new-file line set, or
+ * `null` when the file is in the review's skipped set (ignored, generated,
+ * removed, binary, capped) and carries no line proof this run.
+ */
+export interface DiffStanding {
+  readonly files: ReadonlyMap<string, ReadonlySet<number> | null>;
+  /** The head SHA this diff was read at — what a `resolved` status claim is tied to. */
+  readonly headSha: string;
 }
 
 /** The stable identity of a finding: the rule, the place, and the claim text. */
@@ -107,23 +127,48 @@ export function sameIntention(a: Finding, b: Finding): boolean {
  *   `resolved` is `reopened` — the claim is back, so the thread re-opens it;
  * - everything else is `created`.
  *
- * Every previously-active finding this run has no evidence for becomes
- * `resolved`: the code changed and the claim did not survive the change. The
- * comment renders it under a "Resolved" heading (it stays part of the thread's
- * history), and the payload keeps it, marked resolved, so a reintroduction is
- * later told apart from a newborn claim.
+ * Every previously-active finding this run has no evidence for *and whose
+ * position the diff no longer proves* becomes `resolved`: the code changed and
+ * the claim did not survive the change. The comment renders it under a
+ * "Resolved" heading (it stays part of the thread's history), and the payload
+ * keeps it, marked resolved, so a reintroduction is later told apart from a
+ * newborn claim.
+ *
+ * **Resolved is tied to a diff that moved, never to model omission.** A review
+ * that calls a finding resolved purely because this run's model did not
+ * re-mention it churns the thread on a reread of the same diff — `created →
+ * resolved → reopened` on identical synchronize events, with zero code moved.
+ * So the gate below is evidence, not absence: a finding is resolved only when
+ * its whole file left the review (not shown, not skipped — the file is gone
+ * from the pull request), or when the file is still shown but its exact line
+ * is no longer proven by the patch. A stale active finding whose file and line
+ * still stand is carried forward as `persists` — the review says the claim is
+ * still open, with the same text, instead of pretending the diff answered it.
  *
  * This is what the anti-pattern "do not blindly repost the same findings" is
  * enforced with: an identical claim that was resolved is not a `created`, and
  * a claim the model repeats run after run at an unchanged position cannot
  * change its fingerprint — it stays `persists`, which the rendering collapses
  * into stability the reader can recognise rather than a growing copy of itself.
+ * A resolved finding that the diff has actually moved past stays in the
+ * payload with the SHA it was resolved at, so a later reintroduction is
+ * provably distinct from a claim that never left.
  */
-export function reconcile(candidates: readonly Finding[], previous: Previous): Reconciled[] {
+export function reconcile(
+  candidates: readonly Finding[],
+  previous: Previous,
+  diff: DiffStanding,
+): Reconciled[] {
   const out: Reconciled[] = [];
   const active = previous.findings.filter((old) => !old.wasResolved);
   const resolved = previous.findings.filter((old) => old.wasResolved);
   const matched = new Set<string>();
+  const doesNotStand = (old: PreviousFinding): boolean => {
+    const lines = diff.files.get(old.path);
+    if (lines === undefined) return true; // the file left the pull request
+    if (lines === null) return true; // skipped this run: no line proof, the review scope moved on
+    return old.line !== null && !lines.has(old.line);
+  };
 
   for (const candidate of candidates) {
     const fp = findingFingerprint(candidate);
@@ -152,9 +197,16 @@ export function reconcile(candidates: readonly Finding[], previous: Previous): R
   }
 
   for (const old of active) {
-    if (!matched.has(findingFingerprint(old))) {
+    const fp = findingFingerprint(old);
+    if (matched.has(fp)) continue;
+    if (doesNotStand(old)) {
       out.push({ finding: old, status: "resolved" });
+      continue;
     }
+    // The evidence for the claim still stands — the model simply did not
+    // re-cite it. Carry it forward unchanged rather than call a diff-move
+    // that no diff made: `persists` keeps the thread stable on a reread.
+    out.push({ finding: old, status: "persists" });
   }
 
   return out;
@@ -164,6 +216,9 @@ export function reconcile(candidates: readonly Finding[], previous: Previous): R
  * What the next run should remember: the findings this run will show, each
  * marked resolved when this run resolved it, plus the head SHAs reviewed.
  */
+/** How many resolved findings the payload keeps, so the memory has a bounded tail. */
+const MAX_REMEMBERED_RESOLVED = 8;
+
 export function remember(
   reconciled: readonly Reconciled[],
   headSha: string,
@@ -173,7 +228,9 @@ export function remember(
   const findings: PreviousFinding[] = [];
   for (const entry of reconciled) {
     if (entry.status === "resolved") {
-      findings.push({ ...entry.finding, wasResolved: true });
+      // The SHA this review resolved the finding at — the status claim names
+      // the diff it is evidence of, so a later reader knows what moved.
+      findings.push({ ...entry.finding, wasResolved: true, resolvedAtSha: headSha });
       seen.add(findingFingerprint(entry.finding));
       continue;
     }
@@ -181,11 +238,18 @@ export function remember(
     seen.add(findingFingerprint(entry.finding));
   }
   // Findings resolved in an earlier run but still in the payload stay there,
-  // so `reopened` keeps a memory to work against.
+  // so `reopened` keeps a memory to work against — capped so the payload does
+  // not grow without bound on a long-lived pull request that resolves many
+  // findings. The newest resolved findings are kept first; the oldest roll off
+  // and a reintroduction of one reads as `created`, which is the honest frame
+  // for a claim the payload no longer remembers resolving.
+  let keptResolved = 0;
   for (const old of previous.findings) {
-    if (old.wasResolved && !seen.has(findingFingerprint(old))) {
+    const fp = findingFingerprint(old);
+    if (old.wasResolved && !seen.has(fp) && keptResolved < MAX_REMEMBERED_RESOLVED) {
       findings.push(old);
-      seen.add(findingFingerprint(old));
+      seen.add(fp);
+      keptResolved += 1;
     }
   }
   const shas = previous.reviewedShas.includes(headSha)

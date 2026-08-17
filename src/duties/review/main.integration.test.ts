@@ -54,7 +54,7 @@ const NOTHING = ["version: 1", "duties:", "  review: [none]"].join("\n");
 /** A diff whose new-file lines the stub serves and the model may cite. */
 const PATCH_ONE = "@@ -1 +12,2 @@\n+const one = 1;\n+const two = 2;";
 /** A second state for the same file, so a rerun can move the diff. */
-const PATCH_TWO = "@@ -1 +12,2 @@\n+const one = 1;\n+const two = 2;\n+const three = 3;";
+const PATCH_TWO = "@@ -1 +14,2 @@\n+const one = 1;\n+const two = 2;\n+const three = 3;";
 
 beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
@@ -588,13 +588,15 @@ describe("the action", () => {
     await runAction(stub);
     expect(stub.comments[0]?.body).toContain("New findings (1)");
 
+    // The diff moves on: the second hunk's earlier lines are deleted under the
+    // finding, so line 13 is no longer proven by the patch.
     stub.pull.files = [
       {
         filename: "src/a.ts",
         status: "modified",
-        additions: 3,
-        deletions: 1,
-        patch: PATCH_TWO,
+        additions: 1,
+        deletions: 3,
+        patch: "@@ -1 +12,1 @@\n+const one = 1;" + "\n@@ -18 +14,1 @@\n+const four = 4;",
       },
     ];
     // The model still reviews the moved-on diff, but has nothing to say now.
@@ -608,6 +610,43 @@ describe("the action", () => {
     expect(stub.comments).toHaveLength(1);
     expect(stub.comments[0]?.body).toContain("### Resolved (1)");
     expect(second.outputs.commented).toBe("true");
+  });
+
+  it("never churns a finding's status when the same diff is reread and the model goes quiet", async () => {
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    await runAction(stub);
+    expect(stub.comments[0]?.body).toContain("New findings (1)");
+
+    // Same diff, same SHA; the model has nothing to add. The position still
+    // stands, so the finding must survive as `persists` — never a ghost
+    // `resolved` that a third run would then flip to `reopened`.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const second = await runAction(stub);
+    expect(second.code).toBe(0);
+    expect(stub.comments).toHaveLength(1);
+    expect(stub.comments[0]?.body).toContain("### Still standing (1)");
+    expect(stub.comments[0]?.body).not.toContain("### Resolved (1)");
+
+    const third = await runAction(stub);
+    expect(third.outputs.commented).toBe("false"); // nothing moved — unchanged
   });
 
   it("skips a draft green under `trigger: pr`, and reviews it under `prod`", async () => {

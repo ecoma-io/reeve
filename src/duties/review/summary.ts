@@ -90,6 +90,9 @@ function verdict(run: Run): string {
     ["Confidence", run.confidence === null ? "not measured" : run.confidence.toFixed(2)],
     ["Posted", run.posted ?? "nothing to post"],
   ];
+  if (run.permitted.length > 0) {
+    rows.push(["Granted", run.permitted.join(", ")]);
+  }
   if (run.malformedAnswers > 0) {
     rows.push(["Unreadable", `${String(run.malformedAnswers)} answer(s) discarded`]);
   }
