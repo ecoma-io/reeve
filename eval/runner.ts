@@ -17,7 +17,7 @@
  * is never mistaken for a passing one.
  */
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -48,6 +48,39 @@ import {
   scriptRespond,
 } from "./drivers/respond.ts";
 import type { RespondScenario } from "./drivers/respond.ts";
+import {
+  newTracker as newTranslateTracker,
+  scenarioOf as translateScenarioOf,
+  scriptTranslate,
+  translateRoutes,
+} from "./drivers/translate.ts";
+import type { TranslateScenario } from "./drivers/translate.ts";
+import {
+  duplicateRoutes,
+  newTracker as newDuplicateTracker,
+  scenarioOf as duplicateScenarioOf,
+  scriptDuplicate,
+} from "./drivers/duplicate.ts";
+import type { DuplicateScenario } from "./drivers/duplicate.ts";
+import {
+  lifecycleRoutes,
+  newTracker as newLifecycleTracker,
+  scenarioOf as lifecycleScenarioOf,
+} from "./drivers/lifecycle.ts";
+import type { LifecycleScenario } from "./drivers/lifecycle.ts";
+import {
+  dependaRoutes,
+  scenarioOf as dependaScenarioOf,
+  scriptDependa,
+} from "./drivers/dependa.ts";
+import type { DependaScenario } from "./drivers/dependa.ts";
+import {
+  newTracker as newReviewTracker,
+  reviewRoutes,
+  scenarioOf as reviewScenarioOf,
+  scriptReview,
+} from "./drivers/review.ts";
+import type { ReviewScenario } from "./drivers/review.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -62,7 +95,16 @@ const ROOT = resolve(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
 
 /** Every duty the runner knows how to drive. */
-const DUTIES = ["harmonise", "triage", "respond"] as const;
+const DUTIES = [
+  "harmonise",
+  "triage",
+  "respond",
+  "translate",
+  "duplicate",
+  "lifecycle",
+  "dependa",
+  "review",
+] as const;
 
 /** Whether a duty has fixtures on disk to run. */
 async function hasFixtures(duty: string): Promise<boolean> {
@@ -504,6 +546,472 @@ function respondLine(
 }
 
 // ---------------------------------------------------------------------------
+// translate
+// ---------------------------------------------------------------------------
+
+async function runTranslate(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "translate", fixture);
+  const scenario = await translateScenarioOf(fixture, directory);
+  const tracker = newTranslateTracker();
+  const stub = await startStub({
+    routes: [...translateRoutes(scenario, tracker)],
+    completion: scriptTranslate(scenario),
+  });
+  try {
+    const warrant = join(scratch, `warrant-${fixture}.yml`);
+    if (scenario.warrant !== null) await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "translate",
+      stub.url,
+      translateInputs(stub.url, warrant),
+      scratchFiles(scratch),
+    );
+    return translateLine(fixture, scenario, tracker.effect.edited, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const TRANSLATE_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "stub-model",
+  warrant: "",
+  "judge-models": "",
+  drafts: "1",
+  "max-body-chars": "6000",
+  "translate-replies": "false",
+  "max-replies": "100",
+  "chunk-chars": "6000",
+  "max-requests": "none",
+  "show-attribution": "none",
+  "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function translateInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...TRANSLATE_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one translate fixture. */
+function translateLine(
+  fixture: string,
+  scenario: TranslateScenario,
+  edited: boolean,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const translated = parseIds(run.outputs.translated);
+  const expectedTranslated = expected.translated ?? [];
+  const expectedEdited = expected.effects?.edited ?? false;
+  const source = run.outputs["source-language"] ?? "";
+  const sourceMatches = source === (expected["source-language"] ?? "");
+  const finding =
+    idsEqual(translated, expectedTranslated) && sourceMatches && edited === expectedEdited;
+
+  if (finding) {
+    const detail = expectedEdited
+      ? `published ${translated.join(", ")}`
+      : `clean stop — ${scenario.alreadyTranslated ? "already translated" : "warrant denies translate"}`;
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `translated=${JSON.stringify(translated)} source=${JSON.stringify(source)} edited=${String(edited)}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// duplicate
+// ---------------------------------------------------------------------------
+
+async function runDuplicate(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "duplicate", fixture);
+  const scenario = await duplicateScenarioOf(fixture, directory);
+  const tracker = newDuplicateTracker();
+  const stub = await startStub({
+    routes: [...duplicateRoutes(scenario, tracker)],
+    completion: scriptDuplicate(scenario),
+  });
+  try {
+    const warrant = join(scratch, `warrant-${fixture}.yml`);
+    if (scenario.warrant !== null) await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "duplicate",
+      stub.url,
+      duplicateInputs(stub.url, warrant),
+      scratchFiles(scratch),
+    );
+    return duplicateLine(fixture, scenario, tracker.effect.commented, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const DUPLICATE_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "stub-model",
+  warrant: "",
+  confidence: "0.75",
+  candidates: "5",
+  "corpus-limit": "50",
+  "corpus-since": "",
+  "max-body-chars": "6000",
+  "show-attribution": "none",
+  "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function duplicateInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...DUPLICATE_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one duplicate fixture. */
+function duplicateLine(
+  fixture: string,
+  scenario: DuplicateScenario,
+  commented: boolean,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const duplicate = run.outputs["duplicate-of"] ?? "";
+  const score = run.outputs.score ?? "";
+  const expectedComments = expected.effects?.commented ?? false;
+  const finding =
+    duplicate === (expected["duplicate-of"] ?? "") &&
+    score === (expected.score ?? "") &&
+    commented === expectedComments;
+
+  if (finding) {
+    const detail = expectedComments
+      ? `proposed #${duplicate}`
+      : `clean stop — ${duplicate === "" ? "warrant denies duplicate" : `#${duplicate} named but ${score} under the floor`}`;
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `duplicate-of=${duplicate} score=${score} commented=${String(commented)}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// lifecycle
+// ---------------------------------------------------------------------------
+
+async function runLifecycle(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "lifecycle", fixture);
+  const scenario = await lifecycleScenarioOf(fixture, directory);
+  const tracker = newLifecycleTracker();
+  const stub = await startStub({
+    routes: [...lifecycleRoutes(scenario, tracker)],
+    // lifecycle never calls a model, so this completion is never reached — it
+    // exists only because the harness requires one to be mounted.
+    completion: () => saying("unused"),
+  });
+  try {
+    await writeFile(join(scratch, "reeve.yml"), scenario.warrant);
+    const run = await runBundle(
+      "lifecycle",
+      stub.url,
+      lifecycleInputs(scratch),
+      scratchFiles(scratch),
+    );
+    return lifecycleLine(fixture, scenario, tracker.effect, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const LIFECYCLE_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  // lifecycle never calls a model — the shared provider inputs are not read,
+  // and the interface requires none. The input set is only the ones
+  // `readSettings` reads.
+  warrant: "",
+  "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
+};
+
+function lifecycleInputs(scratch: string): Record<string, string> {
+  return { ...LIFECYCLE_INPUTS, warrant: join(scratch, "reeve.yml") };
+}
+
+// ---------------------------------------------------------------------------
+// dependa
+// ---------------------------------------------------------------------------
+
+async function runDependa(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "dependa", fixture);
+  const scenario = await dependaScenarioOf(fixture, directory);
+  const stub = await startStub({
+    routes: dependaRoutes(scenario),
+    completion: scriptDependa(),
+  });
+  try {
+    const warrant = join(scratch, `warrant-dependa-${fixture}.yml`);
+    await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "dependa",
+      stub.url,
+      dependaInputs(stub.url, warrant),
+      scratchFiles(scratch),
+    );
+    return dependaLine(fixture, scenario, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const DEPENDA_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "",
+  warrant: "",
+  ecosystems: "",
+  drafts: "0",
+  "dry-run": "false",
+  "max-requests": "none",
+  paths: "",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function dependaInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...DEPENDA_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one dependa fixture. */
+function dependaLine(fixture: string, scenario: DependaScenario, run: Run): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const proposed = run.outputs.proposed ?? "";
+  const refused = run.outputs.refused ?? "";
+  const security = run.outputs.security ?? "";
+  const pullRequests = run.outputs["pull-requests"] ?? "";
+  const starved = run.outputs.starved ?? "";
+  const budgetExhausted = run.outputs["budget-exhausted"] ?? "";
+
+  const finding =
+    proposed === (expected.proposed ?? "[]") &&
+    refused === (expected.refused ?? "[]") &&
+    security === (expected.security ?? "[]") &&
+    pullRequests === (expected["pull-requests"] ?? "[]") &&
+    starved === (expected.starved ?? "false") &&
+    budgetExhausted === (expected["budget-exhausted"] ?? "false");
+
+  if (finding) {
+    return {
+      fixture,
+      outcome: "finding",
+      detail: `clean stop — nothing proposed (${JSON.stringify(proposed)})`,
+    };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `proposed=${JSON.stringify(proposed)} refused=${JSON.stringify(refused)} security=${JSON.stringify(security)} pull-requests=${JSON.stringify(pullRequests)}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// review
+// ---------------------------------------------------------------------------
+
+async function runReview(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "review", fixture);
+  const scenario = await reviewScenarioOf(fixture, directory);
+  const tracker = newReviewTracker();
+  const stub = await startStub({
+    routes: reviewRoutes(scenario, tracker),
+    completion: scriptReview(scenario),
+  });
+  try {
+    const warrant = join(scratch, `warrant-review-${fixture}.yml`);
+    await writeFile(warrant, scenario.warrant);
+    // The rules file lives in the checkout — the run reads it from
+    // `GITHUB_WORKSPACE`, so the fixture's rules are written there.
+    await mkdir(join(scratch, ".github"), { recursive: true });
+    if (scenario.rules === null) {
+      await writeFile(join(scratch, ".github", "reeve-rules.yml"), "");
+    } else {
+      await writeFile(join(scratch, ".github", "reeve-rules.yml"), scenario.rules);
+    }
+    const run = await runBundle(
+      "review",
+      stub.url,
+      reviewInputs(stub.url, warrant),
+      scratchFiles(scratch),
+      { GITHUB_WORKSPACE: scratch },
+    );
+    return reviewLine(fixture, scenario, tracker.effect.commented, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const REVIEW_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "stub-model",
+  warrant: "",
+  "rules-path": ".github/reeve-rules.yml",
+  trigger: "pr",
+  "max-diff-chars": "none",
+  confidence: "0.75",
+  "dry-run": "false",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function reviewInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...REVIEW_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one review fixture. */
+function reviewLine(fixture: string, scenario: ReviewScenario, commented: boolean, run: Run): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const echoed = run.outputs.commented ?? "";
+  const findings = run.outputs.findings ?? "";
+  const headSha = run.outputs["head-sha"] ?? "";
+  const finding =
+    echoed === (expected.commented ?? "false") &&
+    findings === (expected.findings ?? "0") &&
+    headSha === (expected["head-sha"] ?? "") &&
+    commented === (expected.commented === "true");
+
+  if (finding) {
+    const detail = commented
+      ? `posted ${findings} finding(s) — comments: ${echoed}`
+      : `clean stop — ${echoed === "false" ? "warrant denies review" : "nothing posted"}`;
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)}`,
+  };
+}
+
+/** The outcome for one lifecycle fixture. */
+function lifecycleLine(
+  fixture: string,
+  scenario: LifecycleScenario,
+  effect: LifecycleEffectLike,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const skipped = run.outputs.skipped ?? "";
+  const reminded = run.outputs.reminded ?? "";
+  const labeled = run.outputs.labeled ?? "";
+  const closed = run.outputs.closed ?? "";
+  const unstaled = run.outputs.unstaled ?? "";
+  const dueNotGranted = run.outputs["due-not-granted"] ?? "";
+
+  const effects = expected.effects ?? {};
+  const effectsMatch =
+    (effects.labeled ?? false) === effect.labeled &&
+    (effects.commented ?? false) === effect.commented &&
+    (effects.closed ?? false) === effect.closed &&
+    (effects.unstaled ?? false) === effect.unstaled;
+
+  const finding =
+    skipped === (expected.skipped ?? "") &&
+    reminded === (expected.reminded ?? "") &&
+    labeled === (expected.labeled ?? "") &&
+    closed === (expected.closed ?? "") &&
+    unstaled === (expected.unstaled ?? "") &&
+    dueNotGranted === (expected["due-not-granted"] ?? "") &&
+    effectsMatch;
+
+  if (finding) {
+    const detail =
+      expected.skipped === "true"
+        ? "clean stop — warrant writes no lifecycle policy"
+        : effect.closed
+          ? "closed"
+          : effect.commented
+            ? "reminded"
+            : effect.labeled
+              ? "labeled"
+              : effect.unstaled
+                ? "unstaled"
+                : "evaluated, nothing due";
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `skipped=${skipped} reminded=${reminded} labeled=${labeled} closed=${closed} unstaled=${unstaled}`,
+  };
+}
+
+interface LifecycleEffectLike {
+  readonly labeled: boolean;
+  readonly commented: boolean;
+  readonly closed: boolean;
+  readonly unstaled: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // The banner and the run.
 // ---------------------------------------------------------------------------
 
@@ -527,6 +1035,16 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runTriage;
     case "respond":
       return runRespond;
+    case "translate":
+      return runTranslate;
+    case "duplicate":
+      return runDuplicate;
+    case "lifecycle":
+      return runLifecycle;
+    case "dependa":
+      return runDependa;
+    case "review":
+      return runReview;
     default:
       return null;
   }

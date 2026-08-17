@@ -1,0 +1,15 @@
+{
+  "description": "An inactivity track fires: the thread has been silent past its `after`, so the run applies the clock-hand label and posts the built-in reminder.",
+  "warrant": "version: 1\nlanguages:\n  - en\nlifecycle:\n  tracks:\n    - name: quiet\n      resets: any\n      steps:\n        - after: 7d\n          label: stale\n          say: true\n",
+  "labels": [],
+  "repo-labels": ["stale"],
+  "expected": {
+    "skipped": "false",
+    "reminded": "true",
+    "labeled": "1",
+    "closed": "false",
+    "unstaled": "0",
+    "due-not-granted": "0",
+    "effects": { "labeled": true, "commented": true }
+  }
+}

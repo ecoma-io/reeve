@@ -1,0 +1,11 @@
+{
+  "description": "The corpus holds an open thread sharing the fixture's vocabulary, BM25 ranks it first, and the judge names it a duplicate at 0.9. The warrant grants comment, the proposal is eligible, and the run posts its marker-guarded comment — the tracker records the write.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  duplicate: [comment]\n",
+  "expected": {
+    "duplicate-of": "7",
+    "score": "0.90",
+    "effects": {
+      "commented": true
+    }
+  }
+}
