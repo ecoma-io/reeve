@@ -238,6 +238,10 @@ A change that breaks one of these is a breaking change regardless of what any
 9. **Thread text never reaches a model outside a per-call nonce boundary.**
 10. **Machine output is sanitised before it is published**, and the author's half
     never is.
+11. **Claimed evidence is never accepted at face value.** A finding is reported
+    `verified` only on actual deterministic evidence the run collected; a
+    model's confidence, or its prose claiming proof, never upgrades a finding.
+    Absence of evidence leaves the finding `unverified` and shown.
 
 ---
 

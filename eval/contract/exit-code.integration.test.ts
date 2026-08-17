@@ -120,7 +120,7 @@ describe("the eval runner's fail-closed exit code, end to end", () => {
     const run = await evalDuty("all");
     expect(run.exit).toBe(0);
     // 12 triage + 11 respond + 7 harmonise + 3 translate + 3 duplicate + 4 lifecycle + 3 dependa + 6 review = 49, multilingual fixtures included.
-    expect(run.out).toMatch(/finding 49 · failed 0 · skipped 0/);
+    expect(run.out).toMatch(/finding 50 · failed 0 · skipped 0/);
   });
 
   it("exits 1 when a fixture is skipped — the clean-stop collapse", async () => {

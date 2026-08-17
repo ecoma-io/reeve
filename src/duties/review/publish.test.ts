@@ -120,6 +120,88 @@ describe("encodeEnvelope / decodeEnvelope", () => {
     expect(decodeEnvelope("fp " + Buffer.from("[1,2]", "utf8").toString("base64"))).toBeNull();
   });
 
+  it("round-trips the new optional verification fields", () => {
+    const payload: Previous = {
+      findings: [
+        {
+          ...finding(),
+          snippet: 'export const VERSION = "1.0.0";',
+          verification: "unverified",
+          evidence: [
+            {
+              kind: "rules",
+              weight: 0.6,
+              detail: "cites a repository rule",
+              provenance: {
+                ruleId: "dedup",
+                sourceFile: "repository rules",
+                atLine: null,
+                ref: { sha: "", path: "" },
+              },
+              at: "deterministic",
+            },
+          ],
+          wasResolved: false,
+        },
+      ],
+      reviewedShas: ["abc"],
+    };
+    expect(decodeEnvelope(encodeEnvelope(payload))).toEqual(payload);
+  });
+
+  it("decodes an old envelope without the optional fields as undefined", () => {
+    const payload = {
+      findings: [
+        {
+          id: "a",
+          ruleId: "r",
+          ruleName: "N",
+          ruleBody: "",
+          path: "p",
+          line: 1,
+          severity: "warning",
+          body: "b",
+          marker: "",
+          wasResolved: true,
+        },
+      ],
+      reviewedShas: ["ok"],
+    };
+    const out = decodeEnvelope(
+      "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
+    );
+    expect(out?.findings[0]?.verification).toBeUndefined();
+    expect(out?.findings[0]?.evidence).toBeUndefined();
+  });
+
+  it("treats malformed optional fields as undefined, keeping the finding's core fields", () => {
+    const payload = {
+      findings: [
+        {
+          id: "a",
+          ruleId: "r",
+          ruleName: "N",
+          ruleBody: "",
+          path: "p",
+          line: 1,
+          severity: "warning",
+          body: "b",
+          marker: "",
+          wasResolved: true,
+          verification: "bogus",
+          evidence: [{ kind: "not-a-kind", weight: 1, detail: 42, provenance: null }],
+        },
+      ],
+      reviewedShas: ["ok"],
+    };
+    const out = decodeEnvelope(
+      "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
+    );
+    expect(out?.findings).toHaveLength(1);
+    expect(out?.findings[0]?.verification).toBeUndefined();
+    expect(out?.findings[0]?.evidence).toBeUndefined();
+  });
+
   it("drops malformed findings and keeps the readable ones", () => {
     const payload = {
       findings: [
@@ -216,6 +298,31 @@ describe("render", () => {
     const body = render([{ finding: finding(), status: "created" }]);
     expect(body).toContain("<sub>");
     expect(body).toContain("</sub>");
+  });
+
+  it("appends the verification badge to a model finding's line", () => {
+    const verified = render([
+      { finding: finding({ verification: "verified" as const }), status: "created" },
+    ]);
+    expect(verified).toContain("· verified");
+
+    const unverified = render([
+      { finding: finding({ verification: "unverified" as const }), status: "created" },
+    ]);
+    expect(unverified).toContain("· not verified");
+    expect(unverified).not.toContain("· verified");
+  });
+
+  it("renders no badge for deterministic findings or unverified fields absent", () => {
+    const deterministic = render([
+      { finding: finding({ marker: "preflight:blocked" }), status: "created" },
+    ]);
+    expect(deterministic).not.toContain("· verified");
+    expect(deterministic).not.toContain("· not verified");
+
+    const untouched = render([{ finding: finding(), status: "created" }]);
+    expect(untouched).not.toContain("· verified");
+    expect(untouched).not.toContain("· not verified");
   });
 
   it("defangs references in a model-written finding body before it is printed", () => {

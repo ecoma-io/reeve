@@ -64,6 +64,16 @@ describe("findingFingerprint", () => {
       findingFingerprint(finding({ line: 2 })),
     );
   });
+
+  it("is unchanged when verification flips — D9's stays-unchanged rerun", () => {
+    // Verification is recomputed per run, never part of the identity: a rerun
+    // of untouched code keeps `persists` and the comment stays `unchanged`
+    // even though this run's evidence verdict differed.
+    expect(findingFingerprint(finding({ verification: "verified" }))).toBe(
+      findingFingerprint(finding({ verification: "unverified" })),
+    );
+    expect(findingFingerprint(finding({ evidence: [] }))).toBe(findingFingerprint(finding()));
+  });
 });
 
 describe("sameIntention", () => {
@@ -127,6 +137,12 @@ describe("reconcile", () => {
     // The diff still shows a.ts, but only line 12 is proven now.
     const out = reconcile([], previous({ findings: [old] }), standing());
     expect(out).toEqual([expect.objectContaining({ status: "resolved" })]);
+  });
+
+  it("carries verification and evidence through reconcile as part of the finding", () => {
+    const verified = finding({ verification: "verified" as const, evidence: [] });
+    const out = reconcile([verified], previous(), standing());
+    expect(out[0]).toEqual({ finding: verified, status: "created" });
   });
 
   it("carries a stale active finding forward as `persists` when its position still stands", () => {

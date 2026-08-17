@@ -78,6 +78,7 @@ import {
 } from "./publish.js";
 import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
 import { preflight, readRules } from "./rules.js";
+import { verifyFindings } from "./verify.js";
 import { NOTHING, review as askModel, type Reviewed } from "./verdict.js";
 import { summarize, type Run } from "./summary.js";
 
@@ -341,6 +342,18 @@ async function decide(
     .map((entry: RawFinding) => toFinding(entry, rules))
     .filter((finding): finding is Finding => finding !== null);
 
+  // The evidence half: every admitted model finding is verified against
+  // evidence the diff already proves — the claimed snippet against the
+  // diff-proven line text, and the cited rule against the rules snapshot.
+  // Deterministic preflight findings are not passed to the engine; they are
+  // always-right by construction, so no claim of theirs needs proving.
+  const verified = verifyFindings({
+    findings: raw,
+    shown: bounded.shown,
+    rules,
+    headSha: pr.headSha,
+  });
+
   // Merge deterministic + model findings, reconcile against the memory once.
   // The diff standing is what makes the resolved rung honest: a finding is
   // resolved only when the diff moved past it (see findings.ts), never because
@@ -349,7 +362,7 @@ async function decide(
   for (const file of bounded.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-  const final = reconcile([...deterministic, ...raw], previous, diffStanding);
+  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
   const confidence = reviewed.verdict.confidence;
 
   const next = remember(final, pr.headSha, previous);
@@ -526,6 +539,7 @@ function toFinding(
     severity: raw.severity,
     body: raw.body,
     marker: "",
+    snippet: raw.snippet,
   };
 }
 

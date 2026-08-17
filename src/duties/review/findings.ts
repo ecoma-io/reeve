@@ -15,6 +15,7 @@
  * is that thread, so it follows the same ladder, evidence-based at every rung.
  */
 import { fingerprint } from "../../core/marker.js";
+import type { Evidence, VerificationStatus } from "./evidence.js";
 
 /** A single claim a review makes about the diff. */
 export interface Finding {
@@ -30,6 +31,12 @@ export interface Finding {
   readonly body: string;
   /** The deterministic marker that produced this finding, or "" when a model wrote it. */
   readonly marker: string;
+  /** The exact text the model claimed at `line`, when a model wrote the finding — "" for deterministic findings. */
+  readonly snippet?: string;
+  /** Whether deterministic evidence proved this finding, set by the verification engine. */
+  readonly verification?: VerificationStatus;
+  /** The evidence the verification ran on, set by the verification engine. */
+  readonly evidence?: readonly Evidence[];
 }
 
 /**

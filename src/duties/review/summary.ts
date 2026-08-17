@@ -102,6 +102,18 @@ function verdict(run: Run): string {
   if (run.previousSha.length > 0 && run.previousSha !== run.headSha) {
     rows.push(["Previously", `reviewed at \`${run.previousSha}\``]);
   }
+  if (run.findings.length > 0) {
+    const verified = run.findings.filter(
+      ({ finding }) => finding.verification === "verified",
+    ).length;
+    const unverified = run.findings.filter(
+      ({ finding }) => finding.verification === "unverified",
+    ).length;
+    rows.push([
+      "Verification",
+      `${String(verified)} verified · ${String(unverified)} not verified`,
+    ]);
+  }
 
   return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
 }
@@ -112,8 +124,13 @@ function findingsTable(run: Run): string {
     `\`${finding.path}\`` + (finding.line === null ? "" : `:${String(finding.line)}`),
     finding.severity,
     cell(finding.body),
+    finding.verification ?? "—",
   ]);
-  return ["### Findings", "", table(["State", "Location", "Severity", "Finding"], rows)].join("\n");
+  return [
+    "### Findings",
+    "",
+    table(["State", "Location", "Severity", "Finding", "Verified"], rows),
+  ].join("\n");
 }
 
 function coverage(run: Run): string {

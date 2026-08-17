@@ -35342,10 +35342,17 @@ function decodeEnvelope(payload) {
     }).map((entry) => {
       const raw = entry;
       const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
+      const {
+        snippet: _snippet,
+        verification: _verification,
+        evidence: _evidence,
+        ...core
+      } = entry;
       return {
-        ...entry,
+        ...core,
         wasResolved: entry.wasResolved === true,
-        ...resolvedAtSha
+        ...resolvedAtSha,
+        ...optionalEvidence(raw)
       };
     });
     const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
@@ -35353,6 +35360,23 @@ function decodeEnvelope(payload) {
   } catch {
     return null;
   }
+}
+function optionalEvidence(raw) {
+  const out = {};
+  if (typeof raw.snippet === "string") out.snippet = raw.snippet;
+  if (raw.verification === "verified" || raw.verification === "unverified") {
+    out.verification = raw.verification;
+  }
+  if (Array.isArray(raw.evidence)) {
+    const items = raw.evidence.filter((entry) => evidenceShaped(entry));
+    if (items.length > 0) out.evidence = items;
+  }
+  return out;
+}
+function evidenceShaped(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
+  const entry = raw;
+  return (entry.kind === "diff" || entry.kind === "rules") && typeof entry.weight === "number" && typeof entry.detail === "string" && typeof entry.provenance === "object" && entry.provenance !== null && typeof entry.provenance.ruleId === "string";
 }
 var COMMENT_PAGE = 100;
 async function findMarked(api, at) {
@@ -35465,7 +35489,15 @@ function findingLine(finding) {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   const body = sanitize(finding.body);
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}`;
+  const badge = verificationBadge(finding);
+  const suffix = badge.length === 0 ? "" : ` ${badge}`;
+  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+}
+function verificationBadge(finding) {
+  if (finding.marker.length > 0) return "";
+  if (finding.verification === "verified") return "\xB7 verified";
+  if (finding.verification === "unverified") return "\xB7 not verified";
+  return "";
 }
 function footer() {
   const parts = [chrome("reviewFooterFloor", null), chrome("reviewFooterEditable", null)];
@@ -35802,6 +35834,84 @@ function blockedNote(blocked) {
   return `The diff contains the blocked text "${blocked.phrase}"${note}`;
 }
 
+// src/duties/review/limits.ts
+var MAX_EVIDENCE_PER_FINDING = 8;
+var MAX_EVIDENCE_ITEMS_PER_RUN = 128;
+var MAX_EVIDENCE_TOTAL_CHARS = 4096;
+
+// src/duties/review/evidence.ts
+function deriveStatus(evidence) {
+  return evidence.some((entry) => entry.weight >= 1) ? "verified" : "unverified";
+}
+
+// src/duties/review/providers.ts
+function diffEvidence(file, line, claimedSnippet, headSha) {
+  if (line === null || claimedSnippet === null) return null;
+  const claim = claimedSnippet.trim();
+  if (claim.length === 0) return null;
+  const proven = file.lines.get(line)?.trim() ?? "";
+  if (proven.length === 0) return null;
+  if (!proven.includes(claim) && !claim.includes(proven)) return null;
+  return {
+    kind: "diff",
+    weight: 1,
+    detail: `diff-proven line ${String(line)}`,
+    provenance: {
+      ruleId: "diff-evidence",
+      sourceFile: file.path,
+      atLine: line,
+      ref: { sha: headSha, path: file.path }
+    },
+    at: "deterministic"
+  };
+}
+function ruleEvidence(rules, ruleId) {
+  if (!rules.rules.some((entry) => entry.id === ruleId)) return null;
+  return {
+    kind: "rules",
+    weight: 0.6,
+    detail: "cites a repository rule",
+    provenance: {
+      ruleId,
+      sourceFile: "repository rules",
+      atLine: null,
+      ref: { sha: "", path: "" }
+    },
+    at: "deterministic"
+  };
+}
+
+// src/duties/review/verify.ts
+function verifyFindings(request2) {
+  const shown2 = new Map(request2.shown.map((file) => [file.path, file]));
+  let runItems = 0;
+  let runChars = 0;
+  return request2.findings.map((finding) => {
+    const collected = [];
+    const rule = ruleEvidence(request2.rules, finding.ruleId);
+    if (rule !== null) collected.push(rule);
+    if (finding.line !== null) {
+      const file = shown2.get(finding.path);
+      if (file !== void 0) {
+        const diff = diffEvidence(file, finding.line, finding.snippet ?? null, request2.headSha);
+        if (diff !== null) collected.push(diff);
+      }
+    }
+    const room = MAX_EVIDENCE_PER_FINDING;
+    const kept = [];
+    for (const entry of collected.sort((a, b) => b.weight - a.weight)) {
+      if (kept.length >= room) break;
+      if (runItems >= MAX_EVIDENCE_ITEMS_PER_RUN) break;
+      if (runChars + entry.detail.length > MAX_EVIDENCE_TOTAL_CHARS) break;
+      kept.push(entry);
+      runItems += 1;
+      runChars += entry.detail.length;
+    }
+    const verification = deriveStatus(kept);
+    return { ...finding, evidence: kept, verification };
+  });
+}
+
 // src/duties/review/verdict.ts
 var NOTHING = { findings: [], confidence: 0 };
 var PATCH_EXCERPT = 4e3;
@@ -36020,6 +36130,18 @@ function verdict(run2) {
   if (run2.previousSha.length > 0 && run2.previousSha !== run2.headSha) {
     rows.push(["Previously", `reviewed at \`${run2.previousSha}\``]);
   }
+  if (run2.findings.length > 0) {
+    const verified = run2.findings.filter(
+      ({ finding }) => finding.verification === "verified"
+    ).length;
+    const unverified = run2.findings.filter(
+      ({ finding }) => finding.verification === "unverified"
+    ).length;
+    rows.push([
+      "Verification",
+      `${String(verified)} verified \xB7 ${String(unverified)} not verified`
+    ]);
+  }
   return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
 }
 function findingsTable(run2) {
@@ -36027,9 +36149,14 @@ function findingsTable(run2) {
     status,
     `\`${finding.path}\`` + (finding.line === null ? "" : `:${String(finding.line)}`),
     finding.severity,
-    cell(finding.body)
+    cell(finding.body),
+    finding.verification ?? "\u2014"
   ]);
-  return ["### Findings", "", table(["State", "Location", "Severity", "Finding"], rows)].join("\n");
+  return [
+    "### Findings",
+    "",
+    table(["State", "Location", "Severity", "Finding", "Verified"], rows)
+  ].join("\n");
 }
 function coverage(run2) {
   const rows = run2.skipped.map(({ path, reason }) => [cell(path), cell(reason)]);
@@ -36203,11 +36330,17 @@ async function decide(api, at, warrant, settings, stages, weather) {
     }
   }
   const raw = reviewed.verdict.findings.map((entry) => toFinding(entry, rules)).filter((finding) => finding !== null);
+  const verified = verifyFindings({
+    findings: raw,
+    shown: bounded2.shown,
+    rules,
+    headSha: pr.headSha
+  });
   const StandingFiles = /* @__PURE__ */ new Map();
   for (const file of bounded2.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded2.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-  const final = reconcile([...deterministic, ...raw], previous, diffStanding);
+  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
   const confidence = reviewed.verdict.confidence;
   const next = remember(final, pr.headSha, previous);
   const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
@@ -36333,7 +36466,8 @@ function toFinding(raw, rules) {
     line: raw.line,
     severity: raw.severity,
     body: raw.body,
-    marker: ""
+    marker: "",
+    snippet: raw.snippet
   };
 }
 var DEFAULT_GENERATED2 = [".min.js", ".min.css", ".map"];

@@ -925,7 +925,11 @@ function reviewLine(
     effect.commented === (expected.commented === "true") &&
     // A fixture that pins the update path asserts the run PATCHed its own
     // previous comment rather than POSTing a second one.
-    (expected.wrote === undefined || effect.wrote === expected.wrote);
+    (expected.wrote === undefined || effect.wrote === expected.wrote) &&
+    // A fixture that pins verification asserts the evidence engine ran and
+    // produced the expected count, read off the summary's `| Verification |`
+    // row.
+    (expected.verified === undefined || verifiedFromSummary(run.summary) === expected.verified);
 
   // The language dimension wins over both: a pull request the pipeline
   // identified as the wrong language was handled wrong, and that can never be
@@ -938,6 +942,17 @@ function reviewLine(
         fixture,
         outcome: "failed",
         detail: `identified the pull request as \`${identified}\`; fixture expects \`${expected.language}\``,
+      };
+    }
+  }
+
+  if (expected.verified !== undefined) {
+    const verified = verifiedFromSummary(run.summary);
+    if (verified !== expected.verified) {
+      return {
+        fixture,
+        outcome: "failed",
+        detail: `verified ${verified} finding(s); fixture expects ${expected.verified}`,
       };
     }
   }
@@ -968,6 +983,17 @@ function languageFromSummary(summary: string): string {
   const code = row[1];
   if (code === "not identified") return "";
   return code;
+}
+
+/**
+ * The number of findings a review run verified, off its summary's
+ * `| Verification | N verified · M not verified |` row. A run with no
+ * verification row reads as no verified findings.
+ */
+function verifiedFromSummary(summary: string): string {
+  const row = /^\|\s*Verification\s*\|\s*(\d+)\s*verified/m.exec(summary);
+  if (row?.[1] === undefined) return "0";
+  return row[1];
 }
 
 /** The outcome for one lifecycle fixture. */

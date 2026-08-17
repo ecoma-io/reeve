@@ -91,7 +91,11 @@ on this repository — every duty but `review`, through `.github/workflows/reeve
 `reeve-dependa-dogfood` and `reeve-sweep`) — which is the same discipline Phase 3
 below borrows. `review` is the eighth, granted nothing until a warrant names it,
 and its whole duty is driven end to end by its own integration suite against a
-stub API.
+stub API. Its claimed findings are verified deterministically in-process —
+the model's snippets and cited rules are checked against the diff and the rules
+snapshot the run already read, with no command execution — the same
+never-trust-the-model-display stance the 2.x Verify stage takes to its own
+idempotency markers.
 The warrant is the whole answer for authority, with total enumeration once a
 `duties:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog
