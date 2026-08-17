@@ -985,7 +985,7 @@ function reviewLine(
     // produced the expected count, read off the summary's `| Verification |`
     // row.
     (expected.verified === undefined || verifiedFromSummary(run.summary) === expected.verified) &&
-// A fixture that pins the human-disposition axis asserts the run's summary
+    // A fixture that pins the human-disposition axis asserts the run's summary
     // rendered the maintainer's triage read off the thread's eligible reply.
     (expected.disposition === undefined ||
       dispositionFromSummary(run.summary).includes(expected.disposition)) &&

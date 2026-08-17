@@ -6,9 +6,11 @@ _Full contract for the `review` duty — every input, every output, checked agai
 
 A pull request changes, and the finding that was true at the previous SHA may
 be one thing now: still standing, changed, resolved, or back after the code
-came around again. `review` answers the pull request with exactly one comment
-— its own, idempotent under its marker — that tracks its findings across
-`synchronize` events instead of reposting them. It reviews; it does not code.
+came around again. `review` answers the pull request with one owned summary
+comment — its own, idempotent under its marker — that tracks its findings
+across `synchronize` events instead of reposting them, and with an owned
+inline review thread per finding whose line the diff still proves. It
+reviews; it does not code.
 
 > [!IMPORTANT]
 > Reeve is on a `0.x` line. This page is a contract that can still change on a minor —
@@ -20,8 +22,9 @@ The gap between a pull request and a careful reader is where the useful parts
 of review live: a diff read against the repository's own rules, the findings
 written down where the author can answer them, and the review that said a
 thing once not repeating itself on every force-push. `review` fills that gap
-with a single owned comment — the useful half of what a review bot does,
-without the part that makes review bots noise.
+with a single owned summary comment plus an owned inline thread per
+diff-proven finding — the useful half of what a review bot does, without the
+part that makes review bots noise.
 
 **It is not a coding agent, and this is not a soft claim.** [The north
 star](../../doctrine/north-star.md#8-non-goals) says Reeve does a duty and
@@ -138,7 +141,7 @@ Every input `review/action.yml` declares.
 
 | Input                                          | Required | Default                     | What it does                                                                                                                                                                                                                                                                                                                                           |
 | ---------------------------------------------- | -------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `github-token`                                 | no       | `${{ github.token }}`       | Token used to read the pull request and write the single owned comment. `pull-requests: write` on the token covers both; the warrant decides whether a comment is written at all.                                                                                                                                                                      |
+| `github-token`                                 | no       | `${{ github.token }}`       | Token used to read the pull request and write the owned summary comment and inline threads. `pull-requests: write` on the token covers all three (list, create, update); the warrant decides whether anything is written at all.                                                                                                                       |
 | `number`                                       | no       | _(empty)_                   | The pull request to review. Defaults to the one that triggered the workflow — meant to run on `pull_request` events, not on a backfill. An event that carries no pull request fails red naming the event.                                                                                                                                              |
 | `base-url`                                     | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                                                                                                                     |
 | `api-key`                                      | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                                                                                                                        |
@@ -198,16 +201,36 @@ it](../../development/evaluation.md) against your own diffs before you move
 it — what `0.6` means for one project's tolerance for a slightly-off finding
 is not what it means for another's.
 
-## The owned comment, and the ladder
+## The owned summary comment, the ladder, and inline threads
 
-**Exactly one comment per pull request, ever.** The core anti-pattern this
-duty exists to avoid is a bot that reposts the same findings on every
-synchronize event. The comment carries this duty's marker — a fingerprint of
-the rendered review plus a base64 envelope holding the previous run's findings
-and the SHAs it reviewed. The next run recomputes the fingerprint: a run that
-reached the same review changes nothing (`commented: false`, the comment left
-in place), and a run whose findings moved replaces the comment in place.
-Reruns never stack a second review under the first.
+**Exactly one owned summary comment per pull request, ever, and an owned
+inline review thread per finding the diff still proves.** The core
+anti-pattern this duty exists to avoid is a bot that reposts the same findings
+on every synchronize event. The summary comment carries this duty's marker — a
+fingerprint of the rendered review plus a base64 envelope holding the previous
+run's findings and the SHAs it reviewed. The next run recomputes the
+fingerprint: a run that reached the same review changes nothing
+(`commented: false`, the comment left in place), and a run whose findings
+moved replaces the comment in place. Reruns never stack a second review under
+the first.
+
+**The inline threads are the useful half a comment alone lacks** — each
+finding with a line the diff proves gets to be answered where it lives, not
+scrolled past in a wall of findings. Every thread is owned the way the summary
+is: it carries its own marker (`<!-- reeve:review:thread source=<fingerprint>.<position key> -->`)
+written by a bot author, keyed by the finding's position (rule, file, line),
+and only a body whose marker parses as a real fingerprint over a nonempty key
+is ever touched as Reeve's own — a forged, truncated, or human-authored thread
+is left alone. Idempotency comes from the live listing, never from memory:
+each run lists the pull request's review comments, and a thread whose rendered
+body already matches is left alone, so a rerun never stacks a second copy. A
+finding whose line GitHub can no longer anchor (422 from the review-comments
+API) falls back to the summary, which renders every finding — a threading
+problem can never lose a finding, and a thread-listing failure throws before
+the summary is written, so a permission problem can never leave a duplicate
+on the next run's relisting. When a pull request has so many review comments
+that this duty's own threads cannot be listed with certainty, threads are
+withheld — the summary still posts, exactly once.
 
 **The changes a finding passes through.** A finding is a rule, a file, a line
 and a reason, with a stable identity across runs. Comparing this run's
@@ -218,14 +241,18 @@ with new evidence). The comment renders them under headings a human review
 uses — "New findings", "Still standing", "Resolved" — so a thread's history
 reads the way a reviewer's own comment would.
 
-**Two code guards enforce "one comment, and it holds its memory."** This
-duty's marker, found the same bot-author walk every duty uses, stops a rerun
-from treating an existing comment as absent, and the marker's `official ===
-""` check means a forged or quoted marker is never overwritten as if it were
-Reeve's own. When a pull request has so many comments that this duty's own
-cannot be found with certainty, the review is withheld — `withheld` — rather
-than risk a duplicate. Neither guard is configurable, because an input can be
-misconfigured and these two cannot be.
+**Two code guards enforce "one summary comment, and it holds its memory."**
+This duty's marker, found the same bot-author walk every duty uses, stops a
+rerun from treating an existing comment as absent, and the marker's
+`official === ""` check means a forged or quoted marker is never overwritten
+as if it were Reeve's own. When a pull request has so many comments that this
+duty's own cannot be found with certainty, the review is withheld —
+`withheld` — rather than risk a duplicate. Neither guard is configurable,
+because an input can be misconfigured and these two cannot be. The inline
+threads answer to the same ownership rule through their own marker, and the
+same walk: a thread the listing cannot prove is this duty's own is never
+touched, and a listing that never reaches a short page withholds thread
+writes rather than risk a copy.
 
 **`resolved` is evidence, never agreement — and the ladder carries a human
 axis beside it.** A finding the diff has truly moved past is `resolved` by
@@ -251,8 +278,8 @@ maintainer decided, it never overrules the evidence ladder, and it is never
 silently reverted.
 
 This keeps the ladder honest (the duty documents only what its single owned
-comment decided) while giving the thread the last rung a human review has —
-conversation itself, heard. See
+summary comment and its own inline threads decided) while giving the thread
+the last rung a human review has — conversation itself, heard. See
 [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 
 ## Deterministic findings, before any model
@@ -399,7 +426,7 @@ boundary as the diff itself, framed as evidence about the repository. A
 finding must still name one of the diff's files and one of the lines the
 patch proves (`parseFinding` enforces this) — a file the context mentions
 but the diff never showed cannot authorise a finding about itself. The
-single model pass and the single owned comment are unchanged.
+single model pass and the single owned summary comment are unchanged.
 
 ## Unreadable output is no verdict
 
@@ -426,13 +453,19 @@ summary still says what happened.
 
 Every output `review/action.yml` declares.
 
-| Output      | Value                                                                                                                                                                                                                                                                                              |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `commented` | `true` when the single review comment was posted or replaced this run. `false` on every other path — including one that reconciled findings but the warrant, the confidence floor, or `dry-run` withheld the write. Never unset; there is no update-in-place beyond this duty's own owned comment. |
-| `note`      | Why this run stopped before a verdict, when it did — merged, closed, a draft under `trigger: pr`, or a Reeve proposal pull request. Empty when the run reached a verdict.                                                                                                                          |
-| `head-sha`  | The pull request's head SHA at review time. Empty when the run stopped before reading the pull request.                                                                                                                                                                                            |
-| `starved`   | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                                                                               |
-| `findings`  | How many findings this run's reconciliation produced — created, persisted, changed, resolved and reopened combined. The comment, when one was posted, carries the same count.                                                                                                                      |
+| Output      | Value                                                                                                                                                                                                                                                                                                     |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commented` | `true` when the single owned summary comment was posted or replaced this run. `false` on every other path — including one that reconciled findings but the warrant, the confidence floor, or `dry-run` withheld the write. Never unset; there is no update-in-place beyond this duty's own owned comment. |
+| `note`      | Why this run stopped before a verdict, when it did — merged, closed, a draft under `trigger: pr`, or a Reeve proposal pull request. Empty when the run reached a verdict.                                                                                                                                 |
+| `head-sha`  | The pull request's head SHA at review time. Empty when the run stopped before reading the pull request.                                                                                                                                                                                                   |
+| `starved`   | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                                                                                      |
+| `findings`  | How many findings this run's reconciliation produced — created, persisted, changed, resolved and reopened combined. The summary comment, when one was posted, carries the same count.                                                                                                                     |
+
+Inline threads are not an output — they are a write, like the comment itself.
+The summary's `### Verdict` table carries a `Threads` row naming what the
+sync did: how many threads were posted inline, how many updated in place, and
+how many findings fell back to the summary because the API could not anchor
+them at the current commit.
 
 **`findings` is the output that matters most for a repository still tuning
 `confidence`.** It is populated on every run that reached a verdict, whether
@@ -455,18 +488,25 @@ watch how it does.
 | A referenced pack is missing, over-budget, or does not match its pin | **Red**, naming the pack and the version it declares                  |
 | The pull request cannot be read                                      | **Red**                                                               |
 | This duty's own comment could not be found with certainty            | Comment withheld, **green**                                           |
+| This duty's own threads could not be listed with certainty           | Threads withheld, summary still posts, **green**                      |
+| A finding's thread could not be anchored at the current commit (422) | Finding falls back to the summary, **green**                          |
+| The review-comment API is missing scope or denied                    | **Red**, before the summary is written                                |
 
 **The failure mode of this duty is a withheld write, never a wrong or a
 doubled comment.** Every branch above ends without posting, or posts exactly
-once — the same comment in place, replaced only when its findings moved.
+once — the same summary comment in place, replaced only when its findings
+moved, and one owned inline thread per anchorable finding, never a second
+copy of one.
 
 ## Dry-run behavior
 
 `dry-run: true` runs the whole pipeline, writes every output, and posts
 nothing. The disposition a real run would have taken — `posted`, `replaced`,
 `unchanged` — is rehearsed and printed to the log, and the job summary still
-shows the full verdict. `commented` is `false` on a dry run, because nothing
-was written. See [Rehearsing a run](../../guides/dry-run.md).
+shows the full verdict, including the `Threads` row naming the inline threads
+a real run would have written. `commented` is `false` on a dry run, because
+nothing was written, and no thread is posted either. See [Rehearsing a
+run](../../guides/dry-run.md).
 
 ## Cost
 
@@ -528,18 +568,21 @@ full arithmetic.
   diff, framed as evidence — never as instructions — and a finding must still
   be proven by the diff, however vivid the surrounding source looks. See
   [The context engine](#the-context-engine).
-- **The review comment is visibly machine-written, unconditionally.** The
-  fixed closing line — "This review was written by a model, not decided by a
-  maintainer — read each finding as a lead to check" — is unstrippable: there
-  is no input, no `show-attribution`-style setting, that renders the comment
-  without it, the same site rule as `respond`'s notice.
+- **The review summary comment and every inline thread are visibly
+  machine-written, unconditionally.** The fixed closing line — "This review
+  was written by a model, not decided by a maintainer — read each finding as
+  a lead to check" — is unstrippable: there is no input, no
+  `show-attribution`-style setting, that renders a comment without it, the
+  same site rule as `respond`'s notice.
 - **What it will never do:** edit code, open a fixing pull request, run a
   test suite, or otherwise touch the repository on the pull request's behalf;
-  request changes on the review API or approve; post a second comment to a
-  pull request it already owns; overwrite a comment whose marker it cannot
-  verify as its own; post without `comment` granted by the warrant; report a
-  finding the diff cannot prove; hide, soften, or make removable the
-  machine-written notice. See
+  request changes on the review API or approve; post a second summary comment
+  to a pull request it already owns; create a thread this duty does not own,
+  update a thread whose marker it cannot verify as its own, or touch a thread
+  a human wrote; overwrite a comment whose marker it cannot verify as its
+  own; post without `comment` granted by the warrant; report a finding the
+  diff cannot prove; hide, soften, or make removable the machine-written
+  notice. See
   [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 
 ## Related concepts

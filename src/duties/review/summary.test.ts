@@ -24,7 +24,7 @@ function run(overrides: Partial<Run> = {}): Run {
     ungranted: null,
     malformedAnswers: 0,
     readRules: null,
-passes: [],
+    passes: [],
     contextReadFiles: 0,
     threads: null,
     ...overrides,

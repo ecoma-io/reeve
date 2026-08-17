@@ -177,7 +177,7 @@ export interface ReviewFixture {
   readonly previous?: {
     readonly body: string;
   };
-/** Human replies on the thread after the owned comment — the disposition path. */
+  /** Human replies on the thread after the owned comment — the disposition path. */
   readonly replies?: readonly ReviewThreadReply[];
   /** Inline review threads a previous run left, as the listing would serve them. */
   readonly threads?: ReviewScenario["threads"];

@@ -175,7 +175,7 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
-/** How many workspace reads the context engine made, for the summary's Context row. */
+  /** How many workspace reads the context engine made, for the summary's Context row. */
   readonly contextReadFiles: number;
   /** What the inline-thread sync did — for the page's "Threads" row. */
   readonly threads: ThreadSync | null;
@@ -203,7 +203,7 @@ type Settled = Partial<
     | "headSha"
     | "malformedAnswers"
     | "rulesPath"
-| "contextReadFiles"
+    | "contextReadFiles"
     | "threads"
     | "previous"
     | "memoryNote"
@@ -272,7 +272,7 @@ async function decide(
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
-contextReadFiles: 0,
+    contextReadFiles: 0,
     threads: null,
     previous: null,
     memoryNote: null,

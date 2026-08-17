@@ -169,8 +169,9 @@ correctness pass; `deep` adds a security pass). Each pass reads the diff
 independently and the synthesis correlates the findings — the same finding
 from two passes is reported once, corroborated; a disagreement at the same
 line is annotated, not silently kept or dropped. The verdict lands once, as
-one owned comment, and tracks its findings across `synchronize` events
-instead of reposting. Rules are your own (`.github/reeve-rules.yml`) and a
+one owned summary comment plus an owned inline thread per finding the diff
+proves, and tracks its findings across `synchronize` events instead of
+reposting. Rules are your own (`.github/reeve-rules.yml`) and a
 maintainer always owns the diff. [Review](docs/reference/duties/review.md).
 
 What comes after these nine is decided by one test, and it is a strict one: the

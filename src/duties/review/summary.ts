@@ -51,7 +51,7 @@ export interface Run {
     readonly failed: boolean;
     readonly findings: number;
   }[];
-/** How many workspace reads the context engine made this run. */
+  /** How many workspace reads the context engine made this run. */
   readonly contextReadFiles: number;
   /** What this run's inline-thread sync did, when one ran — for the "Threads" row. */
   readonly threads: ThreadSync | null;
