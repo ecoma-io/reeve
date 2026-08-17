@@ -131,7 +131,7 @@ configuration file sitting next to this one, ever — one file, read the same
 way at every level, is what makes climbing the ladder something a `git diff`
 can show a reviewer, rather than something a support thread has to explain.
 
-This reshapes how [D2](#d2-authority-is-granted-written-and-bounded) reads: a
+This reshapes how [D2](#d2--authority-is-granted-written-and-bounded) reads: a
 `duties:` block, once written, is not an optional tightening of a duty's
 own defaults — it is the entire surface for what any duty may do — and the
 absence of that block, whether because there is no file at all or because the
@@ -142,7 +142,7 @@ unstated wide one.
 undoes the ladder.** The warrant is authority: what a duty is permitted to do
 _to the repository_ — which label, which comment, which close, which write.
 It is reviewed the way code is, because it grants power, and it is the one
-file [D2](#d2-authority-is-granted-written-and-bounded) makes the whole
+file [D2](#d2--authority-is-granted-written-and-bounded) makes the whole
 answer once a `duties:` block exists. An input on the workflow is not
 that. It is how a duty already holding its authority is asked to operate —
 how many threads a sweep considers, how long one request is allowed to run,
