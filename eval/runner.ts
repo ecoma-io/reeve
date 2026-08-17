@@ -985,10 +985,13 @@ function reviewLine(
     // produced the expected count, read off the summary's `| Verification |`
     // row.
     (expected.verified === undefined || verifiedFromSummary(run.summary) === expected.verified) &&
-    // A fixture that pins the human-disposition axis asserts the run's summary
+// A fixture that pins the human-disposition axis asserts the run's summary
     // rendered the maintainer's triage read off the thread's eligible reply.
     (expected.disposition === undefined ||
-      dispositionFromSummary(run.summary).includes(expected.disposition));
+      dispositionFromSummary(run.summary).includes(expected.disposition)) &&
+    // A fixture that pins the thread surface asserts the run posted exactly
+    // that many inline review threads (the `pulls/{n}/comments` POST count).
+    (expected.threads === undefined || effect.threads === Number(expected.threads));
 
   // The language dimension wins over both: a pull request the pipeline
   // identified as the wrong language was handled wrong, and that can never be
@@ -1018,14 +1021,15 @@ function reviewLine(
 
   if (finding) {
     const detail = effect.commented
-      ? `${effect.wrote === "patch" ? "replaced" : "posted"} ${findings} finding(s) — comments: ${echoed}`
+      ? `${effect.wrote === "patch" ? "replaced" : "posted"} ${findings} finding(s) — comments: ${echoed}` +
+        (effect.threads > 0 ? `, ${String(effect.threads)} inline thread(s)` : "")
       : `clean stop — ${echoed === "false" ? "warrant denies review" : "nothing posted"}`;
     return { fixture, outcome: "finding", detail };
   }
   return {
     fixture,
     outcome: "skipped",
-    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)} wrote=${JSON.stringify(effect.wrote)}`,
+    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)} wrote=${JSON.stringify(effect.wrote)} threads=${JSON.stringify(effect.threads)}`,
   };
 }
 
