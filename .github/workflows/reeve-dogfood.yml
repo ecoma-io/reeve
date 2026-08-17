@@ -1,0 +1,842 @@
+name: Reeve dogfood
+
+# The one workflow that dogfoods every duty. This file is the consolidation of
+# the per-duty dogfood workflows it replaces (reeve-triage-issue, reeve-translate-issue,
+# reeve-translate-pr, reeve-duplicate-issue, reeve-respond-issue, reeve-lifecycle-issue,
+# reeve-harmonise, reeve-sweep, reeve-dependa, reeve-dependa-dogfood).
+#
+# One config answers the dogfood questions in a glance: which repository, which
+# duty, which event, which mode, which result. The `on:` block declares every
+# event once; each job carries the ONLY filter for the event this duty answers
+# to, and no two jobs restate the same filter. Everything below is commentary on
+# that one table.
+#
+# Every job runs the REAL public leaf action: `uses: ecoma-io/reeve/<duty>@main`.
+# `@main` rather than a tag because dogfooding is how an un-released change gets
+# exercised — a release is the end of the loop, not the beginning. The committed
+# `dist/` bundle the leaf runs is the one this branch carries, exactly the bundle
+# CI proves matches `src/`.
+#
+# MODE — what a job may write. A job's mode is stated in its header, and the
+# boundary between modes is a deliberate act, never a default:
+#
+#   observe    — dry-run or shadow. The pipeline runs whole; nothing is written.
+#                `duplicate`, `respond`, `lifecycle`, `review` and the dependa
+#                rows live here until a maintainer has read enough job summaries
+#                to trust them.
+#   propose    — the duty drafts (and judges) but the warrant is what decides
+#                whether a draft becomes a write: translate's edit-body,
+#                harmonise's edit-file + open-pr. The workflow withholds nothing;
+#                the warrant does.
+#   controlled — the duty writes what the warrant grants, narrowed by its own
+#                `dry-run`. Only `triage` (label, record) is configured here,
+#                and only on the repository that owns the warrant.
+#
+# `observe` is the only mode that is write-safe BY CONSTRUCTION — dry-run cannot
+# be turned off from a matrix row. `propose` and `controlled` are write modes
+# that answer to the warrant, which is the single authority file and the only
+# thing that can widen them. Nothing in this file can grant a capability the
+# warrant does not. dependa is the proof: the warrant deliberately omits it from
+# `duties:`, so both dependa rows below — the Wednesday drafting shape inherited
+# from reeve-dependa.yml and the Thursday conformance shape inherited from
+# reeve-dependa-dogfood.yml — are observation in effect, whatever drafts count
+# or permission scope they carry. Granting `dependa: [edit-file, open-pr]` in
+# the warrant would be the act that transitions it from observer to actor.
+#
+# Target repositories. Dogfooding runs the leaf action against THIS repository's
+# own threads — the warrant at `.github/reeve.yml` is a consumer file, and
+# running a duty against the repository that owns the warrant is the whole point.
+# ecoma-io/lattice and ecoma-io/loom were verified accessible and un-archived
+# but are NOT configured here: their warrants do not yet exist, and this
+# workflow's GITHUB_TOKEN cannot act across repositories. Cross-repository
+# dogfood is a follow-up that ships a workflow file into each target repository;
+# the config table below is the shape it will take. ecoma-io/litmus was dropped
+# before configuration — the token cannot resolve the repository at all (404).
+#
+# Schedule cadence. GitHub fires the workflow on EVERY cron in the list below and
+# reports the cron that reached this run in `github.event.schedule`, so each job
+# gates its `if:` on the cron it answers to. A scheduled run is the single
+# payload for all four crons' worth of jobs; the gate is what keeps a job from
+# running more often than the workflow it replaced. One caveat taken from the
+# platform's own docs: during high load a scheduled run may arrive carrying the
+# most recent cron string rather than the one it was queued for. For dogfood the
+# failure mode is benign either way — a sweep running a day early is idempotent
+# (fingerprints make re-runs free) and a lifecycle run arriving a day late is
+# one quiet night, not a missed one.
+
+on:
+  # The union of every event the consolidated workflows listened for. A job
+  # filters rows from the config table below; the `on:` block is the only place
+  # an event is declared, and it is declared once.
+  issues:
+    # `opened` for every duty; `edited` for translate (a corrected issue gets a
+    # corrected translation); `labeled`, `unlabeled`, `reopened` for triage's
+    # `record` capability (a human's label change or reopen is a correction, not
+    # a model decision).
+    types: [opened, edited, labeled, unlabeled, reopened]
+  # Not `pull_request`: a fork's token is read-only there, so translate could
+  # never write the body it exists to write. `pull_request_target` runs against
+  # the BASE ref with a write token, which is safe here for one reason and it is
+  # worth stating precisely — nothing from the head is checked out or executed.
+  # The body is read through the API and framed as untrusted data in every
+  # prompt that sees it. The same reasoning is what keeps review's rules file on
+  # the trusted base checkout (see the review job's checkout `ref:`).
+  pull_request_target:
+    types: [opened, edited]
+  # review dogfoods on `pull_request` (not `_target`): it checks out the base
+  # ref explicitly so the rules file it reads is the trusted one, and it runs
+  # `dry-run: true` (the warrant grants review nothing), so the write token the
+  # `_target` event would provide is not needed yet.
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+  # harmonise syncs locale files when the source locale changes on main.
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+  schedule:
+    - cron: "17 3 * * *" # daily — lifecycle
+    - cron: "0 4 * * 1" # Monday — sweep
+    - cron: "17 3 * * 3" # Wednesday — dependa drafting shape
+    - cron: "17 3 * * 4" # Thursday — dependa shadow conformance
+  workflow_dispatch:
+    inputs:
+      number:
+        description: Issue or pull request number to act on
+        required: false
+      # A manual run defaults to observation. The write duties (triage,
+      # translate, harmonise, the sweep) answer to the warrant, and a maintainer
+      # who wants a manual run to write has to say so twice: `dry-run: false`
+      # here, and the capability granted in the warrant.
+      dry-run:
+        description: Report what would happen, change nothing
+        type: boolean
+        default: true
+
+# Best-effort: the top-level block exists so a job added later has a safe
+# default. Every job below narrows it further — a job's own `concurrency` block
+# replaces this one rather than adding to it, and a per-duty group is what stops
+# two duties on the same thread from cancelling each other.
+concurrency:
+  group: reeve-dogfood-derived
+  cancel-in-progress: false
+
+jobs:
+  # ────────────────────────────── triage ─────────────────────────────────────
+  # Labels issues from the warrant's taxonomy; records a human's label change or
+  # reopen as a correction. MODE: controlled — the warrant grants `label, record`.
+  # A manual dispatch defaults to dry-run and needs `dry-run: false` to act.
+  triage:
+    name: Triage
+    if: |
+      (github.event_name == 'issues' && github.event.issue.user.type != 'Bot') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # record writes corrections to .reeve/corrections/
+      issues: write # label
+    concurrency:
+      # Per-duty, per-thread: an edit supersedes the run the previous state of
+      # the thread started, but a triage run never cancels a translate run on
+      # the same thread.
+      group: reeve-dogfood-triage-${{ github.event.issue.number || inputs.number || 'dispatch' }}
+      cancel-in-progress: true
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: >-
+          env.MODELS == '' &&
+          github.event.action != 'labeled' &&
+          github.event.action != 'unlabeled' &&
+          github.event.action != 'reopened'
+        run: echo "::notice::No provider is configured for this repository, so nothing was triaged."
+
+      # `record` is governance, not intelligence: label corrections and reopen
+      # reversals can be recorded without a model. Ordinary triage still needs
+      # a provider.
+      - if: >-
+          env.MODELS != '' ||
+          github.event.action == 'labeled' ||
+          github.event.action == 'unlabeled' ||
+          github.event.action == 'reopened'
+        name: Keep the provider out of the log
+        env:
+          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+        run: |
+          printf '%s,%s\n' "$MODELS" "$SCREEN_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      # The real public leaf, pinned to @main for dogfood of un-released
+      # behaviour. `number` names the triggering thread, or a `workflow_dispatch`
+      # backfill.
+      - if: >-
+          env.MODELS != '' ||
+          github.event.action == 'labeled' ||
+          github.event.action == 'unlabeled' ||
+          github.event.action == 'reopened'
+        id: triage
+        uses: ecoma-io/reeve/triage@main
+        with:
+          number: ${{ github.event.issue.number || inputs.number }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          about: >-
+            Reeve is a GitHub Action that reads issues and pull requests with a
+            language model and acts on them under a warrant committed to the
+            repository — translating threads and applying labels from a taxonomy
+            the maintainers wrote.
+          # A real issue event acts (the warrant says label, record); a manual
+          # dispatch observes unless a maintainer says otherwise.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+
+      # The dogfood read: every job ends with a summary naming repository, duty,
+      # event, mode and outcome, so a failure is answerable in one glance.
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: triage
+          REPOSITORY: ecoma-io/reeve
+          MODE: controlled
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.action }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (writes answer to the warrant) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| thread | ${{ github.event.issue.number || inputs.number || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.triage.outcome }} — labels: ${{ steps.triage.outputs.proposed }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────── translate ───────────────────────────────────
+  # Translates an issue or pull request body and publishes the block into the
+  # body. MODE: propose — the warrant grants `edit-body`, and the workflow asks
+  # for `drafts: 2` and lets the judge panel pick, the quality lever.
+  translate:
+    name: Translate
+    if: |
+      (github.event_name == 'issues' && github.event.issue.user.type != 'Bot') ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.user.type != 'Bot') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write # publish the translated block into an issue body
+      pull-requests: write # publish the translated block into a pull request body
+    concurrency:
+      # Issue and pull request numbers share one space, so at most one event can
+      # name a given thread — the group is unambiguous without an issue/PR tag.
+      group: reeve-dogfood-translate-${{ github.event.issue.number || github.event.pull_request.number || inputs.number || 'dispatch' }}
+      cancel-in-progress: true
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was translated."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+        run: |
+          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        id: translate
+        uses: ecoma-io/reeve/translate@main
+        with:
+          number: ${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+          drafts: "2"
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: translate
+          REPOSITORY: ecoma-io/reeve
+          MODE: propose
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.action }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (drafts judged; warrant decides the write) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| thread | ${{ github.event.issue.number || github.event.pull_request.number || inputs.number || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.translate.outcome }} — languages: ${{ steps.translate.outputs.translated }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────── duplicate ───────────────────────────────────
+  # Finds duplicate reports. MODE: observe — the warrant grants `comment`, and
+  # this job runs `dry-run: true`, so the verdict lands in the job summary, the
+  # read a maintainer does for a few weeks before removing the dry-run.
+  duplicate:
+    name: Duplicate check
+    if: |
+      (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    concurrency:
+      group: reeve-dogfood-duplicate-${{ github.event.issue.number || inputs.number || 'dispatch' }}
+      cancel-in-progress: true
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was checked."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        run: |
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        id: duplicate
+        uses: ecoma-io/reeve/duplicate@main
+        with:
+          number: ${{ github.event.issue.number || inputs.number }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          # Report-only until this backlog says what the false-positive rate
+          # actually is.
+          dry-run: true
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: duplicate
+          REPOSITORY: ecoma-io/reeve
+          MODE: observe
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.action }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (dry-run — nothing posted) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| thread | ${{ github.event.issue.number || inputs.number || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.duplicate.outcome }} — duplicate-of: ${{ steps.duplicate.outputs.duplicate-of }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────── respond ────────────────────────────────────
+  # Drafts a first reply. MODE: observe, the same way duplicate is: the warrant
+  # grants `comment`, this job withholds the post with `dry-run: true`, and the
+  # sanitized draft is rendered in the job summary.
+  respond:
+    name: First reply
+    if: |
+      (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    concurrency:
+      group: reeve-dogfood-respond-${{ github.event.issue.number || inputs.number || 'dispatch' }}
+      cancel-in-progress: true
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was drafted."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+        run: |
+          printf '%s,%s\n' "$MODELS" "$SCREEN_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        id: respond
+        uses: ecoma-io/reeve/respond@main
+        with:
+          number: ${{ github.event.issue.number || inputs.number }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          about: >-
+            Reeve is a GitHub Action that reads issues and pull requests with a
+            language model and acts on them under a warrant committed to the
+            repository — translating threads and applying labels from a taxonomy
+            the maintainers wrote.
+          # Report-only; the draft lives in the job summary.
+          dry-run: true
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: respond
+          REPOSITORY: ecoma-io/reeve
+          MODE: observe
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.action }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (dry-run — nothing posted) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| thread | ${{ github.event.issue.number || inputs.number || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.respond.outcome }} — response drafted: ${{ steps.respond.outputs.responded }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────── lifecycle ───────────────────────────────────
+  # The stale-clock duty: labels after the inactivity window, closes after the
+  # grace period — all in `dry-run: true` until a maintainer removes it. Two
+  # separate acts of intent (this file and the warrant's lifecycle capabilities)
+  # arm the clock. MODE: observe. Runs on the daily cron and manual dispatch.
+  lifecycle:
+    name: Lifecycle
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: reeve-dogfood-lifecycle-${{ github.event.issue.number || inputs.number || 'sweep' }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: lifecycle
+        uses: ecoma-io/reeve/lifecycle@main
+        with:
+          number: ${{ github.event.issue.number || inputs.number || '' }}
+          # A scheduled sweep is always dry-run; a manual run defaults to dry-run
+          # and needs `dry-run: false` to act.
+          dry-run: ${{ inputs.dry-run || 'true' }}
+          sweep: ${{ (github.event.issue.number || inputs.number) && 'false' || 'true' }}
+          limit: "20"
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: lifecycle
+          REPOSITORY: ecoma-io/reeve
+          MODE: observe
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.schedule }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (dry-run — nothing closed) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.lifecycle.outcome }} — processed: ${{ steps.lifecycle.outputs.processed }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────── harmonise ───────────────────────────────────
+  # Keeps locale-suffixed documentation in sync with the source locale, when the
+  # source locale changes on main. MODE: propose — the warrant grants edit-file
+  # + open-pr, so the sync pull request is opened. The Monday scheduled sweep of
+  # open document groups lives in the sweep job below, not here.
+  harmonise:
+    name: Harmonise
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # commit locale files and provenance state
+      pull-requests: write # open or update sync pull requests
+    concurrency:
+      group: reeve-dogfood-harmonise-${{ github.sha }}
+      cancel-in-progress: false
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so no documentation was harmonised."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+        run: |
+          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        id: harmonise
+        uses: ecoma-io/reeve/harmonise@main
+        with:
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+          drafts: "2"
+          source-language: en
+          paths: "README.md"
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: harmonise
+          REPOSITORY: ecoma-io/reeve
+          MODE: propose
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.ref }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (drafts judged; warrant decides the write) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.harmonise.outcome }} — synced: ${{ steps.harmonise.outputs.synced }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────── review ─────────────────────────────────────
+  # The newest duty, exercised here as a live dogfood for the first time. It
+  # answers a pull request with findings — in MODE: observe, because the warrant
+  # grants review nothing yet, so the verdict and findings stay on the job
+  # summary. This is the exact "watch a few synchronize events before granting
+  # comment" start the duty's own docs recommend.
+  review:
+    name: Review
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write # dry-run posts nothing, but the duty needs the scope to read
+    concurrency:
+      group: reeve-dogfood-review-${{ github.event.pull_request.number || inputs.number || 'dispatch' }}
+      cancel-in-progress: true
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      # The rules file is part of the job's own pinned checkout, so a pull
+      # request cannot replace it before the review reads it. `ref:` names the
+      # base branch — the rules a model ever follows are the ones that already
+      # survived a review of their own.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was reviewed."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        run: |
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != ''
+        id: review
+        uses: ecoma-io/reeve/review@main
+        with:
+          number: ${{ github.event.pull_request.number || inputs.number }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          # The warrant grants review nothing; dry-run keeps the findings on the
+          # job summary even if a maintainer later adds the grant.
+          dry-run: true
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: review
+          REPOSITORY: ecoma-io/reeve
+          MODE: observe
+        run: |
+          echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.action }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (dry-run — nothing posted) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| thread | ${{ github.event.pull_request.number || inputs.number || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.review.outcome }} — findings: ${{ steps.review.outputs.findings }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ────────────────────────────── dependa ────────────────────────────────────
+  # The dependency maintainer. Both rows are observation in effect: the warrant
+  # deliberately omits dependa from `duties:`, so no grant exists for it to act
+  # on. The Wednesday row keeps the drafting shape of the old reeve-dependa.yml
+  # (it would open pull requests the moment the warrant grants edit-file + open-
+  # pr; until then it drafts and stops). The Thursday row keeps the shadow
+  # conformance shape of the old reeve-dependa-dogfood.yml: what it discovers,
+  # classifies and groups is compared against Renovate's own findings and
+  # uploaded as a conformance dataset. MODE: observe for both — see
+  # dogfood/README.md.
+  dependa:
+    name: Dependa ${{ matrix.shape }}
+    if: >
+      (github.event_name == 'schedule' && (github.event.schedule == '17 3 * * 3' || github.event.schedule == '17 3 * * 4')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shape: drafting
+            cron: "17 3 * * 3"
+            drafts: "2"
+          - shape: conformance
+            cron: "17 3 * * 4"
+            drafts: "0"
+    concurrency:
+      group: reeve-dogfood-dependa-${{ matrix.shape }}
+      cancel-in-progress: false
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The conformance row runs the comparison CLI, which imports the typescript
+      # sources; only it needs the toolchain.
+      - if: matrix.shape == 'conformance'
+        uses: pnpm/action-setup@0977fd99890a83b15e6c6a4bf7e1d3040f40b87c # v6.0.10
+
+      - if: matrix.shape == 'conformance'
+        uses: actions/setup-node@820762782a9f9c1c3883f26b28b6896b0f89d769 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - if: matrix.shape == 'conformance'
+        run: pnpm install --frozen-lockfile
+
+      - if: env.MODELS == '' && matrix.shape == 'drafting'
+        run: echo "::notice::No provider is configured for this repository, so no model-assisted risk interpretation will run. The deterministic pipeline still discovers, classifies, and groups."
+
+      - if: env.MODELS != '' && matrix.shape == 'drafting'
+        name: Keep the provider out of the log
+        run: |
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      # Run dependa — observations only, no mutations. The warrant deliberately
+      # omits dependa from its `duties:` block, so no grant exists for this duty
+      # to act on.
+      - id: dependa
+        uses: ecoma-io/reeve/dependa@main
+        with:
+          ecosystems: "npm, github-actions"
+          drafts: ${{ matrix.drafts }}
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+
+      # Run the conformance comparison CLI: extracts the Renovate baseline,
+      # extracts dependa's shadow findings, and produces a conformance report
+      # + JSONL dataset.
+      - if: matrix.shape == 'conformance'
+        name: Run conformance comparison
+        run: npx tsx dogfood/conformance/cli.ts --repo-root . --ecosystems npm,github-actions
+
+      - if: matrix.shape == 'conformance'
+        name: Upload conformance data
+        uses: actions/upload-artifact@043fb46d768f4889835ef676b1c6f0659a0f2b3f # v7.0.1
+        with:
+          name: dependa-dogfood-${{ github.sha }}
+          path: |
+            dogfood/conformance-report.jsonl
+          retention-days: 30
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: dependa
+          REPOSITORY: ecoma-io/reeve
+          MODE: observe
+        run: |
+          echo "## Dogfood — $DUTY (${{ matrix.shape }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY / ${{ matrix.shape }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.schedule }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (shadow — the warrant grants dependa nothing) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ steps.dependa.outcome }} — proposals: ${{ steps.dependa.outputs.proposed }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f dogfood/conformance-report.jsonl ]; then
+            echo "Conformance report uploaded as an artifact." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ─────────────────────────────── sweep ─────────────────────────────────────
+  # The scheduled counterpart to the event-triggered jobs. It comes back on the
+  # Monday cron for whatever the event never fired on — backlog from before this
+  # repository ran Reeve, and anything a keyless provider's rate limit left
+  # stranded mid-run. This job is the consolidation of the old reeve-sweep.yml;
+  # triage, translate and harmonise each process up to `limit` open threads.
+  # A sweep decides how much work a run looks for, never what it is allowed to
+  # do — the warrant bounds that exactly as it bounds a single-thread run.
+  # MODE: propose (the individual steps answer to the warrant, and a manual
+  # dispatch defaults to dry-run).
+  sweep:
+    name: Sweep — ${{ matrix.duty }}
+    if: >
+      (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 1') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        duty: [triage, translate, harmonise]
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    concurrency:
+      group: reeve-dogfood-sweep
+      cancel-in-progress: false
+    env:
+      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - if: env.MODELS == ''
+        run: echo "::notice::No provider is configured for this repository, so nothing was swept."
+
+      - if: env.MODELS != ''
+        name: Keep the provider out of the log
+        env:
+          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+        run: |
+          printf '%s,%s,%s\n' "$MODELS" "$SCREEN_MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+            id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+          done
+
+      - if: env.MODELS != '' && matrix.duty == 'triage'
+        id: sweep_triage
+        uses: ecoma-io/reeve/triage@main
+        with:
+          sweep: true
+          limit: "20"
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          about: >-
+            Reeve is a GitHub Action that reads issues and pull requests with a
+            language model and acts on them under a warrant committed to the
+            repository — translating threads and applying labels from a taxonomy
+            the maintainers wrote.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+
+      - if: env.MODELS != '' && matrix.duty == 'translate'
+        id: sweep_translate
+        uses: ecoma-io/reeve/translate@main
+        with:
+          sweep: true
+          limit: "20"
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+          drafts: "2"
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+
+      - if: env.MODELS != '' && matrix.duty == 'harmonise'
+        id: sweep_harmonise
+        uses: ecoma-io/reeve/harmonise@main
+        with:
+          sweep: true
+          limit: "20"
+          base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
+          api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
+          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
+          drafts: "2"
+          source-language: en
+          paths: "README.md"
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
+
+      - name: Write dogfood summary
+        if: always()
+        env:
+          DUTY: ${{ matrix.duty }}
+          REPOSITORY: ecoma-io/reeve
+          MODE: propose
+        run: |
+          echo "## Dogfood — sweep: $DUTY" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| duty | $DUTY (sweep) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| event | ${{ github.event_name }} ${{ github.event.schedule }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| outcome | ${{ matrix.duty == 'triage' && steps.sweep_triage.outcome || matrix.duty == 'translate' && steps.sweep_translate.outcome || steps.sweep_harmonise.outcome }} |" >> "$GITHUB_STEP_SUMMARY"
