@@ -320,9 +320,9 @@ backlog told you what the rate actually is.
 
 **This file is the whole authority — the workflow adds nothing.** The action
 inputs handle how the runtime operates (`dry-run`, `number`, `limit`, and
-friends); they cannot grant a capability. A workflow can restrict what this
-block granted, never widen it. `duplicate`, `respond`, harness grants — every
-write this page lists comes out of this file alone. The narrower-of-the-two
+friends); they cannot grant a capability. A workflow can say when a run
+happens, never what a run may do. `duplicate`, `respond`, harness grants —
+every write this page lists comes out of this file alone. The narrower-of-the-two
 rule that used to sit between the file and each action's `apply` input no
 longer exists, because there is no second half of the gate to be narrower
 than.

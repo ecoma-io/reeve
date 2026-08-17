@@ -63,7 +63,6 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          languages: en, vi
           dry-run: true # safe first run — remove when you trust it
 ```
 
