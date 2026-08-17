@@ -19619,7 +19619,7 @@ var require_dist = __commonJS({
      */
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.format = format;
-    exports.parse = parse5;
+    exports.parse = parse6;
     var TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
     var TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
     var QUOTE_REGEXP = /[\\"]/g;
@@ -19646,7 +19646,7 @@ var require_dist = __commonJS({
       }
       return result;
     }
-    function parse5(header, options) {
+    function parse6(header, options) {
       const len = header.length;
       let index = skipOWS(header, 0, len);
       const valueStart = index;
@@ -19759,7 +19759,7 @@ var require_identity = __commonJS({
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
     var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isScalar2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
     var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection(node) {
       if (node && typeof node === "object")
@@ -19781,7 +19781,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar2(node) || isCollection(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -19796,7 +19796,7 @@ var require_identity = __commonJS({
     exports.isMap = isMap;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.isSeq = isSeq;
   }
 });
@@ -21407,7 +21407,7 @@ var require_merge = __commonJS({
     var identity = require_identity();
     var Scalar = require_Scalar();
     var MERGE_KEY = "<<";
-    var merge2 = {
+    var merge3 = {
       identify: (value) => value === MERGE_KEY || typeof value === "symbol" && value.description === MERGE_KEY,
       default: "key",
       tag: "tag:yaml.org,2002:merge",
@@ -21417,7 +21417,7 @@ var require_merge = __commonJS({
       }),
       stringify: () => MERGE_KEY
     };
-    var isMergeKey = (ctx, key) => (merge2.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge2.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default);
+    var isMergeKey = (ctx, key) => (merge3.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge3.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge3.tag && tag.default);
     function addMergeToJSMap(ctx, map, value) {
       const source = resolveAliasValue(ctx, value);
       if (identity.isSeq(source))
@@ -21456,7 +21456,7 @@ var require_merge = __commonJS({
     }
     exports.addMergeToJSMap = addMergeToJSMap;
     exports.isMergeKey = isMergeKey;
-    exports.merge = merge2;
+    exports.merge = merge3;
   }
 });
 
@@ -21465,15 +21465,15 @@ var require_addPairToJSMap = __commonJS({
   "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports) {
     "use strict";
     var log = require_log();
-    var merge2 = require_merge();
+    var merge3 = require_merge();
     var stringify = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
     function addPairToJSMap(ctx, map, { key, value }) {
       if (identity.isNode(key) && key.addToJSMap)
         key.addToJSMap(ctx, map, value);
-      else if (merge2.isMergeKey(ctx, key))
-        merge2.addMergeToJSMap(ctx, map, value);
+      else if (merge3.isMergeKey(ctx, key))
+        merge3.addMergeToJSMap(ctx, map, value);
       else {
         const jsKey = toJS.toJS(key, "", ctx);
         if (map instanceof Map) {
@@ -22864,7 +22864,7 @@ var require_schema3 = __commonJS({
     var bool = require_bool2();
     var float = require_float2();
     var int = require_int2();
-    var merge2 = require_merge();
+    var merge3 = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
     var set = require_set();
@@ -22884,7 +22884,7 @@ var require_schema3 = __commonJS({
       float.floatExp,
       float.float,
       binary.binary,
-      merge2.merge,
+      merge3.merge,
       omap.omap,
       pairs.pairs,
       set.set,
@@ -22910,7 +22910,7 @@ var require_tags = __commonJS({
     var schema = require_schema();
     var schema$1 = require_schema2();
     var binary = require_binary();
-    var merge2 = require_merge();
+    var merge3 = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
     var schema$2 = require_schema3();
@@ -22935,7 +22935,7 @@ var require_tags = __commonJS({
       intOct: int.intOct,
       intTime: timestamp.intTime,
       map: map.map,
-      merge: merge2.merge,
+      merge: merge3.merge,
       null: _null.nullTag,
       omap: omap.omap,
       pairs: pairs.pairs,
@@ -22945,7 +22945,7 @@ var require_tags = __commonJS({
     };
     var coreKnownTags = {
       "tag:yaml.org,2002:binary": binary.binary,
-      "tag:yaml.org,2002:merge": merge2.merge,
+      "tag:yaml.org,2002:merge": merge3.merge,
       "tag:yaml.org,2002:omap": omap.omap,
       "tag:yaml.org,2002:pairs": pairs.pairs,
       "tag:yaml.org,2002:set": set.set,
@@ -22954,7 +22954,7 @@ var require_tags = __commonJS({
     function getTags(customTags, schemaName, addMergeTag) {
       const schemaTags = schemas.get(schemaName);
       if (schemaTags && !customTags) {
-        return addMergeTag && !schemaTags.includes(merge2.merge) ? schemaTags.concat(merge2.merge) : schemaTags.slice();
+        return addMergeTag && !schemaTags.includes(merge3.merge) ? schemaTags.concat(merge3.merge) : schemaTags.slice();
       }
       let tags = schemaTags;
       if (!tags) {
@@ -22972,7 +22972,7 @@ var require_tags = __commonJS({
         tags = customTags(tags.slice());
       }
       if (addMergeTag)
-        tags = tags.concat(merge2.merge);
+        tags = tags.concat(merge3.merge);
       return tags.reduce((tags2, tag) => {
         const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
         if (!tagObj) {
@@ -23001,11 +23001,11 @@ var require_Schema = __commonJS({
     var tags = require_tags();
     var sortMapEntriesByKey = (a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
     var Schema = class _Schema {
-      constructor({ compat, customTags, merge: merge2, resolveKnownTags, schema, sortMapEntries, toStringDefaults }) {
+      constructor({ compat, customTags, merge: merge3, resolveKnownTags, schema, sortMapEntries, toStringDefaults }) {
         this.compat = Array.isArray(compat) ? tags.getTags(compat, "compat") : compat ? tags.getTags(null, compat) : null;
         this.name = typeof schema === "string" && schema || "core";
         this.knownTags = resolveKnownTags ? tags.coreKnownTags : {};
-        this.tags = tags.getTags(customTags, this.name, merge2);
+        this.tags = tags.getTags(customTags, this.name, merge3);
         this.toStringOptions = toStringDefaults ?? null;
         Object.defineProperty(this, identity.MAP, { value: map.map });
         Object.defineProperty(this, identity.SCALAR, { value: string.string });
@@ -23424,7 +23424,7 @@ var require_errors2 = __commonJS({
         this.pos = pos;
       }
     };
-    var YAMLParseError3 = class extends YAMLError {
+    var YAMLParseError4 = class extends YAMLError {
       constructor(pos, code2, message) {
         super("YAMLParseError", pos, code2, message);
       }
@@ -23470,7 +23470,7 @@ ${pointer}
       }
     };
     exports.YAMLError = YAMLError;
-    exports.YAMLParseError = YAMLParseError3;
+    exports.YAMLParseError = YAMLParseError4;
     exports.YAMLWarning = YAMLWarning;
     exports.prettifyError = prettifyError;
   }
@@ -25338,7 +25338,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -25422,7 +25422,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -26952,7 +26952,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument(source, options = {}) {
+    function parseDocument2(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -26971,14 +26971,14 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse5(src, reviver, options) {
+    function parse6(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument(src, options);
+      const doc = parseDocument2(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning2) => log.warn(doc.options.logLevel, warning2));
@@ -27012,9 +27012,9 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse5;
+    exports.parse = parse6;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument;
+    exports.parseDocument = parseDocument2;
     exports.stringify = stringify;
   }
 });
@@ -31576,7 +31576,7 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // src/duties/review/main.ts
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 
 // node_modules/.pnpm/eld@2.0.3/node_modules/eld/src/avgScore.js
 var avgScore = {
@@ -32790,10 +32790,10 @@ function classifyStatus(status) {
 function readUsage(payload) {
   const usage = asRecord(asRecord(payload)?.usage);
   if (usage === null) return null;
-  const prompt2 = asCount(usage.prompt_tokens);
+  const prompt = asCount(usage.prompt_tokens);
   const completion = asCount(usage.completion_tokens);
-  if (prompt2 === null && completion === null) return null;
-  return { prompt: prompt2 ?? 0, completion: completion ?? 0 };
+  if (prompt === null && completion === null) return null;
+  return { prompt: prompt ?? 0, completion: completion ?? 0 };
 }
 function asCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
@@ -35346,10 +35346,17 @@ function decodeEnvelope(payload) {
     }).map((entry) => {
       const raw = entry;
       const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
+      const {
+        snippet: _snippet,
+        verification: _verification,
+        evidence: _evidence,
+        ...core
+      } = entry;
       return {
-        ...entry,
+        ...core,
         wasResolved: entry.wasResolved === true,
-        ...resolvedAtSha
+        ...resolvedAtSha,
+        ...optionalEvidence(raw)
       };
     });
     const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
@@ -35357,6 +35364,23 @@ function decodeEnvelope(payload) {
   } catch {
     return null;
   }
+}
+function optionalEvidence(raw) {
+  const out = {};
+  if (typeof raw.snippet === "string") out.snippet = raw.snippet;
+  if (raw.verification === "verified" || raw.verification === "unverified") {
+    out.verification = raw.verification;
+  }
+  if (Array.isArray(raw.evidence)) {
+    const items = raw.evidence.filter((entry) => evidenceShaped(entry));
+    if (items.length > 0) out.evidence = items;
+  }
+  return out;
+}
+function evidenceShaped(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
+  const entry = raw;
+  return (entry.kind === "diff" || entry.kind === "rules") && typeof entry.weight === "number" && typeof entry.detail === "string" && typeof entry.provenance === "object" && entry.provenance !== null && typeof entry.provenance.ruleId === "string";
 }
 var COMMENT_PAGE = 100;
 async function findMarked(api, at) {
@@ -35469,7 +35493,15 @@ function findingLine(finding) {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   const body = sanitize(finding.body);
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}`;
+  const badge = verificationBadge(finding);
+  const suffix = badge.length === 0 ? "" : ` ${badge}`;
+  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+}
+function verificationBadge(finding) {
+  if (finding.marker.length > 0) return "";
+  if (finding.verification === "verified") return "\xB7 verified";
+  if (finding.verification === "unverified") return "\xB7 not verified";
+  return "";
 }
 function footer() {
   const parts = [chrome("reviewFooterFloor", null), chrome("reviewFooterEditable", null)];
@@ -35480,8 +35512,159 @@ function escapeHtml(text2) {
 }
 
 // src/duties/review/rules.ts
-var import_yaml2 = __toESM(require_dist2(), 1);
+var import_yaml3 = __toESM(require_dist2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
+import { join } from "node:path";
+
+// src/duties/review/packs.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
+var MAX_PACK_CHARS = 8e3;
+var PACK_TOP_LEVEL_KEYS = /* @__PURE__ */ new Set([
+  "name",
+  "description",
+  "version",
+  "rules",
+  "ignore",
+  "generated",
+  "blocked"
+]);
+var UnreadablePacks = class extends Error {
+  warnings;
+  constructor(message, warnings = []) {
+    super(message);
+    this.name = "UnreadablePacks";
+    this.warnings = warnings;
+  }
+};
+var TWO_PART_VERSION = /^(\d+)(?:\.(\d+))?$/;
+function parsePack(text2, ref) {
+  const warnings = [];
+  let document2;
+  try {
+    document2 = (0, import_yaml2.parse)(text2, { maxAliasCount: 0 });
+  } catch (error2) {
+    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    throw new UnreadablePacks(`pack ${ref}: not valid YAML \u2014 ${reason}`);
+  }
+  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
+    throw new UnreadablePacks(`pack ${ref}: expected a YAML mapping`);
+  }
+  const map = document2;
+  const unknown = Object.keys(map).filter((key) => !PACK_TOP_LEVEL_KEYS.has(key));
+  if (unknown.length > 0) {
+    throw new UnreadablePacks(
+      `pack ${ref}: unknown top-level key \`${unknown[0] ?? ""}\` \u2014 a rule pack describes review policy (rules, ignores, blocked phrases, generated suffixes) and cannot grant authority (D2); remove it or the pack is refused`
+    );
+  }
+  const version = readPackVersion(text2, map.version, ref);
+  const fragment = readPackFragment(map, ref, warnings);
+  return { ref, version, fragment, raw: text2, warnings };
+}
+function readPackVersion(text2, parsed, ref) {
+  if (parsed === void 0 || parsed === null) return null;
+  const node = (0, import_yaml2.parseDocument)(text2).get("version", true);
+  const raw = (0, import_yaml2.isScalar)(node) && Array.isArray(node.range) ? text2.slice(node.range[0], node.range[1]) : null;
+  if (raw === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` could not be read from the file \u2014 got ${JSON.stringify(parsed)}`
+    );
+  }
+  const match = TWO_PART_VERSION.exec(raw.trim().replace(/^['"]|['"]$/g, ""));
+  if (match === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 \u2014 got \`${raw}\``
+    );
+  }
+  return { major: Number(match[1]), minor: match[2] === void 0 ? 0 : Number(match[2]) };
+}
+function readPackFragment(map, ref, warnings) {
+  const rules = readPackRules(map.rules, ref, warnings);
+  const ignore = readPackIgnore(map.ignore, ref, warnings);
+  return {
+    rules,
+    ignoreFiles: ignore.files,
+    ignorePaths: ignore.paths,
+    generatedExtensions: readPackStringList(map.generated, ref, "generated", warnings),
+    blocked: readPackBlocked(map.blocked, ref, warnings)
+  };
+}
+function readPackRules(raw, ref, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks(`pack ${ref}: \`rules:\` is not a list`);
+  }
+  const out = raw.map((entry, index) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(`pack ${ref}: rule entry ${String(index + 1)} is not a mapping; dropped`);
+      return null;
+    }
+    const map = entry;
+    const id = map.id ?? map.rule ?? `rule-${String(index + 1)}`;
+    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    return {
+      id: typeof id === "string" ? id : `rule-${String(index + 1)}`,
+      name: typeof map.name === "string" ? map.name : "Unnamed rule",
+      marker: typeof map.marker === "string" ? map.marker : "",
+      body: typeof map.body === "string" ? map.body : "",
+      severity
+    };
+  }).filter((rule) => rule !== null);
+  return out;
+}
+function readPackIgnore(raw, ref, warnings) {
+  if (raw === void 0 || raw === null) return { files: [], paths: [] };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new UnreadablePacks(`pack ${ref}: \`ignore:\` is not a mapping`);
+  }
+  const map = raw;
+  return {
+    files: readPackStringList(map.files, ref, "ignore.files", warnings),
+    paths: readPackStringList(map.paths, ref, "ignore.paths", warnings)
+  };
+}
+function readPackStringList(raw, ref, key, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push(`pack ${ref}: \`${key}:\` is not a list; ignoring`);
+    return [];
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry !== "string") {
+      warnings.push(
+        `pack ${ref}: \`${key}\` entry ${String(index + 1)} is not a string; dropped`
+      );
+      return null;
+    }
+    return entry;
+  }).filter((entry) => entry !== null);
+}
+function readPackBlocked(raw, ref, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks(`pack ${ref}: \`blocked:\` is not a list`);
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry === "string") {
+      return { phrase: entry, severity: "warning", note: "" };
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(
+        `pack ${ref}: \`blocked\` entry ${String(index + 1)} is not a string or mapping; dropped`
+      );
+      return null;
+    }
+    const map = entry;
+    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    return {
+      phrase: typeof map.phrase === "string" ? map.phrase : "",
+      severity,
+      note: typeof map.note === "string" ? map.note : ""
+    };
+  }).filter((entry) => entry !== null);
+}
+var SEVERITY = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
+
+// src/duties/review/rules.ts
 var MAX_RULES_CHARS = 2e4;
 var UnreadableRules = class extends Error {
   warnings;
@@ -35491,7 +35674,7 @@ var UnreadableRules = class extends Error {
     this.warnings = warnings;
   }
 };
-var SEVERITY = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
+var SEVERITY2 = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
 var DEFAULT_GENERATED = [".min.js", ".min.css", ".map"];
 var DEFAULT_RULES = [
   {
@@ -35528,6 +35711,7 @@ function emptyRules() {
     blocked: [],
     architecture: emptyArchitecture(),
     raw: "",
+    packRefs: [],
     warnings: []
   };
 }
@@ -35537,15 +35721,56 @@ var KNOWN_RULE_KEYS = /* @__PURE__ */ new Set([
   "ignore",
   "generated",
   "blocked",
-  "architecture"
+  "architecture",
+  "packs"
 ]);
+var PACK_REF = /^([a-z0-9][a-z0-9-]{0,63})\/([a-z0-9][a-z0-9-]{0,63})(?:@(\d+)(?:\.(\d+))?)?$/;
+function readPackRefs(raw) {
+  const warnings = [];
+  if (raw === void 0 || raw === null) return { refs: [], warnings };
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks("`packs:` is not a list");
+  }
+  const refs = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new UnreadablePacks("`packs:` entries must be mappings with a `pack:` key");
+    }
+    const map = entry;
+    const value = map.pack;
+    if (typeof value !== "string") {
+      throw new UnreadablePacks("`packs:` entries must carry a `pack:` string");
+    }
+    const match = PACK_REF.exec(value);
+    if (match === null) {
+      throw new UnreadablePacks(
+        `pack reference \`${value}\` is not valid \u2014 expected \`namespace/name\`, \`namespace/name@1\` or \`namespace/name@1.2\``
+      );
+    }
+    const ref = {
+      namespace: match[1] ?? "",
+      name: match[2] ?? "",
+      major: match[3] === void 0 ? null : Number(match[3]),
+      minor: match[4] === void 0 ? null : Number(match[4]),
+      raw: value
+    };
+    if (seen.has(value)) {
+      warnings.push(`pack \`${value}\` referenced more than once; loaded once`);
+      continue;
+    }
+    seen.add(value);
+    refs.push(ref);
+  }
+  return { refs, warnings };
+}
 function parseRules(text2) {
   const warnings = [];
   let document2;
   try {
-    document2 = (0, import_yaml2.parse)(text2);
+    document2 = (0, import_yaml3.parse)(text2);
   } catch (error2) {
-    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml3.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new UnreadableRules([`not valid YAML \u2014 ${reason}`]);
   }
   if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
@@ -35557,6 +35782,8 @@ function parseRules(text2) {
   }
   const rules = readRuleList(map.rules, warnings);
   const ignore = readIgnore(map.ignore, warnings);
+  const { refs: packRefs, warnings: packWarnings } = readPackRefs(map.packs);
+  warnings.push(...packWarnings);
   return {
     version: readVersion(map.version, warnings),
     rules,
@@ -35566,6 +35793,7 @@ function parseRules(text2) {
     blocked: readBlocked(map.blocked, warnings),
     architecture: readArchitecture(map.architecture, warnings),
     raw: text2,
+    packRefs,
     warnings
   };
 }
@@ -35627,7 +35855,7 @@ function readBlocked(raw, warnings) {
       return null;
     }
     const map = entry;
-    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    const severity = typeof map.severity === "string" && SEVERITY2.has(map.severity) ? map.severity : "warning";
     return {
       phrase: typeof map.phrase === "string" ? map.phrase : "",
       severity,
@@ -35648,7 +35876,7 @@ function readRuleList(raw, warnings) {
     }
     const map = entry;
     const id = map.id ?? map.rule ?? `rule-${String(index + 1)}`;
-    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    const severity = typeof map.severity === "string" && SEVERITY2.has(map.severity) ? map.severity : "warning";
     return {
       id: typeof id === "string" ? id : `rule-${String(index + 1)}`,
       name: typeof map.name === "string" ? map.name : "Unnamed rule",
@@ -35658,6 +35886,144 @@ function readRuleList(raw, warnings) {
     };
   }).filter((rule) => rule !== null);
   return out.length > 0 ? out : DEFAULT_RULES;
+}
+function composeRules(local, packs) {
+  const rules = [];
+  const seenRuleIds = /* @__PURE__ */ new Set();
+  const duplicatedIds = /* @__PURE__ */ new Set();
+  const addRule = (rule, source) => {
+    void source;
+    if (seenRuleIds.has(rule.id)) {
+      duplicatedIds.add(rule.id);
+      return;
+    }
+    seenRuleIds.add(rule.id);
+    rules.push(rule);
+  };
+  let anyRulesList = false;
+  if (local.rules !== DEFAULT_RULES) {
+    anyRulesList = local.rules.length > 0;
+    for (const rule of local.rules) addRule(rule, "the local rules file");
+  }
+  for (const pack of packs) {
+    if (pack.fragment.rules.length > 0) anyRulesList = true;
+    for (const rule of pack.fragment.rules) addRule(rule, `pack ${pack.ref}`);
+  }
+  if (!anyRulesList && local.rules === DEFAULT_RULES) {
+    for (const rule of DEFAULT_RULES) addRule(rule, "the built-in default");
+  }
+  const effectiveRules = rules.length > 0 ? rules : DEFAULT_RULES;
+  const blockedByPhrase = /* @__PURE__ */ new Map();
+  for (const entry of local.blocked) {
+    if (!blockedByPhrase.has(entry.phrase)) blockedByPhrase.set(entry.phrase, entry);
+  }
+  for (const pack of packs) {
+    for (const entry of pack.fragment.blocked) {
+      if (!blockedByPhrase.has(entry.phrase)) blockedByPhrase.set(entry.phrase, entry);
+    }
+  }
+  const generated = [];
+  const seenGenerated = /* @__PURE__ */ new Set();
+  const absorbGenerated = (list) => {
+    if (list.length === 0) return;
+    for (const item of list) {
+      if (!seenGenerated.has(item)) {
+        seenGenerated.add(item);
+        generated.push(item);
+      }
+    }
+  };
+  absorbGenerated(local.generatedExtensions);
+  for (const pack of packs) absorbGenerated(pack.fragment.generatedExtensions);
+  const warnings = [...local.warnings];
+  for (const pack of packs) {
+    for (const warning2 of pack.warnings) warnings.push(warning2);
+  }
+  for (const id of duplicatedIds) {
+    warnings.push(`rule \`${id}\` is defined more than once; the first definition wins`);
+  }
+  return {
+    version: local.version,
+    rules: effectiveRules,
+    ignoreFiles: [...local.ignoreFiles, ...packs.flatMap((p) => p.fragment.ignoreFiles)],
+    ignorePaths: [...local.ignorePaths, ...packs.flatMap((p) => p.fragment.ignorePaths)],
+    generatedExtensions: generated.length > 0 ? generated : DEFAULT_GENERATED,
+    blocked: [...blockedByPhrase.values()],
+    architecture: local.architecture,
+    raw: local.raw,
+    packRefs: local.packRefs,
+    warnings
+  };
+}
+async function readPackedRules(path, packsPath) {
+  const local = await readRules(path);
+  if (local.packRefs.length === 0) return local;
+  const packs = [];
+  let rawSum = 0;
+  for (const ref of local.packRefs) {
+    const packPath = join(packsPath, ref.namespace, `${ref.name}.yml`);
+    const pack = await readPackFile(ref, packPath);
+    packs.push(pack);
+    rawSum += pack.raw.length;
+  }
+  if (rawSum > MAX_RULES_CHARS) {
+    throw new UnreadablePacks(
+      `packs exceed the ${String(MAX_RULES_CHARS)}-character composition budget (sum ${String(rawSum)}); reduce packs or the count`
+    );
+  }
+  const composed = composeRules(local, packs);
+  const textBudget = composed.rules.reduce((n, rule) => n + rule.body.length, 0) + composed.blocked.reduce((n, entry) => n + entry.phrase.length + entry.note.length, 0);
+  if (textBudget > MAX_RULES_CHARS) {
+    throw new UnreadablePacks(
+      `composed rules and blocked phrases exceed the ${String(MAX_RULES_CHARS)}-character budget (${String(textBudget)}); reduce packs`
+    );
+  }
+  return composed;
+}
+async function readPackFile(ref, path) {
+  let raw;
+  try {
+    raw = await readFile2(path, "utf8");
+  } catch (error2) {
+    if (isMissing(error2)) {
+      throw new UnreadablePacks(
+        `pack \`${ref.raw}\` is referenced by the rules file but no file is at ${path}`
+      );
+    }
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` could not be read at ${path}: ${error2 instanceof Error ? error2.message : String(error2)}`
+    );
+  }
+  if (raw.trim().length === 0) {
+    throw new UnreadablePacks(`pack \`${ref.raw}\` at ${path} is empty`);
+  }
+  if (raw.length > MAX_PACK_CHARS) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` at ${path} is ${String(raw.length)} characters, exceeding the ${String(MAX_PACK_CHARS)}-character pack cap; trim it or drop the reference`
+    );
+  }
+  const pack = parsePack(raw, ref.raw);
+  assertPin(ref, pack);
+  return pack;
+}
+function assertPin(ref, pack) {
+  if (ref.major === null) return;
+  const declared = pack.version;
+  if (declared === null) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}${ref.minor !== null ? `.${String(ref.minor)}` : ""} but declares no \`version:\``
+    );
+  }
+  if (declared.major !== ref.major) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}${ref.minor !== null ? `.${String(ref.minor)}` : ""} but declares ${String(declared.major)}.${String(declared.minor)}`
+    );
+  }
+  if (ref.minor !== null && declared.minor !== ref.minor) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}.${String(ref.minor)} but declares ${String(declared.major)}.${String(declared.minor)}`
+    );
+  }
 }
 var BLOCKED_MARK = "preflight:blocked";
 var GENERATED_MARK = "preflight:generated";
@@ -35765,8 +36131,8 @@ function readArchEdges(raw, warnings) {
       );
       return;
     }
-    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
-    if (typeof map.severity === "string" && !SEVERITY.has(map.severity)) {
+    const severity = typeof map.severity === "string" && SEVERITY2.has(map.severity) ? map.severity : "warning";
+    if (typeof map.severity === "string" && !SEVERITY2.has(map.severity)) {
       warnings.push(
         `\`architecture.edges\` entry ${String(index + 1)} has unknown severity \`${map.severity}\`; using warning`
       );
@@ -35804,6 +36170,453 @@ function readArchAliases(raw, warnings) {
 function blockedNote(blocked) {
   const note = blocked.note.length > 0 ? ` ${blocked.note}` : "";
   return `The diff contains the blocked text "${blocked.phrase}"${note}`;
+}
+
+// src/duties/review/verdict.ts
+function parseVerdict(answer2, files) {
+  let parsed;
+  try {
+    parsed = JSON.parse(unwrapped(answer2));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const fields = parsed;
+  const confidence = fields.confidence ?? 0;
+  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
+  if (confidence < 0 || confidence > 1) return null;
+  const rawFindings = fields.findings;
+  if (rawFindings === void 0 || rawFindings === null) {
+    return { findings: [], confidence };
+  }
+  if (!Array.isArray(rawFindings)) return null;
+  const findings = [];
+  for (const raw of rawFindings) {
+    const finding = parseFinding(raw, files);
+    if (finding === null) return null;
+    findings.push(finding);
+  }
+  return { findings, confidence };
+}
+function parseFinding(raw, files) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const fields = raw;
+  const rule = fields.rule;
+  if (typeof rule !== "string" || rule.trim().length === 0) return null;
+  const severity = fields.severity ?? "warning";
+  if (severity !== "info" && severity !== "warning" && severity !== "critical") return null;
+  const path = fields.path;
+  if (typeof path !== "string") return null;
+  const file = files.find((candidate) => candidate.path === path);
+  if (file === void 0) return null;
+  const line = fields.line ?? null;
+  if (typeof line !== "number") return null;
+  if (!Number.isInteger(line) || line < 1) return null;
+  if (!file.lines.has(line)) return null;
+  const body = fields.body;
+  if (typeof body !== "string" || body.trim().length === 0) return null;
+  const snippet = fields.snippet ?? body;
+  if (typeof snippet !== "string") return null;
+  return {
+    rule: rule.trim(),
+    severity,
+    path: file.path,
+    line,
+    body: body.trim(),
+    snippet: snippet.slice(0, 120)
+  };
+}
+function unwrapped(answer2) {
+  const parts = segments(answer2.trim());
+  const [only] = parts;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
+  const lines = only.text.split("\n");
+  return lines.slice(1, -1).join("\n");
+}
+
+// src/duties/review/passes.ts
+var SEVERITY_ORDER = {
+  critical: 0,
+  warning: 1,
+  info: 2
+};
+function selectPasses(profile) {
+  if (profile === "deep") return [correctnessPass(), securityPass()];
+  return [correctnessPass()];
+}
+async function runPasses(provider, passes, models, context3, weather) {
+  const results = [];
+  for (const pass of passes) {
+    const roster = pass.models.length > 0 ? pass.models : models;
+    const rotation = await rotateModels(
+      roster,
+      (model) => answer(provider, model, pass.prompt(context3)),
+      weather
+    );
+    if (!rotation.success) {
+      results.push({
+        pass,
+        verdict: null,
+        unreadable: null,
+        failures: rotation.failures,
+        model: null
+      });
+      continue;
+    }
+    const verdict2 = pass.parse(rotation.success.content, context3.files);
+    results.push({
+      pass,
+      // An unreadable answer stays null — never dressed up as a readable
+      // empty verdict. A pass that could not be read is priced into the
+      // confidence and named in `failedPasses`, exactly as loud as D5 asks.
+      verdict: verdict2,
+      unreadable: verdict2 === null ? rotation.success.content : null,
+      failures: rotation.failures,
+      model: rotation.success.model
+    });
+  }
+  return results;
+}
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function correctnessPass() {
+  return {
+    id: "correctness",
+    name: "Correctness",
+    models: [],
+    prompt: (context3) => correctnessPrompt(context3),
+    parse: (answer2, files) => parseVerdict(answer2, files)
+  };
+}
+function securityPass() {
+  return {
+    id: "security",
+    name: "Security",
+    models: [],
+    prompt: (context3) => securityPrompt(context3),
+    parse: (answer2, files) => parseVerdict(answer2, files)
+  };
+}
+function material(context3, lead) {
+  const { prTitle, prBody, headSha, files, rules, language } = context3;
+  const wrapped = enclose(
+    "untrusted-diff",
+    [
+      "--- PULL REQUEST BEING REVIEWED ---",
+      `TITLE: ${prTitle}`,
+      prBody.length === 0 ? "" : `BODY:
+${prBody}`,
+      "",
+      "--- DIFF (new-file lines proven; every line number a finding cites must be one of these) ---",
+      ...files.map(
+        (file) => `### ${file.path} (${file.status})
+` + (file.additions + file.deletions === 0 ? "" : `+${String(file.additions)} -${String(file.deletions)}
+`) + patchExcerpt(file.patch)
+      )
+    ].join("\n")
+  );
+  return [
+    {
+      role: "system",
+      content: [
+        ...lead,
+        "",
+        language === null ? "The pull request's language could not be identified from the languages this project reads." : `The pull request, its threads and your findings should be written in ${language}.`,
+        "",
+        `The diff below is the whole universe of this review \u2014 every finding must name one of its files and one of its proven new-file line numbers.`,
+        "",
+        "The repository's own review rules are:",
+        ...rules.flatMap((rule) => [
+          `- [${rule.id}] ${rule.name}${rule.body.length > 0 ? ` \u2014 ${rule.body}` : ""}`,
+          rule.marker.length > 0 ? `  mark this rule's findings with marker "${rule.marker}"` : ""
+        ]),
+        "",
+        "Answer with one JSON object and nothing else \u2014 no prose, no explanation:",
+        "",
+        '{"findings": [], "confidence": 0.0}',
+        "",
+        "- `findings`: zero or more of the shape below, each naming a rule from the repository's",
+        "  list, a file from the diff, and a proven line number (or `null` when the problem is",
+        "  the file as a whole):",
+        "",
+        '{"rule": "dedup", "severity": "warning", "path": "src/a.ts", "line": 12,',
+        ' "snippet": "the exact text at that line", "body": "one or two sentences. Be specific"}',
+        "",
+        "- `severity` is one of `info`, `warning`, `critical`. Prefer the repository rule's own",
+        "  severity when it sets one.",
+        `- Report real problems only. A model that invents a line or a file that is not in the diff is answering a different question \u2014 do not.`,
+        "",
+        `The head SHA of the diff you are reviewing is ${headSha}.`,
+        "",
+        wrapped.rule
+      ].join("\n")
+    },
+    { role: "user", content: wrapped.block }
+  ];
+}
+function correctnessPrompt(context3) {
+  return material(context3, ["You are reviewing a pull request on a GitHub repository."]);
+}
+function securityPrompt(context3) {
+  return material(context3, [
+    "You are a security review pass for a pull request on a GitHub repository.",
+    "",
+    "This pass focuses on security only: secret material committed to the diff, injection",
+    "(shell, SQL, HTML, command), unsafe deserialisation or evaluation of untrusted input,",
+    "authentication or authorisation flaws, privilege changes, and dependency risk visible",
+    "in the diff. Report only what the diff itself supports \u2014 a finding must name one of the",
+    "proven lines below."
+  ]);
+}
+var PATCH_EXCERPT = 4e3;
+function patchExcerpt(patch) {
+  return patch.length <= PATCH_EXCERPT ? patch : `${patch.slice(0, PATCH_EXCERPT)}
+\u2026`;
+}
+function synthesize(results) {
+  const findings = [];
+  for (const result of results) {
+    if (result.verdict === null) continue;
+    for (const raw of result.verdict.findings) {
+      findings.push(toReviewFinding(raw, result.pass, result.verdict.findings.length));
+    }
+  }
+  const deduped = dedup(findings);
+  const contradictions = detectContradictions(deduped);
+  const annotated = applyContradictions(deduped, contradictions);
+  const ranked = rank(annotated);
+  const { confidence, measured } = aggregateConfidence(results);
+  const passes = results.map((result) => ({
+    id: result.pass.id,
+    name: result.pass.name,
+    answered: result.verdict !== null,
+    unreadable: result.unreadable !== null,
+    failed: result.failures.length > 0,
+    findings: result.verdict?.findings.length ?? 0
+  }));
+  const failedPasses = [];
+  for (const result of results) {
+    if (result.verdict !== null) continue;
+    const reasons = result.failures.map((f) => f.reason);
+    if (reasons.length === 0 && result.unreadable !== null) {
+      failedPasses.push({
+        id: result.pass.id,
+        reason: "the answer did not parse as findings"
+      });
+    } else if (reasons.length > 0) {
+      failedPasses.push({
+        id: result.pass.id,
+        reason: reasons.join("; ")
+      });
+    }
+  }
+  return { findings: ranked, confidence, measured, passes, failedPasses };
+}
+function toReviewFinding(raw, pass, _passFindings) {
+  const line = raw.line;
+  const evidence = [
+    {
+      kind: "patch",
+      source: line === null ? raw.path : `${raw.path}:${String(line)}`,
+      content: raw.snippet
+    },
+    { kind: "rule", source: raw.rule, content: "" },
+    { kind: "pass", source: pass.id, content: pass.name }
+  ];
+  return {
+    id: `${raw.rule}:${raw.path}:${String(line ?? 0)}`,
+    ruleId: raw.rule,
+    severity: raw.severity,
+    path: raw.path,
+    line,
+    body: raw.body,
+    snippet: raw.snippet,
+    passId: pass.id,
+    passName: pass.name,
+    corroboratedBy: [pass.id],
+    evidence
+  };
+}
+function dedup(findings) {
+  const out = [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const finding of findings) {
+    const at = byId.get(finding.id);
+    if (at === void 0) {
+      byId.set(finding.id, out.length);
+      out.push(finding);
+      continue;
+    }
+    const existing = out[at];
+    if (existing === void 0) continue;
+    out[at] = merge2(existing, finding);
+  }
+  return out;
+}
+function merge2(a, b) {
+  const aWins = SEVERITY_ORDER[a.severity] <= SEVERITY_ORDER[b.severity] || a.severity === b.severity && a.corroboratedBy.length >= b.corroboratedBy.length;
+  const primary = aWins ? a : b;
+  const corroboratedBy = a.corroboratedBy.includes(b.passId) ? [...a.corroboratedBy] : [...a.corroboratedBy, b.passId];
+  return {
+    ...primary,
+    corroboratedBy,
+    evidence: mergeEvidence([...a.evidence, ...b.evidence])
+  };
+}
+function mergeEvidence(all) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const evidence of all) {
+    const key = `${evidence.kind}:${evidence.source}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(evidence);
+  }
+  return out;
+}
+function detectContradictions(findings) {
+  const out = [];
+  const byPlace = /* @__PURE__ */ new Map();
+  for (const finding of findings) {
+    const key = `${finding.path}
+${finding.line === null ? "" : String(finding.line)}`;
+    const bucket = byPlace.get(key) ?? [];
+    bucket.push(finding);
+    byPlace.set(key, bucket);
+  }
+  for (const [, bucket] of byPlace) {
+    const rules = new Set(bucket.map((f) => f.ruleId));
+    if (rules.size > 1) {
+      out.push({ path: bucket[0]?.path ?? "", line: bucket[0]?.line ?? null, findings: bucket });
+    }
+  }
+  return out;
+}
+function applyContradictions(findings, contradictions) {
+  if (contradictions.length === 0) return [...findings];
+  const others = /* @__PURE__ */ new Map();
+  for (const contradiction of contradictions) {
+    for (const finding of contradiction.findings) {
+      const other = contradiction.findings.filter((f) => f.ruleId !== finding.ruleId).map((f) => f.ruleId).join(", ");
+      const key = finding.id;
+      others.set(key, `${others.get(key) ?? ""}${other}`.trim());
+    }
+  }
+  return findings.map((finding) => {
+    const other = others.get(finding.id);
+    if (other === void 0) return finding;
+    return {
+      ...finding,
+      body: `${finding.body} (another pass reports "${other}" at the same location)`
+    };
+  });
+}
+function rank(findings) {
+  return [...findings].sort((a, b) => {
+    const severity = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+    if (severity !== 0) return severity;
+    const corroboration = b.corroboratedBy.length - a.corroboratedBy.length;
+    if (corroboration !== 0) return corroboration;
+    const path = a.path.localeCompare(b.path);
+    if (path !== 0) return path;
+    return (a.line ?? 0) - (b.line ?? 0);
+  });
+}
+function aggregateConfidence(results) {
+  const readable = results.filter((r) => r.verdict !== null);
+  if (readable.length === 0) return { confidence: 0, measured: false };
+  let confidence = Math.max(...readable.map((r) => r.verdict?.confidence ?? 0));
+  const unreadable = results.filter((r) => r.verdict === null).length;
+  if (unreadable > 0) confidence = Math.max(0, confidence * Math.pow(0.9, unreadable));
+  return { confidence, measured: true };
+}
+
+// src/duties/review/limits.ts
+var MAX_EVIDENCE_PER_FINDING = 8;
+var MAX_EVIDENCE_ITEMS_PER_RUN = 128;
+var MAX_EVIDENCE_TOTAL_CHARS = 4096;
+
+// src/duties/review/evidence.ts
+function deriveStatus(evidence) {
+  return evidence.some((entry) => entry.weight >= 1) ? "verified" : "unverified";
+}
+
+// src/duties/review/providers.ts
+function diffEvidence(file, line, claimedSnippet, headSha) {
+  if (line === null || claimedSnippet === null) return null;
+  const claim = claimedSnippet.trim();
+  if (claim.length === 0) return null;
+  const proven = file.lines.get(line)?.trim() ?? "";
+  if (proven.length === 0) return null;
+  if (!proven.includes(claim) && !claim.includes(proven)) return null;
+  return {
+    kind: "diff",
+    weight: 1,
+    detail: `diff-proven line ${String(line)}`,
+    provenance: {
+      ruleId: "diff-evidence",
+      sourceFile: file.path,
+      atLine: line,
+      ref: { sha: headSha, path: file.path }
+    },
+    at: "deterministic"
+  };
+}
+function ruleEvidence(rules, ruleId) {
+  if (!rules.rules.some((entry) => entry.id === ruleId)) return null;
+  return {
+    kind: "rules",
+    weight: 0.6,
+    detail: "cites a repository rule",
+    provenance: {
+      ruleId,
+      sourceFile: "repository rules",
+      atLine: null,
+      ref: { sha: "", path: "" }
+    },
+    at: "deterministic"
+  };
+}
+
+// src/duties/review/verify.ts
+function verifyFindings(request2) {
+  const shown2 = new Map(request2.shown.map((file) => [file.path, file]));
+  let runItems = 0;
+  let runChars = 0;
+  return request2.findings.map((finding) => {
+    const collected = [];
+    const rule = ruleEvidence(request2.rules, finding.ruleId);
+    if (rule !== null) collected.push(rule);
+    if (finding.line !== null) {
+      const file = shown2.get(finding.path);
+      if (file !== void 0) {
+        const diff = diffEvidence(file, finding.line, finding.snippet ?? null, request2.headSha);
+        if (diff !== null) collected.push(diff);
+      }
+    }
+    const room = MAX_EVIDENCE_PER_FINDING;
+    const kept = [];
+    for (const entry of collected.sort((a, b) => b.weight - a.weight)) {
+      if (kept.length >= room) break;
+      if (runItems >= MAX_EVIDENCE_ITEMS_PER_RUN) break;
+      if (runChars + entry.detail.length > MAX_EVIDENCE_TOTAL_CHARS) break;
+      kept.push(entry);
+      runItems += 1;
+      runChars += entry.detail.length;
+    }
+    const verification = deriveStatus(kept);
+    return { ...finding, evidence: kept, verification };
+  });
 }
 
 // src/duties/review/threads.ts
@@ -35960,165 +36773,6 @@ async function dryRunThreads(api, at, reconciled, standing) {
   };
 }
 
-// src/duties/review/verdict.ts
-var NOTHING = { findings: [], confidence: 0 };
-var PATCH_EXCERPT = 4e3;
-async function review(request2) {
-  const { provider, models, weather, files } = request2;
-  if (files.length === 0) {
-    return { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  }
-  const messages = prompt(request2);
-  const rotation = await rotateModels(
-    models,
-    (model) => answer(provider, model, messages),
-    weather
-  );
-  if (!rotation.success) {
-    return { verdict: NOTHING, failures: rotation.failures, unreadable: null, model: null };
-  }
-  const verdict2 = parseVerdict(rotation.success.content, files);
-  return {
-    verdict: verdict2 ?? NOTHING,
-    failures: rotation.failures,
-    unreadable: verdict2 === null ? rotation.success.content : null,
-    model: rotation.success.model
-  };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished"
-    };
-  }
-  return completion;
-}
-function parseVerdict(answer2, files) {
-  let parsed;
-  try {
-    parsed = JSON.parse(unwrapped(answer2));
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const fields = parsed;
-  const confidence = fields.confidence ?? 0;
-  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
-  if (confidence < 0 || confidence > 1) return null;
-  const rawFindings = fields.findings;
-  if (rawFindings === void 0 || rawFindings === null) {
-    return { findings: [], confidence };
-  }
-  if (!Array.isArray(rawFindings)) return null;
-  const findings = [];
-  for (const raw of rawFindings) {
-    const finding = parseFinding(raw, files);
-    if (finding === null) return null;
-    findings.push(finding);
-  }
-  return { findings, confidence };
-}
-function parseFinding(raw, files) {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const fields = raw;
-  const rule = fields.rule;
-  if (typeof rule !== "string" || rule.trim().length === 0) return null;
-  const severity = fields.severity ?? "warning";
-  if (severity !== "info" && severity !== "warning" && severity !== "critical") return null;
-  const path = fields.path;
-  if (typeof path !== "string") return null;
-  const file = files.find((candidate) => candidate.path === path);
-  if (file === void 0) return null;
-  const line = fields.line ?? null;
-  if (typeof line !== "number") return null;
-  if (!Number.isInteger(line) || line < 1) return null;
-  if (!file.lines.has(line)) return null;
-  const body = fields.body;
-  if (typeof body !== "string" || body.trim().length === 0) return null;
-  const snippet = fields.snippet ?? body;
-  if (typeof snippet !== "string") return null;
-  return {
-    rule: rule.trim(),
-    severity,
-    path: file.path,
-    line,
-    body: body.trim(),
-    snippet: snippet.slice(0, 120)
-  };
-}
-function unwrapped(answer2) {
-  const parts = segments(answer2.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
-}
-function prompt(request2) {
-  const { prTitle, prBody, headSha, files, rules, language } = request2;
-  const material = enclose(
-    "untrusted-diff",
-    [
-      "--- PULL REQUEST BEING REVIEWED ---",
-      `TITLE: ${prTitle}`,
-      prBody.length === 0 ? "" : `BODY:
-${prBody}`,
-      "",
-      "--- DIFF (new-file lines proven; every line number a finding cites must be one of these) ---",
-      ...files.map(
-        (file) => `### ${file.path} (${file.status})
-` + (file.additions + file.deletions === 0 ? "" : `+${String(file.additions)} -${String(file.deletions)}
-`) + patchExcerpt(file.patch)
-      )
-    ].join("\n")
-  );
-  return [
-    {
-      role: "system",
-      content: [
-        "You are reviewing a pull request on a GitHub repository.",
-        "",
-        language === null ? "The pull request's language could not be identified from the languages this project reads." : `The pull request, its threads and your findings should be written in ${language}.`,
-        "",
-        `The diff below is the whole universe of this review \u2014 every finding must name one of its files and one of its proven new-file line numbers.`,
-        "",
-        "The repository's own review rules are:",
-        ...rules.flatMap((rule) => [
-          `- [${rule.id}] ${rule.name}${rule.body.length > 0 ? ` \u2014 ${rule.body}` : ""}`,
-          rule.marker.length > 0 ? `  mark this rule's findings with marker "${rule.marker}"` : ""
-        ]),
-        "",
-        "Answer with one JSON object and nothing else \u2014 no prose, no explanation:",
-        "",
-        '{"findings": [], "confidence": 0.0}',
-        "",
-        "- `findings`: zero or more of the shape below, each naming a rule from the repository's",
-        "  list, a file from the diff, and a proven line number (or `null` when the problem is",
-        "  the file as a whole):",
-        "",
-        '{"rule": "dedup", "severity": "warning", "path": "src/a.ts", "line": 12,',
-        ' "snippet": "the exact text at that line", "body": "one or two sentences. Be specific"}',
-        "",
-        "- `severity` is one of `info`, `warning`, `critical`. Prefer the repository rule's own",
-        "  severity when it sets one.",
-        `- Report real problems only. A model that invents a line or a file that is not in the diff is answering a different question \u2014 do not.`,
-        "",
-        `The head SHA of the diff you are reviewing is ${headSha}.`,
-        "",
-        material.rule
-      ].join("\n")
-    },
-    { role: "user", content: material.block }
-  ];
-}
-function patchExcerpt(patch) {
-  return patch.length <= PATCH_EXCERPT ? patch : `${patch.slice(0, PATCH_EXCERPT)}
-\u2026`;
-}
-
 // src/duties/review/summary.ts
 function summarize(run2) {
   if (run2.ungranted !== null) {
@@ -36172,11 +36826,31 @@ function verdict(run2) {
   if (run2.malformedAnswers > 0) {
     rows.push(["Unreadable", `${String(run2.malformedAnswers)} answer(s) discarded`]);
   }
+  if (run2.passes.length > 0) {
+    rows.push([
+      "Passes",
+      run2.passes.map(
+        (pass) => pass.answered ? `${pass.name} (${String(pass.findings)} finding${pass.findings === 1 ? "" : "s"})` : `${pass.name} (did not answer)`
+      ).join(", ")
+    ]);
+  }
   if (run2.readRules !== null) {
     rows.push(["Rules", cell(run2.readRules)]);
   }
   if (run2.previousSha.length > 0 && run2.previousSha !== run2.headSha) {
     rows.push(["Previously", `reviewed at \`${run2.previousSha}\``]);
+  }
+  if (run2.findings.length > 0) {
+    const verified = run2.findings.filter(
+      ({ finding }) => finding.verification === "verified"
+    ).length;
+    const unverified = run2.findings.filter(
+      ({ finding }) => finding.verification === "unverified"
+    ).length;
+    rows.push([
+      "Verification",
+      `${String(verified)} verified \xB7 ${String(unverified)} not verified`
+    ]);
   }
   if (run2.threads !== null) {
     rows.push(["Threads", threadsCell(run2.threads)]);
@@ -36197,9 +36871,14 @@ function findingsTable(run2) {
     status,
     `\`${finding.path}\`` + (finding.line === null ? "" : `:${String(finding.line)}`),
     finding.severity,
-    cell(finding.body)
+    cell(finding.body),
+    finding.verification ?? "\u2014"
   ]);
-  return ["### Findings", "", table(["State", "Location", "Severity", "Finding"], rows)].join("\n");
+  return [
+    "### Findings",
+    "",
+    table(["State", "Location", "Severity", "Finding", "Verified"], rows)
+  ].join("\n");
 }
 function coverage(run2) {
   const rows = run2.skipped.map(({ path, reason }) => [cell(path), cell(reason)]);
@@ -36228,10 +36907,18 @@ function readSettings() {
     number: threadNumber(),
     warrant: getInput("warrant", { required: true }),
     rulesPath: getInput("rules-path"),
+    packsPath: getInput("packs-path"),
     trigger: getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", getInput("max-diff-chars")),
-    confidence: parseConfidence(getInput("confidence"))
+    confidence: parseConfidence(getInput("confidence")),
+    profile: parseProfile(getInput("profile"))
   };
+}
+function parseProfile(raw) {
+  const value = raw.trim();
+  if (value.length === 0 || value === "default") return "default";
+  if (value === "deep") return "deep";
+  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw}\`.`);
 }
 function parseConfidence(raw) {
   const value = Number(raw.trim());
@@ -36243,8 +36930,13 @@ function parseConfidence(raw) {
 var STAGE_PURPOSES = ["review", "detect"];
 function resolveRulesPath(settings) {
   const workspace = process.env.GITHUB_WORKSPACE ?? "";
-  if (settings.rulesPath.length === 0) return join(workspace, ".github", "reeve-rules.yml");
-  return join(workspace, settings.rulesPath);
+  if (settings.rulesPath.length === 0) return join2(workspace, ".github", "reeve-rules.yml");
+  return join2(workspace, settings.rulesPath);
+}
+function resolvePacksPath(settings) {
+  const workspace = process.env.GITHUB_WORKSPACE ?? "";
+  if (settings.packsPath.length === 0) return join2(workspace, ".github", "reeve-packs");
+  return join2(workspace, settings.packsPath);
 }
 function rulesLabel(settings) {
   return settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath;
@@ -36264,6 +36956,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     previous: null,
     shown: [],
     skipped: [],
+    passes: [],
     permitted,
     ...over
   });
@@ -36303,7 +36996,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     generatedExtensions: DEFAULT_GENERATED2,
     maxDiffChars: budget
   });
-  const rules = await readRules(resolveRulesPath(settings));
+  const rules = await readPackedRules(resolveRulesPath(settings), resolvePacksPath(settings));
   for (const warning2 of rules.warnings) warning(`rules: ${warning2}`);
   const bounded2 = classify(snapshot.allFiles, {
     ignoreFiles: rules.ignoreFiles,
@@ -36351,37 +37044,48 @@ async function decide(api, at, warrant, settings, stages, weather) {
       marker: entry.marker
     }))
   ];
-  let reviewed = { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  if (bounded2.shown.length > 0) {
-    reviewed = await review({
-      provider: stages.review,
-      models: settings.models,
-      prTitle: pr.title,
-      prBody: pr.body.slice(0, BODY_EXCERPT),
-      headSha: pr.headSha,
-      files: bounded2.shown,
-      rules: rules.rules,
-      language: language?.code ?? null,
-      weather
-    });
-    for (const failure of reviewed.failures) {
+  const passContext = {
+    prTitle: pr.title,
+    prBody: pr.body.slice(0, BODY_EXCERPT),
+    headSha: pr.headSha,
+    files: bounded2.shown,
+    rules: rules.rules,
+    language: language?.code ?? null
+  };
+  const passResults = bounded2.shown.length > 0 ? await runPasses(
+    stages.review,
+    selectPasses(settings.profile),
+    settings.models,
+    passContext,
+    weather
+  ) : [];
+  for (const result of passResults) {
+    for (const failure of result.failures) {
       warning(`review: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
     }
-    if (reviewed.unreadable !== null) {
-      warning(
-        "review: the model's answer did not parse as findings \u2014 discarded rather than read best-effort."
-      );
-    }
   }
-  const raw = reviewed.verdict.findings.map((entry) => toFinding(entry, rules)).filter((finding) => finding !== null);
+  const synthesis = synthesize(passResults);
+  if (synthesis.failedPasses.length > 0) {
+    warning(
+      `review: ${synthesis.failedPasses.map((failed) => `the ${failed.id} pass ${failed.reason}`).join("; ")}.`
+    );
+  }
+  const unreadableCount = passResults.filter((result) => result.unreadable !== null).length;
+  const raw = synthesis.findings.map((entry) => toFinding(entry, rules));
+  const verified = verifyFindings({
+    findings: raw,
+    shown: bounded2.shown,
+    rules,
+    headSha: pr.headSha
+  });
   const StandingFiles = /* @__PURE__ */ new Map();
   for (const file of bounded2.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded2.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-  const final = reconcile([...deterministic, ...raw], previous, diffStanding);
-  const confidence = reviewed.verdict.confidence;
+  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
+  const confidence = synthesis.confidence;
   const next = remember(final, pr.headSha, previous);
-  const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
+  const verdictMeasured = synthesis.measured;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
   const silentNoVerdict = bounded2.shown.length > 0 && !verdictMeasured && final.length === 0;
   const allShownIgnored = bounded2.shown.length === 0 && bounded2.skipped.length > 0 && bounded2.skipped.every((entry) => entry.reason === "ignored");
@@ -36394,10 +37098,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   if (belowFloor) {
@@ -36409,10 +37114,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   if (silentNoVerdict) {
@@ -36424,10 +37130,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   if (allShownIgnored) {
@@ -36442,7 +37149,8 @@ async function decide(api, at, warrant, settings, stages, weather) {
       malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   const publication = {
@@ -36469,10 +37177,11 @@ ${would}`);
       // disposition stays in the log.
       posted: null,
       threads: rehearsal,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   const threads = await syncThreads(api, at, final, diffStanding, pr.headSha);
@@ -36495,10 +37204,11 @@ ${would}`);
     confidence,
     posted,
     threads,
-    malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+    malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded2.shown,
-    skipped: bounded2.skipped
+    skipped: bounded2.skipped,
+    passes: synthesis.passes
   });
 }
 function wrapPr(api) {
@@ -36510,18 +37220,19 @@ async function readEnvelope(api, at) {
   if (payload === null) return { findings: [], reviewedShas: [] };
   return decodeEnvelope(payload) ?? { findings: [], reviewedShas: [] };
 }
-function toFinding(raw, rules) {
-  const rule = rules.rules.find((entry) => entry.id === raw.rule);
+function toFinding(claim, rules) {
+  const rule = rules.rules.find((entry) => entry.id === claim.ruleId);
   return {
-    id: `${raw.rule}:${raw.path}:${String(raw.line ?? 0)}`,
-    ruleId: raw.rule,
-    ruleName: rule?.id ?? raw.rule,
+    id: claim.id,
+    ruleId: claim.ruleId,
+    ruleName: rule?.id ?? claim.ruleId,
     ruleBody: "",
-    path: raw.path,
-    line: raw.line,
-    severity: raw.severity,
-    body: raw.body,
-    marker: ""
+    path: claim.path,
+    line: claim.line,
+    severity: claim.severity,
+    body: claim.body,
+    marker: "",
+    snippet: claim.snippet
   };
 }
 var DEFAULT_GENERATED2 = [".min.js", ".min.css", ".map"];
@@ -36603,7 +37314,8 @@ function page(settings, authority2, outcome, ungranted, spent) {
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
-    threads: outcome?.threads ?? null
+    threads: outcome?.threads ?? null,
+    passes: outcome?.passes ?? []
   });
 }
 await run();

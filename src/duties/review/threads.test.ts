@@ -84,7 +84,7 @@ interface ListedComment {
 interface ThreadStub {
   api: ReviewThreadApi;
   comments: { id: number; body: string; path: string; line: number | null; user: Author }[];
-  calls: { page?: number; per_page?: number }[];
+  calls: { page: number | undefined; per_page: number | undefined }[];
   creates: number;
   updates: number;
   createBodies: string[];
@@ -107,7 +107,7 @@ function stubOf(threads: ListedComment[] = []): ThreadStub {
     user: entry.user ?? BOT,
   }));
   let nextId = Math.max(0, ...comments.map((c) => c.id)) + 1;
-  const calls: { page?: number; per_page?: number }[] = [];
+  const calls: { page: number | undefined; per_page: number | undefined }[] = [];
   const state = { creates: 0, updates: 0 };
   const bodies = { createBodies: [] as string[], updateBodies: [] as string[] };
   const fail: ThreadStub["fail"] = {};
