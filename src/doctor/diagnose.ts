@@ -403,20 +403,29 @@ export async function diagnose(options: DiagnoseOptions): Promise<Report> {
           `\`languages:\` names ${unsupported.map((language) => `\`${language.code}\``).join(", ")} — ` +
           "outside the bundled byte-ngram profile set, so the free `detectByProfile` step " +
           "declines for the whole run and every ambiguous thread is sent to the model instead. " +
-          "Not a failure; write the regional variant as `code:Label:Script` if the scripts " +
-          "should stay in the profile's reach.",
+          "Not a failure; spell the regional identity in the label and use the base " +
+          "profiled code to keep the free step, or add the variant explicitly as a " +
+          "candidate — the `code:Label:Script` long form keeps the code verbatim, so it " +
+          "changes nothing here.",
       });
     }
   }
 
   // One aggregated note, not one per duty — named once so a reader sees the
   // whole set of duties running unmodified at their own built-in default in
-  // a single place. `isDefault` alone is deliberately the only test: a duty
-  // `warrant.unnamed` denies is a different, separate fact, already visible
-  // in its own row (`denied: true`), and never belongs in this note — a
-  // written `duties:` block that leaves a duty out denies it, it does
+  // a single place. `isDefault` alone is deliberately not the only test: a
+  // duty `warrant.unnamed` denies is a different, separate fact, already
+  // visible in its own row (`denied: true`), and never belongs in this note —
+  // a written `duties:` block that leaves a duty out denies it, it does
   // not default it (see `unnamed`'s own doc comment in `core/warrant.ts`).
-  const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
+  // And a duty with an inert grant is excluded too: it carries its own red
+  // finding just above, and "exactly its own built-in default right now"
+  // next to a red flag would read as the report contradicting itself.
+  // `unused` is what an inert grant took to the red finding, so filtering on
+  // it keeps every duty the red loop already named out of this green note.
+  const defaulted = authorityRows.filter(
+    (row) => row.isDefault && !row.denied && row.unused.length === 0,
+  );
   if (defaulted.length > 0) {
     findings.push({
       severity: "green",

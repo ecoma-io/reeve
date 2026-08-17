@@ -7,9 +7,9 @@
  * in and what a failure at each step means for the run:
  *
  *   1. Read the warrant — or, missing one at the default path, build the
- *      implicit warrant the same way triage does. `languages` comes from
- *      whichever of the warrant's own `languages:` key and the `languages`
- *      input answers it, the file winning outright when it has an opinion.
+ *      implicit warrant the same way triage does. `languages` comes from the
+ *      warrant's own `languages:` key — or, the key silent, the duty's
+ *      documented default (`DEFAULT_LANGUAGES` below).
  *   1a. A written `duties:` block that does not name `translate` is
  *      checked here, once, before a single thread is read — sweep or not,
  *      exactly as triage's own enumeration is total. Nothing below this line

@@ -441,6 +441,10 @@ describe("diagnose", () => {
     expect(note?.severity).toBe("green");
     expect(note?.text).toContain("`zh-Hans`");
     expect(note?.text).toContain("detectByProfile");
+    // The remedy is real: the long form keeps the code verbatim, so it must
+    // not promise that spelling `pt-BR:Português:Latin` restores profile reach.
+    expect(note?.text).toContain("base profiled code");
+    expect(note?.text).not.toContain("profile's reach");
   });
 
   it("says nothing about profile coverage when `languages:` names only profiled codes", async () => {
@@ -463,6 +467,21 @@ describe("diagnose", () => {
     const note = result.findings.find((finding) => finding.text.includes("built-in default"));
     expect(note?.severity).toBe("green");
     for (const duty of DUTIES) expect(note?.text).toContain(`\`${duty}\``);
+  });
+
+  it("leaves a duty with an inert grant out of the default note — it carries its own red finding", async () => {
+    const source = `${TAXONOMY}duties:\n  duplicate: [close]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const note = result.findings.find((finding) => finding.text.includes("built-in default"));
+    // `duplicate`'s effective grant (`[]`) equals its own built-in default,
+    // so `isDefault` is true — but `close` was granted and filtered out,
+    // which is the red finding just above. "Exactly its own built-in default
+    // right now" next to that red would read as the report contradicting
+    // itself, so `unused` rows are never named here.
+    // The note may be gone entirely — no duty qualifies — which is fine; the
+    // point is `duplicate` is never in it.
+    expect(note?.text.includes("`duplicate`")).toBeFalsy();
   });
 
   it("leaves a duty a written block denies out of the default note — denied is not default", async () => {

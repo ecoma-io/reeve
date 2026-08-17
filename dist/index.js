@@ -33383,11 +33383,13 @@ async function diagnose(options) {
     if (unsupported.length > 0) {
       findings.push({
         severity: "green",
-        text: `\`languages:\` names ${unsupported.map((language) => `\`${language.code}\``).join(", ")} \u2014 outside the bundled byte-ngram profile set, so the free \`detectByProfile\` step declines for the whole run and every ambiguous thread is sent to the model instead. Not a failure; write the regional variant as \`code:Label:Script\` if the scripts should stay in the profile's reach.`
+        text: `\`languages:\` names ${unsupported.map((language) => `\`${language.code}\``).join(", ")} \u2014 outside the bundled byte-ngram profile set, so the free \`detectByProfile\` step declines for the whole run and every ambiguous thread is sent to the model instead. Not a failure; spell the regional identity in the label and use the base profiled code to keep the free step, or add the variant explicitly as a candidate \u2014 the \`code:Label:Script\` long form keeps the code verbatim, so it changes nothing here.`
       });
     }
   }
-  const defaulted = authorityRows.filter((row) => row.isDefault && !row.denied);
+  const defaulted = authorityRows.filter(
+    (row) => row.isDefault && !row.denied && row.unused.length === 0
+  );
   if (defaulted.length > 0) {
     findings.push({
       severity: "green",
