@@ -87,6 +87,22 @@ describe("readShared", () => {
     });
   });
 
+  it("reads a group duty's shared inputs with no event thread in sight", () => {
+    // `harmonise` works document groups, not a thread: its `number` input is an
+    // optional group base path, and a `push` run has no issue or pull request
+    // to name. `needsThread: false` must not require one — a schedule-like
+    // event with no `issue.number` used to throw `names no issue or pull
+    // request` here.
+    given(COMPLETE);
+    delete issue.number;
+    process.env.GITHUB_EVENT_NAME = "schedule";
+
+    const shared = readShared({ needsThread: false });
+
+    expect(shared.number).toBeNull();
+    expect(shared.sweep).toBe(false);
+  });
+
   it("carries the names a workflow gave its models, kept beside the ids", () => {
     // Nothing between here and publication has any business with them, which is
     // exactly why they travel separately rather than folded into the ids.

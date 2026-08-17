@@ -36,8 +36,6 @@ function settingsWith(maxRequests: number | null): Settings {
     ignore: true,
     sweep: false,
     limit: null,
-    number: null,
-    since: null,
   };
 }
 

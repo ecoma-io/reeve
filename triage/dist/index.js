@@ -34649,7 +34649,7 @@ function readCore(options) {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
-function readShared() {
+function readShared(options = {}) {
   const sweep = getBooleanInput("sweep");
   const configuredNumber = getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -34659,7 +34659,7 @@ function readShared() {
   }
   return {
     ...readCore(),
-    number: sweep ? null : threadNumber(),
+    number: options.needsThread === false ? null : sweep ? null : threadNumber(),
     sweep,
     since: parseSince(getInput("since")),
     limit: bounded("limit", getInput("limit"))
