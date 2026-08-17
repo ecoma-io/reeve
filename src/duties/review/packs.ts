@@ -25,7 +25,7 @@
  * - a pack past `MAX_PACK_CHARS` fails red rather than truncating, because
  *   truncation would silently drop the policy somebody pinned (D5).
  */
-import { parse, YAMLParseError } from "yaml";
+import { isScalar, parse, parseDocument, YAMLParseError } from "yaml";
 
 import type { Rules } from "./rules.js";
 
@@ -106,42 +106,32 @@ export function parsePack(text: string, ref: string): Pack {
     );
   }
 
-  const version = readPackVersion(map.version, ref);
+  const version = readPackVersion(text, map.version, ref);
   const fragment = readPackFragment(map, ref, warnings);
   return { ref, version, fragment, raw: text, warnings };
 }
 
-function readPackVersion(raw: unknown, ref: string): Pack["version"] {
-  if (raw === undefined || raw === null) return null;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
-    // YAML parses `1.2` and `1.0` as numbers. A whole number is `major.0`;
-    // a fraction is `major.minor`, and `1.10` must mean 1.10, not 1.1.
-    return decimalParts(raw);
+function readPackVersion(text: string, parsed: unknown, ref: string): Pack["version"] {
+  if (parsed === undefined || parsed === null) return null;
+  // The version is read from the pack's source text, not the YAML-coerced
+  // number, so `1.10` stays 1.10 — YAML parses it as the JS number 1.1 and
+  // the trailing zero is otherwise unrecoverable. The scalar's source range
+  // preserves the author's spelling, quoted or not.
+  const node = parseDocument(text).get("version", true);
+  const raw =
+    isScalar(node) && Array.isArray(node.range) ? text.slice(node.range[0], node.range[1]) : null;
+  if (raw === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` could not be read from the file — got ${JSON.stringify(parsed)}`,
+    );
   }
-  if (typeof raw === "string") {
-    const match = TWO_PART_VERSION.exec(raw.trim());
-    if (match !== null) {
-      return { major: Number(match[1]), minor: match[2] === undefined ? 0 : Number(match[2]) };
-    }
+  const match = TWO_PART_VERSION.exec(raw.trim().replace(/^['"]|['"]$/g, ""));
+  if (match === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 — got \`${raw}\``,
+    );
   }
-  throw new UnreadablePacks(
-    `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 — got ${JSON.stringify(raw)}`,
-  );
-}
-
-/** Splits a non-negative finite number into major and minor decimal parts,
- * preserving trailing zeros (`1.10` → major 1, minor 10). */
-function decimalParts(value: number): { major: number; minor: number } {
-  if (Number.isInteger(value)) return { major: value, minor: 0 };
-  const text = String(value);
-  const dot = text.indexOf(".");
-  if (dot === -1) return { major: value, minor: 0 };
-  const major = Number(text.slice(0, dot));
-  const fraction = text.slice(dot + 1);
-  // Strip trailing zeros so `1.50` stays a two-component version, not 1.500.
-  const trimmed = fraction.replace(/0+$/, "");
-  const minor = trimmed.length === 0 ? 0 : Number(trimmed);
-  return { major, minor };
+  return { major: Number(match[1]), minor: match[2] === undefined ? 0 : Number(match[2]) };
 }
 
 function readPackFragment(

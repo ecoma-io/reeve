@@ -19759,7 +19759,7 @@ var require_identity = __commonJS({
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
     var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isScalar2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
     var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection(node) {
       if (node && typeof node === "object")
@@ -19781,7 +19781,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar2(node) || isCollection(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -19796,7 +19796,7 @@ var require_identity = __commonJS({
     exports.isMap = isMap;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.isSeq = isSeq;
   }
 });
@@ -25338,7 +25338,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -25422,7 +25422,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -26952,7 +26952,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument(source, options = {}) {
+    function parseDocument2(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -26978,7 +26978,7 @@ var require_public_api = __commonJS({
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument(src, options);
+      const doc = parseDocument2(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning2) => log.warn(doc.options.logLevel, warning2));
@@ -27014,7 +27014,7 @@ var require_public_api = __commonJS({
     }
     exports.parse = parse6;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument;
+    exports.parseDocument = parseDocument2;
     exports.stringify = stringify;
   }
 });
@@ -35552,35 +35552,26 @@ function parsePack(text2, ref) {
       `pack ${ref}: unknown top-level key \`${unknown[0] ?? ""}\` \u2014 a rule pack describes review policy (rules, ignores, blocked phrases, generated suffixes) and cannot grant authority (D2); remove it or the pack is refused`
     );
   }
-  const version = readPackVersion(map.version, ref);
+  const version = readPackVersion(text2, map.version, ref);
   const fragment = readPackFragment(map, ref, warnings);
   return { ref, version, fragment, raw: text2, warnings };
 }
-function readPackVersion(raw, ref) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
-    return decimalParts(raw);
+function readPackVersion(text2, parsed, ref) {
+  if (parsed === void 0 || parsed === null) return null;
+  const node = (0, import_yaml2.parseDocument)(text2).get("version", true);
+  const raw = (0, import_yaml2.isScalar)(node) && Array.isArray(node.range) ? text2.slice(node.range[0], node.range[1]) : null;
+  if (raw === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` could not be read from the file \u2014 got ${JSON.stringify(parsed)}`
+    );
   }
-  if (typeof raw === "string") {
-    const match = TWO_PART_VERSION.exec(raw.trim());
-    if (match !== null) {
-      return { major: Number(match[1]), minor: match[2] === void 0 ? 0 : Number(match[2]) };
-    }
+  const match = TWO_PART_VERSION.exec(raw.trim().replace(/^['"]|['"]$/g, ""));
+  if (match === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 \u2014 got \`${raw}\``
+    );
   }
-  throw new UnreadablePacks(
-    `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 \u2014 got ${JSON.stringify(raw)}`
-  );
-}
-function decimalParts(value) {
-  if (Number.isInteger(value)) return { major: value, minor: 0 };
-  const text2 = String(value);
-  const dot = text2.indexOf(".");
-  if (dot === -1) return { major: value, minor: 0 };
-  const major = Number(text2.slice(0, dot));
-  const fraction = text2.slice(dot + 1);
-  const trimmed = fraction.replace(/0+$/, "");
-  const minor = trimmed.length === 0 ? 0 : Number(trimmed);
-  return { major, minor };
+  return { major: Number(match[1]), minor: match[2] === void 0 ? 0 : Number(match[2]) };
 }
 function readPackFragment(map, ref, warnings) {
   const rules = readPackRules(map.rules, ref, warnings);

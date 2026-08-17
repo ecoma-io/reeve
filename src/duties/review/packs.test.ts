@@ -63,6 +63,11 @@ describe("parsePack", () => {
     expect(parsePack("version: '1.0'\n", "x/y").version).toEqual({ major: 1, minor: 0 });
   });
 
+  it("keeps a trailing-zero minor — 1.10 stays 1.10, never YAML's 1.1", () => {
+    expect(parsePack("version: 1.10\n", "x/y").version).toEqual({ major: 1, minor: 10 });
+    expect(parsePack('version: "1.10"\n', "x/y").version).toEqual({ major: 1, minor: 10 });
+  });
+
   it("accepts a pack without a version (unpinned references tolerate it)", () => {
     expect(parsePack("rules: []\n", "x/y").version).toBeNull();
   });
