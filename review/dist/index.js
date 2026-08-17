@@ -24467,9 +24467,9 @@ var require_resolve_flow_scalar = __commonJS({
             res += parseCharCode(source, i + 1, length, onError);
             i += length;
           } else {
-            const raw = source.substr(i - 1, 2);
-            onError(i - 1, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
-            res += raw;
+            const raw2 = source.substr(i - 1, 2);
+            onError(i - 1, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw2}`);
+            res += raw2;
           }
         } else if (ch === " " || ch === "	") {
           const wsStart = i;
@@ -24541,9 +24541,9 @@ var require_resolve_flow_scalar = __commonJS({
       try {
         return String.fromCodePoint(code2);
       } catch {
-        const raw = source.substr(offset - 2, length + 2);
-        onError(offset - 2, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw}`);
-        return raw;
+        const raw2 = source.substr(offset - 2, length + 2);
+        onError(offset - 2, "BAD_DQ_ESCAPE", `Invalid escape sequence ${raw2}`);
+        return raw2;
       }
     }
     exports.resolveFlowScalar = resolveFlowScalar;
@@ -32346,13 +32346,13 @@ function labelOf(code2) {
 }
 
 // src/core/list.ts
-function parseList(raw) {
-  return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+function parseList(raw2) {
+  return raw2.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
 // src/core/languages.ts
-function parseLanguages(raw) {
-  const entries = typeof raw === "string" ? parseList(raw) : raw;
+function parseLanguages(raw2) {
+  const entries = typeof raw2 === "string" ? parseList(raw2) : raw2;
   if (entries.length === 0) {
     throw new Error("languages: no entries. Expected at least one language code.");
   }
@@ -32422,8 +32422,8 @@ function mapProse(markdown, rewrite) {
   return segments(markdown).map((segment) => segment.kind === "prose" ? rewrite(segment.text) : segment.text).join("");
 }
 function terminatedLines(markdown) {
-  const raw = markdown.split("\n");
-  return raw.map((line, index) => index < raw.length - 1 ? `${line}
+  const raw2 = markdown.split("\n");
+  return raw2.map((line, index) => index < raw2.length - 1 ? `${line}
 ` : line);
 }
 function withoutTerminator(line) {
@@ -32594,10 +32594,10 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw2) {
   const models = [];
   const names = /* @__PURE__ */ new Map();
-  for (const entry of parseList(raw)) {
+  for (const entry of parseList(raw2)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
@@ -33291,9 +33291,9 @@ function parseWarrant(path, source) {
     propose,
     dependa,
     granted: (duty, fallback) => {
-      const raw = capabilities.get(duty);
-      if (raw === "default") return fallback;
-      if (raw !== void 0) return raw;
+      const raw2 = capabilities.get(duty);
+      if (raw2 === "default") return fallback;
+      if (raw2 !== void 0) return raw2;
       return declared ? [] : fallback;
     },
     unnamed: (duty) => declared && !capabilities.has(duty),
@@ -33383,14 +33383,14 @@ function load(path, source) {
   }
   return document2;
 }
-function readLabels(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`labels\` as ${describe(raw)}, expected a list.`);
+function readLabels(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  if (!Array.isArray(raw2)) {
+    throw new Error(`warrant: \`${path}\` has \`labels\` as ${describe(raw2)}, expected a list.`);
   }
   const labels = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const [index, entry] of raw.entries()) {
+  for (const [index, entry] of raw2.entries()) {
     const at = `\`${path}\` label ${String(index + 1)}`;
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
@@ -33443,17 +33443,17 @@ function readLabels(path, raw) {
   }
   return labels;
 }
-function readLanguages(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
+function readLanguages(path, raw2) {
+  if (raw2 === void 0) return null;
+  if (raw2 === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`languages:\` with nothing under it. Name at least one language, or delete the key to leave each duty's own default in charge.`
     );
   }
-  if (!Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw)}, expected a list.`);
+  if (!Array.isArray(raw2)) {
+    throw new Error(`warrant: \`${path}\` has \`languages\` as ${describe(raw2)}, expected a list.`);
   }
-  const entries = raw.map((entry, index) => {
+  const entries = raw2.map((entry, index) => {
     if (typeof entry !== "string") {
       throw new Error(
         `warrant: \`${path}\` \`languages\` entry ${String(index + 1)} is ${describe(entry)}, expected text.`
@@ -33468,26 +33468,26 @@ function readLanguages(path, raw) {
   });
   return parseLanguages(entries);
 }
-function readPivot(path, raw) {
-  if (raw === void 0) return null;
-  if (typeof raw !== "string" || raw.trim().length === 0) {
+function readPivot(path, raw2) {
+  if (raw2 === void 0) return null;
+  if (typeof raw2 !== "string" || raw2.trim().length === 0) {
     throw new Error(
-      `warrant: \`${path}\` has \`pivot\` as ${describe(raw)}, expected a language code.`
+      `warrant: \`${path}\` has \`pivot\` as ${describe(raw2)}, expected a language code.`
     );
   }
-  return raw.trim();
+  return raw2.trim();
 }
-function readMemory(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
+function readMemory(path, raw2) {
+  if (raw2 === void 0) return null;
+  if (raw2 === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`memory:\` with nothing under it. Write \`recall:\` under it, or remove the key to leave the duty's own default in charge.`
     );
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw)}, expected a mapping.`);
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
+    throw new Error(`warrant: \`${path}\` has \`memory\` as ${describe(raw2)}, expected a mapping.`);
   }
-  const fields = raw;
+  const fields = raw2;
   const recall = fields.recall;
   if (recall === void 0 || recall === null) {
     throw new Error(`warrant: \`${path}\`'s \`memory\` has no \`recall\`.`);
@@ -33499,27 +33499,27 @@ function readMemory(path, raw) {
   }
   return { recall };
 }
-function readAbout(path, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string") {
-    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw)}, expected text.`);
+function readAbout(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return null;
+  if (typeof raw2 !== "string") {
+    throw new Error(`warrant: \`${path}\` has \`about\` as ${describe(raw2)}, expected text.`);
   }
-  const value = raw.trim();
+  const value = raw2.trim();
   return value.length === 0 ? null : value;
 }
-function readLifecycle(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
+function readLifecycle(path, raw2) {
+  if (raw2 === void 0) return null;
+  if (raw2 === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`lifecycle:\` with nothing under it. Write \`tracks:\` under it, or remove the key to leave the duty unwired.`
     );
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     throw new Error(
-      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw)}, expected a mapping.`
+      `warrant: \`${path}\` has \`lifecycle\` as ${describe(raw2)}, expected a mapping.`
     );
   }
-  const fields = raw;
+  const fields = raw2;
   rejectUnknownKeys(`\`${path}\`'s \`lifecycle\``, fields, [
     "tracks",
     "exempt",
@@ -33544,14 +33544,14 @@ function readLifecycle(path, raw) {
   }
   return { tracks, exempt, overrides, threads };
 }
-function readLifecycleTracks(path, raw) {
-  if (!Array.isArray(raw) || raw.length === 0) {
+function readLifecycleTracks(path, raw2) {
+  if (!Array.isArray(raw2) || raw2.length === 0) {
     throw new Error(
       `warrant: \`${path}\`'s \`lifecycle:\` has no \`tracks\` \u2014 a lifecycle with no tracks decides nothing. Delete the key, or write a track.`
     );
   }
   const seen = /* @__PURE__ */ new Set();
-  return raw.map((entry, index) => {
+  return raw2.map((entry, index) => {
     const at = `\`${path}\`'s \`lifecycle.tracks\` entry ${String(index + 1)}`;
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
@@ -33594,18 +33594,18 @@ function readLifecycleTracks(path, raw) {
     return { name, when, resets, steps };
   });
 }
-function resetsField(at, raw, fallback) {
-  if (raw === void 0 || raw === null) return fallback;
-  if (raw === "author" || raw === "any") return raw;
+function resetsField(at, raw2, fallback) {
+  if (raw2 === void 0 || raw2 === null) return fallback;
+  if (raw2 === "author" || raw2 === "any") return raw2;
   throw new Error(
-    `warrant: ${at} has \`resets\` as ${describe(raw)}, expected \`author\` or \`any\`.`
+    `warrant: ${at} has \`resets\` as ${describe(raw2)}, expected \`author\` or \`any\`.`
   );
 }
-function readLifecycleStep(at, raw, isLast) {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+function readLifecycleStep(at, raw2, isLast) {
+  if (raw2 === null || typeof raw2 !== "object" || Array.isArray(raw2)) {
+    throw new Error(`warrant: ${at} is ${describe(raw2)}, expected a mapping.`);
   }
-  const fields = raw;
+  const fields = raw2;
   rejectUnknownKeys(at, fields, ["after", "label", "say", "close"]);
   const after = durationField(at, "after", fields.after, { allowNever: false });
   const label = nullable(text(at, "label", fields.label, { required: false }));
@@ -33623,17 +33623,17 @@ function readLifecycleStep(at, raw, isLast) {
   }
   return { after, label, say, close };
 }
-function readSay(at, raw) {
-  if (raw === void 0 || raw === null || raw === false) return null;
-  if (raw === true) return { kind: "built-in" };
-  if (typeof raw === "string") {
-    const value = raw.trim();
+function readSay(at, raw2) {
+  if (raw2 === void 0 || raw2 === null || raw2 === false) return null;
+  if (raw2 === true) return { kind: "built-in" };
+  if (typeof raw2 === "string") {
+    const value = raw2.trim();
     if (value.length === 0) throw new Error(`warrant: ${at} has an empty \`say\`.`);
     return { kind: "text", text: value };
   }
-  if (typeof raw === "object" && !Array.isArray(raw)) {
+  if (typeof raw2 === "object" && !Array.isArray(raw2)) {
     const map = /* @__PURE__ */ new Map();
-    for (const [lang, value] of Object.entries(raw)) {
+    for (const [lang, value] of Object.entries(raw2)) {
       if (typeof value !== "string" || value.trim().length === 0) {
         throw new Error(`warrant: ${at}'s \`say.${lang}\` is ${describe(value)}, expected text.`);
       }
@@ -33643,22 +33643,22 @@ function readSay(at, raw) {
     return { kind: "map", map };
   }
   throw new Error(
-    `warrant: ${at} has \`say\` as ${describe(raw)}, expected true, text, or a mapping of language to text.`
+    `warrant: ${at} has \`say\` as ${describe(raw2)}, expected true, text, or a mapping of language to text.`
   );
 }
-function closeField(at, raw) {
-  if (raw === void 0 || raw === null || raw === false) return false;
-  if (raw === true || raw === "not_planned") return true;
-  if (raw === "completed") {
+function closeField(at, raw2) {
+  if (raw2 === void 0 || raw2 === null || raw2 === false) return false;
+  if (raw2 === true || raw2 === "not_planned") return true;
+  if (raw2 === "completed") {
     throw new Error(
       `warrant: ${at} has \`close: completed\` \u2014 Reeve closes only as \`not_planned\`. Write \`close: true\`.`
     );
   }
-  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw)}, expected true or false.`);
+  throw new Error(`warrant: ${at} has \`close\` as ${describe(raw2)}, expected true or false.`);
 }
-function readLifecycleExempt(path, raw) {
+function readLifecycleExempt(path, raw2) {
   const at = `\`${path}\`'s \`lifecycle.exempt\``;
-  if (raw === void 0 || raw === null) {
+  if (raw2 === void 0 || raw2 === null) {
     return {
       labels: [],
       milestones: true,
@@ -33668,10 +33668,10 @@ function readLifecycleExempt(path, raw) {
       drafts: true
     };
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`warrant: ${at} is ${describe(raw)}, expected a mapping.`);
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
+    throw new Error(`warrant: ${at} is ${describe(raw2)}, expected a mapping.`);
   }
-  const fields = raw;
+  const fields = raw2;
   rejectUnknownKeys(at, fields, [
     "labels",
     "milestones",
@@ -33689,22 +33689,22 @@ function readLifecycleExempt(path, raw) {
     drafts: booleanField(at, "drafts", fields.drafts, true)
   };
 }
-function guardField(at, key, raw, fallback) {
-  if (raw === void 0 || raw === null) return fallback;
-  if (typeof raw === "boolean") return raw;
-  if (typeof raw === "string" || Array.isArray(raw)) return strings(at, key, raw);
+function guardField(at, key, raw2, fallback) {
+  if (raw2 === void 0 || raw2 === null) return fallback;
+  if (typeof raw2 === "boolean") return raw2;
+  if (typeof raw2 === "string" || Array.isArray(raw2)) return strings(at, key, raw2);
   throw new Error(
-    `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true, false, or a list of names.`
+    `warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected true, false, or a list of names.`
   );
 }
-function readLifecycleOverrides(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
+function readLifecycleOverrides(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  if (!Array.isArray(raw2)) {
     throw new Error(
-      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw)}, expected a list.`
+      `warrant: \`${path}\`'s \`lifecycle.overrides\` is ${describe(raw2)}, expected a list.`
     );
   }
-  return raw.map((entry, index) => {
+  return raw2.map((entry, index) => {
     const at = `\`${path}\`'s \`lifecycle.overrides\` entry ${String(index + 1)}`;
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`label\`.`);
@@ -33726,19 +33726,19 @@ function readLifecycleOverrides(path, raw) {
     return { label, after, never };
   });
 }
-function readDependa(path, raw) {
-  if (raw === void 0) return null;
-  if (raw === null) {
+function readDependa(path, raw2) {
+  if (raw2 === void 0) return null;
+  if (raw2 === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`dependa:\` with nothing under it. Write \`allowed-types:\` under it, or remove the key to leave dependa's own defaults in charge.`
     );
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     throw new Error(
-      `warrant: \`${path}\` has \`dependa\` as ${describe(raw)}, expected a mapping.`
+      `warrant: \`${path}\` has \`dependa\` as ${describe(raw2)}, expected a mapping.`
     );
   }
-  const fields = raw;
+  const fields = raw2;
   rejectUnknownKeys(`\`${path}\`'s \`dependa\``, fields, [
     "ecosystems",
     "allowed-types",
@@ -33772,9 +33772,9 @@ function readDependa(path, raw) {
     schedule: readDependaSchedule(path, fields.schedule)
   };
 }
-function readDependaEcosystems(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = strings(`\`${path}\`'s \`dependa\``, "ecosystems", raw);
+function readDependaEcosystems(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  const list = strings(`\`${path}\`'s \`dependa\``, "ecosystems", raw2);
   const ecosystems = [];
   for (const entry of list) {
     const eco = ECOSYSTEMS.find((e) => e === entry);
@@ -33787,11 +33787,11 @@ function readDependaEcosystems(path, raw) {
   }
   return ecosystems;
 }
-function readDependaAllowedTypes(path, raw) {
-  if (raw === void 0 || raw === null) {
+function readDependaAllowedTypes(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) {
     return ["patch", "minor", "pin", "digest", "rollback", "security"];
   }
-  const list = strings(`\`${path}\`'s \`dependa\``, "allowed-types", raw);
+  const list = strings(`\`${path}\`'s \`dependa\``, "allowed-types", raw2);
   if (list.length === 0) {
     throw new Error(
       `warrant: \`${path}\`'s \`dependa.allowed-types\` is empty. Write at least one, or remove the key to take the defaults.`
@@ -33809,14 +33809,14 @@ function readDependaAllowedTypes(path, raw) {
   }
   return types;
 }
-function readDependaIgnore(path, raw) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
+function readDependaIgnore(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  if (!Array.isArray(raw2)) {
     throw new Error(
-      `warrant: \`${path}\`'s \`dependa.ignore\` is ${describe(raw)}, expected a list.`
+      `warrant: \`${path}\`'s \`dependa.ignore\` is ${describe(raw2)}, expected a list.`
     );
   }
-  return raw.map((entry, index) => {
+  return raw2.map((entry, index) => {
     const at = `\`${path}\`'s \`dependa.ignore\` entry ${String(index + 1)}`;
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`warrant: ${at} is ${describe(entry)}, expected a mapping with a \`name\`.`);
@@ -33829,24 +33829,24 @@ function readDependaIgnore(path, raw) {
     return { name, ecosystem, types };
   });
 }
-function readIgnoreEcosystem(at, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string") {
+function readIgnoreEcosystem(at, raw2) {
+  if (raw2 === void 0 || raw2 === null) return null;
+  if (typeof raw2 !== "string") {
     throw new Error(
-      `warrant: ${at} has \`ecosystem\` as ${describe(raw)}, expected an ecosystem name.`
+      `warrant: ${at} has \`ecosystem\` as ${describe(raw2)}, expected an ecosystem name.`
     );
   }
-  const eco = ECOSYSTEMS.find((e) => e === raw.trim());
+  const eco = ECOSYSTEMS.find((e) => e === raw2.trim());
   if (eco === void 0) {
     throw new Error(
-      `warrant: ${at} has \`ecosystem: ${raw}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
+      `warrant: ${at} has \`ecosystem: ${raw2}\`, which is not a known ecosystem. Expected any of ${ECOSYSTEMS.join(", ")}.`
     );
   }
   return eco;
 }
-function readIgnoreTypes(at, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = strings(at, "types", raw);
+function readIgnoreTypes(at, raw2) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  const list = strings(at, "types", raw2);
   const types = [];
   for (const entry of list) {
     const ut = UPDATE_TYPES.find((t) => t === entry);
@@ -33859,30 +33859,30 @@ function readIgnoreTypes(at, raw) {
   }
   return types;
 }
-function readDependaGrouping(path, raw) {
-  if (raw === void 0 || raw === null) return "by-ecosystem";
-  if (raw !== "by-ecosystem" && raw !== "by-package" && raw !== "single") {
+function readDependaGrouping(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return "by-ecosystem";
+  if (raw2 !== "by-ecosystem" && raw2 !== "by-package" && raw2 !== "single") {
     throw new Error(
-      `warrant: \`${path}\`'s \`dependa.grouping\` is ${describe(raw)}, expected \`by-ecosystem\`, \`by-package\`, or \`single\`.`
+      `warrant: \`${path}\`'s \`dependa.grouping\` is ${describe(raw2)}, expected \`by-ecosystem\`, \`by-package\`, or \`single\`.`
     );
   }
-  return raw;
+  return raw2;
 }
-function readDependaAutoApprove(path, raw) {
-  if (raw === void 0 || raw === null) return "minor";
-  if (raw === "none") return "none";
-  const ut = UPDATE_TYPES.find((t) => t === raw);
+function readDependaAutoApprove(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return "minor";
+  if (raw2 === "none") return "none";
+  const ut = UPDATE_TYPES.find((t) => t === raw2);
   if (ut === void 0) {
     throw new Error(
-      `warrant: \`${path}\`'s \`dependa.auto-approve\` is ${describe(raw)}, expected an update type or \`none\`.`
+      `warrant: \`${path}\`'s \`dependa.auto-approve\` is ${describe(raw2)}, expected an update type or \`none\`.`
     );
   }
   return ut;
 }
-function readDependaSchedule(path, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
+function readDependaSchedule(path, raw2) {
+  if (raw2 === void 0 || raw2 === null) return null;
+  if (typeof raw2 === "string") {
+    const trimmed = raw2.trim();
     if (/^\d+d$/.test(trimmed)) {
       const days = Number(trimmed.slice(0, -1));
       if (days === 0) {
@@ -33894,8 +33894,8 @@ function readDependaSchedule(path, raw) {
     }
     return { kind: "cron", expression: trimmed };
   }
-  if (typeof raw === "object" && !Array.isArray(raw)) {
-    const fields = raw;
+  if (typeof raw2 === "object" && !Array.isArray(raw2)) {
+    const fields = raw2;
     rejectUnknownKeys(`\`${path}\`'s \`dependa.schedule\``, fields, ["interval", "cron"]);
     const interval = fields.interval;
     const cron = fields.cron;
@@ -33921,22 +33921,22 @@ function readDependaSchedule(path, raw) {
     );
   }
   throw new Error(
-    `warrant: \`${path}\`'s \`dependa.schedule\` is ${describe(raw)}, expected a duration, a cron expression, or a mapping.`
+    `warrant: \`${path}\`'s \`dependa.schedule\` is ${describe(raw2)}, expected a duration, a cron expression, or a mapping.`
   );
 }
-function readPropose(path, raw) {
-  if (raw === void 0) return DEFAULT_PROPOSE_WORKSPACE;
-  if (raw === null) {
+function readPropose(path, raw2) {
+  if (raw2 === void 0) return DEFAULT_PROPOSE_WORKSPACE;
+  if (raw2 === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`propose:\` with nothing under it. Write \`workspace:\` under it, or remove the key to take the defaults.`
     );
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     throw new Error(
-      `warrant: \`${path}\` has \`propose\` as ${describe(raw)}, expected a mapping.`
+      `warrant: \`${path}\` has \`propose\` as ${describe(raw2)}, expected a mapping.`
     );
   }
-  const fields = raw;
+  const fields = raw2;
   rejectUnknownKeys(`\`${path}\`'s \`propose\``, fields, ["workspace"]);
   const workspaceRaw = fields.workspace;
   if (workspaceRaw === void 0 || workspaceRaw === null) return DEFAULT_PROPOSE_WORKSPACE;
@@ -33961,32 +33961,32 @@ function readPropose(path, raw) {
   const retire = booleanField(at, "retire", w.retire, false);
   return { name, except, evidence, window: window2, retire };
 }
-function wholeNumber(at, key, raw, min) {
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min) {
+function wholeNumber(at, key, raw2, min) {
+  if (typeof raw2 !== "number" || !Number.isInteger(raw2) || raw2 < min) {
     throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a whole number of ${String(min)} or more.`
+      `warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected a whole number of ${String(min)} or more.`
     );
   }
-  return raw;
+  return raw2;
 }
-function optionalWholeNumber(at, key, raw, min) {
-  if (raw === void 0 || raw === null) return null;
-  return wholeNumber(at, key, raw, min);
+function optionalWholeNumber(at, key, raw2, min) {
+  if (raw2 === void 0 || raw2 === null) return null;
+  return wholeNumber(at, key, raw2, min);
 }
-function readDuties(path, raw) {
+function readDuties(path, raw2) {
   const granted = /* @__PURE__ */ new Map();
-  if (raw === void 0) return { declared: false, granted };
-  if (raw === null) {
+  if (raw2 === void 0) return { declared: false, granted };
+  if (raw2 === null) {
     throw new Error(
       `warrant: \`${path}\` writes \`duties:\` with nothing under it. Use \`[none]\` to grant nothing, write the mapping, or remove the key to keep every duty's own default.`
     );
   }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     throw new Error(
-      `warrant: \`${path}\` has \`duties\` as ${describe(raw)}, expected a mapping of duty to what it may do.`
+      `warrant: \`${path}\` has \`duties\` as ${describe(raw2)}, expected a mapping of duty to what it may do.`
     );
   }
-  for (const [duty, value] of Object.entries(raw)) {
+  for (const [duty, value] of Object.entries(raw2)) {
     const at = `\`${path}\` duties for \`${duty}\``;
     if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
       const available = [...DUTIES, ...PLANNED];
@@ -34026,23 +34026,23 @@ function readDuties(path, raw) {
   }
   return { declared: true, granted };
 }
-function text(at, key, raw, options) {
-  if (raw === void 0 || raw === null) {
+function text(at, key, raw2, options) {
+  if (raw2 === void 0 || raw2 === null) {
     if (!options.required) return "";
     throw new Error(`warrant: ${at} has no \`${key}\`.`);
   }
-  if (typeof raw !== "string") {
-    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected text.`);
+  if (typeof raw2 !== "string") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected text.`);
   }
-  const value = raw.trim();
+  const value = raw2.trim();
   if (value.length === 0 && options.required) {
     throw new Error(`warrant: ${at} has an empty \`${key}\`.`);
   }
   return value;
 }
-function strings(at, key, raw) {
-  if (raw === void 0 || raw === null) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
+function strings(at, key, raw2) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  const list = Array.isArray(raw2) ? raw2 : [raw2];
   return list.map((entry, index) => {
     if (typeof entry !== "string") {
       throw new Error(
@@ -34059,40 +34059,40 @@ function strings(at, key, raw) {
 function nullable(value) {
   return value.length === 0 ? null : value;
 }
-function confidenceField(at, key, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0 || raw > 1) {
+function confidenceField(at, key, raw2) {
+  if (raw2 === void 0 || raw2 === null) return null;
+  if (typeof raw2 !== "number" || !Number.isFinite(raw2) || raw2 < 0 || raw2 > 1) {
     throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a number between 0 and 1.`
+      `warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected a number between 0 and 1.`
     );
   }
-  return raw;
+  return raw2;
 }
-function booleanField(at, key, raw, fallback) {
-  if (raw === void 0 || raw === null) return fallback;
-  if (typeof raw !== "boolean") {
-    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw)}, expected true or false.`);
+function booleanField(at, key, raw2, fallback) {
+  if (raw2 === void 0 || raw2 === null) return fallback;
+  if (typeof raw2 !== "boolean") {
+    throw new Error(`warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected true or false.`);
   }
-  return raw;
+  return raw2;
 }
 var HEX_COLOR = /^[0-9a-fA-F]{6}$/;
-function colorField(at, key, raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string" || !HEX_COLOR.test(raw.trim())) {
+function colorField(at, key, raw2) {
+  if (raw2 === void 0 || raw2 === null) return null;
+  if (typeof raw2 !== "string" || !HEX_COLOR.test(raw2.trim())) {
     throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a 6-digit hex color with no \`#\`.`
+      `warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected a 6-digit hex color with no \`#\`.`
     );
   }
-  return raw.trim().toLowerCase();
+  return raw2.trim().toLowerCase();
 }
-function durationField(at, key, raw, options) {
-  if (options.allowNever && raw === "never") return null;
-  if (typeof raw !== "string" || !/^\d+d$/.test(raw.trim())) {
+function durationField(at, key, raw2, options) {
+  if (options.allowNever && raw2 === "never") return null;
+  if (typeof raw2 !== "string" || !/^\d+d$/.test(raw2.trim())) {
     throw new Error(
-      `warrant: ${at} has \`${key}\` as ${describe(raw)}, expected a duration like \`14d\`` + (options.allowNever ? " or `never`." : ".")
+      `warrant: ${at} has \`${key}\` as ${describe(raw2)}, expected a duration like \`14d\`` + (options.allowNever ? " or `never`." : ".")
     );
   }
-  const days = Number(raw.trim().slice(0, -1));
+  const days = Number(raw2.trim().slice(0, -1));
   if (days === 0) {
     throw new Error(
       `warrant: ${at} has \`${key}: 0d\`, which is not a duration. Write \`never\`, or remove the step.`
@@ -34107,11 +34107,11 @@ function rejectUnknownKeys(at, fields, known) {
     }
   }
 }
-function closestKeys(raw, known) {
+function closestKeys(raw2, known) {
   const best = /* @__PURE__ */ new Map();
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const key of known) {
-    const distance = levenshtein(raw, key);
+    const distance = levenshtein(raw2, key);
     if (distance > bestDistance) continue;
     if (distance < bestDistance) {
       bestDistance = distance;
@@ -34120,10 +34120,10 @@ function closestKeys(raw, known) {
     best.set(distance, [...best.get(distance) ?? [], key]);
   }
   const suggestions = best.get(bestDistance) ?? [];
-  return suggestions.filter((key) => bestDistance <= 2 && key !== raw).slice(0, 2);
+  return suggestions.filter((key) => bestDistance <= 2 && key !== raw2).slice(0, 2);
 }
-function closestHint(raw, known) {
-  const suggestions = closestKeys(raw, known);
+function closestHint(raw2, known) {
+  const suggestions = closestKeys(raw2, known);
   return suggestions.length === 0 ? "" : ` Did you mean ${suggestions.map((name) => `\`${name}\``).join(" or ")}?`;
 }
 function levenshtein(a, b) {
@@ -34181,9 +34181,9 @@ function readCore(options) {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
-function parseEndpoints(raw) {
+function parseEndpoints(raw2) {
   const seen = /* @__PURE__ */ new Set();
-  return parseList(raw).map((entry) => {
+  return parseList(raw2).map((entry) => {
     const at = entry.indexOf("=");
     if (at === -1) {
       throw new Error(`endpoints: expected \`alias = url\`, got \`${entry}\`.`);
@@ -34221,8 +34221,8 @@ function parseEndpoints(raw) {
     return { alias, baseUrl: url, timeoutMs };
   });
 }
-function parseApiKeys(raw) {
-  const entries = parseList(raw);
+function parseApiKeys(raw2) {
+  const entries = parseList(raw2);
   for (const entry of entries) {
     const at = entry.indexOf("=");
     const value = (at === -1 ? entry : entry.slice(at + 1)).trim();
@@ -34247,31 +34247,31 @@ function checkApiKeysDeclared(endpoints, apiKeys) {
     }
   }
 }
-function parseTimeout(name, raw) {
-  const trimmed = raw.trim();
+function parseTimeout(name, raw2) {
+  const trimmed = raw2.trim();
   const match = /^(\d+)(s|m)$/.exec(trimmed);
   if (!match) {
     throw new Error(
-      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw}\`.`
+      `${name}: expected a whole number of seconds or minutes, like \`120s\` or \`2m\` \u2014 a bare number names no unit, got \`${raw2}\`.`
     );
   }
   const [, digits, unit] = match;
   const value = Number(digits);
-  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw}\`.`);
+  if (value < 1) throw new Error(`${name}: expected a positive duration, got \`${raw2}\`.`);
   const ms = unit === "m" ? value * 6e4 : value * 1e3;
   if (ms > 2147483647) {
     throw new Error(
-      `${name}: \`${raw}\` is longer than any run could ever wait \u2014 use a shorter duration.`
+      `${name}: \`${raw2}\` is longer than any run could ever wait \u2014 use a shorter duration.`
     );
   }
   return ms;
 }
-function parseTemperature(raw) {
-  const trimmed = raw.trim();
+function parseTemperature(raw2) {
+  const trimmed = raw2.trim();
   if (trimmed.length === 0) return void 0;
   const value = Number(trimmed);
   if (!Number.isFinite(value) || value < 0 || value > 2) {
-    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw}\`.`);
+    throw new Error(`temperature: expected a number between 0 and 2, got \`${raw2}\`.`);
   }
   return value;
 }
@@ -34288,20 +34288,20 @@ function threadNumber() {
   }
   return triggered;
 }
-function whole(name, raw) {
-  const value = Number(raw);
+function whole(name, raw2) {
+  const value = Number(raw2);
   if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw}\`.`);
+    throw new Error(`${name}: expected a whole number of 1 or more, got \`${raw2}\`.`);
   }
   return value;
 }
-function bounded(name, raw) {
-  const trimmed = raw.trim();
+function bounded(name, raw2) {
+  const trimmed = raw2.trim();
   if (trimmed.toLowerCase() === "none") return null;
   const value = Number(trimmed);
   if (trimmed.length === 0 || !Number.isInteger(value) || value < 1) {
     throw new Error(
-      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
+      `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw2}\`.`
     );
   }
   return value;
@@ -34526,17 +34526,17 @@ function isGenerated(path, extensions) {
 function lineNumbers(patch) {
   const lines = /* @__PURE__ */ new Map();
   let current = null;
-  for (const raw of patch.split("\n")) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+  for (const raw2 of patch.split("\n")) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw2);
     if (hunk !== null) {
       current = Number(hunk[1]);
       continue;
     }
     if (current === null) continue;
-    const plus = raw.startsWith("+") && !raw.startsWith("+++");
-    const context3 = raw.startsWith(" ") || raw.startsWith("	");
+    const plus = raw2.startsWith("+") && !raw2.startsWith("+++");
+    const context3 = raw2.startsWith(" ") || raw2.startsWith("	");
     if (plus || context3) {
-      const text2 = raw.slice(1);
+      const text2 = raw2.slice(1);
       lines.set(current, text2);
       current += 1;
     }
@@ -35340,12 +35340,19 @@ function decodeEnvelope(payload) {
       const f = entry;
       return typeof f.id === "string" && typeof f.ruleId === "string" && typeof f.ruleName === "string" && typeof f.ruleBody === "string" && typeof f.path === "string" && (f.line === null || Number.isInteger(f.line)) && typeof f.severity === "string" && typeof f.body === "string" && typeof f.marker === "string" && typeof f.wasResolved === "boolean";
     }).map((entry) => {
-      const raw = entry;
-      const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
+      const raw2 = entry;
+      const resolvedAtSha = typeof raw2.resolvedAtSha === "string" ? { resolvedAtSha: raw2.resolvedAtSha } : {};
+      const {
+        snippet: _snippet,
+        verification: _verification,
+        evidence: _evidence,
+        ...core
+      } = entry;
       return {
-        ...entry,
+        ...core,
         wasResolved: entry.wasResolved === true,
-        ...resolvedAtSha
+        ...resolvedAtSha,
+        ...optionalEvidence(raw2)
       };
     });
     const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
@@ -35353,6 +35360,23 @@ function decodeEnvelope(payload) {
   } catch {
     return null;
   }
+}
+function optionalEvidence(raw2) {
+  const out = {};
+  if (typeof raw2.snippet === "string") out.snippet = raw2.snippet;
+  if (raw2.verification === "verified" || raw2.verification === "unverified") {
+    out.verification = raw2.verification;
+  }
+  if (Array.isArray(raw2.evidence)) {
+    const items = raw2.evidence.filter((entry) => evidenceShaped(entry));
+    if (items.length > 0) out.evidence = items;
+  }
+  return out;
+}
+function evidenceShaped(raw2) {
+  if (typeof raw2 !== "object" || raw2 === null || Array.isArray(raw2)) return false;
+  const entry = raw2;
+  return (entry.kind === "diff" || entry.kind === "rules") && typeof entry.weight === "number" && typeof entry.detail === "string" && typeof entry.provenance === "object" && entry.provenance !== null && typeof entry.provenance.ruleId === "string";
 }
 var COMMENT_PAGE = 100;
 async function findMarked(api, at) {
@@ -35465,7 +35489,15 @@ function findingLine(finding) {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   const body = sanitize(finding.body);
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}`;
+  const badge = verificationBadge(finding);
+  const suffix = badge.length === 0 ? "" : ` ${badge}`;
+  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+}
+function verificationBadge(finding) {
+  if (finding.marker.length > 0) return "";
+  if (finding.verification === "verified") return "\xB7 verified";
+  if (finding.verification === "unverified") return "\xB7 not verified";
+  return "";
 }
 function footer() {
   const parts = [chrome("reviewFooterFloor", null), chrome("reviewFooterEditable", null)];
@@ -35500,19 +35532,19 @@ var DEFAULT_RULES = [
 ];
 var PREFLIGHT_ID = "review-preflight";
 async function readRules(path) {
-  let raw;
+  let raw2;
   try {
-    raw = await readFile2(path, "utf8");
+    raw2 = await readFile2(path, "utf8");
   } catch (error2) {
     if (isMissing(error2)) return emptyRules();
     warning(`review: could not read rules file at ${path}: ${String(error2)}`);
     return emptyRules();
   }
-  if (raw.trim().length === 0) return emptyRules();
-  if (raw.length > MAX_RULES_CHARS) {
-    raw = raw.slice(0, MAX_RULES_CHARS);
+  if (raw2.trim().length === 0) return emptyRules();
+  if (raw2.length > MAX_RULES_CHARS) {
+    raw2 = raw2.slice(0, MAX_RULES_CHARS);
   }
-  return parseRules(raw);
+  return parseRules(raw2);
 }
 function emptyRules() {
   return {
@@ -35565,38 +35597,38 @@ function parseRules(text2) {
     warnings
   };
 }
-function readIgnore(raw, warnings) {
-  if (raw === void 0 || raw === null) return { files: [], paths: [] };
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+function readIgnore(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return { files: [], paths: [] };
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     warnings.push("`ignore:` is not a mapping; ignoring");
     return { files: [], paths: [] };
   }
-  const map = raw;
+  const map = raw2;
   return {
     files: readStringList(map.files, "ignore.files", warnings),
     paths: readStringList(map.paths, "ignore.paths", warnings)
   };
 }
-function readVersion(raw, warnings) {
-  if (raw === void 0) {
+function readVersion(raw2, warnings) {
+  if (raw2 === void 0) {
     warnings.push("no `version:`; assuming 1");
     return 1;
   }
-  if (raw === 1 || raw === "1") return 1;
-  if (typeof raw === "number" && Number.isInteger(raw)) {
-    warnings.push(`unsupported version ${String(raw)}; treating as 1`);
+  if (raw2 === 1 || raw2 === "1") return 1;
+  if (typeof raw2 === "number" && Number.isInteger(raw2)) {
+    warnings.push(`unsupported version ${String(raw2)}; treating as 1`);
     return 1;
   }
   warnings.push("`version` is not a number; treating as 1");
   return 1;
 }
-function readStringList(raw, key, warnings) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
+function readStringList(raw2, key, warnings) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  if (!Array.isArray(raw2)) {
     warnings.push(`\`${key}:\` is not a list; ignoring`);
     return [];
   }
-  return raw.map((entry, index) => {
+  return raw2.map((entry, index) => {
     if (typeof entry !== "string") {
       warnings.push(`\`${key}\` entry ${String(index + 1)} is not a string; dropped`);
       return null;
@@ -35604,17 +35636,17 @@ function readStringList(raw, key, warnings) {
     return entry;
   }).filter((entry) => entry !== null);
 }
-function readGenerated(raw, warnings) {
-  const list = readStringList(raw, "generated", warnings);
+function readGenerated(raw2, warnings) {
+  const list = readStringList(raw2, "generated", warnings);
   return list.length > 0 ? list : DEFAULT_GENERATED;
 }
-function readBlocked(raw, warnings) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
+function readBlocked(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  if (!Array.isArray(raw2)) {
     warnings.push("`blocked:` is not a list; ignoring");
     return [];
   }
-  return raw.map((entry, index) => {
+  return raw2.map((entry, index) => {
     if (typeof entry === "string") {
       return { phrase: entry, severity: "warning", note: "" };
     }
@@ -35631,13 +35663,13 @@ function readBlocked(raw, warnings) {
     };
   }).filter((entry) => entry !== null);
 }
-function readRuleList(raw, warnings) {
-  if (raw === void 0 || raw === null) return DEFAULT_RULES;
-  if (!Array.isArray(raw)) {
+function readRuleList(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return DEFAULT_RULES;
+  if (!Array.isArray(raw2)) {
     warnings.push("`rules:` is not a list; keeping the built-in default");
     return DEFAULT_RULES;
   }
-  const out = raw.map((entry, index) => {
+  const out = raw2.map((entry, index) => {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       warnings.push(`rule entry ${String(index + 1)} is not a mapping; dropped`);
       return null;
@@ -35693,26 +35725,26 @@ function preflight(snapshot, rules) {
   }
   return findings;
 }
-function readArchitecture(raw, warnings) {
-  if (raw === void 0 || raw === null) return emptyArchitecture();
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+function readArchitecture(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return emptyArchitecture();
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     warnings.push("`architecture:` is not a mapping; ignoring");
     return emptyArchitecture();
   }
-  const map = raw;
+  const map = raw2;
   return {
     layers: readArchLayers(map.layers, warnings),
     edges: readArchEdges(map.edges, warnings),
     aliases: readArchAliases(map.aliases, warnings)
   };
 }
-function readArchLayers(raw, warnings) {
-  if (raw === void 0 || raw === null) return {};
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+function readArchLayers(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return {};
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     warnings.push("`architecture.layers:` is not a mapping; ignoring");
     return {};
   }
-  const map = raw;
+  const map = raw2;
   const layers = {};
   for (const [name, value] of Object.entries(map)) {
     if (name.length === 0) {
@@ -35740,14 +35772,14 @@ function readArchLayers(raw, warnings) {
   }
   return layers;
 }
-function readArchEdges(raw, warnings) {
-  if (raw === void 0 || raw === null) return [];
-  if (!Array.isArray(raw)) {
+function readArchEdges(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return [];
+  if (!Array.isArray(raw2)) {
     warnings.push("`architecture.edges:` is not a list; ignoring");
     return [];
   }
   const out = [];
-  raw.forEach((entry, index) => {
+  raw2.forEach((entry, index) => {
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
       warnings.push(`\`architecture.edges\` entry ${String(index + 1)} is not a mapping; dropped`);
       return;
@@ -35776,13 +35808,13 @@ function readArchEdges(raw, warnings) {
   });
   return out;
 }
-function readArchAliases(raw, warnings) {
-  if (raw === void 0 || raw === null) return {};
-  if (typeof raw !== "object" || Array.isArray(raw)) {
+function readArchAliases(raw2, warnings) {
+  if (raw2 === void 0 || raw2 === null) return {};
+  if (typeof raw2 !== "object" || Array.isArray(raw2)) {
     warnings.push("`architecture.aliases:` is not a mapping; ignoring");
     return {};
   }
-  const map = raw;
+  const map = raw2;
   const aliases = {};
   for (const [prefix, value] of Object.entries(map)) {
     if (prefix.length === 0) {
@@ -35821,16 +35853,16 @@ function parseVerdict(answer2, files) {
   }
   if (!Array.isArray(rawFindings)) return null;
   const findings = [];
-  for (const raw of rawFindings) {
-    const finding = parseFinding(raw, files);
+  for (const raw2 of rawFindings) {
+    const finding = parseFinding(raw2, files);
     if (finding === null) return null;
     findings.push(finding);
   }
   return { findings, confidence };
 }
-function parseFinding(raw, files) {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const fields = raw;
+function parseFinding(raw2, files) {
+  if (typeof raw2 !== "object" || raw2 === null || Array.isArray(raw2)) return null;
+  const fields = raw2;
   const rule = fields.rule;
   if (typeof rule !== "string" || rule.trim().length === 0) return null;
   const severity = fields.severity ?? "warning";
@@ -36017,8 +36049,8 @@ function synthesize(results) {
   const findings = [];
   for (const result of results) {
     if (result.verdict === null) continue;
-    for (const raw of result.verdict.findings) {
-      findings.push(toReviewFinding(raw, result.pass, result.verdict.findings.length));
+    for (const raw2 of result.verdict.findings) {
+      findings.push(toReviewFinding(raw2, result.pass, result.verdict.findings.length));
     }
   }
   const deduped = dedup(findings);
@@ -36052,25 +36084,25 @@ function synthesize(results) {
   }
   return { findings: ranked, confidence, measured, passes, failedPasses };
 }
-function toReviewFinding(raw, pass, _passFindings) {
-  const line = raw.line;
+function toReviewFinding(raw2, pass, _passFindings) {
+  const line = raw2.line;
   const evidence = [
     {
       kind: "patch",
-      source: line === null ? raw.path : `${raw.path}:${String(line)}`,
-      content: raw.snippet
+      source: line === null ? raw2.path : `${raw2.path}:${String(line)}`,
+      content: raw2.snippet
     },
-    { kind: "rule", source: raw.rule, content: "" },
+    { kind: "rule", source: raw2.rule, content: "" },
     { kind: "pass", source: pass.id, content: pass.name }
   ];
   return {
-    id: `${raw.rule}:${raw.path}:${String(line ?? 0)}`,
-    ruleId: raw.rule,
-    severity: raw.severity,
-    path: raw.path,
+    id: `${raw2.rule}:${raw2.path}:${String(line ?? 0)}`,
+    ruleId: raw2.rule,
+    severity: raw2.severity,
+    path: raw2.path,
     line,
-    body: raw.body,
-    snippet: raw.snippet,
+    body: raw2.body,
+    snippet: raw2.snippet,
     passId: pass.id,
     passName: pass.name,
     corroboratedBy: [pass.id],
@@ -36171,6 +36203,84 @@ function aggregateConfidence(results) {
   return { confidence, measured: true };
 }
 
+// src/duties/review/limits.ts
+var MAX_EVIDENCE_PER_FINDING = 8;
+var MAX_EVIDENCE_ITEMS_PER_RUN = 128;
+var MAX_EVIDENCE_TOTAL_CHARS = 4096;
+
+// src/duties/review/evidence.ts
+function deriveStatus(evidence) {
+  return evidence.some((entry) => entry.weight >= 1) ? "verified" : "unverified";
+}
+
+// src/duties/review/providers.ts
+function diffEvidence(file, line, claimedSnippet, headSha) {
+  if (line === null || claimedSnippet === null) return null;
+  const claim = claimedSnippet.trim();
+  if (claim.length === 0) return null;
+  const proven = file.lines.get(line)?.trim() ?? "";
+  if (proven.length === 0) return null;
+  if (!proven.includes(claim) && !claim.includes(proven)) return null;
+  return {
+    kind: "diff",
+    weight: 1,
+    detail: `diff-proven line ${String(line)}`,
+    provenance: {
+      ruleId: "diff-evidence",
+      sourceFile: file.path,
+      atLine: line,
+      ref: { sha: headSha, path: file.path }
+    },
+    at: "deterministic"
+  };
+}
+function ruleEvidence(rules, ruleId) {
+  if (!rules.rules.some((entry) => entry.id === ruleId)) return null;
+  return {
+    kind: "rules",
+    weight: 0.6,
+    detail: "cites a repository rule",
+    provenance: {
+      ruleId,
+      sourceFile: "repository rules",
+      atLine: null,
+      ref: { sha: "", path: "" }
+    },
+    at: "deterministic"
+  };
+}
+
+// src/duties/review/verify.ts
+function verifyFindings(request2) {
+  const shown2 = new Map(request2.shown.map((file) => [file.path, file]));
+  let runItems = 0;
+  let runChars = 0;
+  return request2.findings.map((finding) => {
+    const collected = [];
+    const rule = ruleEvidence(request2.rules, finding.ruleId);
+    if (rule !== null) collected.push(rule);
+    if (finding.line !== null) {
+      const file = shown2.get(finding.path);
+      if (file !== void 0) {
+        const diff = diffEvidence(file, finding.line, finding.snippet ?? null, request2.headSha);
+        if (diff !== null) collected.push(diff);
+      }
+    }
+    const room = MAX_EVIDENCE_PER_FINDING;
+    const kept = [];
+    for (const entry of collected.sort((a, b) => b.weight - a.weight)) {
+      if (kept.length >= room) break;
+      if (runItems >= MAX_EVIDENCE_ITEMS_PER_RUN) break;
+      if (runChars + entry.detail.length > MAX_EVIDENCE_TOTAL_CHARS) break;
+      kept.push(entry);
+      runItems += 1;
+      runChars += entry.detail.length;
+    }
+    const verification = deriveStatus(kept);
+    return { ...finding, evidence: kept, verification };
+  });
+}
+
 // src/duties/review/summary.ts
 function summarize(run2) {
   if (run2.ungranted !== null) {
@@ -36238,6 +36348,18 @@ function verdict(run2) {
   if (run2.previousSha.length > 0 && run2.previousSha !== run2.headSha) {
     rows.push(["Previously", `reviewed at \`${run2.previousSha}\``]);
   }
+  if (run2.findings.length > 0) {
+    const verified = run2.findings.filter(
+      ({ finding }) => finding.verification === "verified"
+    ).length;
+    const unverified = run2.findings.filter(
+      ({ finding }) => finding.verification === "unverified"
+    ).length;
+    rows.push([
+      "Verification",
+      `${String(verified)} verified \xB7 ${String(unverified)} not verified`
+    ]);
+  }
   return ["### Verdict", "", table(["Field", "Value"], rows)].join("\n");
 }
 function findingsTable(run2) {
@@ -36245,9 +36367,14 @@ function findingsTable(run2) {
     status,
     `\`${finding.path}\`` + (finding.line === null ? "" : `:${String(finding.line)}`),
     finding.severity,
-    cell(finding.body)
+    cell(finding.body),
+    finding.verification ?? "\u2014"
   ]);
-  return ["### Findings", "", table(["State", "Location", "Severity", "Finding"], rows)].join("\n");
+  return [
+    "### Findings",
+    "",
+    table(["State", "Location", "Severity", "Finding", "Verified"], rows)
+  ].join("\n");
 }
 function coverage(run2) {
   const rows = run2.skipped.map(({ path, reason }) => [cell(path), cell(reason)]);
@@ -36282,16 +36409,16 @@ function readSettings() {
     profile: parseProfile(getInput("profile"))
   };
 }
-function parseProfile(raw) {
-  const value = raw.trim();
+function parseProfile(raw2) {
+  const value = raw2.trim();
   if (value.length === 0 || value === "default") return "default";
   if (value === "deep") return "deep";
-  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw}\`.`);
+  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw2}\`.`);
 }
-function parseConfidence(raw) {
-  const value = Number(raw.trim());
-  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`confidence: expected a number between 0 and 1, got \`${raw}\`.`);
+function parseConfidence(raw2) {
+  const value = Number(raw2.trim());
+  if (raw2.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`confidence: expected a number between 0 and 1, got \`${raw2}\`.`);
   }
   return value;
 }
@@ -36433,12 +36560,18 @@ async function decide(api, at, warrant, settings, stages, weather) {
     );
   }
   const unreadableCount = passResults.filter((result) => result.unreadable !== null).length;
-  const raw = synthesis.findings.map((entry) => toFinding(entry, rules));
+  const raw2 = synthesis.findings.map((entry) => toFinding(entry, rules));
+  const verified = verifyFindings({
+    findings: raw2,
+    shown: bounded2.shown,
+    rules,
+    headSha: pr.headSha
+  });
   const StandingFiles = /* @__PURE__ */ new Map();
   for (const file of bounded2.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded2.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-  const final = reconcile([...deterministic, ...raw], previous, diffStanding);
+  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
   const confidence = synthesis.confidence;
   const next = remember(final, pr.headSha, previous);
   const verdictMeasured = synthesis.measured;
@@ -36570,7 +36703,8 @@ function toFinding(claim, rules) {
     line: claim.line,
     severity: claim.severity,
     body: claim.body,
-    marker: ""
+    marker: "",
+    snippet: raw.snippet
   };
 }
 var DEFAULT_GENERATED2 = [".min.js", ".min.css", ".map"];
