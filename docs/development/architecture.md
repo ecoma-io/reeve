@@ -153,7 +153,7 @@ It exists because GitHub reads a Marketplace listing from the root and from
 nowhere else. That leaves a hazard worth handling rather than tolerating:
 `uses: ecoma-io/reeve@v0.6` is the obvious thing for a consumer to write, it
 resolves, and it runs. So the root action **explains where each duty ships —
-the eight leaf actions — and then fails red with the corrected `uses:` line**
+the nine leaf actions — and then fails red with the corrected `uses:` line**
 — `src/refusal.ts`, with the message shaped by what the ref actually carries,
 and the `leaf-action` output carrying the same corrected line
 machine-readable.

@@ -138,6 +138,7 @@ describe("the duty lists", () => {
         "harmonise",
         "dependa",
         "review",
+        "remediation",
       ].sort(),
     );
   });

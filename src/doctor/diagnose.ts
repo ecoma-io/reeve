@@ -76,6 +76,10 @@ import {
   REVIEW_CAPABILITIES,
 } from "../duties/review/capabilities.js";
 import {
+  REMEDIATION_DEFAULTS,
+  REMEDIATION_CAPABILITIES,
+} from "../duties/remediation/capabilities.js";
+import {
   DEFAULT_CAPABILITIES as TRANSLATE_DEFAULTS,
   TRANSLATE_CAPABILITIES,
 } from "../duties/translate/capabilities.js";
@@ -119,6 +123,7 @@ const DEFAULTS_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["harmonise", HARMONISE_DEFAULTS],
   ["dependa", DEPENDA_DEFAULTS],
   ["review", REVIEW_DEFAULTS],
+  ["remediation", REMEDIATION_DEFAULTS],
 ]);
 
 /**
@@ -141,6 +146,7 @@ const LADDER_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["harmonise", HARMONISE_CAPABILITIES],
   ["dependa", DEPENDA_CAPABILITIES],
   ["review", REVIEW_CAPABILITIES],
+  ["remediation", REMEDIATION_CAPABILITIES],
 ]);
 
 /** Whether a finding stops a real run (`red`) or describes a healthy or weather condition (`green`). */

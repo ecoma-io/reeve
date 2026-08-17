@@ -76,21 +76,24 @@ section true. Where a document describes something not yet built, it says so
 in that section rather than in a global disclaimer you would have to
 remember.
 
-Eight duties ship — [`triage`](reference/duties/triage.md),
+Nine duties ship — [`triage`](reference/duties/triage.md),
 [`translate`](reference/duties/translate.md),
 [`duplicate`](reference/duties/duplicate.md),
 [`respond`](reference/duties/respond.md),
 [`lifecycle`](reference/duties/lifecycle.md),
 [`harmonise`](reference/duties/harmonise.md),
-[`dependa`](reference/duties/dependa.md), and
-[`review`](reference/duties/review.md) — seven dogfooded on this repository
+[`dependa`](reference/duties/dependa.md),
+[`review`](reference/duties/review.md), and
+[`remediation`](reference/duties/remediation.md) — seven dogfooded on this repository
 via their own workflows: `triage` and `translate` acting on real threads,
 `duplicate` and `respond` in report-only mode, writing verdicts to job
 summaries and touching nothing, `lifecycle` observing in dry-run,
 `harmonise` configured to watch `README.md` (the first translation is
 bootstrap-pending), and `dependa` maintaining this repository's own
-dependencies. `review` is the newest: its whole duty is driven end to end by
-its own integration suite against a stub API.
+dependencies. `review` and `remediation` are the newest: both are driven end
+to end by their own integration suites against a stub API, and `remediation`
+is proposal-only — it derives proposals from a review's findings and writes
+nothing to the repository.
 See [Self-dogfood](guides/dogfood.md) for how the feedback loop works.
 
 ## Full index

@@ -41,6 +41,7 @@ export default {
         "harmonise",
         "dependa",
         "review",
+        "remediation",
 
         // Everything else.
         "eval", // evaluation sets and the harness over them

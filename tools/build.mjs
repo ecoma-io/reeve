@@ -45,6 +45,11 @@ const BUNDLES = [
   { name: "harmonise", entry: "src/duties/harmonise/main.ts", outfile: "harmonise/dist/index.js" },
   { name: "dependa", entry: "src/duties/dependa/main.ts", outfile: "dependa/dist/index.js" },
   { name: "review", entry: "src/duties/review/main.ts", outfile: "review/dist/index.js" },
+  {
+    name: "remediation",
+    entry: "src/duties/remediation/main.ts",
+    outfile: "remediation/dist/index.js",
+  },
 ];
 
 const only = process.argv[2];
