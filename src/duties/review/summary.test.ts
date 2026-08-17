@@ -47,6 +47,18 @@ describe("summarize", () => {
     expect(text).toContain("nothing to post");
   });
 
+  it("renders the capabilities the warrant granted", () => {
+    const text = summarize(run({ permitted: ["comment" as const] }));
+    expect(text).toContain("Granted");
+    expect(text).toContain("comment");
+  });
+
+  it("renders the head the previous run reviewed, when the diff has moved since", () => {
+    const text = summarize(run({ headSha: "def", previousSha: "abc" }));
+    expect(text).toContain("Previously");
+    expect(text).toContain("`abc`");
+  });
+
   it("renders the findings table when findings exist", () => {
     const text = summarize(
       run({
