@@ -38,8 +38,7 @@ import type { RawFinding } from "./findings.js";
 import type { ShownFile } from "./pr.js";
 import type { Rule } from "./rules.js";
 import type { Context } from "./context.js";
-import { NOTHING, parseVerdict, type ReviewRequest } from "./verdict.js";
-import type { Reviewed } from "./verdict.js";
+import { parseVerdict } from "./verdict.js";
 
 /** Everything a pass needs to build its prompt. */
 export interface PassContext {
@@ -168,21 +167,6 @@ const SEVERITY_ORDER: Record<ReviewFinding["severity"], number> = {
 };
 
 /**
- * The pass roster a review profile names. The `default` profile runs one
- * correctness pass — the cheapest correct review — and `deep` adds a security
- * pass. Risk-tiered reviews (see `risk.ts` and `main.ts`) build their roster
- * from `secondOpinionPass` and `adversarialPass` instead, so this function
- * stays the profile knob PR77 shipped, not the whole roster vocabulary.
- */
-export type Profile = "default" | "deep";
-
-/** The pass roster a profile names, in run order. */
-export function selectPasses(profile: Profile): readonly ReviewPass[] {
-  if (profile === "deep") return [correctnessPass(), securityPass()];
-  return [correctnessPass()];
-}
-
-/**
  * Runs every pass in order, each against its own roster rotation.
  *
  * A pass whose roster is exhausted, or whose one readable answer does not
@@ -258,17 +242,6 @@ export function correctnessPass(): ReviewPass {
     name: "Correctness",
     models: [],
     prompt: (context) => correctnessPrompt(context),
-    parse: (answer, files) => parseVerdict(answer, files),
-  };
-}
-
-/** The security pass — a second, focused read that only `deep` pays for. */
-export function securityPass(): ReviewPass {
-  return {
-    id: "security",
-    name: "Security",
-    models: [],
-    prompt: (context) => securityPrompt(context),
     parse: (answer, files) => parseVerdict(answer, files),
   };
 }
@@ -415,23 +388,10 @@ function material(
 /**
  * The correctness pass's prompt — byte-for-byte the prompt `verdict.ts` has
  * always used, so every existing integration test and eval fixture keeps
- * routing to it. Exported so `review()` can delegate without duplicating it.
+ * routing to it.
  */
 export function correctnessPrompt(context: PassContext): Message[] {
   return material(context, ["You are reviewing a pull request on a GitHub repository."]);
-}
-
-/** The security pass's prompt: the same discipline, one focused brief. */
-export function securityPrompt(context: PassContext): Message[] {
-  return material(context, [
-    "You are a security review pass for a pull request on a GitHub repository.",
-    "",
-    "This pass focuses on security only: secret material committed to the diff, injection",
-    "(shell, SQL, HTML, command), unsafe deserialisation or evaluation of untrusted input,",
-    "authentication or authorisation flaws, privilege changes, and dependency risk visible",
-    "in the diff. Report only what the diff itself supports — a finding must name one of the",
-    "proven lines below.",
-  ]);
 }
 
 /** The second-opinion pass's prompt: a fresh read told to prefer new ground. */
@@ -685,43 +645,4 @@ export function aggregateConfidence(results: readonly PassResult[]): {
   const unreadable = results.filter((r) => r.verdict === null).length;
   if (unreadable > 0) confidence = Math.max(0, confidence * Math.pow(0.9, unreadable));
   return { confidence, measured: true };
-}
-
-/**
- * Thin compatibility wrapper: the single-pass behaviour `verdict.ts` has
- * always had, re-expressed through the pass engine. `ReviewRequest` satisfies
- * `PassContext`; a single correctness pass reproduces the old result exactly.
- */
-export async function reviewSingle(request: ReviewRequest, weather?: Weather): Promise<Reviewed> {
-  if (request.files.length === 0) {
-    return { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  }
-  const context: PassContext = {
-    prTitle: request.prTitle,
-    prBody: request.prBody,
-    headSha: request.headSha,
-    files: request.files,
-    rules: request.rules,
-    language: request.language,
-    context: request.context,
-  };
-  const results = await runPasses(
-    request.provider,
-    [correctnessPass()],
-    request.models,
-    context,
-    weather ?? request.weather,
-  );
-  const result = results[0];
-  if (result === undefined) {
-    return { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  }
-  return {
-    // `?? NOTHING` keeps the sentinel identity the old `review()` returned,
-    // which `verdict.test.ts` asserts with `toBe(NOTHING)`.
-    verdict: result.verdict ?? NOTHING,
-    failures: result.failures,
-    unreadable: result.unreadable,
-    model: result.model,
-  };
 }
