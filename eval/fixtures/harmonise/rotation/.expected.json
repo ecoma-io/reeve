@@ -1,0 +1,14 @@
+{
+  "scenario": "shared-semantic-change",
+  "description": "New section 'Verify the setup' added to EN source. The first roster model is scripted to fail (503); rotation must pass it and classify on the second model, then propagate to VI.",
+  "source-diff": "A new section '## Verify the setup' with one paragraph was added to the end of the EN document.",
+  "expected": {
+    "classification": "semantic",
+    "should-propagate": true,
+    "propagation-target": "vi",
+    "action": "The new section should be translated and appended to the VI document.",
+    "propagation-content": {
+      "vi": "## Xác minh cài đặt\n\nMở một vấn đề bằng ngôn ngữ đã định cấu hình. Quy trình làm việc sẽ hoàn thành mà không thay đổi vấn đề khi không có quyền được cấp."
+    }
+  }
+}

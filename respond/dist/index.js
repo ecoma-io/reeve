@@ -36027,7 +36027,16 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const detection = await detectLanguage(
     body.length === 0 ? standing.title : body,
     settings.languages,
-    createLanguagePicker(stages.detect, settings.models, weather)
+    // The same cheap-roster preference triage's detect already follows: an
+    // enum answer choosing between listed codes is the shape a small model is
+    // reliable on, and paying the expensive model for it when `screen-models`
+    // is configured would be paying it to do the cheap one's work. Falls back
+    // to `models` when no cheap roster is configured, exactly as before.
+    createLanguagePicker(
+      stages.detect,
+      settings.screenModels.length > 0 ? settings.screenModels : settings.models,
+      weather
+    )
   );
   const language = detection.language;
   info(

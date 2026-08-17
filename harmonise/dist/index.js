@@ -33577,23 +33577,29 @@ ${close}`
 }
 
 // src/duties/harmonise/classify.ts
-async function classifyDiff(sourceDiff, targetContent, sourceLocale, targetLocale, classifier, model) {
+async function classifyDiff(sourceDiff, targetContent, sourceLocale, targetLocale, classifier, models, weather) {
   const diffFence = enclose("untrusted-diff", sourceDiff);
   const targetFence = enclose("untrusted-target", targetContent);
   const prompt = buildClassificationPrompt(sourceLocale, targetLocale, diffFence, targetFence);
-  const result = await classifier.complete(model, [
+  const messages = [
     {
       role: "system",
       content: [CLASSIFICATION_SYSTEM_PROMPT, "", diffFence.rule, "", targetFence.rule].join("\n")
     },
     { role: "user", content: prompt }
-  ]);
-  if (!result.ok) {
+  ];
+  const rotation = await rotateModels(
+    models,
+    (model) => classifier.complete(model, messages),
+    weather
+  );
+  if (rotation.success === null) {
+    const reasons = rotation.failures.map((failure) => failure.reason).join("; ");
     throw new Error(
-      `harmonise: classification failed \u2014 ${result.reason}. The run cannot decide what to propagate without this classification.`
+      `harmonise: classification failed \u2014 ${reasons}. The run cannot decide what to propagate without this classification.`
     );
   }
-  return parseClassification(result.content);
+  return parseClassification(rotation.success.content);
 }
 var CLASSIFICATION_SYSTEM_PROMPT = `You classify changes in a source document against its locale translation.
 
@@ -35415,10 +35421,6 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     }
     const firstStalePath = group.files.get(firstStaleLocale);
     const firstStaleFile = firstStalePath !== void 0 ? await readContentsFile(api, at, firstStalePath) : null;
-    const primaryModel = settings.models[0];
-    if (primaryModel === void 0) {
-      return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: [] };
-    }
     try {
       classification = await classifyDiff(
         diffDescription,
@@ -35426,7 +35428,8 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
         sourceLanguage.code,
         firstStaleLocale,
         classifier,
-        primaryModel
+        settings.models,
+        weather
       );
     } catch (error2) {
       const message = error2 instanceof Error ? error2.message : String(error2);

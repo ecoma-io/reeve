@@ -251,6 +251,11 @@ adds new meaning" without understanding the text. The model classifies each
 change, and code enforces the result: only `shared semantic` changes are
 translated and applied to other locales.
 
+The classification consumes the `models` roster through the same rotation
+every other model consumer uses — a model that fails is passed over for the
+next. Only when the whole roster is exhausted does the run fail loud rather
+than silently skip a propagation it could not decide on.
+
 ## File naming convention
 
 Locale variants are discovered by a suffix pattern, not by locale folders:

@@ -155,7 +155,7 @@ function harmoniseStub(scenario: Scenario): StubOptions {
   const routes: Route[] = [
     ...repoRoutes(scenario.contents),
     ...publishRoutes(scenario.contents),
-    completionRoute((ask) => answering(scenario, ask.system)),
+    completionRoute((ask) => answering(scenario, ask)),
   ];
   return { routes, completion: () => saying("stub") };
 }
@@ -170,7 +170,7 @@ function harmoniseInputs(
     "github-token": "stub-token",
     "base-url": `${stubUrl}/v1`,
     "api-key": "sk-stub-key",
-    models: "stub-model",
+    models: scenario.models ?? "stub-model",
     "judge-models": "",
     "source-language": "en",
     languages: scenario.languages,
