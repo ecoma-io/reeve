@@ -376,6 +376,80 @@ describe("diagnose", () => {
     });
   });
 
+  it("narrows every duty's grant to its own ladder, not just lifecycle's", async () => {
+    const source = `${TAXONOMY}duties:\n  translate: [edit-body, comment]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const translate = result.authority.find((row) => row.duty === "translate");
+    expect(translate).toEqual({
+      duty: "translate",
+      granted: ["edit-body"],
+      denied: false,
+      isDefault: true,
+      unused: ["comment"],
+    });
+
+    // The inert grant is red — the same misspelled-capability discipline the
+    // warrant reader applies at parse time, narrowed per duty by doctor.
+    expect(problems(result)).toBe(1);
+    const red = result.findings.find((finding) => finding.severity === "red");
+    expect(red?.text).toContain("`translate`");
+    expect(red?.text).toContain("`comment`");
+  });
+
+  it("is red when a duty is granted a capability its whole ladder filters out — duplicate: [close]", async () => {
+    const source = `${TAXONOMY}duties:\n  duplicate: [close]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    const duplicate = result.authority.find((row) => row.duty === "duplicate");
+    // `close` is not `comment` — the ladder filters it out entirely. The
+    // effective grant equals duplicate's own built-in default (`[]`), so
+    // `isDefault` reads true the same way the lifecycle test below reads it.
+    expect(duplicate).toEqual({
+      duty: "duplicate",
+      granted: [],
+      denied: false,
+      isDefault: true,
+      unused: ["close"],
+    });
+
+    expect(problems(result)).toBe(1);
+    const red = result.findings.find((finding) => finding.severity === "red");
+    expect(red?.text).toContain("`duplicate`");
+    expect(red?.text).toContain("`close`");
+  });
+
+  it("flags no inert grant when a written block grants within every duty's ladder", async () => {
+    const source = `${TAXONOMY}duties:\n  duplicate: [comment]\n  harmonise: [edit-file, open-pr]\n  triage: [label, assign]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    expect(result.authority.every((row) => row.unused.length === 0)).toBe(true);
+    expect(problems(result)).toBe(0);
+    expect(
+      result.findings.some(
+        (finding) => finding.severity === "red" && /unused|no use for/.test(finding.text),
+      ),
+    ).toBe(false);
+  });
+
+  it("notes, green, configured languages outside the byte-ngram profile set", async () => {
+    const source = `${TAXONOMY}\nlanguages: [pt-BR, zh-Hans]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    expect(problems(result)).toBe(0);
+    const note = result.findings.find((finding) => finding.text.includes("`pt-BR`"));
+    expect(note?.severity).toBe("green");
+    expect(note?.text).toContain("`zh-Hans`");
+    expect(note?.text).toContain("detectByProfile");
+  });
+
+  it("says nothing about profile coverage when `languages:` names only profiled codes", async () => {
+    const source = `${TAXONOMY}\nlanguages: [en, vi, zh]\n`;
+    const result = await report(source, labelsApi(["bug", "docs"]));
+
+    expect(result.findings.some((finding) => finding.text.includes("profile set"))).toBe(false);
+  });
+
   it("scopes the authority table to one duty when `duty` names it", async () => {
     const result = await report(TAXONOMY, labelsApi(["bug", "docs"]), "lifecycle");
 
