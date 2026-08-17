@@ -141,6 +141,12 @@ export interface ReviewAssertions {
    * fixture that declares it pins which half of the comment trio ran.
    */
   readonly wrote?: "post" | "patch";
+  /**
+   * How many findings the run verified, read off the summary's
+   * `| Verification | N verified · M not verified |` row. Pins that the
+   * evidence engine ran and its verdict, not just the finding count.
+   */
+  readonly verified?: string;
 }
 
 /** A verdict, in the shape the review prompt asks for. */

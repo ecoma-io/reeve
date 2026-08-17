@@ -29,6 +29,7 @@ import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 import { sanitize } from "../../core/sanitize.js";
 import type { Finding, Previous } from "./findings.js";
 import { findingFingerprint } from "./findings.js";
+import type { Evidence, VerificationStatus } from "./evidence.js";
 
 /** This duty's marker: `<!-- reeve:review source=<fingerprint> <envelope> -->`. */
 export const marker: Marker = markerFor("review");
@@ -101,10 +102,17 @@ export function decodeEnvelope(payload: string | null): Previous | null {
           typeof raw.resolvedAtSha === "string"
             ? ({ resolvedAtSha: raw.resolvedAtSha } as const)
             : {};
+        const {
+          snippet: _snippet,
+          verification: _verification,
+          evidence: _evidence,
+          ...core
+        } = entry as Findable & { readonly resolvedAtSha?: unknown };
         return {
-          ...(entry as unknown as Omit<Previous["findings"][number], "wasResolved">),
+          ...(core as unknown as Omit<Previous["findings"][number], "wasResolved">),
           wasResolved: (entry as { wasResolved: unknown }).wasResolved === true,
           ...resolvedAtSha,
+          ...optionalEvidence(raw),
         };
       });
     const shas = Array.isArray(map.reviewedShas)
@@ -127,6 +135,49 @@ interface Findable {
   readonly body?: unknown;
   readonly marker?: unknown;
   readonly wasResolved?: unknown;
+  readonly snippet?: unknown;
+  readonly verification?: unknown;
+  readonly evidence?: unknown;
+}
+
+/**
+ * The two optional verification fields ride the envelope for backwards
+ * compatibility: old envelopes lack them and still decode (fields undefined),
+ * and a malformed optional field is treated as undefined — the finding's core
+ * fields always win.
+ */
+function optionalEvidence(raw: Findable & { readonly snippet?: unknown }): {
+  readonly snippet?: string;
+  readonly verification?: VerificationStatus;
+  readonly evidence?: readonly Evidence[];
+} {
+  const out: {
+    snippet?: string;
+    verification?: VerificationStatus;
+    evidence?: readonly Evidence[];
+  } = {};
+  if (typeof raw.snippet === "string") out.snippet = raw.snippet;
+  if (raw.verification === "verified" || raw.verification === "unverified") {
+    out.verification = raw.verification;
+  }
+  if (Array.isArray(raw.evidence)) {
+    const items = raw.evidence.filter((entry): entry is Evidence => evidenceShaped(entry));
+    if (items.length > 0) out.evidence = items;
+  }
+  return out;
+}
+
+function evidenceShaped(raw: unknown): raw is Evidence {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
+  const entry = raw as Record<string, unknown>;
+  return (
+    (entry.kind === "diff" || entry.kind === "rules") &&
+    typeof entry.weight === "number" &&
+    typeof entry.detail === "string" &&
+    typeof entry.provenance === "object" &&
+    entry.provenance !== null &&
+    typeof (entry.provenance as Record<string, unknown>).ruleId === "string"
+  );
 }
 
 /** The part of an Octokit client this module needs — same three methods as duplicate. */
@@ -376,7 +427,22 @@ function findingLine(finding: Finding): string {
   // not become link events the model never intended. Deterministic pre-check
   // bodies are constant strings and pass through unchanged.
   const body = sanitize(finding.body);
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}`;
+  const badge = verificationBadge(finding);
+  const suffix = badge.length === 0 ? "" : ` ${badge}`;
+  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+}
+
+/**
+ * The machine-stable verification badge on a finding's line. A model finding
+ * the engine verified reads `· verified`; one the evidence did not prove reads
+ * `· not verified`. Deterministic findings (and findings the engine never
+ * touched) render no badge at all — there is no claim of theirs to verify.
+ */
+function verificationBadge(finding: Finding): string {
+  if (finding.marker.length > 0) return "";
+  if (finding.verification === "verified") return "· verified";
+  if (finding.verification === "unverified") return "· not verified";
+  return "";
 }
 
 function footer(): string {

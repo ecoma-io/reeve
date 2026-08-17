@@ -284,6 +284,42 @@ this check can. A misspelled key is a warning, not a silent drop; a rules file
 that yields no usable rule at all fails the run red, the same loudness the
 warrant gives a file that does not parse.
 
+## Verification: model findings against deterministic evidence
+
+An admitted model finding is checked against evidence the diff already proves
+before it is reported — a deterministic, in-process engine over what this run
+already read, with no new model pass and no command execution. Two providers
+establish evidence:
+
+- **The claimed snippet vs the diff-proven line.** A finding that names a line
+  is verified only when the exact text the model claimed (the `snippet` it was
+  asked for) agrees with the text the patch proves at that line — trimmed, and
+  accepting either side as a substring of the other. Agreement on significant
+  text is the strongest evidence this duty has: `weight 1`, `verified`.
+- **The cited rule exists.** When the repository's rules snapshot contains the
+  rule the finding cites, the finding is _consistent with_ the rules the run
+  read — `weight 0.6`, which alone never upgrades a finding past `unverified`.
+
+A finding is `verified` only on actual deterministic evidence (`weight >= 1`).
+**Model confidence is not an input**: a 0.99-confidence claim about a line
+whose text the diff does not prove stays `unverified`, and no number from the
+model upgrades absence. Evidence is bounded per finding and per run (8 items
+per finding, 128 per run, 4096 detail chars per run); when a limit is reached
+the evidence is truncated to the highest-weight items, never the finding
+itself.
+
+**Unverified findings are still shown** — with a `not verified` mark on their
+line — and are never silently dropped. The run stays fail-closed: an
+all-unverified review is still posted, because the alternative — the empty
+chrome over a diff whose findings were all unverifiable — would be a false
+clean. Deterministic pre-check findings (the marker rules above) need no
+verification and carry no mark: they are always-right by construction.
+
+**No commands are ever run.** Verification reads only the diff-proven lines
+and the rules snapshot this run already read. `code.write` — running tests or
+commands to confirm a claim — stays permanently forbidden; there is no
+command-execution path in this duty at all.
+
 ## Unreadable output is no verdict
 
 A model's answer is read strictly, and what does not parse is discarded, not
@@ -352,7 +388,10 @@ was written. See [Rehearsing a run](../../guides/dry-run.md).
 
 ## Cost
 
-One model pass reads the whole diff, once, and nothing repeats it — a
+One model pass reads the whole diff, once, and its findings are verified
+against deterministic evidence before they are reported (see
+[Verification](#verification-model-findings-against-deterministic-evidence));
+nothing repeats it — a
 `synchronize` event that changed nothing is recognised by the marker's
 fingerprint and skipped at the write, and the diff cap keeps a huge diff from
 blowing the prompt. `max-diff-chars` (default `4000` for the whole run, `none`

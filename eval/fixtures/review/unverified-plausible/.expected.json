@@ -1,0 +1,36 @@
+{
+  "description": "Fail-closed verification: the model claims a finding at a proven line with a plausible-but-wrong snippet (it does not match the diff-proven line text) and confidence 0.99. The deterministic engine finds no evidence — a high-confidence claim never upgrades absence — so the finding is reported `unverified` and still shown with the badge. The run posts, because an all-unverified review is still a review.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "pr": {
+    "title": "Bump the shipped version",
+    "body": "This pull request releases the current snapshot as 1.0.0."
+  },
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,1 @@\n+export const VERSION = \"1.0.0\";"
+    }
+  ],
+  "verdict-over": {
+    "findings": [
+      {
+        "rule": "dedup",
+        "severity": "warning",
+        "path": "src/app.ts",
+        "line": 1,
+        "snippet": "export function save(): void {",
+        "body": "A duplicate callback is registered on every save."
+      }
+    ],
+    "confidence": 0.99
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "1",
+    "head-sha": "abc123",
+    "verified": "0"
+  }
+}

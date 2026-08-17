@@ -85,6 +85,64 @@ describe("summarize", () => {
     expect(text).toContain("Repeated.");
   });
 
+  it("renders the verification count row and the Verified column", () => {
+    const text = summarize(
+      run({
+        findings: [
+          {
+            finding: {
+              id: "i",
+              ruleId: "dedup",
+              ruleName: "Repeated code",
+              ruleBody: "",
+              path: "a.ts",
+              line: 12,
+              severity: "warning",
+              body: "Repeated.",
+              marker: "",
+              verification: "verified" as const,
+              evidence: [],
+            },
+            status: "created",
+          },
+          {
+            finding: {
+              id: "u",
+              ruleId: "dedup",
+              ruleName: "Repeated code",
+              ruleBody: "",
+              path: "b.ts",
+              line: 2,
+              severity: "warning",
+              body: "Claimed.",
+              marker: "",
+              verification: "unverified" as const,
+              evidence: [],
+            },
+            status: "persists",
+          },
+          {
+            finding: {
+              id: "d",
+              ruleId: "preflight",
+              ruleName: "Blocked text",
+              ruleBody: "",
+              path: "c.ts",
+              line: 3,
+              severity: "warning",
+              body: "Blocked.",
+              marker: "preflight:blocked",
+            },
+            status: "created",
+          },
+        ],
+      }),
+    );
+    expect(text).toContain("1 verified · 1 not verified");
+    expect(text).toContain("| State | Location | Severity | Finding | Verified |");
+    expect(text).toMatch(/c\.ts.*\| — /);
+  });
+
   it("renders the coverage table with skipped reasons", () => {
     const text = summarize(run({ skipped: [{ path: "big.ts", reason: "capped" }] }));
     expect(text).toContain("### Coverage");
