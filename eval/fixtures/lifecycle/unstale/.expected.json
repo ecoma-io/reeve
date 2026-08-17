@@ -1,0 +1,18 @@
+{
+  "description": "A reset makes the bot's own earlier application of the clock-hand label stale: a human comment restarted the clock, so the run removes the label instead of acting again.",
+  "warrant": "version: 1\nlanguages:\n  - en\nlifecycle:\n  tracks:\n    - name: quiet\n      resets: any\n      steps:\n        - after: 7d\n          label: stale\n          say: true\n",
+  "labels": ["stale"],
+  "repo-labels": ["stale"],
+  "created-ago": "90d",
+  "reactions": [{ "label": "stale", "actor": "reeve[bot]", "is-bot": true, "created-ago": "30d" }],
+  "comments": [{ "login": "maintainer", "created-ago": "3d" }],
+  "expected": {
+    "skipped": "false",
+    "reminded": "false",
+    "labeled": "0",
+    "closed": "false",
+    "unstaled": "1",
+    "due-not-granted": "0",
+    "effects": { "unstaled": true }
+  }
+}

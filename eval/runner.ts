@@ -62,6 +62,12 @@ import {
   scriptDuplicate,
 } from "./drivers/duplicate.ts";
 import type { DuplicateScenario } from "./drivers/duplicate.ts";
+import {
+  lifecycleRoutes,
+  newTracker as newLifecycleTracker,
+  scenarioOf as lifecycleScenarioOf,
+} from "./drivers/lifecycle.ts";
+import type { LifecycleScenario } from "./drivers/lifecycle.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -76,7 +82,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
 
 /** Every duty the runner knows how to drive. */
-const DUTIES = ["harmonise", "triage", "respond", "translate", "duplicate"] as const;
+const DUTIES = ["harmonise", "triage", "respond", "translate", "duplicate", "lifecycle"] as const;
 
 /** Whether a duty has fixtures on disk to run. */
 async function hasFixtures(duty: string): Promise<boolean> {
@@ -700,6 +706,114 @@ function duplicateLine(
 }
 
 // ---------------------------------------------------------------------------
+// lifecycle
+// ---------------------------------------------------------------------------
+
+async function runLifecycle(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "lifecycle", fixture);
+  const scenario = await lifecycleScenarioOf(fixture, directory);
+  const tracker = newLifecycleTracker();
+  const stub = await startStub({
+    routes: [...lifecycleRoutes(scenario, tracker)],
+    // lifecycle never calls a model, so this completion is never reached — it
+    // exists only because the harness requires one to be mounted.
+    completion: () => saying("unused"),
+  });
+  try {
+    await writeFile(join(scratch, "reeve.yml"), scenario.warrant);
+    const run = await runBundle(
+      "lifecycle",
+      stub.url,
+      lifecycleInputs(scratch),
+      scratchFiles(scratch),
+    );
+    return lifecycleLine(fixture, scenario, tracker.effect, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const LIFECYCLE_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  // lifecycle never calls a model — the shared provider inputs are not read,
+  // and the interface requires none. The input set is only the ones
+  // `readSettings` reads.
+  warrant: "",
+  "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
+};
+
+function lifecycleInputs(scratch: string): Record<string, string> {
+  return { ...LIFECYCLE_INPUTS, warrant: join(scratch, "reeve.yml") };
+}
+
+/** The outcome for one lifecycle fixture. */
+function lifecycleLine(
+  fixture: string,
+  scenario: LifecycleScenario,
+  effect: LifecycleEffectLike,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const skipped = run.outputs.skipped ?? "";
+  const reminded = run.outputs.reminded ?? "";
+  const labeled = run.outputs.labeled ?? "";
+  const closed = run.outputs.closed ?? "";
+  const unstaled = run.outputs.unstaled ?? "";
+  const dueNotGranted = run.outputs["due-not-granted"] ?? "";
+
+  const effects = expected.effects ?? {};
+  const effectsMatch =
+    (effects.labeled ?? false) === effect.labeled &&
+    (effects.commented ?? false) === effect.commented &&
+    (effects.closed ?? false) === effect.closed &&
+    (effects.unstaled ?? false) === effect.unstaled;
+
+  const finding =
+    skipped === (expected.skipped ?? "") &&
+    reminded === (expected.reminded ?? "") &&
+    labeled === (expected.labeled ?? "") &&
+    closed === (expected.closed ?? "") &&
+    unstaled === (expected.unstaled ?? "") &&
+    dueNotGranted === (expected["due-not-granted"] ?? "") &&
+    effectsMatch;
+
+  if (finding) {
+    const detail =
+      expected.skipped === "true"
+        ? "clean stop — warrant writes no lifecycle policy"
+        : effect.closed
+          ? "closed"
+          : effect.commented
+            ? "reminded"
+            : effect.labeled
+              ? "labeled"
+              : effect.unstaled
+                ? "unstaled"
+                : "evaluated, nothing due";
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `skipped=${skipped} reminded=${reminded} labeled=${labeled} closed=${closed} unstaled=${unstaled}`,
+  };
+}
+
+interface LifecycleEffectLike {
+  readonly labeled: boolean;
+  readonly commented: boolean;
+  readonly closed: boolean;
+  readonly unstaled: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // The banner and the run.
 // ---------------------------------------------------------------------------
 
@@ -727,6 +841,8 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runTranslate;
     case "duplicate":
       return runDuplicate;
+    case "lifecycle":
+      return runLifecycle;
     default:
       return null;
   }

@@ -74,6 +74,12 @@ stub (`eval/harness.ts`) that answers the GitHub and provider calls a duty
 makes, with the model's responses scripted from the fixture's own
 `.expected.json`.
 
+`lifecycle` is the one duty with no model call anywhere: its driver mounts
+only the GitHub API routes it reads (the thread, its comments and events, the
+repository's labels, the token's identity) and computes every timestamp
+relative to the run's own clock, so an inactivity or `when:` track whose
+`after` falls inside the fixture's window is due on every run.
+
 ## The warrant contract
 
 All fixtures run against the post-T1 warrant model: a `version: 1` file with
@@ -96,8 +102,9 @@ Each fixture is a directory under `eval/fixtures/<duty>/` holding:
 - for harmonise, the fixture's own `en.md`/`vi.md`/`zh.md` files the driver
   rewires onto the repository layout.
 
-The three drivers (`eval/drivers/harmonise.ts`, `triage.ts`, `respond.ts`)
-own the mapping from a fixture's `.expected.json` to the stub routes and
-scripted model answers, plus the assertion that turns a run into an outcome.
-A new duty means a new driver under `eval/drivers/`, a fixtures directory,
-and one more entry in `DUTIES` in `eval/runner.ts`.
+The six drivers (`eval/drivers/harmonise.ts`, `triage.ts`, `respond.ts`,
+`translate.ts`, `duplicate.ts`, `lifecycle.ts`) own the mapping from a
+fixture's `.expected.json` to the stub routes and scripted model answers,
+plus the assertion that turns a run into an outcome. A new duty means a new
+driver under `eval/drivers/`, a fixtures directory, and one more entry in
+`DUTIES` in `eval/runner.ts`.
