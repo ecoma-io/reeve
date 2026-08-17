@@ -85,6 +85,49 @@ repository's labels, the token's identity) and computes every timestamp
 relative to the run's own clock, so an inactivity or `when:` track whose
 `after` falls inside the fixture's window is due on every run.
 
+## Measurement register
+
+The CI gate measures structure, not accuracy: the stub scripts every model
+answer, so a run cannot tell whether a real provider would have said the
+same thing. Accuracy is measured deliberately, against a real provider, with
+`eval/live.ts`:
+
+```sh
+REEVE_EVAL_BASE_URL=https://.../v1 REEVE_EVAL_API_KEY=sk-... \
+REEVE_EVAL_MODELS=oc/deepseek-v4-flash-free \
+node --experimental-strip-types eval/live.ts   # all three language duties
+```
+
+The GitHub side stays stubbed; only the completion endpoint is real. Each
+fixture that asserts a language is scored by the language its run identified
+(`language` output, or the review summary's `| Language | id |` row). The
+worst-language number is the lowest per-language accuracy — the language
+this model most often misidentifies, never the average.
+
+### 2026-08-17 — DeepSeek v4 flash (`oc/deepseek-v4-flash-free`)
+
+| Duty    | Languages measured             | Correct | Worst-language rate |
+| ------- | ------------------------------ | ------- | ------------------- |
+| triage  | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+| respond | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+| review  | id                             | 1/1     | 100%                |
+
+Every language the fixture set declares was identified correctly on the
+first full pass — the worst-language rate is 100% for every duty, because no
+language fell below it. The model-dependent thread — Indonesian (`id`), the
+one language the script and profile steps together cannot narrow — reached
+the real provider in `triage/id-model`, `respond/id-model-reply` and
+`review/id-pr`, and the provider identified it as `id` every time. All other
+languages resolve in the script or profile step; the number guards the whole
+pipeline, not the model alone.
+
+Reproduce: set the three `REEVE_EVAL_*` variables for a reachable provider
+and run the command above. A regression — a prompt change that makes a model
+misidentify a language — shows up here as a diff in this table (this is
+[Stage 6](../docs/doctrine/north-star.md#7-roadmap)'s "numbers are committed
+alongside the fixture set"). The next release's number goes below; a duty
+whose worst language fell is a duty that does not ship.
+
 ## The warrant contract
 
 All fixtures run against the post-T1 warrant model: a `version: 1` file with

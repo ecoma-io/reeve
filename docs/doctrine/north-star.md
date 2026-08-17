@@ -655,13 +655,15 @@ number the whole thesis rests on, published from this repository and
 reproducible by anyone who clones it.
 
 **Committed and CI-gated:** the fixture set and harness live in `eval/` —
-`eval/harness.ts` plus 30 `.expected.json` fixtures across `triage`, `respond`
-and `harmonise` — and CI runs `pnpm eval all` on every push, so the
-fail-closed contract is exercised rather than this number resting on a
-hand-run.
+`eval/harness.ts` plus the multilingual fixtures across `triage`, `respond`
+and `review` — and CI runs `pnpm eval all` on every push, so the fail-closed
+contract is exercised rather than this number resting on a hand-run.
 
 **Done when:** the worst-language number is published and reproducible from
-this repository.
+this repository — it now is, in `eval/README.md`'s measurement register
+(`eval/live.ts` against a real provider; DeepSeek v4 flash measured 2026-08-17:
+worst-language rate 100% for `triage`, `respond` and `review` on every
+language the fixture set declares).
 
 ### Then `1.0`
 
