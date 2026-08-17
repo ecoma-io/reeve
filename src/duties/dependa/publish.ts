@@ -52,6 +52,7 @@ export interface PublishApi {
         base: string;
         head: string;
         per_page?: number;
+        page?: number;
       }): Promise<{
         data: {
           readonly ahead_by: number;
@@ -255,20 +256,41 @@ export async function publishGroup(
     // listCommits would return ALL reachable commits including main's, causing
     // false refusals whenever main has any human-authored commit.
     try {
-      const { data: comparison } = await api.rest.repos.compareCommits({
-        owner: at.owner,
-        repo: at.repo,
-        base: baseSha,
-        head: branchName,
-        per_page: 100,
-      });
+      // Page through ALL of them. compareCommits caps one response at
+      // `per_page` commits (default 100) and `ahead_by` counts the total —
+      // stopping at the first page would let a human commit beyond it slip
+      // past the D3 guard, and a force-reset that overwrites it would violate
+      // the inviolable-commits rule below. Pages are the endpoint's own
+      // 1-based `page` parameter, walking earliest→latest chronological order.
       const botAuthors = new Set([
         "github-actions[bot]",
         "github-actions",
         "dependabot[bot]",
         "reeve[bot]",
       ]);
-      const hasHumanCommit = comparison.commits.some((c) => {
+      const commits: {
+        readonly sha: string;
+        readonly author?: { readonly login?: string } | null;
+        readonly committer?: { readonly login?: string } | null;
+      }[] = [];
+      let aheadBy = 0;
+      for (let page = 1; ; page++) {
+        const { data: comparison } = await api.rest.repos.compareCommits({
+          owner: at.owner,
+          repo: at.repo,
+          base: baseSha,
+          head: branchName,
+          per_page: 100,
+          page,
+        });
+        aheadBy = comparison.ahead_by;
+        commits.push(...comparison.commits);
+        // `ahead_by` counts the whole comparison; enough pages collected means
+        // the walk is done. An empty or short page stops the walk too, rather
+        // than looping forever on a total the endpoint never re-states.
+        if (commits.length >= aheadBy || comparison.commits.length === 0) break;
+      }
+      const hasHumanCommit = commits.some((c) => {
         const login = c.author?.login ?? c.committer?.login;
         if (login === undefined) {
           // Unknown attribution — fail closed per D3. An unattributable
