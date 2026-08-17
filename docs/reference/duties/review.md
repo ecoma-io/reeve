@@ -33,6 +33,11 @@ maintainer who wants any of that does it themselves; no input here, and no
 warrant entry, turns it on. Review comments and threads only, and only where
 the warrant grants `comment`.
 
+Remediation proposals are a separate duty, not a review capability.
+[`remediation`](remediation.md) reads this review's own owned comment and
+derives deterministic proposals for its standing findings — it proposes, and
+it never edits repository state. Nothing review-side can ever turn it on.
+
 **It is the top rung of [the ladder](../../doctrine/north-star.md#3-the-ladder),
 and it is granted nothing on any default.** A finding printed on a pull
 request reads, to everyone downstream, as though somebody from the project

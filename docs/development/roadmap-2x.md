@@ -76,16 +76,17 @@ is added today, by [earning its place](../doctrine/north-star.md#d10--a-duty-mus
 The phase that is not proposed, because it exists. Named here so the rest of
 the page is anchored to something checkable rather than to an idea of 1.x.
 
-**Standing today:** eight duties ship —
+**Standing today:** nine duties ship —
 [`triage`](../reference/duties/triage.md),
 [`translate`](../reference/duties/translate.md),
 [`duplicate`](../reference/duties/duplicate.md),
 [`respond`](../reference/duties/respond.md),
 [`lifecycle`](../reference/duties/lifecycle.md),
 [`harmonise`](../reference/duties/harmonise.md),
-[`dependa`](../reference/duties/dependa.md) and
-[`review`](../reference/duties/review.md). Seven of the eight are dogfooded
-on this repository — every duty but `review`, through `.github/workflows/reeve-*.yml`
+[`dependa`](../reference/duties/dependa.md),
+[`review`](../reference/duties/review.md) and
+[`remediation`](../reference/duties/remediation.md). Seven of the nine are dogfooded
+on this repository — every duty but `review` and `remediation`, through `.github/workflows/reeve-*.yml`
 (`reeve-triage-issue`, `reeve-translate-issue` and `-pr`, `reeve-duplicate-issue`,
 `reeve-respond-issue`, `reeve-lifecycle-issue`, `reeve-harmonise`, `reeve-dependa`,
 `reeve-dependa-dogfood` and `reeve-sweep`) — which is the same discipline Phase 3
@@ -95,7 +96,9 @@ stub API. Its claimed findings are verified deterministically in-process —
 the model's snippets and cited rules are checked against the diff and the rules
 snapshot the run already read, with no command execution — the same
 never-trust-the-model-display stance the 2.x Verify stage takes to its own
-idempotency markers.
+idempotency markers. `remediation` is the ninth, proposal-only, reading a
+review's owned comment and deriving deterministic proposals — driven end to end
+the same way.
 The warrant is the whole answer for authority, with total enumeration once a
 `duties:` block exists
 ([Stage 3](../doctrine/north-star.md#7-roadmap)). The sweep works a backlog

@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CAPABILITIES as HARMONISE_DEFAULTS } from "../../src/duties/harmonise/capabilities.ts";
+import { REMEDIATION_DEFAULTS } from "../../src/duties/remediation/capabilities.ts";
 import { DEFAULT_CAPABILITIES as RESPOND_DEFAULTS } from "../../src/duties/respond/capabilities.ts";
 import { DEFAULT_CAPABILITIES as TRIAGE_DEFAULTS } from "../../src/duties/triage/capabilities.ts";
 import { parseWarrant } from "../../src/core/warrant.ts";
@@ -51,6 +52,7 @@ const EXPECTED_GRANTS: readonly ExpectedGrant[] = [
   { duty: "triage", named: ["label"], fallback: ["label"] },
   { duty: "respond", named: [], fallback: [] },
   { duty: "harmonise", named: [], fallback: [] },
+  { duty: "remediation", named: [], fallback: [] },
 ];
 
 /** The fallback `granted` is handed by each duty, imported from its module. */
@@ -58,6 +60,7 @@ const DEFAULTS: Record<string, readonly Capability[]> = {
   triage: TRIAGE_DEFAULTS,
   respond: RESPOND_DEFAULTS,
   harmonise: HARMONISE_DEFAULTS,
+  remediation: REMEDIATION_DEFAULTS,
 };
 
 describe("the post-T1 warrant contract every eval fixture stands on", () => {

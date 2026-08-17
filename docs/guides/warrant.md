@@ -364,6 +364,16 @@ and says so in a notice — the state file still lands, just without the PR
 wrapping it. See [the `harmonise` duty](../reference/duties/harmonise.md) and
 [the `triage` duty](../reference/duties/triage.md).
 
+**Neither does `remediation`.** It is the separate home for fixing what
+[`review`](../reference/duties/review.md) finds: a `duties: { remediation:
+[propose] }` grant lets it read review's own owned comment and derive
+deterministic remediation proposals for the findings still standing, recorded
+on the job summary and the run's outputs. It never writes repository state —
+no `edit-file`, no `open-pr`, no state branch, no comments — and a warrant
+that grants it `edit-file` or `open-pr` fails red, because the fixing-PR stage
+is a later, separate grant. `pull-requests: read` is enough on the token; do
+not over-grant one. See [the `remediation` duty](../reference/duties/remediation.md).
+
 ## Languages
 
 `languages:` is optional, and it moves one more thing off each duty's default

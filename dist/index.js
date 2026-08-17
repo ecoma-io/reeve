@@ -32041,7 +32041,8 @@ var DUTIES = [
   "lifecycle",
   "harmonise",
   "dependa",
-  "review"
+  "review",
+  "remediation"
 ];
 var PLANNED = [];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
@@ -33169,6 +33170,10 @@ var RESPOND_CAPABILITIES = ["comment"];
 var DEFAULT_CAPABILITIES6 = [];
 var REVIEW_CAPABILITIES = ["comment"];
 
+// src/duties/remediation/capabilities.ts
+var REMEDIATION_DEFAULTS = [];
+var REMEDIATION_CAPABILITIES = ["propose"];
+
 // src/duties/translate/capabilities.ts
 var DEFAULT_CAPABILITIES7 = ["edit-body"];
 var TRANSLATE_CAPABILITIES = ["edit-body"];
@@ -33260,7 +33265,8 @@ var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
   ["lifecycle", DEFAULT_CAPABILITIES4],
   ["harmonise", DEFAULT_CAPABILITIES3],
   ["dependa", DEFAULT_CAPABILITIES],
-  ["review", DEFAULT_CAPABILITIES6]
+  ["review", DEFAULT_CAPABILITIES6],
+  ["remediation", REMEDIATION_DEFAULTS]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", TRANSLATE_CAPABILITIES],
@@ -33270,7 +33276,8 @@ var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["lifecycle", LIFECYCLE_CAPABILITIES],
   ["harmonise", HARMONISE_CAPABILITIES],
   ["dependa", DEPENDA_CAPABILITIES],
-  ["review", REVIEW_CAPABILITIES]
+  ["review", REVIEW_CAPABILITIES],
+  ["remediation", REMEDIATION_CAPABILITIES]
 ]);
 function problems(report) {
   return report.findings.filter((finding) => finding.severity === "red").length;
@@ -33636,7 +33643,8 @@ async function writeExplain(leaf) {
         ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
         ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
         ["dependa", "`ecoma-io/reeve/dependa@<ref>`"],
-        ["review", "`ecoma-io/reeve/review@<ref>`"]
+        ["review", "`ecoma-io/reeve/review@<ref>`"],
+        ["remediation", "`ecoma-io/reeve/remediation@<ref>`"]
       ]
     ),
     ""

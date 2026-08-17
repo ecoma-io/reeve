@@ -1,0 +1,26 @@
+{
+  "description": "The proposal-only boundary end to end: the stub serves a pull request whose only issue comment is a bot-authored review comment carrying the review marker envelope with one actionable finding. The run decodes it, derives one deterministic proposal record, and reports it on the outputs and the summary — and never reaches a mutation route, because the stub serves none.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  remediation: [propose]\n",
+  "pr": {
+    "title": "Fix the crash",
+    "body": "This pull request fixes the crash on save."
+  },
+  "findings": [
+    {
+      "id": "blocked:src/app.ts:13",
+      "ruleId": "blocked",
+      "ruleName": "No debugger",
+      "ruleBody": "Debugger statements must not land.",
+      "path": "src/app.ts",
+      "line": 13,
+      "severity": "warning",
+      "body": "debugger; statement on line 13.",
+      "marker": "",
+      "wasResolved": false
+    }
+  ],
+  "expected": {
+    "proposed": "true",
+    "proposals": "1"
+  }
+}

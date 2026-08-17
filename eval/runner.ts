@@ -81,6 +81,12 @@ import {
   scriptReview,
 } from "./drivers/review.ts";
 import type { ReviewEffect, ReviewScenario } from "./drivers/review.ts";
+import {
+  newTracker as newRemediationTracker,
+  remediationRoutes,
+  scenarioOf as remediationScenarioOf,
+} from "./drivers/remediation.ts";
+import type { RemediationEffect, RemediationSample } from "./drivers/remediation.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -104,6 +110,7 @@ const DUTIES = [
   "lifecycle",
   "dependa",
   "review",
+  "remediation",
 ] as const;
 
 /**
@@ -1018,6 +1025,82 @@ function reviewLine(
   };
 }
 
+// remediation
+// ---------------------------------------------------------------------------
+
+async function runRemediation(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "remediation", fixture);
+  const scenario = await remediationScenarioOf(fixture, directory);
+  const tracker = newRemediationTracker();
+  const stub = await startStub({
+    routes: remediationRoutes(scenario, tracker),
+    completion: () => {
+      // Remediation asks no model — a completion request is a 404 by
+      // construction. The fallback here is unreachable but keeps the stub
+      // type-complete.
+      return { status: 404, payload: { error: "no model stage" } };
+    },
+  });
+  try {
+    const warrant = join(scratch, `warrant-remediation-${fixture}.yml`);
+    await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "remediation",
+      stub.url,
+      remediationInputs(warrant),
+      scratchFiles(scratch),
+    );
+    return remediationLine(fixture, scenario, tracker, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const REMEDIATION_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  warrant: "",
+  "dry-run": "false",
+};
+
+function remediationInputs(warrant: string): Record<string, string> {
+  return { ...REMEDIATION_INPUTS, warrant };
+}
+
+/** The outcome for one remediation fixture. */
+function remediationLine(
+  fixture: string,
+  scenario: RemediationSample,
+  effect: RemediationEffect,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const proposed = run.outputs.proposed ?? "";
+  const proposals = run.outputs.proposals ?? "";
+  const finding =
+    proposed === (expected.proposed ?? "false") &&
+    proposals === (expected.proposals ?? "0") &&
+    // The no-create proof: this duty never reached a mutation route, which is
+    // also structural — the stub serves no write route to reach at all.
+    !effect.written;
+
+  if (finding) {
+    return {
+      fixture,
+      outcome: "finding",
+      detail: `${proposals} proposal(s) — outputs: ${proposed}`,
+    };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `proposed=${JSON.stringify(proposed)} proposals=${JSON.stringify(proposals)}`,
+  };
+}
+
 /**
  * The language code a review run identified, off its summary's `| Language | id |` row.
  *
@@ -1141,6 +1224,8 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runDependa;
     case "review":
       return runReview;
+    case "remediation":
+      return runRemediation;
     default:
       return null;
   }

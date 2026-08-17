@@ -1,0 +1,92 @@
+# The `remediation` duty.
+#
+# This file is the contract. The documentation describes it and links here; it
+# deliberately does not restate every input, because a copy is only free to
+# drift.
+#
+# A workflow names this directory: `uses: ecoma-io/reeve/remediation@v0.6`.
+#
+# Remediation reads the review duty's own owned comment on a pull request and
+# derives one deterministic remediation proposal per actionable finding. It
+# proposes; it never writes repository state — no edit-file, no open-pr, no
+# state branch, no comments. Its deliverable is the Proposals table on the job
+# summary and the `proposed`/`proposals`/`note` outputs. A warrant grant of
+# `edit-file` or `open-pr` fails red, naming the capability, because the
+# fixing-PR stage is a later, separate grant.
+name: Reeve - remediation
+description: Turn a review's findings into deterministic remediation proposals — recorded on the job summary and the run's outputs, never written to the repository.
+author: ecoma.io
+
+branding:
+  icon: tools
+  color: orange
+
+inputs:
+  github-token:
+    description: >-
+      The token used to read the pull request and its comments.
+      `pull-requests: read` is enough — this duty never writes anything. Do
+      not over-grant the token out of symmetry with a duty that will never
+      use the extra scopes.
+    required: false
+    default: ${{ github.token }}
+
+  number:
+    description: >-
+      The pull request to derive proposals for. Defaults to the one that
+      triggered the workflow — this duty runs after `review`, on the same
+      pull request.
+
+      An event that carries no pull request — a `schedule`, a `push`, a bare
+      `workflow_dispatch` — fails red naming the event rather than asking
+      GitHub for pull request `NaN`.
+    required: false
+    default: ""
+
+  warrant:
+    description: >-
+      Where the permissions live. Remediation is granted nothing until a
+      warrant explicitly names it — write `duties: { remediation: [propose] }`
+      to grant it. `propose` is the only capability this duty has; a grant of
+      `edit-file` or `open-pr` fails red because the fixing-PR stage is a
+      later, separate grant.
+
+      A file missing at this default path is not a failure — the run
+      resolves to granting nothing and says so in the job summary. Point
+      this at a path of your own instead, and a file missing there fails the
+      run red, because naming a file that is not there is a configuration
+      mistake rather than an absence. A file that exists but does not parse
+      always fails red, wherever it lives.
+    required: false
+    default: .github/reeve.yml
+
+  dry-run:
+    description: >-
+      Run the whole pipeline, write every output and the summary, and write
+      nothing anywhere else. There is nothing else this duty would write —
+      dry-run exists so a run can be observed before the future fixing step
+      is granted.
+    required: false
+    default: "false"
+
+outputs:
+  proposed:
+    description: >-
+      `true` when at least one remediation proposal was derived this run.
+      `false` on every other path — the warrant denied the duty, no review
+      envelope was found, or every finding was not actionable. Never unset.
+
+  proposals:
+    description: >-
+      How many proposal records this run derived. Matches the rows of the
+      job summary's Proposals table.
+
+  note:
+    description: >-
+      Why this run stopped before proposing, when it did — the warrant's
+      `duties:` block never named `remediation`, or no review envelope was
+      found on the pull request. Empty when the run derived proposals.
+
+runs:
+  using: node24
+  main: dist/index.js
