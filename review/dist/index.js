@@ -19619,7 +19619,7 @@ var require_dist = __commonJS({
      */
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.format = format;
-    exports.parse = parse5;
+    exports.parse = parse6;
     var TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
     var TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
     var QUOTE_REGEXP = /[\\"]/g;
@@ -19646,7 +19646,7 @@ var require_dist = __commonJS({
       }
       return result;
     }
-    function parse5(header, options) {
+    function parse6(header, options) {
       const len = header.length;
       let index = skipOWS(header, 0, len);
       const valueStart = index;
@@ -19759,7 +19759,7 @@ var require_identity = __commonJS({
     var isDocument = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === DOC;
     var isMap = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === MAP;
     var isPair = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === PAIR;
-    var isScalar = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
+    var isScalar2 = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SCALAR;
     var isSeq = (node) => !!node && typeof node === "object" && node[NODE_TYPE] === SEQ;
     function isCollection(node) {
       if (node && typeof node === "object")
@@ -19781,7 +19781,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node) => (isScalar(node) || isCollection(node)) && !!node.anchor;
+    var hasAnchor = (node) => (isScalar2(node) || isCollection(node)) && !!node.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -19796,7 +19796,7 @@ var require_identity = __commonJS({
     exports.isMap = isMap;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.isSeq = isSeq;
   }
 });
@@ -23424,7 +23424,7 @@ var require_errors2 = __commonJS({
         this.pos = pos;
       }
     };
-    var YAMLParseError3 = class extends YAMLError {
+    var YAMLParseError4 = class extends YAMLError {
       constructor(pos, code2, message) {
         super("YAMLParseError", pos, code2, message);
       }
@@ -23470,7 +23470,7 @@ ${pointer}
       }
     };
     exports.YAMLError = YAMLError;
-    exports.YAMLParseError = YAMLParseError3;
+    exports.YAMLParseError = YAMLParseError4;
     exports.YAMLWarning = YAMLWarning;
     exports.prettifyError = prettifyError;
   }
@@ -25338,7 +25338,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -25422,7 +25422,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -26952,7 +26952,7 @@ var require_public_api = __commonJS({
         return docs;
       return Object.assign([], { empty: true }, composer$1.streamInfo());
     }
-    function parseDocument(source, options = {}) {
+    function parseDocument2(source, options = {}) {
       const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
       const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
       const composer$1 = new composer.Composer(options);
@@ -26971,14 +26971,14 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse5(src, reviver, options) {
+    function parse6(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
       } else if (options === void 0 && reviver && typeof reviver === "object") {
         options = reviver;
       }
-      const doc = parseDocument(src, options);
+      const doc = parseDocument2(src, options);
       if (!doc)
         return null;
       doc.warnings.forEach((warning2) => log.warn(doc.options.logLevel, warning2));
@@ -27012,9 +27012,9 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse5;
+    exports.parse = parse6;
     exports.parseAllDocuments = parseAllDocuments;
-    exports.parseDocument = parseDocument;
+    exports.parseDocument = parseDocument2;
     exports.stringify = stringify;
   }
 });
@@ -31576,7 +31576,7 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // src/duties/review/main.ts
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 
 // node_modules/.pnpm/eld@2.0.3/node_modules/eld/src/avgScore.js
 var avgScore = {
@@ -35508,8 +35508,159 @@ function escapeHtml(text2) {
 }
 
 // src/duties/review/rules.ts
-var import_yaml2 = __toESM(require_dist2(), 1);
+var import_yaml3 = __toESM(require_dist2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
+import { join } from "node:path";
+
+// src/duties/review/packs.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
+var MAX_PACK_CHARS = 8e3;
+var PACK_TOP_LEVEL_KEYS = /* @__PURE__ */ new Set([
+  "name",
+  "description",
+  "version",
+  "rules",
+  "ignore",
+  "generated",
+  "blocked"
+]);
+var UnreadablePacks = class extends Error {
+  warnings;
+  constructor(message, warnings = []) {
+    super(message);
+    this.name = "UnreadablePacks";
+    this.warnings = warnings;
+  }
+};
+var TWO_PART_VERSION = /^(\d+)(?:\.(\d+))?$/;
+function parsePack(text2, ref) {
+  const warnings = [];
+  let document2;
+  try {
+    document2 = (0, import_yaml2.parse)(text2, { maxAliasCount: 0 });
+  } catch (error2) {
+    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    throw new UnreadablePacks(`pack ${ref}: not valid YAML \u2014 ${reason}`);
+  }
+  if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
+    throw new UnreadablePacks(`pack ${ref}: expected a YAML mapping`);
+  }
+  const map = document2;
+  const unknown = Object.keys(map).filter((key) => !PACK_TOP_LEVEL_KEYS.has(key));
+  if (unknown.length > 0) {
+    throw new UnreadablePacks(
+      `pack ${ref}: unknown top-level key \`${unknown[0] ?? ""}\` \u2014 a rule pack describes review policy (rules, ignores, blocked phrases, generated suffixes) and cannot grant authority (D2); remove it or the pack is refused`
+    );
+  }
+  const version = readPackVersion(text2, map.version, ref);
+  const fragment = readPackFragment(map, ref, warnings);
+  return { ref, version, fragment, raw: text2, warnings };
+}
+function readPackVersion(text2, parsed, ref) {
+  if (parsed === void 0 || parsed === null) return null;
+  const node = (0, import_yaml2.parseDocument)(text2).get("version", true);
+  const raw = (0, import_yaml2.isScalar)(node) && Array.isArray(node.range) ? text2.slice(node.range[0], node.range[1]) : null;
+  if (raw === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` could not be read from the file \u2014 got ${JSON.stringify(parsed)}`
+    );
+  }
+  const match = TWO_PART_VERSION.exec(raw.trim().replace(/^['"]|['"]$/g, ""));
+  if (match === null) {
+    throw new UnreadablePacks(
+      `pack ${ref}: \`version\` must be a whole number or a two-component version like 1.2 \u2014 got \`${raw}\``
+    );
+  }
+  return { major: Number(match[1]), minor: match[2] === void 0 ? 0 : Number(match[2]) };
+}
+function readPackFragment(map, ref, warnings) {
+  const rules = readPackRules(map.rules, ref, warnings);
+  const ignore = readPackIgnore(map.ignore, ref, warnings);
+  return {
+    rules,
+    ignoreFiles: ignore.files,
+    ignorePaths: ignore.paths,
+    generatedExtensions: readPackStringList(map.generated, ref, "generated", warnings),
+    blocked: readPackBlocked(map.blocked, ref, warnings)
+  };
+}
+function readPackRules(raw, ref, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks(`pack ${ref}: \`rules:\` is not a list`);
+  }
+  const out = raw.map((entry, index) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(`pack ${ref}: rule entry ${String(index + 1)} is not a mapping; dropped`);
+      return null;
+    }
+    const map = entry;
+    const id = map.id ?? map.rule ?? `rule-${String(index + 1)}`;
+    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    return {
+      id: typeof id === "string" ? id : `rule-${String(index + 1)}`,
+      name: typeof map.name === "string" ? map.name : "Unnamed rule",
+      marker: typeof map.marker === "string" ? map.marker : "",
+      body: typeof map.body === "string" ? map.body : "",
+      severity
+    };
+  }).filter((rule) => rule !== null);
+  return out;
+}
+function readPackIgnore(raw, ref, warnings) {
+  if (raw === void 0 || raw === null) return { files: [], paths: [] };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new UnreadablePacks(`pack ${ref}: \`ignore:\` is not a mapping`);
+  }
+  const map = raw;
+  return {
+    files: readPackStringList(map.files, ref, "ignore.files", warnings),
+    paths: readPackStringList(map.paths, ref, "ignore.paths", warnings)
+  };
+}
+function readPackStringList(raw, ref, key, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push(`pack ${ref}: \`${key}:\` is not a list; ignoring`);
+    return [];
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry !== "string") {
+      warnings.push(
+        `pack ${ref}: \`${key}\` entry ${String(index + 1)} is not a string; dropped`
+      );
+      return null;
+    }
+    return entry;
+  }).filter((entry) => entry !== null);
+}
+function readPackBlocked(raw, ref, warnings) {
+  if (raw === void 0 || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks(`pack ${ref}: \`blocked:\` is not a list`);
+  }
+  return raw.map((entry, index) => {
+    if (typeof entry === "string") {
+      return { phrase: entry, severity: "warning", note: "" };
+    }
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      warnings.push(
+        `pack ${ref}: \`blocked\` entry ${String(index + 1)} is not a string or mapping; dropped`
+      );
+      return null;
+    }
+    const map = entry;
+    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    return {
+      phrase: typeof map.phrase === "string" ? map.phrase : "",
+      severity,
+      note: typeof map.note === "string" ? map.note : ""
+    };
+  }).filter((entry) => entry !== null);
+}
+var SEVERITY = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
+
+// src/duties/review/rules.ts
 var MAX_RULES_CHARS = 2e4;
 var UnreadableRules = class extends Error {
   warnings;
@@ -35519,7 +35670,7 @@ var UnreadableRules = class extends Error {
     this.warnings = warnings;
   }
 };
-var SEVERITY = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
+var SEVERITY2 = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
 var DEFAULT_GENERATED = [".min.js", ".min.css", ".map"];
 var DEFAULT_RULES = [
   {
@@ -35556,6 +35707,7 @@ function emptyRules() {
     blocked: [],
     architecture: emptyArchitecture(),
     raw: "",
+    packRefs: [],
     warnings: []
   };
 }
@@ -35565,15 +35717,56 @@ var KNOWN_RULE_KEYS = /* @__PURE__ */ new Set([
   "ignore",
   "generated",
   "blocked",
-  "architecture"
+  "architecture",
+  "packs"
 ]);
+var PACK_REF = /^([a-z0-9][a-z0-9-]{0,63})\/([a-z0-9][a-z0-9-]{0,63})(?:@(\d+)(?:\.(\d+))?)?$/;
+function readPackRefs(raw) {
+  const warnings = [];
+  if (raw === void 0 || raw === null) return { refs: [], warnings };
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks("`packs:` is not a list");
+  }
+  const refs = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new UnreadablePacks("`packs:` entries must be mappings with a `pack:` key");
+    }
+    const map = entry;
+    const value = map.pack;
+    if (typeof value !== "string") {
+      throw new UnreadablePacks("`packs:` entries must carry a `pack:` string");
+    }
+    const match = PACK_REF.exec(value);
+    if (match === null) {
+      throw new UnreadablePacks(
+        `pack reference \`${value}\` is not valid \u2014 expected \`namespace/name\`, \`namespace/name@1\` or \`namespace/name@1.2\``
+      );
+    }
+    const ref = {
+      namespace: match[1] ?? "",
+      name: match[2] ?? "",
+      major: match[3] === void 0 ? null : Number(match[3]),
+      minor: match[4] === void 0 ? null : Number(match[4]),
+      raw: value
+    };
+    if (seen.has(value)) {
+      warnings.push(`pack \`${value}\` referenced more than once; loaded once`);
+      continue;
+    }
+    seen.add(value);
+    refs.push(ref);
+  }
+  return { refs, warnings };
+}
 function parseRules(text2) {
   const warnings = [];
   let document2;
   try {
-    document2 = (0, import_yaml2.parse)(text2);
+    document2 = (0, import_yaml3.parse)(text2);
   } catch (error2) {
-    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml3.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new UnreadableRules([`not valid YAML \u2014 ${reason}`]);
   }
   if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
@@ -35585,6 +35778,8 @@ function parseRules(text2) {
   }
   const rules = readRuleList(map.rules, warnings);
   const ignore = readIgnore(map.ignore, warnings);
+  const { refs: packRefs, warnings: packWarnings } = readPackRefs(map.packs);
+  warnings.push(...packWarnings);
   return {
     version: readVersion(map.version, warnings),
     rules,
@@ -35594,6 +35789,7 @@ function parseRules(text2) {
     blocked: readBlocked(map.blocked, warnings),
     architecture: readArchitecture(map.architecture, warnings),
     raw: text2,
+    packRefs,
     warnings
   };
 }
@@ -35655,7 +35851,7 @@ function readBlocked(raw, warnings) {
       return null;
     }
     const map = entry;
-    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    const severity = typeof map.severity === "string" && SEVERITY2.has(map.severity) ? map.severity : "warning";
     return {
       phrase: typeof map.phrase === "string" ? map.phrase : "",
       severity,
@@ -35676,7 +35872,7 @@ function readRuleList(raw, warnings) {
     }
     const map = entry;
     const id = map.id ?? map.rule ?? `rule-${String(index + 1)}`;
-    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
+    const severity = typeof map.severity === "string" && SEVERITY2.has(map.severity) ? map.severity : "warning";
     return {
       id: typeof id === "string" ? id : `rule-${String(index + 1)}`,
       name: typeof map.name === "string" ? map.name : "Unnamed rule",
@@ -35686,6 +35882,144 @@ function readRuleList(raw, warnings) {
     };
   }).filter((rule) => rule !== null);
   return out.length > 0 ? out : DEFAULT_RULES;
+}
+function composeRules(local, packs) {
+  const rules = [];
+  const seenRuleIds = /* @__PURE__ */ new Set();
+  const duplicatedIds = /* @__PURE__ */ new Set();
+  const addRule = (rule, source) => {
+    void source;
+    if (seenRuleIds.has(rule.id)) {
+      duplicatedIds.add(rule.id);
+      return;
+    }
+    seenRuleIds.add(rule.id);
+    rules.push(rule);
+  };
+  let anyRulesList = false;
+  if (local.rules !== DEFAULT_RULES) {
+    anyRulesList = local.rules.length > 0;
+    for (const rule of local.rules) addRule(rule, "the local rules file");
+  }
+  for (const pack of packs) {
+    if (pack.fragment.rules.length > 0) anyRulesList = true;
+    for (const rule of pack.fragment.rules) addRule(rule, `pack ${pack.ref}`);
+  }
+  if (!anyRulesList && local.rules === DEFAULT_RULES) {
+    for (const rule of DEFAULT_RULES) addRule(rule, "the built-in default");
+  }
+  const effectiveRules = rules.length > 0 ? rules : DEFAULT_RULES;
+  const blockedByPhrase = /* @__PURE__ */ new Map();
+  for (const entry of local.blocked) {
+    if (!blockedByPhrase.has(entry.phrase)) blockedByPhrase.set(entry.phrase, entry);
+  }
+  for (const pack of packs) {
+    for (const entry of pack.fragment.blocked) {
+      if (!blockedByPhrase.has(entry.phrase)) blockedByPhrase.set(entry.phrase, entry);
+    }
+  }
+  const generated = [];
+  const seenGenerated = /* @__PURE__ */ new Set();
+  const absorbGenerated = (list) => {
+    if (list.length === 0) return;
+    for (const item of list) {
+      if (!seenGenerated.has(item)) {
+        seenGenerated.add(item);
+        generated.push(item);
+      }
+    }
+  };
+  absorbGenerated(local.generatedExtensions);
+  for (const pack of packs) absorbGenerated(pack.fragment.generatedExtensions);
+  const warnings = [...local.warnings];
+  for (const pack of packs) {
+    for (const warning2 of pack.warnings) warnings.push(warning2);
+  }
+  for (const id of duplicatedIds) {
+    warnings.push(`rule \`${id}\` is defined more than once; the first definition wins`);
+  }
+  return {
+    version: local.version,
+    rules: effectiveRules,
+    ignoreFiles: [...local.ignoreFiles, ...packs.flatMap((p) => p.fragment.ignoreFiles)],
+    ignorePaths: [...local.ignorePaths, ...packs.flatMap((p) => p.fragment.ignorePaths)],
+    generatedExtensions: generated.length > 0 ? generated : DEFAULT_GENERATED,
+    blocked: [...blockedByPhrase.values()],
+    architecture: local.architecture,
+    raw: local.raw,
+    packRefs: local.packRefs,
+    warnings
+  };
+}
+async function readPackedRules(path, packsPath) {
+  const local = await readRules(path);
+  if (local.packRefs.length === 0) return local;
+  const packs = [];
+  let rawSum = 0;
+  for (const ref of local.packRefs) {
+    const packPath = join(packsPath, ref.namespace, `${ref.name}.yml`);
+    const pack = await readPackFile(ref, packPath);
+    packs.push(pack);
+    rawSum += pack.raw.length;
+  }
+  if (rawSum > MAX_RULES_CHARS) {
+    throw new UnreadablePacks(
+      `packs exceed the ${String(MAX_RULES_CHARS)}-character composition budget (sum ${String(rawSum)}); reduce packs or the count`
+    );
+  }
+  const composed = composeRules(local, packs);
+  const textBudget = composed.rules.reduce((n, rule) => n + rule.body.length, 0) + composed.blocked.reduce((n, entry) => n + entry.phrase.length + entry.note.length, 0);
+  if (textBudget > MAX_RULES_CHARS) {
+    throw new UnreadablePacks(
+      `composed rules and blocked phrases exceed the ${String(MAX_RULES_CHARS)}-character budget (${String(textBudget)}); reduce packs`
+    );
+  }
+  return composed;
+}
+async function readPackFile(ref, path) {
+  let raw;
+  try {
+    raw = await readFile2(path, "utf8");
+  } catch (error2) {
+    if (isMissing(error2)) {
+      throw new UnreadablePacks(
+        `pack \`${ref.raw}\` is referenced by the rules file but no file is at ${path}`
+      );
+    }
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` could not be read at ${path}: ${error2 instanceof Error ? error2.message : String(error2)}`
+    );
+  }
+  if (raw.trim().length === 0) {
+    throw new UnreadablePacks(`pack \`${ref.raw}\` at ${path} is empty`);
+  }
+  if (raw.length > MAX_PACK_CHARS) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` at ${path} is ${String(raw.length)} characters, exceeding the ${String(MAX_PACK_CHARS)}-character pack cap; trim it or drop the reference`
+    );
+  }
+  const pack = parsePack(raw, ref.raw);
+  assertPin(ref, pack);
+  return pack;
+}
+function assertPin(ref, pack) {
+  if (ref.major === null) return;
+  const declared = pack.version;
+  if (declared === null) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}${ref.minor !== null ? `.${String(ref.minor)}` : ""} but declares no \`version:\``
+    );
+  }
+  if (declared.major !== ref.major) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}${ref.minor !== null ? `.${String(ref.minor)}` : ""} but declares ${String(declared.major)}.${String(declared.minor)}`
+    );
+  }
+  if (ref.minor !== null && declared.minor !== ref.minor) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}.${String(ref.minor)} but declares ${String(declared.major)}.${String(declared.minor)}`
+    );
+  }
 }
 var BLOCKED_MARK = "preflight:blocked";
 var GENERATED_MARK = "preflight:generated";
@@ -35793,8 +36127,8 @@ function readArchEdges(raw, warnings) {
       );
       return;
     }
-    const severity = typeof map.severity === "string" && SEVERITY.has(map.severity) ? map.severity : "warning";
-    if (typeof map.severity === "string" && !SEVERITY.has(map.severity)) {
+    const severity = typeof map.severity === "string" && SEVERITY2.has(map.severity) ? map.severity : "warning";
+    if (typeof map.severity === "string" && !SEVERITY2.has(map.severity)) {
       warnings.push(
         `\`architecture.edges\` entry ${String(index + 1)} has unknown severity \`${map.severity}\`; using warning`
       );
@@ -36403,6 +36737,7 @@ function readSettings() {
     number: threadNumber(),
     warrant: getInput("warrant", { required: true }),
     rulesPath: getInput("rules-path"),
+    packsPath: getInput("packs-path"),
     trigger: getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", getInput("max-diff-chars")),
     confidence: parseConfidence(getInput("confidence")),
@@ -36425,8 +36760,13 @@ function parseConfidence(raw) {
 var STAGE_PURPOSES = ["review", "detect"];
 function resolveRulesPath(settings) {
   const workspace = process.env.GITHUB_WORKSPACE ?? "";
-  if (settings.rulesPath.length === 0) return join(workspace, ".github", "reeve-rules.yml");
-  return join(workspace, settings.rulesPath);
+  if (settings.rulesPath.length === 0) return join2(workspace, ".github", "reeve-rules.yml");
+  return join2(workspace, settings.rulesPath);
+}
+function resolvePacksPath(settings) {
+  const workspace = process.env.GITHUB_WORKSPACE ?? "";
+  if (settings.packsPath.length === 0) return join2(workspace, ".github", "reeve-packs");
+  return join2(workspace, settings.packsPath);
 }
 function rulesLabel(settings) {
   return settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath;
@@ -36485,7 +36825,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     generatedExtensions: DEFAULT_GENERATED2,
     maxDiffChars: budget
   });
-  const rules = await readRules(resolveRulesPath(settings));
+  const rules = await readPackedRules(resolveRulesPath(settings), resolvePacksPath(settings));
   for (const warning2 of rules.warnings) warning(`rules: ${warning2}`);
   const bounded2 = classify(snapshot.allFiles, {
     ignoreFiles: rules.ignoreFiles,

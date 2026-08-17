@@ -70,7 +70,7 @@ import {
   type Publication,
 } from "./publish.js";
 import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
-import { preflight, readRules } from "./rules.js";
+import { preflight, readPackedRules } from "./rules.js";
 import {
   runPasses,
   selectPasses,
@@ -96,6 +96,8 @@ interface Settings extends Core {
   readonly warrant: string;
   /** Repo-relative path to the repository rules file in the checkout. */
   readonly rulesPath: string;
+  /** Repo-relative path to the rule packs directory in the checkout. */
+  readonly packsPath: string;
   /** The event that triggered this run — `pr` reviews drafts, `prod` reviews everything. */
   readonly trigger: string;
   /** The diff chars a single file may contribute before being skipped as capped — `none` means no bound. */
@@ -114,6 +116,7 @@ function readSettings(): Omit<Settings, "languages"> {
     number: threadNumber(),
     warrant: core.getInput("warrant", { required: true }),
     rulesPath: core.getInput("rules-path"),
+    packsPath: core.getInput("packs-path"),
     trigger: core.getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", core.getInput("max-diff-chars")),
     confidence: parseConfidence(core.getInput("confidence")),
@@ -184,6 +187,13 @@ function resolveRulesPath(settings: Settings): string {
   const workspace = process.env.GITHUB_WORKSPACE ?? "";
   if (settings.rulesPath.length === 0) return join(workspace, ".github", "reeve-rules.yml");
   return join(workspace, settings.rulesPath);
+}
+
+/** The rule packs directory's path in the checkout, absolute, resolved from the workspace. */
+function resolvePacksPath(settings: Settings): string {
+  const workspace = process.env.GITHUB_WORKSPACE ?? "";
+  if (settings.packsPath.length === 0) return join(workspace, ".github", "reeve-packs");
+  return join(workspace, settings.packsPath);
 }
 
 /** The rules file as a reader of the summary will name it. */
@@ -265,7 +275,7 @@ async function decide(
     maxDiffChars: budget,
   });
 
-  const rules = await readRules(resolveRulesPath(settings));
+  const rules = await readPackedRules(resolveRulesPath(settings), resolvePacksPath(settings));
   for (const warning of rules.warnings) core.warning(`rules: ${warning}`);
 
   // The snapshot, bounded by the repository's own rules — the diff the model

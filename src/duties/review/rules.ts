@@ -13,6 +13,7 @@
  */
 import * as core from "@actions/core";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { parse, YAMLParseError } from "yaml";
 
 import { isMissing } from "../../core/forge.js";
@@ -23,6 +24,7 @@ import {
   type LayerName,
 } from "./architecture.js";
 import { isGenerated } from "./pr.js";
+import { MAX_PACK_CHARS, UnreadablePacks, parsePack, type Pack } from "./packs.js";
 
 /**
  * Cap on the rules file, the same frugality `guidance.ts` applies to respond's
@@ -61,6 +63,8 @@ export interface Rules {
   /** Forbidden dependency boundaries — layers, edges, and aliases. */
   readonly architecture: Architecture;
   readonly raw: string;
+  /** The rule packs this file composes by reference, in reference order. */
+  readonly packRefs: readonly PackRef[];
   /** Parsing left warnings behind (unknown keys, malformed entries). */
   readonly warnings: readonly string[];
 }
@@ -125,6 +129,7 @@ function emptyRules(): Rules {
     blocked: [],
     architecture: emptyArchitecture(),
     raw: "",
+    packRefs: [],
     warnings: [],
   };
 }
@@ -137,7 +142,75 @@ const KNOWN_RULE_KEYS: Readonly<Set<string>> = new Set([
   "generated",
   "blocked",
   "architecture",
+  "packs",
 ]);
+
+/**
+ * One reference to a rule pack, e.g. `go/concurrency@1.2`.
+ *
+ * `namespace/name` — unpinned; resolves to whatever the checkout has.
+ * `namespace/name@1` — major pin: the pack's declared `version:` major must be 1.
+ * `namespace/name@1.2` — exact pin: the pack's `version:` must be exactly 1.2.
+ */
+export interface PackRef {
+  readonly namespace: string;
+  readonly name: string;
+  /** Major-only pin (`@1`), or null for unpinned. */
+  readonly major: number | null;
+  /** Exact minor pin (`@1.2`); implies `major` too. */
+  readonly minor: number | null;
+  /** The reference exactly as written, for messages. */
+  readonly raw: string;
+}
+
+const PACK_REF = /^([a-z0-9][a-z0-9-]{0,63})\/([a-z0-9][a-z0-9-]{0,63})(?:@(\d+)(?:\.(\d+))?)?$/;
+
+/**
+ * Reads the `packs:` list. A value outside the reference grammar fails red —
+ * path traversal (`../`, uppercase, a trailing `.yml`) is structurally
+ * impossible — because a pack reference is an explicit versioned choice, the
+ * same class as naming a warrant path that is not there. A duplicate reference
+ * is loaded once and warned about.
+ */
+export function readPackRefs(raw: unknown): { refs: PackRef[]; warnings: string[] } {
+  const warnings: string[] = [];
+  if (raw === undefined || raw === null) return { refs: [], warnings };
+  if (!Array.isArray(raw)) {
+    throw new UnreadablePacks("`packs:` is not a list");
+  }
+  const refs: PackRef[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new UnreadablePacks("`packs:` entries must be mappings with a `pack:` key");
+    }
+    const map = entry as Record<string, unknown>;
+    const value = map.pack;
+    if (typeof value !== "string") {
+      throw new UnreadablePacks("`packs:` entries must carry a `pack:` string");
+    }
+    const match = PACK_REF.exec(value);
+    if (match === null) {
+      throw new UnreadablePacks(
+        `pack reference \`${value}\` is not valid — expected \`namespace/name\`, \`namespace/name@1\` or \`namespace/name@1.2\``,
+      );
+    }
+    const ref: PackRef = {
+      namespace: match[1] ?? "",
+      name: match[2] ?? "",
+      major: match[3] === undefined ? null : Number(match[3]),
+      minor: match[4] === undefined ? null : Number(match[4]),
+      raw: value,
+    };
+    if (seen.has(value)) {
+      warnings.push(`pack \`${value}\` referenced more than once; loaded once`);
+      continue;
+    }
+    seen.add(value);
+    refs.push(ref);
+  }
+  return { refs, warnings };
+}
 
 /**
  * Parses a rules file with the same `yaml` parser the warrant uses, then
@@ -166,6 +239,8 @@ export function parseRules(text: string): Rules {
 
   const rules = readRuleList(map.rules, warnings);
   const ignore = readIgnore(map.ignore, warnings);
+  const { refs: packRefs, warnings: packWarnings } = readPackRefs(map.packs);
+  warnings.push(...packWarnings);
   return {
     version: readVersion(map.version, warnings),
     rules,
@@ -175,6 +250,7 @@ export function parseRules(text: string): Rules {
     blocked: readBlocked(map.blocked, warnings),
     architecture: readArchitecture(map.architecture, warnings),
     raw: text,
+    packRefs,
     warnings,
   };
 }
@@ -287,6 +363,189 @@ function readRuleList(raw: unknown, warnings: string[]): readonly Rule[] {
     })
     .filter((rule): rule is Rule => rule !== null);
   return out.length > 0 ? out : DEFAULT_RULES;
+}
+
+/**
+ * Composes the local rules file with the referenced packs into the effective
+ * rules the review runs on.
+ *
+ * Precedence, highest wins: local rules → pack[0] → pack[1] → … → built-in
+ * defaults. Composition is deterministic (D9): the order is the reference
+ * order in the local `packs:` list, never a filesystem walk.
+ *
+ * | Slot | Merge |
+ * |---|---|
+ * | `rules` | Id-keyed, first-definition-wins. Local first, then packs in reference order; a later definition of an id already present is dropped with a warning naming both sources. |
+ * | `blocked` | Union, dedup by phrase; the first definition's severity/note wins. |
+ * | `generated` | Union of every non-empty list; an empty union falls back to `DEFAULT_GENERATED`. (Zero packs reproduce today exactly.) |
+ * | `ignore.files`/`ignore.paths` | Union. The `allShownIgnored` guard in `main.ts` still refuses to stamp a diff the rules alone emptied. |
+ *
+ * The built-in `dedup` rule is included exactly when no source — local or any
+ * pack — wrote a non-empty `rules:` list.
+ */
+export function composeRules(local: Rules, packs: readonly Pack[]): Rules {
+  const rules: Rule[] = [];
+  const seenRuleIds = new Set<string>();
+  const duplicatedIds = new Set<string>();
+  const addRule = (rule: Rule, source: string): void => {
+    void source;
+    if (seenRuleIds.has(rule.id)) {
+      duplicatedIds.add(rule.id);
+      return;
+    }
+    seenRuleIds.add(rule.id);
+    rules.push(rule);
+  };
+
+  let anyRulesList = false;
+  if (local.rules !== DEFAULT_RULES) {
+    anyRulesList = local.rules.length > 0;
+    for (const rule of local.rules) addRule(rule, "the local rules file");
+  }
+  for (const pack of packs) {
+    if (pack.fragment.rules.length > 0) anyRulesList = true;
+    for (const rule of pack.fragment.rules) addRule(rule, `pack ${pack.ref}`);
+  }
+  if (!anyRulesList && local.rules === DEFAULT_RULES) {
+    for (const rule of DEFAULT_RULES) addRule(rule, "the built-in default");
+  }
+
+  const effectiveRules = rules.length > 0 ? rules : DEFAULT_RULES;
+
+  // blocked: union, first-wins per phrase.
+  const blockedByPhrase = new Map<string, Rules["blocked"][number]>();
+  for (const entry of local.blocked) {
+    if (!blockedByPhrase.has(entry.phrase)) blockedByPhrase.set(entry.phrase, entry);
+  }
+  for (const pack of packs) {
+    for (const entry of pack.fragment.blocked) {
+      if (!blockedByPhrase.has(entry.phrase)) blockedByPhrase.set(entry.phrase, entry);
+    }
+  }
+
+  // generated: union of non-empty lists.
+  const generated: string[] = [];
+  const seenGenerated = new Set<string>();
+  const absorbGenerated = (list: readonly string[]): void => {
+    if (list.length === 0) return;
+    for (const item of list) {
+      if (!seenGenerated.has(item)) {
+        seenGenerated.add(item);
+        generated.push(item);
+      }
+    }
+  };
+  absorbGenerated(local.generatedExtensions);
+  for (const pack of packs) absorbGenerated(pack.fragment.generatedExtensions);
+
+  const warnings = [...local.warnings];
+  for (const pack of packs) {
+    for (const warning of pack.warnings) warnings.push(warning);
+  }
+  for (const id of duplicatedIds) {
+    warnings.push(`rule \`${id}\` is defined more than once; the first definition wins`);
+  }
+
+  return {
+    version: local.version,
+    rules: effectiveRules,
+    ignoreFiles: [...local.ignoreFiles, ...packs.flatMap((p) => p.fragment.ignoreFiles)],
+    ignorePaths: [...local.ignorePaths, ...packs.flatMap((p) => p.fragment.ignorePaths)],
+    generatedExtensions: generated.length > 0 ? generated : DEFAULT_GENERATED,
+    blocked: [...blockedByPhrase.values()],
+    architecture: local.architecture,
+    raw: local.raw,
+    packRefs: local.packRefs,
+    warnings,
+  };
+}
+
+/**
+ * Reads the local rules file and every pack it references, then composes.
+ *
+ * The local file is read exactly as `readRules` reads it — missing is the cold
+ * start, unreadable is red, truncation-warn kept. A `packs:` list makes the
+ * run depend on those packs, and a referenced pack is never optional: a
+ * missing pack, a pin that does not match the pack's declared `version:`, an
+ * over-budget pack, or a transient read failure is red (D5) — the same
+ * loudness as naming a warrant path that is not there.
+ */
+export async function readPackedRules(path: string, packsPath: string): Promise<Rules> {
+  const local = await readRules(path);
+  if (local.packRefs.length === 0) return local;
+
+  const packs: Pack[] = [];
+  let rawSum = 0;
+  for (const ref of local.packRefs) {
+    const packPath = join(packsPath, ref.namespace, `${ref.name}.yml`);
+    const pack = await readPackFile(ref, packPath);
+    packs.push(pack);
+    rawSum += pack.raw.length;
+  }
+  if (rawSum > MAX_RULES_CHARS) {
+    throw new UnreadablePacks(
+      `packs exceed the ${String(MAX_RULES_CHARS)}-character composition budget (sum ${String(rawSum)}); reduce packs or the count`,
+    );
+  }
+
+  const composed = composeRules(local, packs);
+  const textBudget =
+    composed.rules.reduce((n, rule) => n + rule.body.length, 0) +
+    composed.blocked.reduce((n, entry) => n + entry.phrase.length + entry.note.length, 0);
+  if (textBudget > MAX_RULES_CHARS) {
+    throw new UnreadablePacks(
+      `composed rules and blocked phrases exceed the ${String(MAX_RULES_CHARS)}-character budget (${String(textBudget)}); reduce packs`,
+    );
+  }
+  return composed;
+}
+
+async function readPackFile(ref: PackRef, path: string): Promise<Pack> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissing(error)) {
+      throw new UnreadablePacks(
+        `pack \`${ref.raw}\` is referenced by the rules file but no file is at ${path}`,
+      );
+    }
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` could not be read at ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (raw.trim().length === 0) {
+    throw new UnreadablePacks(`pack \`${ref.raw}\` at ${path} is empty`);
+  }
+  if (raw.length > MAX_PACK_CHARS) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` at ${path} is ${String(raw.length)} characters, exceeding the ${String(MAX_PACK_CHARS)}-character pack cap; trim it or drop the reference`,
+    );
+  }
+  const pack = parsePack(raw, ref.raw);
+  assertPin(ref, pack);
+  return pack;
+}
+
+/** A version pin in the reference must match the pack's declared version. */
+function assertPin(ref: PackRef, pack: Pack): void {
+  if (ref.major === null) return;
+  const declared = pack.version;
+  if (declared === null) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}${ref.minor !== null ? `.${String(ref.minor)}` : ""} but declares no \`version:\``,
+    );
+  }
+  if (declared.major !== ref.major) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}${ref.minor !== null ? `.${String(ref.minor)}` : ""} but declares ${String(declared.major)}.${String(declared.minor)}`,
+    );
+  }
+  if (ref.minor !== null && declared.minor !== ref.minor) {
+    throw new UnreadablePacks(
+      `pack \`${ref.raw}\` is pinned at version ${String(ref.major)}.${String(ref.minor)} but declares ${String(declared.major)}.${String(declared.minor)}`,
+    );
+  }
 }
 
 /**
