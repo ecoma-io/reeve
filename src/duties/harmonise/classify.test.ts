@@ -4,7 +4,8 @@
 import { describe, expect, it, vi } from "vitest";
 import * as core from "@actions/core";
 
-import { parseClassification } from "./classify.js";
+import type { Completion, Provider } from "../../core/provider.js";
+import { classifyDiff, parseClassification } from "./classify.js";
 
 vi.mock("@actions/core", async (importOriginal) => ({
   ...(await importOriginal<typeof core>()),
@@ -78,5 +79,63 @@ describe("parseClassification", () => {
     expect(result.hunks).toHaveLength(1);
     expect(result.hunks[0]!.classification).toBe("semantic");
     expect(result.hunks[0]!.description).toBe("Added section");
+  });
+});
+
+describe("classifyDiff rotation", () => {
+  const SOURCE = "added a section";
+  const TARGET = "existing content";
+
+  /** An endpoint whose models answer with whatever the case scripted for them. */
+  function scripted(answers: Record<string, string | Completion>): Provider {
+    return {
+      complete(model: string): Promise<Completion> {
+        const answer = answers[model];
+        if (answer === undefined) {
+          return Promise.resolve({
+            ok: false,
+            model,
+            reason: "no answer scripted",
+            kind: "protocol",
+          });
+        }
+        return Promise.resolve(
+          typeof answer === "string"
+            ? { ok: true, model, content: answer, finishReason: "stop" }
+            : answer,
+        );
+      },
+    };
+  }
+
+  it("rotates past a failing first model and classifies on the second", async () => {
+    const provider = scripted({
+      first: { ok: false, model: "first", reason: "overloaded", kind: "capacity" },
+      second: "semantic|Added a section",
+    });
+
+    const result = await classifyDiff(SOURCE, TARGET, "en", "vi", provider, ["first", "second"]);
+
+    expect(result.hasSemantic).toBe(true);
+    expect(result.hunks[0]?.description).toBe("Added a section");
+  });
+
+  it("throws only when the whole roster is exhausted", async () => {
+    const provider = scripted({
+      first: { ok: false, model: "first", reason: "overloaded", kind: "capacity" },
+      second: { ok: false, model: "second", reason: "down", kind: "capacity" },
+    });
+
+    await expect(
+      classifyDiff(SOURCE, TARGET, "en", "vi", provider, ["first", "second"]),
+    ).rejects.toThrow("classification failed");
+  });
+
+  it("uses the first model that answers when it never fails", async () => {
+    const provider = scripted({ first: "correction|Fixed a typo" });
+
+    const result = await classifyDiff(SOURCE, TARGET, "en", "vi", provider, ["first", "second"]);
+
+    expect(result.hasSemantic).toBe(false);
   });
 });

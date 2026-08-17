@@ -567,11 +567,6 @@ async function processGroup(
     const firstStaleFile =
       firstStalePath !== undefined ? await readContentsFile(api, at, firstStalePath) : null;
 
-    const primaryModel = settings.models[0];
-    if (primaryModel === undefined) {
-      return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: [] };
-    }
-
     // A classification failure is a run that cannot decide what to propagate.
     // The doctrine says "a locale that fails does not fail the run" — skip the
     // group and continue, rather than crashing the whole document group.
@@ -582,7 +577,8 @@ async function processGroup(
         sourceLanguage.code,
         firstStaleLocale,
         classifier,
-        primaryModel,
+        settings.models,
+        weather,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

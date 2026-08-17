@@ -31,8 +31,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { Answer, ContentMap } from "../harness.ts";
-import { saying, shaOf } from "../harness.ts";
+import type { Answer, Ask, ContentMap } from "../harness.ts";
+import { failing, saying, shaOf } from "../harness.ts";
 
 /** What one run produced, narrowed to the four things a harmonise run declares. */
 export interface HarmoniseObserved {
@@ -199,6 +199,14 @@ export interface Scenario {
   readonly state: SeededState[];
   readonly languages: string;
   readonly classify: string;
+  /** The fixture's model roster override, when one — comma-separated ids. */
+  readonly models?: string;
+  /**
+   * The classify answer per model, when a fixture scripts rotation. Absent,
+   * every classify request answers `classify`. Present, a model not listed
+   * fails (so the run must rotate past it to the roster's next model).
+   */
+  readonly classifyPerModel?: Record<string, string>;
   readonly draft: Record<string, string>;
   readonly expected: ExpectedEffects;
   readonly detail: string;
@@ -241,6 +249,29 @@ function withExpected(scenario: Scenario, expected: FixtureExpected): Scenario {
           skipped: [],
         },
         detail: `synced: ${name} propagates the semantic change to its locale`,
+        conflict: false,
+      };
+    }
+    case "rotation": {
+      // The first roster model is scripted to fail, the second to classify.
+      // Rotation must pass the failure and let the second model's answer
+      // decide the propagation — the whole point of the fix.
+      return {
+        ...scenario,
+        models: "stub-model,stub-model-2",
+        classify: "correction|unreachable",
+        classifyPerModel: {
+          "stub-model": "",
+          "stub-model-2": classifyOf(expected),
+        },
+        draft: { vi: draftFor("vi", viOf(scenario)) },
+        expected: {
+          synced: [GROUP],
+          classified: [GROUP],
+          conflicts: [],
+          skipped: [],
+        },
+        detail: `synced: ${name} rotates past the failing first roster model to classify on the second`,
         conflict: false,
       };
     }
@@ -300,11 +331,17 @@ function classifyOf(expected: FixtureExpected): string {
  * translation prompt; the judge stage only runs when a panel is configured
  * (ours is not, so the best-scored draft wins without one).
  */
-export function answering(scenario: Scenario, system: string): Answer {
-  if (system.includes("You classify changes in a source document")) {
+export function answering(scenario: Scenario, ask: Ask): Answer {
+  if (ask.system.includes("You classify changes in a source document")) {
+    const scripted = scenario.classifyPerModel?.[ask.model];
+    if (scripted !== undefined) {
+      // A model scripted to fail is answered with the outage, not with
+      // content: rotation must be driven by the wire, not by a parse.
+      return scripted === "" ? failing(503, "overloaded") : saying(scripted);
+    }
     return saying(scenario.classify);
   }
-  if (system.includes("You update a locale translation to incorporate semantic changes")) {
+  if (ask.system.includes("You update a locale translation to incorporate semantic changes")) {
     return saying(draftFor(scenario.languages === "zh" ? "zh" : "vi", viOf(scenario)));
   }
   return saying("correction|unrecognised stage");

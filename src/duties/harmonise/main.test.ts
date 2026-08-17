@@ -31,15 +31,15 @@ describe("classifyDiff", () => {
     },
   };
 
-  it("throws when the model returns ok: false", async () => {
+  it("throws when the whole roster returns ok: false", async () => {
     await expect(
-      classifyDiff("some diff", "target content", "en", "vi", failing, "model-a"),
+      classifyDiff("some diff", "target content", "en", "vi", failing, ["model-a"]),
     ).rejects.toThrow("classification failed");
   });
 
   it("includes the model's reason in the thrown error", async () => {
     await expect(
-      classifyDiff("some diff", "target content", "en", "vi", failing, "model-a"),
+      classifyDiff("some diff", "target content", "en", "vi", failing, ["model-a"]),
     ).rejects.toThrow("capacity error");
   });
 });

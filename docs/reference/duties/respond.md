@@ -143,6 +143,11 @@ same four provider inputs every duty takes — the full grammar, the
 auth failures are all in
 [Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
+**`screen-models` also names the language-detection roster**, the same way
+it does in `triage`: when configured, identifying which configured language
+wrote the thread is asked of the cheap roster, and detection falls back to
+`models` only when no cheap roster is configured.
+
 **`confidence` is a floor worth measuring, not inheriting.** [Measure
 it](../../development/evaluation.md) against your own drafts before you move
 it — what `0.75` means for one project's tolerance for a slightly-off first

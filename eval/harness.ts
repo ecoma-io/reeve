@@ -99,6 +99,20 @@ export function saying(content: string): Answer {
   };
 }
 
+/**
+ * A capacity failure — the shape a provider sends when its backend refuses.
+ * The stub's role is to script an outage, and it must look like the wire, not
+ * like a special answer: `rotateModels` decides from the status line, so a
+ * harness that scripted failures as content would be testing a rotation that
+ * never happened.
+ */
+export function failing(status: number, message: string): Answer {
+  return {
+    status,
+    payload: { error: { message } },
+  };
+}
+
 function readAll(request: IncomingMessage): Promise<string> {
   return new Promise((resolveAll) => {
     const chunks: Buffer[] = [];

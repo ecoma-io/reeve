@@ -15,7 +15,7 @@
  */
 import * as core from "@actions/core";
 import { enclose, type Enclosed } from "../../core/enclose.js";
-import type { Provider } from "../../core/provider.js";
+import { rotateModels, type Message, type Provider, type Weather } from "../../core/provider.js";
 
 /** The three classification outcomes. */
 export type Classification = "semantic" | "correction" | "locale-specific";
@@ -41,7 +41,12 @@ export const CLASSIFICATION_PURPOSE = "classify" as const;
  * Classifies a source diff against the target locale's current state.
  *
  * This is a model call — the model receives the source diff and the target's
- * current content, and returns a classification for each distinct change.
+ * current content, and returns a classification for each distinct change. The
+ * roster is rotated exactly as every other model consumer rotates it: a model
+ * that fails is passed over for the next, and only a roster wholly exhausted
+ * throws. Classification decides what propagates, so a run that cannot get an
+ * answer at all must fail loud rather than silently skip (D5) — but one
+ * model's outage must not fail it.
  *
  * The classification is then enforced in code: only `semantic` hunks trigger
  * propagation. This is the same pattern `triage` uses — the model proposes,
@@ -53,31 +58,40 @@ export async function classifyDiff(
   sourceLocale: string,
   targetLocale: string,
   classifier: Provider,
-  model: string,
+  models: readonly string[],
+  weather?: Weather,
 ): Promise<ClassificationResult> {
   const diffFence = enclose("untrusted-diff", sourceDiff);
   const targetFence = enclose("untrusted-target", targetContent);
 
   const prompt = buildClassificationPrompt(sourceLocale, targetLocale, diffFence, targetFence);
-
-  const result = await classifier.complete(model, [
+  const messages: readonly Message[] = [
     {
       role: "system",
       content: [CLASSIFICATION_SYSTEM_PROMPT, "", diffFence.rule, "", targetFence.rule].join("\n"),
     },
     { role: "user", content: prompt },
-  ]);
+  ];
 
-  if (!result.ok) {
-    // A classification failure is a run that cannot decide what to propagate.
-    // Fail loud — never silently skip propagation (D5).
+  // The same rotation every other model consumer uses: try each roster model
+  // in preference order, retrying past a failure instead of giving up on the
+  // first one. Only when the whole roster is exhausted does classification
+  // fail loud — a run that cannot decide what to propagate must not silently
+  // skip propagation (D5), but a single model's outage must not cost the run.
+  const rotation = await rotateModels(
+    models,
+    (model) => classifier.complete(model, messages),
+    weather,
+  );
+  if (rotation.success === null) {
+    const reasons = rotation.failures.map((failure) => failure.reason).join("; ");
     throw new Error(
-      `harmonise: classification failed — ${result.reason}. ` +
+      `harmonise: classification failed — ${reasons}. ` +
         "The run cannot decide what to propagate without this classification.",
     );
   }
 
-  return parseClassification(result.content);
+  return parseClassification(rotation.success.content);
 }
 
 /**
