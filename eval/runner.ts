@@ -17,7 +17,7 @@
  * is never mistaken for a passing one.
  */
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -74,6 +74,13 @@ import {
   scriptDependa,
 } from "./drivers/dependa.ts";
 import type { DependaScenario } from "./drivers/dependa.ts";
+import {
+  newTracker as newReviewTracker,
+  reviewRoutes,
+  scenarioOf as reviewScenarioOf,
+  scriptReview,
+} from "./drivers/review.ts";
+import type { ReviewScenario } from "./drivers/review.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -96,6 +103,7 @@ const DUTIES = [
   "duplicate",
   "lifecycle",
   "dependa",
+  "review",
 ] as const;
 
 /** Whether a duty has fixtures on disk to run. */
@@ -850,6 +858,96 @@ function dependaLine(fixture: string, scenario: DependaScenario, run: Run): Line
   };
 }
 
+// ---------------------------------------------------------------------------
+// review
+// ---------------------------------------------------------------------------
+
+async function runReview(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "review", fixture);
+  const scenario = await reviewScenarioOf(fixture, directory);
+  const tracker = newReviewTracker();
+  const stub = await startStub({
+    routes: reviewRoutes(scenario, tracker),
+    completion: scriptReview(scenario),
+  });
+  try {
+    const warrant = join(scratch, `warrant-review-${fixture}.yml`);
+    await writeFile(warrant, scenario.warrant);
+    // The rules file lives in the checkout — the run reads it from
+    // `GITHUB_WORKSPACE`, so the fixture's rules are written there.
+    await mkdir(join(scratch, ".github"), { recursive: true });
+    if (scenario.rules === null) {
+      await writeFile(join(scratch, ".github", "reeve-rules.yml"), "");
+    } else {
+      await writeFile(join(scratch, ".github", "reeve-rules.yml"), scenario.rules);
+    }
+    const run = await runBundle(
+      "review",
+      stub.url,
+      reviewInputs(stub.url, warrant),
+      scratchFiles(scratch),
+      { GITHUB_WORKSPACE: scratch },
+    );
+    return reviewLine(fixture, scenario, tracker.effect.commented, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const REVIEW_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "stub-model",
+  warrant: "",
+  "rules-path": ".github/reeve-rules.yml",
+  trigger: "pr",
+  "max-diff-chars": "none",
+  confidence: "0.75",
+  "dry-run": "false",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function reviewInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...REVIEW_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one review fixture. */
+function reviewLine(fixture: string, scenario: ReviewScenario, commented: boolean, run: Run): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const echoed = run.outputs.commented ?? "";
+  const findings = run.outputs.findings ?? "";
+  const headSha = run.outputs["head-sha"] ?? "";
+  const finding =
+    echoed === (expected.commented ?? "false") &&
+    findings === (expected.findings ?? "0") &&
+    headSha === (expected["head-sha"] ?? "") &&
+    commented === (expected.commented === "true");
+
+  if (finding) {
+    const detail = commented
+      ? `posted ${findings} finding(s) — comments: ${echoed}`
+      : `clean stop — ${echoed === "false" ? "warrant denies review" : "nothing posted"}`;
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `commented=${JSON.stringify(echoed)} findings=${JSON.stringify(findings)} head-sha=${JSON.stringify(headSha)}`,
+  };
+}
+
 /** The outcome for one lifecycle fixture. */
 function lifecycleLine(
   fixture: string,
@@ -945,6 +1043,8 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runLifecycle;
     case "dependa":
       return runDependa;
+    case "review":
+      return runReview;
     default:
       return null;
   }

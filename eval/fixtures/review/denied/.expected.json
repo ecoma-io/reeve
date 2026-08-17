@@ -1,0 +1,18 @@
+{
+  "description": "The warrant's duties: block exists but never names review, so the run is denied outright — before the pull request is read, before any model call, before the rules file. Nothing is posted and the run reports no findings.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  triage: [label]\n",
+  "files": [
+    {
+      "filename": "src/app.ts",
+      "status": "added",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1 @@\n+console.log(\"hello\");"
+    }
+  ],
+  "expected": {
+    "commented": "false",
+    "findings": "0",
+    "head-sha": ""
+  }
+}
