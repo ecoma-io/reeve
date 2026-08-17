@@ -97,6 +97,7 @@ import {
   type ReviewSynthesis,
 } from "./passes.js";
 import { verifyFindings } from "./verify.js";
+import { dryRunThreads, syncThreads, type ThreadSync } from "./threads.js";
 import { summarize, type Run } from "./summary.js";
 
 /** The languages this run reads when the warrant's `languages:` key is silent. */
@@ -174,8 +175,10 @@ interface Outcome {
   readonly headSha: string;
   readonly malformedAnswers: number;
   readonly rulesPath: string | null;
-  /** How many workspace reads the context engine made, for the summary's Context row. */
+/** How many workspace reads the context engine made, for the summary's Context row. */
   readonly contextReadFiles: number;
+  /** What the inline-thread sync did — for the page's "Threads" row. */
+  readonly threads: ThreadSync | null;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
   readonly previous: Previous | null;
   /** Why the comment memory was unreadable — set when corruption was found and recovered from, never silent. */
@@ -200,7 +203,8 @@ type Settled = Partial<
     | "headSha"
     | "malformedAnswers"
     | "rulesPath"
-    | "contextReadFiles"
+| "contextReadFiles"
+    | "threads"
     | "previous"
     | "memoryNote"
     | "shown"
@@ -268,7 +272,8 @@ async function decide(
     headSha: "",
     malformedAnswers: 0,
     rulesPath: null,
-    contextReadFiles: 0,
+contextReadFiles: 0,
+    threads: null,
     previous: null,
     memoryNote: null,
     shown: [],
@@ -631,6 +636,10 @@ async function decide(
   if (settings.dryRun) {
     const would = await rehearse(api, at, publication);
     core.info(`Dry run — #${String(at.number)} would have received:\n${would}`);
+    const rehearsal = await dryRunThreads(api, at, final, diffStanding);
+    core.info(
+      `Dry run — #${String(at.number)} thread sync would create ${String(rehearsal.created)} and update ${String(rehearsal.updated)}.`,
+    );
     return settled({
       ...withMemory,
       language: language?.code ?? null,
@@ -641,12 +650,34 @@ async function decide(
       // that already announces the run wrote nothing. The rehearsal's
       // disposition stays in the log.
       posted: null,
+      threads: rehearsal,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,
       passes: synthesis.passes,
     });
+  }
+
+  // Threads first, summary after: a thread-write permission failure throws
+  // before the summary comment is written, so a rerun's relisting finds no
+  // half-written state and never duplicates. A finding GitHub cannot anchor
+  // (422) falls back to the summary — which renders every finding — so a
+  // thread that did not anchor is never lost.
+  const threads = await syncThreads(api, at, final, diffStanding, pr.headSha);
+  if (threads.created > 0 || threads.updated > 0) {
+    core.info(
+      `#${String(at.number)}: ${String(threads.created)} thread(s) posted, ${String(threads.updated)} updated` +
+        (threads.fallback.length > 0
+          ? `, ${String(threads.fallback.length)} fell back to the summary`
+          : "") +
+        ".",
+    );
+  }
+  if (threads.uncertain) {
+    core.warning(
+      `#${String(at.number)}: review threads could not be listed with certainty, so none were written this run.`,
+    );
   }
 
   const posted = await postOrReplace(api, at, publication);
@@ -657,6 +688,7 @@ async function decide(
     findings: final,
     confidence,
     posted,
+    threads,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded.shown,
@@ -840,6 +872,7 @@ function page(
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
+    threads: outcome?.threads ?? null,
     passes: outcome?.passes ?? [],
     contextReadFiles: outcome?.contextReadFiles ?? 0,
   });
