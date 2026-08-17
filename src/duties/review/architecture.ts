@@ -196,9 +196,30 @@ export function extractEdges(
   aliases: Readonly<Record<string, string>> = {},
 ): Edge[] {
   const edges: Edge[] = [];
+  // A `/* ... */` block comment can span lines; interior lines carry no
+  // comment marker of their own, so the opener's state must ride across
+  // lines until its closer appears.
+  let blockComment = false;
   for (const [line, text] of file.lines) {
     const trimmed = text.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("* ")) continue;
+    if (trimmed.startsWith("//")) continue;
+    if (blockComment) {
+      blockComment = !text.includes("*/");
+      continue;
+    }
+    if (trimmed.startsWith("* ")) continue;
+    if (trimmed.startsWith("/*")) {
+      // A trimmed line that opens a block comment and never closes it on the
+      // same line leaves the rest of the comment open across the following
+      // lines; one that closes on the same line falls through so code after
+      // the `*/` still extracts.
+      const closer = text.indexOf("*/", 2);
+      if (closer < 0) {
+        blockComment = true;
+        continue;
+      }
+      if (trimmed.slice(closer + 2).trim() === "") continue;
+    }
     const opaque = opaqueRanges(text);
     const candidates: Candidate[] = [];
     collect(text, IMPORT_TYPE, "type", candidates);

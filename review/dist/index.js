@@ -34672,9 +34672,23 @@ function collect(text2, regex, kind, out) {
 }
 function extractEdges(file, aliases = {}) {
   const edges = [];
+  let blockComment = false;
   for (const [line, text2] of file.lines) {
     const trimmed = text2.trimStart();
-    if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("* ")) continue;
+    if (trimmed.startsWith("//")) continue;
+    if (blockComment) {
+      blockComment = !text2.includes("*/");
+      continue;
+    }
+    if (trimmed.startsWith("* ")) continue;
+    if (trimmed.startsWith("/*")) {
+      const closer = text2.indexOf("*/", 2);
+      if (closer < 0) {
+        blockComment = true;
+        continue;
+      }
+      if (trimmed.slice(closer + 2).trim() === "") continue;
+    }
     const opaque = opaqueRanges(text2);
     const candidates = [];
     collect(text2, IMPORT_TYPE, "type", candidates);

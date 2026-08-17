@@ -149,6 +149,57 @@ describe("extractEdges", () => {
       },
     ]);
   });
+
+  it("never extracts an interior line of a plain multi-line block comment", () => {
+    const edges = extractEdges(
+      file("src/domain/svc.ts", {
+        1: "/*",
+        2: '   import "./infra/db" is forbidden here',
+        3: "   and the line carries no comment marker of its own",
+        4: "*/",
+        5: "export function run(): void {}",
+      }),
+      NO_ALIASES,
+    );
+    expect(edges).toEqual([]);
+  });
+
+  it("keeps extracting after a closed multi-line block comment", () => {
+    const edges = extractEdges(
+      file("src/domain/svc.ts", {
+        1: "/*",
+        2: '   import "./infra/db" is forbidden here',
+        3: "*/",
+        4: `import real from "./ok";`,
+      }),
+      NO_ALIASES,
+    );
+    expect(edges).toEqual([
+      {
+        fromFile: "src/domain/svc.ts",
+        line: 4,
+        specifier: "./ok",
+        kind: "import",
+        target: "src/domain/ok",
+      },
+    ]);
+  });
+
+  it("skips a block comment opened and closed on one line but keeps the code after it", () => {
+    const edges = extractEdges(
+      file("src/domain/svc.ts", { 1: `/* note */ import real from "./ok";` }),
+      NO_ALIASES,
+    );
+    expect(edges).toEqual([
+      {
+        fromFile: "src/domain/svc.ts",
+        line: 1,
+        specifier: "./ok",
+        kind: "import",
+        target: "src/domain/ok",
+      },
+    ]);
+  });
 });
 
 describe("resolveTarget", () => {
