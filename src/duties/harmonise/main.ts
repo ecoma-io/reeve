@@ -119,12 +119,10 @@ export interface Settings {
   readonly ignore: boolean;
   readonly sweep: boolean;
   readonly limit: number | null;
-  readonly number: number | null;
-  readonly since: Date | null;
 }
 
 function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permitted"> {
-  const shared = readShared();
+  const shared = readShared({ needsThread: false });
   const panel = parseSeats(core.getInput("judge-models"));
 
   return {

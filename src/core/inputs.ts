@@ -70,11 +70,25 @@ export interface Core {
   readonly temperature: number | undefined;
 }
 
+/** Options for {@link readShared}. */
+export interface ReadSharedOptions {
+  /**
+   * Whether the duty works threads (the default) or document groups.
+   *
+   * A group duty — `harmonise` — has no event thread to work: it scans the
+   * file tree, so a `push` run needs no issue or pull request. Its `number`
+   * input is an optional group base path, not a thread, and is read as given
+   * rather than resolved from the event.
+   */
+  readonly needsThread?: boolean;
+}
+
 /** What every sweeping duty gets, whatever else its own `action.yml` declares. */
 export interface Shared extends Core {
   /**
    * The thread to work on, or null in `sweep` — a sweep does not name one
-   * thread, it works the backlog.
+   * thread, it works the backlog. A group duty's own `number` semantics are
+   * its business; the shared read only ever produces a thread number.
    */
   readonly number: number | null;
   /** Whether this run works the backlog instead of the one thread the event named. */
@@ -157,7 +171,7 @@ export function readCore(options?: { modelsOptional?: boolean }): Core {
  * a workflow that asked for two different runs at once, and no amount of
  * reading the rest tells anyone which one was meant.
  */
-export function readShared(): Shared {
+export function readShared(options: ReadSharedOptions = {}): Shared {
   const sweep = core.getBooleanInput("sweep");
   const configuredNumber = core.getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -169,7 +183,7 @@ export function readShared(): Shared {
 
   return {
     ...readCore(),
-    number: sweep ? null : threadNumber(),
+    number: options.needsThread === false ? null : sweep ? null : threadNumber(),
     sweep,
     since: parseSince(core.getInput("since")),
     limit: bounded("limit", core.getInput("limit")),
