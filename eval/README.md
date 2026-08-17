@@ -102,9 +102,17 @@ Each fixture is a directory under `eval/fixtures/<duty>/` holding:
 - for harmonise, the fixture's own `en.md`/`vi.md`/`zh.md` files the driver
   rewires onto the repository layout.
 
-The six drivers (`eval/drivers/harmonise.ts`, `triage.ts`, `respond.ts`,
-`translate.ts`, `duplicate.ts`, `lifecycle.ts`) own the mapping from a
-fixture's `.expected.json` to the stub routes and scripted model answers,
-plus the assertion that turns a run into an outcome. A new duty means a new
-driver under `eval/drivers/`, a fixtures directory, and one more entry in
-`DUTIES` in `eval/runner.ts`.
+The seven drivers (`eval/drivers/harmonise.ts`, `triage.ts`, `respond.ts`,
+`translate.ts`, `duplicate.ts`, `lifecycle.ts`, `dependa.ts`) own the mapping
+from a fixture's `.expected.json` to the stub routes and scripted model
+answers, plus the assertion that turns a run into an outcome. A new duty means
+a new driver under `eval/drivers/`, a fixtures directory, and one more entry
+in `DUTIES` in `eval/runner.ts`.
+
+`dependa`'s fixtures are publish-path-limited: its datasource URLs
+(`registry.npmjs.org`, `crates.io`, `proxy.golang.org`,
+`registry.hub.docker.com`, `api.github.com`) are hardcoded in the duty's
+source rather than read from `GITHUB_API_URL`, so no fixture can drive a real
+registry call against the stub. Each fixture stops before the datasource loop
+— warrant denial, no recognised manifest, or the policy's own `ecosystems:`
+narrowing — and asserts the clean empty run.

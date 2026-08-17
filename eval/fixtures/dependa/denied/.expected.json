@@ -1,0 +1,13 @@
+{
+  "description": "The warrant's duties: block exists but never names dependa, so the run is denied outright — before the repository is read, before any manifest is discovered, before any datasource. The run reports the empty outputs a green no-op always does.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  triage: [label]\n",
+  "files": {},
+  "expected": {
+    "proposed": "[]",
+    "refused": "[]",
+    "security": "[]",
+    "pull-requests": "[]",
+    "starved": "false",
+    "budget-exhausted": "false"
+  }
+}

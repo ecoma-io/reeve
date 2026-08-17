@@ -68,6 +68,12 @@ import {
   scenarioOf as lifecycleScenarioOf,
 } from "./drivers/lifecycle.ts";
 import type { LifecycleScenario } from "./drivers/lifecycle.ts";
+import {
+  dependaRoutes,
+  scenarioOf as dependaScenarioOf,
+  scriptDependa,
+} from "./drivers/dependa.ts";
+import type { DependaScenario } from "./drivers/dependa.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -82,7 +88,15 @@ const ROOT = resolve(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
 
 /** Every duty the runner knows how to drive. */
-const DUTIES = ["harmonise", "triage", "respond", "translate", "duplicate", "lifecycle"] as const;
+const DUTIES = [
+  "harmonise",
+  "triage",
+  "respond",
+  "translate",
+  "duplicate",
+  "lifecycle",
+  "dependa",
+] as const;
 
 /** Whether a duty has fixtures on disk to run. */
 async function hasFixtures(duty: string): Promise<boolean> {
@@ -750,6 +764,92 @@ function lifecycleInputs(scratch: string): Record<string, string> {
   return { ...LIFECYCLE_INPUTS, warrant: join(scratch, "reeve.yml") };
 }
 
+// ---------------------------------------------------------------------------
+// dependa
+// ---------------------------------------------------------------------------
+
+async function runDependa(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "dependa", fixture);
+  const scenario = await dependaScenarioOf(fixture, directory);
+  const stub = await startStub({
+    routes: dependaRoutes(scenario),
+    completion: scriptDependa(),
+  });
+  try {
+    const warrant = join(scratch, `warrant-dependa-${fixture}.yml`);
+    await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "dependa",
+      stub.url,
+      dependaInputs(stub.url, warrant),
+      scratchFiles(scratch),
+    );
+    return dependaLine(fixture, scenario, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const DEPENDA_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "",
+  warrant: "",
+  ecosystems: "",
+  drafts: "0",
+  "dry-run": "false",
+  "max-requests": "none",
+  paths: "",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function dependaInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...DEPENDA_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one dependa fixture. */
+function dependaLine(fixture: string, scenario: DependaScenario, run: Run): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const proposed = run.outputs.proposed ?? "";
+  const refused = run.outputs.refused ?? "";
+  const security = run.outputs.security ?? "";
+  const pullRequests = run.outputs["pull-requests"] ?? "";
+  const starved = run.outputs.starved ?? "";
+  const budgetExhausted = run.outputs["budget-exhausted"] ?? "";
+
+  const finding =
+    proposed === (expected.proposed ?? "[]") &&
+    refused === (expected.refused ?? "[]") &&
+    security === (expected.security ?? "[]") &&
+    pullRequests === (expected["pull-requests"] ?? "[]") &&
+    starved === (expected.starved ?? "false") &&
+    budgetExhausted === (expected["budget-exhausted"] ?? "false");
+
+  if (finding) {
+    return {
+      fixture,
+      outcome: "finding",
+      detail: `clean stop — nothing proposed (${JSON.stringify(proposed)})`,
+    };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `proposed=${JSON.stringify(proposed)} refused=${JSON.stringify(refused)} security=${JSON.stringify(security)} pull-requests=${JSON.stringify(pullRequests)}`,
+  };
+}
+
 /** The outcome for one lifecycle fixture. */
 function lifecycleLine(
   fixture: string,
@@ -843,6 +943,8 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runDuplicate;
     case "lifecycle":
       return runLifecycle;
+    case "dependa":
+      return runDependa;
     default:
       return null;
   }
