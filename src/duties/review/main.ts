@@ -59,14 +59,7 @@ import { bounded, readCore, threadNumber, type Core } from "../../core/inputs.js
 import { type Language, parseLanguages } from "../../core/languages.js";
 
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-import {
-  reconcile,
-  remember,
-  type Finding,
-  type Previous,
-  type RawFinding,
-  type Reconciled,
-} from "./findings.js";
+import { reconcile, remember, type Finding, type Previous, type Reconciled } from "./findings.js";
 import { architectureFindings } from "./architecture.js";
 import {
   decodeEnvelope,
@@ -78,8 +71,18 @@ import {
 } from "./publish.js";
 import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
 import { preflight, readRules } from "./rules.js";
+import {
+  runPasses,
+  selectPasses,
+  synthesize,
+  type PassContext,
+  type PassReport,
+  type PassResult,
+  type Profile,
+  type ReviewFinding,
+  type ReviewSynthesis,
+} from "./passes.js";
 import { verifyFindings } from "./verify.js";
-import { NOTHING, review as askModel, type Reviewed } from "./verdict.js";
 import { summarize, type Run } from "./summary.js";
 
 /** The languages this run reads when the warrant's `languages:` key is silent. */
@@ -99,6 +102,8 @@ interface Settings extends Core {
   readonly maxDiffChars: number | null;
   /** The confidence at which a finding is reported — kept below in training only. */
   readonly confidence: number;
+  /** How thorough the model half of this review is: one pass, or several. */
+  readonly profile: Profile;
 }
 
 /** Reads the inputs exactly as `action.yml` declares them — the contract test audits this file. */
@@ -112,7 +117,15 @@ function readSettings(): Omit<Settings, "languages"> {
     trigger: core.getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", core.getInput("max-diff-chars")),
     confidence: parseConfidence(core.getInput("confidence")),
+    profile: parseProfile(core.getInput("profile")),
   };
+}
+
+function parseProfile(raw: string): Profile {
+  const value = raw.trim();
+  if (value.length === 0 || value === "default") return "default";
+  if (value === "deep") return "deep";
+  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw}\`.`);
 }
 
 function parseConfidence(raw: string): number {
@@ -144,6 +157,8 @@ interface Outcome {
   readonly skipped: readonly { path: string; reason: string }[];
   /** What the warrant actually granted — the summary reports it beside every other decision. */
   readonly permitted: readonly Capability[];
+  /** One row per model pass that ran, for the summary's verdict table. */
+  readonly passes: readonly PassReport[];
 }
 
 type Settled = Partial<
@@ -160,6 +175,7 @@ type Settled = Partial<
     | "previous"
     | "shown"
     | "skipped"
+    | "passes"
   >
 >;
 
@@ -196,6 +212,7 @@ async function decide(
     previous: null,
     shown: [],
     skipped: [],
+    passes: [],
     permitted,
     ...over,
   });
@@ -314,33 +331,47 @@ async function decide(
     })),
   ];
 
-  // The expensive half, only when there is a diff to ask about.
-  let reviewed: Reviewed = { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  if (bounded.shown.length > 0) {
-    reviewed = await askModel({
-      provider: stages.review,
-      models: settings.models,
-      prTitle: pr.title,
-      prBody: pr.body.slice(0, BODY_EXCERPT),
-      headSha: pr.headSha,
-      files: bounded.shown,
-      rules: rules.rules,
-      language: language?.code ?? null,
-      weather,
-    });
-    for (const failure of reviewed.failures) {
+  // The expensive half, only when there is a diff to ask about. The profile
+  // names one or more passes, each reading the same diff through its own
+  // prompt and the same strict parser; `synthesize` correlates what came back
+  // — dedupes, annotates contradictions, ranks, and prices every pass that
+  // could not answer into the confidence.
+  const passContext: PassContext = {
+    prTitle: pr.title,
+    prBody: pr.body.slice(0, BODY_EXCERPT),
+    headSha: pr.headSha,
+    files: bounded.shown,
+    rules: rules.rules,
+    language: language?.code ?? null,
+  };
+  const passResults: PassResult[] =
+    bounded.shown.length > 0
+      ? await runPasses(
+          stages.review,
+          selectPasses(settings.profile),
+          settings.models,
+          passContext,
+          weather,
+        )
+      : [];
+  for (const result of passResults) {
+    for (const failure of result.failures) {
       core.warning(`review: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
     }
-    if (reviewed.unreadable !== null) {
-      core.warning(
-        "review: the model's answer did not parse as findings — discarded rather than read best-effort.",
-      );
-    }
   }
+  const synthesis: ReviewSynthesis = synthesize(passResults);
+  if (synthesis.failedPasses.length > 0) {
+    core.warning(
+      `review: ${synthesis.failedPasses
+        .map((failed) => `the ${failed.id} pass ${failed.reason}`)
+        .join("; ")}.`,
+    );
+  }
+  // How many passes produced an answer that did not parse — the summary's
+  // "Unreadable" row, one per pass rather than the old single answer.
+  const unreadableCount = passResults.filter((result) => result.unreadable !== null).length;
 
-  const raw: Finding[] = reviewed.verdict.findings
-    .map((entry: RawFinding) => toFinding(entry, rules))
-    .filter((finding): finding is Finding => finding !== null);
+  const raw: Finding[] = synthesis.findings.map((entry: ReviewFinding) => toFinding(entry, rules));
 
   // The evidence half: every admitted model finding is verified against
   // evidence the diff already proves — the claimed snippet against the
@@ -363,7 +394,7 @@ async function decide(
   for (const file of bounded.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
   const final = reconcile([...deterministic, ...verified], previous, diffStanding);
-  const confidence = reviewed.verdict.confidence;
+  const confidence = synthesis.confidence;
 
   const next = remember(final, pr.headSha, previous);
 
@@ -376,7 +407,7 @@ async function decide(
   // model answered readably — an all-skipped diff, a capacity failure, an
   // unreadable answer — and the findings left standing then are the deterministic
   // pre-checks, which are certain by construction and need no confidence floor.
-  const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
+  const verdictMeasured = synthesis.measured;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
   // An all-clear no model stood behind. The diff had files to show and the
   // model that was asked never delivered a readable verdict — a capacity
@@ -407,10 +438,11 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,
+      passes: synthesis.passes,
     });
   }
 
@@ -424,10 +456,11 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,
+      passes: synthesis.passes,
     });
   }
 
@@ -441,10 +474,11 @@ async function decide(
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,
+      passes: synthesis.passes,
     });
   }
 
@@ -463,6 +497,7 @@ async function decide(
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,
+      passes: synthesis.passes,
     });
   }
 
@@ -485,10 +520,11 @@ async function decide(
       // that already announces the run wrote nothing. The rehearsal's
       // disposition stays in the log.
       posted: null,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded.shown,
       skipped: bounded.skipped,
+      passes: synthesis.passes,
     });
   }
 
@@ -500,10 +536,11 @@ async function decide(
     findings: final,
     confidence,
     posted,
-    malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+    malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded.shown,
     skipped: bounded.skipped,
+    passes: synthesis.passes,
   });
 }
 
@@ -523,23 +560,23 @@ async function readEnvelope(
   return decodeEnvelope(payload) ?? { findings: [], reviewedShas: [] };
 }
 
-/** A claim the model made, admitted as a finding when the diff proved it — see `verdict.ts`. */
+/** A claim a pass made, admitted as a finding when the diff proved it — see `verdict.ts`. */
 function toFinding(
-  raw: RawFinding,
+  claim: ReviewFinding,
   rules: { readonly rules: readonly { readonly id: string }[] },
-): Finding | null {
-  const rule = rules.rules.find((entry) => entry.id === raw.rule);
+): Finding {
+  const rule = rules.rules.find((entry) => entry.id === claim.ruleId);
   return {
-    id: `${raw.rule}:${raw.path}:${String(raw.line ?? 0)}`,
-    ruleId: raw.rule,
-    ruleName: rule?.id ?? raw.rule,
+    id: claim.id,
+    ruleId: claim.ruleId,
+    ruleName: rule?.id ?? claim.ruleId,
     ruleBody: "",
-    path: raw.path,
-    line: raw.line,
-    severity: raw.severity,
-    body: raw.body,
+    path: claim.path,
+    line: claim.line,
+    severity: claim.severity,
+    body: claim.body,
     marker: "",
-    snippet: raw.snippet,
+    snippet: claim.snippet,
   };
 }
 
@@ -645,6 +682,7 @@ function page(
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
     readRules: outcome?.rulesPath ?? null,
+    passes: outcome?.passes ?? [],
   });
 }
 

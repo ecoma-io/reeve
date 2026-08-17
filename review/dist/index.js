@@ -21407,7 +21407,7 @@ var require_merge = __commonJS({
     var identity = require_identity();
     var Scalar = require_Scalar();
     var MERGE_KEY = "<<";
-    var merge2 = {
+    var merge3 = {
       identify: (value) => value === MERGE_KEY || typeof value === "symbol" && value.description === MERGE_KEY,
       default: "key",
       tag: "tag:yaml.org,2002:merge",
@@ -21417,7 +21417,7 @@ var require_merge = __commonJS({
       }),
       stringify: () => MERGE_KEY
     };
-    var isMergeKey = (ctx, key) => (merge2.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge2.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default);
+    var isMergeKey = (ctx, key) => (merge3.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge3.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge3.tag && tag.default);
     function addMergeToJSMap(ctx, map, value) {
       const source = resolveAliasValue(ctx, value);
       if (identity.isSeq(source))
@@ -21456,7 +21456,7 @@ var require_merge = __commonJS({
     }
     exports.addMergeToJSMap = addMergeToJSMap;
     exports.isMergeKey = isMergeKey;
-    exports.merge = merge2;
+    exports.merge = merge3;
   }
 });
 
@@ -21465,15 +21465,15 @@ var require_addPairToJSMap = __commonJS({
   "node_modules/.pnpm/yaml@2.9.0/node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports) {
     "use strict";
     var log = require_log();
-    var merge2 = require_merge();
+    var merge3 = require_merge();
     var stringify = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
     function addPairToJSMap(ctx, map, { key, value }) {
       if (identity.isNode(key) && key.addToJSMap)
         key.addToJSMap(ctx, map, value);
-      else if (merge2.isMergeKey(ctx, key))
-        merge2.addMergeToJSMap(ctx, map, value);
+      else if (merge3.isMergeKey(ctx, key))
+        merge3.addMergeToJSMap(ctx, map, value);
       else {
         const jsKey = toJS.toJS(key, "", ctx);
         if (map instanceof Map) {
@@ -22864,7 +22864,7 @@ var require_schema3 = __commonJS({
     var bool = require_bool2();
     var float = require_float2();
     var int = require_int2();
-    var merge2 = require_merge();
+    var merge3 = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
     var set = require_set();
@@ -22884,7 +22884,7 @@ var require_schema3 = __commonJS({
       float.floatExp,
       float.float,
       binary.binary,
-      merge2.merge,
+      merge3.merge,
       omap.omap,
       pairs.pairs,
       set.set,
@@ -22910,7 +22910,7 @@ var require_tags = __commonJS({
     var schema = require_schema();
     var schema$1 = require_schema2();
     var binary = require_binary();
-    var merge2 = require_merge();
+    var merge3 = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
     var schema$2 = require_schema3();
@@ -22935,7 +22935,7 @@ var require_tags = __commonJS({
       intOct: int.intOct,
       intTime: timestamp.intTime,
       map: map.map,
-      merge: merge2.merge,
+      merge: merge3.merge,
       null: _null.nullTag,
       omap: omap.omap,
       pairs: pairs.pairs,
@@ -22945,7 +22945,7 @@ var require_tags = __commonJS({
     };
     var coreKnownTags = {
       "tag:yaml.org,2002:binary": binary.binary,
-      "tag:yaml.org,2002:merge": merge2.merge,
+      "tag:yaml.org,2002:merge": merge3.merge,
       "tag:yaml.org,2002:omap": omap.omap,
       "tag:yaml.org,2002:pairs": pairs.pairs,
       "tag:yaml.org,2002:set": set.set,
@@ -22954,7 +22954,7 @@ var require_tags = __commonJS({
     function getTags(customTags, schemaName, addMergeTag) {
       const schemaTags = schemas.get(schemaName);
       if (schemaTags && !customTags) {
-        return addMergeTag && !schemaTags.includes(merge2.merge) ? schemaTags.concat(merge2.merge) : schemaTags.slice();
+        return addMergeTag && !schemaTags.includes(merge3.merge) ? schemaTags.concat(merge3.merge) : schemaTags.slice();
       }
       let tags = schemaTags;
       if (!tags) {
@@ -22972,7 +22972,7 @@ var require_tags = __commonJS({
         tags = customTags(tags.slice());
       }
       if (addMergeTag)
-        tags = tags.concat(merge2.merge);
+        tags = tags.concat(merge3.merge);
       return tags.reduce((tags2, tag) => {
         const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
         if (!tagObj) {
@@ -23001,11 +23001,11 @@ var require_Schema = __commonJS({
     var tags = require_tags();
     var sortMapEntriesByKey = (a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
     var Schema = class _Schema {
-      constructor({ compat, customTags, merge: merge2, resolveKnownTags, schema, sortMapEntries, toStringDefaults }) {
+      constructor({ compat, customTags, merge: merge3, resolveKnownTags, schema, sortMapEntries, toStringDefaults }) {
         this.compat = Array.isArray(compat) ? tags.getTags(compat, "compat") : compat ? tags.getTags(null, compat) : null;
         this.name = typeof schema === "string" && schema || "core";
         this.knownTags = resolveKnownTags ? tags.coreKnownTags : {};
-        this.tags = tags.getTags(customTags, this.name, merge2);
+        this.tags = tags.getTags(customTags, this.name, merge3);
         this.toStringOptions = toStringDefaults ?? null;
         Object.defineProperty(this, identity.MAP, { value: map.map });
         Object.defineProperty(this, identity.SCALAR, { value: string.string });
@@ -32790,10 +32790,10 @@ function classifyStatus(status) {
 function readUsage(payload) {
   const usage = asRecord(asRecord(payload)?.usage);
   if (usage === null) return null;
-  const prompt2 = asCount(usage.prompt_tokens);
+  const prompt = asCount(usage.prompt_tokens);
   const completion = asCount(usage.completion_tokens);
-  if (prompt2 === null && completion === null) return null;
-  return { prompt: prompt2 ?? 0, completion: completion ?? 0 };
+  if (prompt === null && completion === null) return null;
+  return { prompt: prompt ?? 0, completion: completion ?? 0 };
 }
 function asCount(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
@@ -35834,6 +35834,375 @@ function blockedNote(blocked) {
   return `The diff contains the blocked text "${blocked.phrase}"${note}`;
 }
 
+// src/duties/review/verdict.ts
+function parseVerdict(answer2, files) {
+  let parsed;
+  try {
+    parsed = JSON.parse(unwrapped(answer2));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const fields = parsed;
+  const confidence = fields.confidence ?? 0;
+  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
+  if (confidence < 0 || confidence > 1) return null;
+  const rawFindings = fields.findings;
+  if (rawFindings === void 0 || rawFindings === null) {
+    return { findings: [], confidence };
+  }
+  if (!Array.isArray(rawFindings)) return null;
+  const findings = [];
+  for (const raw of rawFindings) {
+    const finding = parseFinding(raw, files);
+    if (finding === null) return null;
+    findings.push(finding);
+  }
+  return { findings, confidence };
+}
+function parseFinding(raw, files) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const fields = raw;
+  const rule = fields.rule;
+  if (typeof rule !== "string" || rule.trim().length === 0) return null;
+  const severity = fields.severity ?? "warning";
+  if (severity !== "info" && severity !== "warning" && severity !== "critical") return null;
+  const path = fields.path;
+  if (typeof path !== "string") return null;
+  const file = files.find((candidate) => candidate.path === path);
+  if (file === void 0) return null;
+  const line = fields.line ?? null;
+  if (typeof line !== "number") return null;
+  if (!Number.isInteger(line) || line < 1) return null;
+  if (!file.lines.has(line)) return null;
+  const body = fields.body;
+  if (typeof body !== "string" || body.trim().length === 0) return null;
+  const snippet = fields.snippet ?? body;
+  if (typeof snippet !== "string") return null;
+  return {
+    rule: rule.trim(),
+    severity,
+    path: file.path,
+    line,
+    body: body.trim(),
+    snippet: snippet.slice(0, 120)
+  };
+}
+function unwrapped(answer2) {
+  const parts = segments(answer2.trim());
+  const [only] = parts;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
+  const lines = only.text.split("\n");
+  return lines.slice(1, -1).join("\n");
+}
+
+// src/duties/review/passes.ts
+var SEVERITY_ORDER = {
+  critical: 0,
+  warning: 1,
+  info: 2
+};
+function selectPasses(profile) {
+  if (profile === "deep") return [correctnessPass(), securityPass()];
+  return [correctnessPass()];
+}
+async function runPasses(provider, passes, models, context3, weather) {
+  const results = [];
+  for (const pass of passes) {
+    const roster = pass.models.length > 0 ? pass.models : models;
+    const rotation = await rotateModels(
+      roster,
+      (model) => answer(provider, model, pass.prompt(context3)),
+      weather
+    );
+    if (!rotation.success) {
+      results.push({
+        pass,
+        verdict: null,
+        unreadable: null,
+        failures: rotation.failures,
+        model: null
+      });
+      continue;
+    }
+    const verdict2 = pass.parse(rotation.success.content, context3.files);
+    results.push({
+      pass,
+      // An unreadable answer stays null — never dressed up as a readable
+      // empty verdict. A pass that could not be read is priced into the
+      // confidence and named in `failedPasses`, exactly as loud as D5 asks.
+      verdict: verdict2,
+      unreadable: verdict2 === null ? rotation.success.content : null,
+      failures: rotation.failures,
+      model: rotation.success.model
+    });
+  }
+  return results;
+}
+async function answer(provider, model, messages) {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: "the answer was cut off before it finished"
+    };
+  }
+  return completion;
+}
+function correctnessPass() {
+  return {
+    id: "correctness",
+    name: "Correctness",
+    models: [],
+    prompt: (context3) => correctnessPrompt(context3),
+    parse: (answer2, files) => parseVerdict(answer2, files)
+  };
+}
+function securityPass() {
+  return {
+    id: "security",
+    name: "Security",
+    models: [],
+    prompt: (context3) => securityPrompt(context3),
+    parse: (answer2, files) => parseVerdict(answer2, files)
+  };
+}
+function material(context3, lead) {
+  const { prTitle, prBody, headSha, files, rules, language } = context3;
+  const wrapped = enclose(
+    "untrusted-diff",
+    [
+      "--- PULL REQUEST BEING REVIEWED ---",
+      `TITLE: ${prTitle}`,
+      prBody.length === 0 ? "" : `BODY:
+${prBody}`,
+      "",
+      "--- DIFF (new-file lines proven; every line number a finding cites must be one of these) ---",
+      ...files.map(
+        (file) => `### ${file.path} (${file.status})
+` + (file.additions + file.deletions === 0 ? "" : `+${String(file.additions)} -${String(file.deletions)}
+`) + patchExcerpt(file.patch)
+      )
+    ].join("\n")
+  );
+  return [
+    {
+      role: "system",
+      content: [
+        ...lead,
+        "",
+        language === null ? "The pull request's language could not be identified from the languages this project reads." : `The pull request, its threads and your findings should be written in ${language}.`,
+        "",
+        `The diff below is the whole universe of this review \u2014 every finding must name one of its files and one of its proven new-file line numbers.`,
+        "",
+        "The repository's own review rules are:",
+        ...rules.flatMap((rule) => [
+          `- [${rule.id}] ${rule.name}${rule.body.length > 0 ? ` \u2014 ${rule.body}` : ""}`,
+          rule.marker.length > 0 ? `  mark this rule's findings with marker "${rule.marker}"` : ""
+        ]),
+        "",
+        "Answer with one JSON object and nothing else \u2014 no prose, no explanation:",
+        "",
+        '{"findings": [], "confidence": 0.0}',
+        "",
+        "- `findings`: zero or more of the shape below, each naming a rule from the repository's",
+        "  list, a file from the diff, and a proven line number (or `null` when the problem is",
+        "  the file as a whole):",
+        "",
+        '{"rule": "dedup", "severity": "warning", "path": "src/a.ts", "line": 12,',
+        ' "snippet": "the exact text at that line", "body": "one or two sentences. Be specific"}',
+        "",
+        "- `severity` is one of `info`, `warning`, `critical`. Prefer the repository rule's own",
+        "  severity when it sets one.",
+        `- Report real problems only. A model that invents a line or a file that is not in the diff is answering a different question \u2014 do not.`,
+        "",
+        `The head SHA of the diff you are reviewing is ${headSha}.`,
+        "",
+        wrapped.rule
+      ].join("\n")
+    },
+    { role: "user", content: wrapped.block }
+  ];
+}
+function correctnessPrompt(context3) {
+  return material(context3, ["You are reviewing a pull request on a GitHub repository."]);
+}
+function securityPrompt(context3) {
+  return material(context3, [
+    "You are a security review pass for a pull request on a GitHub repository.",
+    "",
+    "This pass focuses on security only: secret material committed to the diff, injection",
+    "(shell, SQL, HTML, command), unsafe deserialisation or evaluation of untrusted input,",
+    "authentication or authorisation flaws, privilege changes, and dependency risk visible",
+    "in the diff. Report only what the diff itself supports \u2014 a finding must name one of the",
+    "proven lines below."
+  ]);
+}
+var PATCH_EXCERPT = 4e3;
+function patchExcerpt(patch) {
+  return patch.length <= PATCH_EXCERPT ? patch : `${patch.slice(0, PATCH_EXCERPT)}
+\u2026`;
+}
+function synthesize(results) {
+  const findings = [];
+  for (const result of results) {
+    if (result.verdict === null) continue;
+    for (const raw of result.verdict.findings) {
+      findings.push(toReviewFinding(raw, result.pass, result.verdict.findings.length));
+    }
+  }
+  const deduped = dedup(findings);
+  const contradictions = detectContradictions(deduped);
+  const annotated = applyContradictions(deduped, contradictions);
+  const ranked = rank(annotated);
+  const { confidence, measured } = aggregateConfidence(results);
+  const passes = results.map((result) => ({
+    id: result.pass.id,
+    name: result.pass.name,
+    answered: result.verdict !== null,
+    unreadable: result.unreadable !== null,
+    failed: result.failures.length > 0,
+    findings: result.verdict?.findings.length ?? 0
+  }));
+  const failedPasses = [];
+  for (const result of results) {
+    if (result.verdict !== null) continue;
+    const reasons = result.failures.map((f) => f.reason);
+    if (reasons.length === 0 && result.unreadable !== null) {
+      failedPasses.push({
+        id: result.pass.id,
+        reason: "the answer did not parse as findings"
+      });
+    } else if (reasons.length > 0) {
+      failedPasses.push({
+        id: result.pass.id,
+        reason: reasons.join("; ")
+      });
+    }
+  }
+  return { findings: ranked, confidence, measured, passes, failedPasses };
+}
+function toReviewFinding(raw, pass, _passFindings) {
+  const line = raw.line;
+  const evidence = [
+    {
+      kind: "patch",
+      source: line === null ? raw.path : `${raw.path}:${String(line)}`,
+      content: raw.snippet
+    },
+    { kind: "rule", source: raw.rule, content: "" },
+    { kind: "pass", source: pass.id, content: pass.name }
+  ];
+  return {
+    id: `${raw.rule}:${raw.path}:${String(line ?? 0)}`,
+    ruleId: raw.rule,
+    severity: raw.severity,
+    path: raw.path,
+    line,
+    body: raw.body,
+    snippet: raw.snippet,
+    passId: pass.id,
+    passName: pass.name,
+    corroboratedBy: [pass.id],
+    evidence
+  };
+}
+function dedup(findings) {
+  const out = [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const finding of findings) {
+    const at = byId.get(finding.id);
+    if (at === void 0) {
+      byId.set(finding.id, out.length);
+      out.push(finding);
+      continue;
+    }
+    const existing = out[at];
+    if (existing === void 0) continue;
+    out[at] = merge2(existing, finding);
+  }
+  return out;
+}
+function merge2(a, b) {
+  const aWins = SEVERITY_ORDER[a.severity] <= SEVERITY_ORDER[b.severity] || a.severity === b.severity && a.corroboratedBy.length >= b.corroboratedBy.length;
+  const primary = aWins ? a : b;
+  const corroboratedBy = a.corroboratedBy.includes(b.passId) ? [...a.corroboratedBy] : [...a.corroboratedBy, b.passId];
+  return {
+    ...primary,
+    corroboratedBy,
+    evidence: mergeEvidence([...a.evidence, ...b.evidence])
+  };
+}
+function mergeEvidence(all) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const evidence of all) {
+    const key = `${evidence.kind}:${evidence.source}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(evidence);
+  }
+  return out;
+}
+function detectContradictions(findings) {
+  const out = [];
+  const byPlace = /* @__PURE__ */ new Map();
+  for (const finding of findings) {
+    const key = `${finding.path}
+${finding.line === null ? "" : String(finding.line)}`;
+    const bucket = byPlace.get(key) ?? [];
+    bucket.push(finding);
+    byPlace.set(key, bucket);
+  }
+  for (const [, bucket] of byPlace) {
+    const rules = new Set(bucket.map((f) => f.ruleId));
+    if (rules.size > 1) {
+      out.push({ path: bucket[0]?.path ?? "", line: bucket[0]?.line ?? null, findings: bucket });
+    }
+  }
+  return out;
+}
+function applyContradictions(findings, contradictions) {
+  if (contradictions.length === 0) return [...findings];
+  const others = /* @__PURE__ */ new Map();
+  for (const contradiction of contradictions) {
+    for (const finding of contradiction.findings) {
+      const other = contradiction.findings.filter((f) => f.ruleId !== finding.ruleId).map((f) => f.ruleId).join(", ");
+      const key = finding.id;
+      others.set(key, `${others.get(key) ?? ""}${other}`.trim());
+    }
+  }
+  return findings.map((finding) => {
+    const other = others.get(finding.id);
+    if (other === void 0) return finding;
+    return {
+      ...finding,
+      body: `${finding.body} (another pass reports "${other}" at the same location)`
+    };
+  });
+}
+function rank(findings) {
+  return [...findings].sort((a, b) => {
+    const severity = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+    if (severity !== 0) return severity;
+    const corroboration = b.corroboratedBy.length - a.corroboratedBy.length;
+    if (corroboration !== 0) return corroboration;
+    const path = a.path.localeCompare(b.path);
+    if (path !== 0) return path;
+    return (a.line ?? 0) - (b.line ?? 0);
+  });
+}
+function aggregateConfidence(results) {
+  const readable = results.filter((r) => r.verdict !== null);
+  if (readable.length === 0) return { confidence: 0, measured: false };
+  let confidence = Math.max(...readable.map((r) => r.verdict?.confidence ?? 0));
+  const unreadable = results.filter((r) => r.verdict === null).length;
+  if (unreadable > 0) confidence = Math.max(0, confidence * Math.pow(0.9, unreadable));
+  return { confidence, measured: true };
+}
+
 // src/duties/review/limits.ts
 var MAX_EVIDENCE_PER_FINDING = 8;
 var MAX_EVIDENCE_ITEMS_PER_RUN = 128;
@@ -35912,165 +36281,6 @@ function verifyFindings(request2) {
   });
 }
 
-// src/duties/review/verdict.ts
-var NOTHING = { findings: [], confidence: 0 };
-var PATCH_EXCERPT = 4e3;
-async function review(request2) {
-  const { provider, models, weather, files } = request2;
-  if (files.length === 0) {
-    return { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  }
-  const messages = prompt(request2);
-  const rotation = await rotateModels(
-    models,
-    (model) => answer(provider, model, messages),
-    weather
-  );
-  if (!rotation.success) {
-    return { verdict: NOTHING, failures: rotation.failures, unreadable: null, model: null };
-  }
-  const verdict2 = parseVerdict(rotation.success.content, files);
-  return {
-    verdict: verdict2 ?? NOTHING,
-    failures: rotation.failures,
-    unreadable: verdict2 === null ? rotation.success.content : null,
-    model: rotation.success.model
-  };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished"
-    };
-  }
-  return completion;
-}
-function parseVerdict(answer2, files) {
-  let parsed;
-  try {
-    parsed = JSON.parse(unwrapped(answer2));
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const fields = parsed;
-  const confidence = fields.confidence ?? 0;
-  if (typeof confidence !== "number" || !Number.isFinite(confidence)) return null;
-  if (confidence < 0 || confidence > 1) return null;
-  const rawFindings = fields.findings;
-  if (rawFindings === void 0 || rawFindings === null) {
-    return { findings: [], confidence };
-  }
-  if (!Array.isArray(rawFindings)) return null;
-  const findings = [];
-  for (const raw of rawFindings) {
-    const finding = parseFinding(raw, files);
-    if (finding === null) return null;
-    findings.push(finding);
-  }
-  return { findings, confidence };
-}
-function parseFinding(raw, files) {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-  const fields = raw;
-  const rule = fields.rule;
-  if (typeof rule !== "string" || rule.trim().length === 0) return null;
-  const severity = fields.severity ?? "warning";
-  if (severity !== "info" && severity !== "warning" && severity !== "critical") return null;
-  const path = fields.path;
-  if (typeof path !== "string") return null;
-  const file = files.find((candidate) => candidate.path === path);
-  if (file === void 0) return null;
-  const line = fields.line ?? null;
-  if (typeof line !== "number") return null;
-  if (!Number.isInteger(line) || line < 1) return null;
-  if (!file.lines.has(line)) return null;
-  const body = fields.body;
-  if (typeof body !== "string" || body.trim().length === 0) return null;
-  const snippet = fields.snippet ?? body;
-  if (typeof snippet !== "string") return null;
-  return {
-    rule: rule.trim(),
-    severity,
-    path: file.path,
-    line,
-    body: body.trim(),
-    snippet: snippet.slice(0, 120)
-  };
-}
-function unwrapped(answer2) {
-  const parts = segments(answer2.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
-}
-function prompt(request2) {
-  const { prTitle, prBody, headSha, files, rules, language } = request2;
-  const material = enclose(
-    "untrusted-diff",
-    [
-      "--- PULL REQUEST BEING REVIEWED ---",
-      `TITLE: ${prTitle}`,
-      prBody.length === 0 ? "" : `BODY:
-${prBody}`,
-      "",
-      "--- DIFF (new-file lines proven; every line number a finding cites must be one of these) ---",
-      ...files.map(
-        (file) => `### ${file.path} (${file.status})
-` + (file.additions + file.deletions === 0 ? "" : `+${String(file.additions)} -${String(file.deletions)}
-`) + patchExcerpt(file.patch)
-      )
-    ].join("\n")
-  );
-  return [
-    {
-      role: "system",
-      content: [
-        "You are reviewing a pull request on a GitHub repository.",
-        "",
-        language === null ? "The pull request's language could not be identified from the languages this project reads." : `The pull request, its threads and your findings should be written in ${language}.`,
-        "",
-        `The diff below is the whole universe of this review \u2014 every finding must name one of its files and one of its proven new-file line numbers.`,
-        "",
-        "The repository's own review rules are:",
-        ...rules.flatMap((rule) => [
-          `- [${rule.id}] ${rule.name}${rule.body.length > 0 ? ` \u2014 ${rule.body}` : ""}`,
-          rule.marker.length > 0 ? `  mark this rule's findings with marker "${rule.marker}"` : ""
-        ]),
-        "",
-        "Answer with one JSON object and nothing else \u2014 no prose, no explanation:",
-        "",
-        '{"findings": [], "confidence": 0.0}',
-        "",
-        "- `findings`: zero or more of the shape below, each naming a rule from the repository's",
-        "  list, a file from the diff, and a proven line number (or `null` when the problem is",
-        "  the file as a whole):",
-        "",
-        '{"rule": "dedup", "severity": "warning", "path": "src/a.ts", "line": 12,',
-        ' "snippet": "the exact text at that line", "body": "one or two sentences. Be specific"}',
-        "",
-        "- `severity` is one of `info`, `warning`, `critical`. Prefer the repository rule's own",
-        "  severity when it sets one.",
-        `- Report real problems only. A model that invents a line or a file that is not in the diff is answering a different question \u2014 do not.`,
-        "",
-        `The head SHA of the diff you are reviewing is ${headSha}.`,
-        "",
-        material.rule
-      ].join("\n")
-    },
-    { role: "user", content: material.block }
-  ];
-}
-function patchExcerpt(patch) {
-  return patch.length <= PATCH_EXCERPT ? patch : `${patch.slice(0, PATCH_EXCERPT)}
-\u2026`;
-}
-
 // src/duties/review/summary.ts
 function summarize(run2) {
   if (run2.ungranted !== null) {
@@ -36123,6 +36333,14 @@ function verdict(run2) {
   }
   if (run2.malformedAnswers > 0) {
     rows.push(["Unreadable", `${String(run2.malformedAnswers)} answer(s) discarded`]);
+  }
+  if (run2.passes.length > 0) {
+    rows.push([
+      "Passes",
+      run2.passes.map(
+        (pass) => pass.answered ? `${pass.name} (${String(pass.findings)} finding${pass.findings === 1 ? "" : "s"})` : `${pass.name} (did not answer)`
+      ).join(", ")
+    ]);
   }
   if (run2.readRules !== null) {
     rows.push(["Rules", cell(run2.readRules)]);
@@ -36187,8 +36405,15 @@ function readSettings() {
     rulesPath: getInput("rules-path"),
     trigger: getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", getInput("max-diff-chars")),
-    confidence: parseConfidence(getInput("confidence"))
+    confidence: parseConfidence(getInput("confidence")),
+    profile: parseProfile(getInput("profile"))
   };
+}
+function parseProfile(raw) {
+  const value = raw.trim();
+  if (value.length === 0 || value === "default") return "default";
+  if (value === "deep") return "deep";
+  throw new Error(`profile: expected \`default\` or \`deep\`, got \`${raw}\`.`);
 }
 function parseConfidence(raw) {
   const value = Number(raw.trim());
@@ -36220,6 +36445,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     previous: null,
     shown: [],
     skipped: [],
+    passes: [],
     permitted,
     ...over
   });
@@ -36307,29 +36533,34 @@ async function decide(api, at, warrant, settings, stages, weather) {
       marker: entry.marker
     }))
   ];
-  let reviewed = { verdict: NOTHING, failures: [], unreadable: null, model: null };
-  if (bounded2.shown.length > 0) {
-    reviewed = await review({
-      provider: stages.review,
-      models: settings.models,
-      prTitle: pr.title,
-      prBody: pr.body.slice(0, BODY_EXCERPT),
-      headSha: pr.headSha,
-      files: bounded2.shown,
-      rules: rules.rules,
-      language: language?.code ?? null,
-      weather
-    });
-    for (const failure of reviewed.failures) {
+  const passContext = {
+    prTitle: pr.title,
+    prBody: pr.body.slice(0, BODY_EXCERPT),
+    headSha: pr.headSha,
+    files: bounded2.shown,
+    rules: rules.rules,
+    language: language?.code ?? null
+  };
+  const passResults = bounded2.shown.length > 0 ? await runPasses(
+    stages.review,
+    selectPasses(settings.profile),
+    settings.models,
+    passContext,
+    weather
+  ) : [];
+  for (const result of passResults) {
+    for (const failure of result.failures) {
       warning(`review: ${shown(settings.modelNames, failure.model)} \u2014 ${failure.reason}`);
     }
-    if (reviewed.unreadable !== null) {
-      warning(
-        "review: the model's answer did not parse as findings \u2014 discarded rather than read best-effort."
-      );
-    }
   }
-  const raw = reviewed.verdict.findings.map((entry) => toFinding(entry, rules)).filter((finding) => finding !== null);
+  const synthesis = synthesize(passResults);
+  if (synthesis.failedPasses.length > 0) {
+    warning(
+      `review: ${synthesis.failedPasses.map((failed) => `the ${failed.id} pass ${failed.reason}`).join("; ")}.`
+    );
+  }
+  const unreadableCount = passResults.filter((result) => result.unreadable !== null).length;
+  const raw = synthesis.findings.map((entry) => toFinding(entry, rules));
   const verified = verifyFindings({
     findings: raw,
     shown: bounded2.shown,
@@ -36341,9 +36572,9 @@ async function decide(api, at, warrant, settings, stages, weather) {
   for (const file of bounded2.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
   const final = reconcile([...deterministic, ...verified], previous, diffStanding);
-  const confidence = reviewed.verdict.confidence;
+  const confidence = synthesis.confidence;
   const next = remember(final, pr.headSha, previous);
-  const verdictMeasured = reviewed.model !== null && reviewed.unreadable === null;
+  const verdictMeasured = synthesis.measured;
   const belowFloor = verdictMeasured && confidence < settings.confidence;
   const silentNoVerdict = bounded2.shown.length > 0 && !verdictMeasured && final.length === 0;
   const allShownIgnored = bounded2.shown.length === 0 && bounded2.skipped.length > 0 && bounded2.skipped.every((entry) => entry.reason === "ignored");
@@ -36356,10 +36587,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   if (belowFloor) {
@@ -36371,10 +36603,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   if (silentNoVerdict) {
@@ -36386,10 +36619,11 @@ async function decide(api, at, warrant, settings, stages, weather) {
       language: language?.code ?? null,
       findings: final,
       confidence,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   if (allShownIgnored) {
@@ -36404,7 +36638,8 @@ async function decide(api, at, warrant, settings, stages, weather) {
       malformedAnswers: 0,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   const publication = {
@@ -36426,10 +36661,11 @@ ${would}`);
       // that already announces the run wrote nothing. The rehearsal's
       // disposition stays in the log.
       posted: null,
-      malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+      malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
       shown: bounded2.shown,
-      skipped: bounded2.skipped
+      skipped: bounded2.skipped,
+      passes: synthesis.passes
     });
   }
   const posted = await postOrReplace(api, at, publication);
@@ -36440,10 +36676,11 @@ ${would}`);
     findings: final,
     confidence,
     posted,
-    malformedAnswers: reviewed.unreadable === null ? 0 : 1,
+    malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
     shown: bounded2.shown,
-    skipped: bounded2.skipped
+    skipped: bounded2.skipped,
+    passes: synthesis.passes
   });
 }
 function wrapPr(api) {
@@ -36455,19 +36692,19 @@ async function readEnvelope(api, at) {
   if (payload === null) return { findings: [], reviewedShas: [] };
   return decodeEnvelope(payload) ?? { findings: [], reviewedShas: [] };
 }
-function toFinding(raw, rules) {
-  const rule = rules.rules.find((entry) => entry.id === raw.rule);
+function toFinding(claim, rules) {
+  const rule = rules.rules.find((entry) => entry.id === claim.ruleId);
   return {
-    id: `${raw.rule}:${raw.path}:${String(raw.line ?? 0)}`,
-    ruleId: raw.rule,
-    ruleName: rule?.id ?? raw.rule,
+    id: claim.id,
+    ruleId: claim.ruleId,
+    ruleName: rule?.id ?? claim.ruleId,
     ruleBody: "",
-    path: raw.path,
-    line: raw.line,
-    severity: raw.severity,
-    body: raw.body,
+    path: claim.path,
+    line: claim.line,
+    severity: claim.severity,
+    body: claim.body,
     marker: "",
-    snippet: raw.snippet
+    snippet: claim.snippet
   };
 }
 var DEFAULT_GENERATED2 = [".min.js", ".min.css", ".map"];
@@ -36548,7 +36785,8 @@ function page(settings, authority2, outcome, ungranted, spent) {
     implicit: authority2.implicit,
     ungranted,
     malformedAnswers: outcome?.malformedAnswers ?? 0,
-    readRules: outcome?.rulesPath ?? null
+    readRules: outcome?.rulesPath ?? null,
+    passes: outcome?.passes ?? []
   });
 }
 await run();
