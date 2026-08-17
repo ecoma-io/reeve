@@ -34,7 +34,9 @@ export interface PublishApi {
         content: string;
         sha?: string;
         branch?: string;
-      }): Promise<unknown>;
+      }): Promise<{
+        data: { content?: { sha?: string } };
+      }>;
     };
     readonly git: {
       getRef(params: {
@@ -110,15 +112,17 @@ export interface SyncResult {
  * Creates or updates a branch `reeve/harmonise/<document-id>`, writes the
  * updated locale files to it, and opens or updates a PR.
  *
- * Returns the PR number, or null if nothing could be published (all
- * conflicts, or capacity error).
+ * Returns the PR number and the SHA each written locale file now has — the
+ * provenance state records the real SHA, so a later human edit of that file is
+ * seen as a conflict (D3) rather than being silently re-drafted. Null when
+ * nothing could be published (all conflicts, or capacity error).
  */
 export async function publishSync(
   api: PublishApi,
   at: Pick<Location, "owner" | "repo">,
   result: SyncResult,
   dryRun: boolean,
-): Promise<{ pr: number } | null> {
+): Promise<{ pr: number; shas: ReadonlyMap<string, string> } | null> {
   if (result.drafts.size === 0) return null;
 
   // Get the default branch's current head
@@ -140,6 +144,10 @@ export async function publishSync(
     );
     return null;
   }
+
+  // Locale code → the SHA the file now has on the branch, recorded so the
+  // provenance state can name the real revision a sync left behind.
+  const shas = new Map<string, string>();
 
   // Ensure the branch exists
   let branchExists = true;
@@ -188,7 +196,7 @@ export async function publishSync(
       // File does not exist yet — that's fine, we'll create it
     }
 
-    await api.rest.repos.createOrUpdateFileContents({
+    const written = await api.rest.repos.createOrUpdateFileContents({
       owner: at.owner,
       repo: at.repo,
       path: filePath,
@@ -197,6 +205,12 @@ export async function publishSync(
       branch: branchName,
       ...(fileSha !== undefined ? { sha: fileSha } : {}),
     });
+    // The API answers the new blob SHA of the written file. When the shape
+    // does not carry one (a proxy, a mock), leave the locale out of `shas` —
+    // the caller keeps its prior record, and the next source change simply
+    // treats the file as stale rather than as a false conflict.
+    const newSha = written.data.content?.sha;
+    if (typeof newSha === "string" && newSha.length > 0) shas.set(locale, newSha);
 
     core.info(`harmonise: wrote ${filePath} on \`${branchName}\``);
   }
@@ -224,7 +238,7 @@ export async function publishSync(
       body,
     });
     core.info(`harmonise: updated PR #${String(existingPr.number)} for ${result.group.id}`);
-    return { pr: existingPr.number };
+    return { pr: existingPr.number, shas };
   }
 
   // Create new PR
@@ -239,7 +253,7 @@ export async function publishSync(
   });
 
   core.info(`harmonise: opened PR #${String(pr.number)} for ${result.group.id}`);
-  return { pr: pr.number };
+  return { pr: pr.number, shas };
 }
 
 /**

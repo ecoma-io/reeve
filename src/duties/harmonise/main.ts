@@ -699,8 +699,9 @@ async function processGroup(
 
     bestDrafts.set(locale, winner);
 
-    // Mark as synced in provenance
-    // The real SHA will come after the write; we'll update later
+    // Marked as pending in provenance — the real SHA comes from the write's
+    // response, applied once `publishSync` returns below. Recording "pending"
+    // now keeps the state honest if the run dies before the write.
     markSynced(doc, locale, "pending");
     synced.push(locale);
   }
@@ -726,6 +727,14 @@ async function processGroup(
     const pr = await publishSync(publishApi, at, syncResult, settings.dryRun);
 
     if (pr !== null) {
+      // Record the real SHA each locale file now has, replacing the "pending"
+      // placeholder set above. A locale whose SHA the write did not answer
+      // stays "pending" — the honest reading of "synced, but to what is not
+      // known", which the next source change treats as stale rather than as a
+      // false conflict.
+      for (const [locale, sha] of pr.shas) {
+        markSynced(doc, locale, sha);
+      }
       core.info(`harmonise: opened PR #${String(pr.pr)} for ${group.id}`);
     }
   }

@@ -34803,6 +34803,7 @@ async function publishSync(api, at, result, dryRun) {
     );
     return null;
   }
+  const shas = /* @__PURE__ */ new Map();
   let branchExists = true;
   try {
     await api.rest.git.getRef({
@@ -34842,7 +34843,7 @@ async function publishSync(api, at, result, dryRun) {
     } catch (error2) {
       if (!isMissing(error2)) throw error2;
     }
-    await api.rest.repos.createOrUpdateFileContents({
+    const written = await api.rest.repos.createOrUpdateFileContents({
       owner: at.owner,
       repo: at.repo,
       path: filePath,
@@ -34851,6 +34852,8 @@ async function publishSync(api, at, result, dryRun) {
       branch: branchName,
       ...fileSha !== void 0 ? { sha: fileSha } : {}
     });
+    const newSha = written.data.content?.sha;
+    if (typeof newSha === "string" && newSha.length > 0) shas.set(locale, newSha);
     info(`harmonise: wrote ${filePath} on \`${branchName}\``);
   }
   const { data: existing } = await api.rest.pulls.list({
@@ -34872,7 +34875,7 @@ async function publishSync(api, at, result, dryRun) {
       body
     });
     info(`harmonise: updated PR #${String(existingPr.number)} for ${result.group.id}`);
-    return { pr: existingPr.number };
+    return { pr: existingPr.number, shas };
   }
   const { data: pr } = await api.rest.pulls.create({
     owner: at.owner,
@@ -34884,7 +34887,7 @@ async function publishSync(api, at, result, dryRun) {
     draft: true
   });
   info(`harmonise: opened PR #${String(pr.number)} for ${result.group.id}`);
-  return { pr: pr.number };
+  return { pr: pr.number, shas };
 }
 function buildPrBody(result) {
   const updated = [...result.drafts.keys()].map((locale) => `- \`${locale}\`: translation updated`).join("\n");
@@ -35531,6 +35534,9 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     const publishApi = api;
     const pr = await publishSync(publishApi, at, syncResult, settings.dryRun);
     if (pr !== null) {
+      for (const [locale, sha] of pr.shas) {
+        markSynced(doc, locale, sha);
+      }
       info(`harmonise: opened PR #${String(pr.pr)} for ${group.id}`);
     }
   }
