@@ -48,6 +48,13 @@ import {
   scriptRespond,
 } from "./drivers/respond.ts";
 import type { RespondScenario } from "./drivers/respond.ts";
+import {
+  newTracker as newTranslateTracker,
+  scenarioOf as translateScenarioOf,
+  scriptTranslate,
+  translateRoutes,
+} from "./drivers/translate.ts";
+import type { TranslateScenario } from "./drivers/translate.ts";
 // The exit gate lives in `./exit-code.ts`, side-effect-free, so the contract
 // suite pins every outcome→exit-code pairing without spawning a run.
 import { exitCodeFor } from "./exit-code.ts";
@@ -62,7 +69,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const FIXTURES = join(ROOT, "eval", "fixtures");
 
 /** Every duty the runner knows how to drive. */
-const DUTIES = ["harmonise", "triage", "respond"] as const;
+const DUTIES = ["harmonise", "triage", "respond", "translate"] as const;
 
 /** Whether a duty has fixtures on disk to run. */
 async function hasFixtures(duty: string): Promise<boolean> {
@@ -504,6 +511,98 @@ function respondLine(
 }
 
 // ---------------------------------------------------------------------------
+// translate
+// ---------------------------------------------------------------------------
+
+async function runTranslate(fixture: string, scratch: string): Promise<Line> {
+  const directory = join(FIXTURES, "translate", fixture);
+  const scenario = await translateScenarioOf(fixture, directory);
+  const tracker = newTranslateTracker();
+  const stub = await startStub({
+    routes: [...translateRoutes(scenario, tracker)],
+    completion: scriptTranslate(scenario),
+  });
+  try {
+    const warrant = join(scratch, `warrant-${fixture}.yml`);
+    if (scenario.warrant !== null) await writeFile(warrant, scenario.warrant);
+    const run = await runBundle(
+      "translate",
+      stub.url,
+      translateInputs(stub.url, warrant),
+      scratchFiles(scratch),
+    );
+    return translateLine(fixture, scenario, tracker.effect.edited, run);
+  } finally {
+    await stub.close();
+  }
+}
+
+const TRANSLATE_INPUTS: Record<string, string> = {
+  "github-token": "stub-token",
+  number: "42",
+  "base-url": "",
+  "api-key": "sk-stub-key",
+  models: "stub-model",
+  warrant: "",
+  "judge-models": "",
+  drafts: "1",
+  "max-body-chars": "6000",
+  "translate-replies": "false",
+  "max-replies": "100",
+  "chunk-chars": "6000",
+  "max-requests": "none",
+  "show-attribution": "none",
+  "dry-run": "false",
+  sweep: "false",
+  since: "",
+  limit: "50",
+  endpoints: "",
+  "api-keys": "",
+  "request-timeout": "120s",
+  temperature: "",
+};
+
+function translateInputs(stubUrl: string, warrant: string): Record<string, string> {
+  return {
+    ...TRANSLATE_INPUTS,
+    "base-url": `${stubUrl}/v1`,
+    warrant,
+  };
+}
+
+/** The outcome for one translate fixture. */
+function translateLine(
+  fixture: string,
+  scenario: TranslateScenario,
+  edited: boolean,
+  run: Run,
+): Line {
+  if (run.code !== 0)
+    return { fixture, outcome: "failed", detail: `bundle exited ${String(run.code)}` };
+
+  const expected = scenario.expected;
+  const translated = parseIds(run.outputs.translated);
+  const expectedTranslated = expected.translated ?? [];
+  const expectedEdited = expected.effects?.edited ?? false;
+  const source = run.outputs["source-language"] ?? "";
+  const sourceMatches = source === (expected["source-language"] ?? "");
+  const finding =
+    idsEqual(translated, expectedTranslated) && sourceMatches && edited === expectedEdited;
+
+  if (finding) {
+    const detail = expectedEdited
+      ? `published ${translated.join(", ")}`
+      : `clean stop — ${scenario.alreadyTranslated ? "already translated" : "warrant denies translate"}`;
+    return { fixture, outcome: "finding", detail };
+  }
+  return {
+    fixture,
+    outcome: "skipped",
+    detail: `translated=${JSON.stringify(translated)} source=${JSON.stringify(source)} edited=${String(edited)}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The banner and the run.
 // ---------------------------------------------------------------------------
 
@@ -527,6 +626,8 @@ function driverFor(duty: string): ((fixture: string, scratch: string) => Promise
       return runTriage;
     case "respond":
       return runRespond;
+    case "translate":
+      return runTranslate;
     default:
       return null;
   }
