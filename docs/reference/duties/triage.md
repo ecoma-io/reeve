@@ -146,7 +146,7 @@ narrower one would only be free to drift from it.
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **`screen-models` is the whole cost argument.** Spam, a blank body and an
 exact repeat are decided by a small model or by no model at all, and a

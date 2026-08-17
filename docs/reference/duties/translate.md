@@ -63,7 +63,6 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          languages: en, vi
           dry-run: true # safe first run — remove when you trust it
 ```
 
@@ -170,7 +169,7 @@ same way regardless of `max-body-chars`.
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **`judge-models` has two levels, and they mean opposite things.** `models`
 is one rotation chain: the first model that answers is used and the rest are

@@ -132,7 +132,7 @@ Every input `duplicate/action.yml` declares.
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **A published block is stripped out of every body before it is indexed or
 judged** — the thread's own and every candidate's alike, cut at the first

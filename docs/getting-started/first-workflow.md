@@ -40,14 +40,15 @@ jobs:
         with:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           models: gpt-5-mini
-          languages: en, vi
 ```
 
 Both jobs trigger off the same event and run independently — `triage` never
 waits on `translate`, and either can fail or rotate through its model list
-without touching the other. Each keeps its own inputs: `triage` reads nothing
-about `languages`, and `translate` reads nothing about a taxonomy, because
-neither is meaningless to the other's job.
+without touching the other. Each keeps its own inputs: nothing here mentions
+a taxonomy, because that lives in the warrant's `labels:` block; nothing here
+mentions `languages` either, because that is a warrant key too — at level 0,
+with no warrant file, `translate` falls back to its own documented default
+list. Neither step has to be told what the other decided.
 
 An issue opened against this workflow gets sorted against the labels your
 repository already has, and gets a translated block appended below its own

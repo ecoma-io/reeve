@@ -196,7 +196,7 @@ considered — `docs/` would restrict `harmonise` to documentation, leaving
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **`max-requests` is a ceiling this run sets for itself**, not the provider
 running dry. Every request made counts against it, whatever it answered.

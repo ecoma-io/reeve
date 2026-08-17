@@ -51,18 +51,20 @@ that works differently from the others.
 
 A duty does not ask permission at the moment it wants to act and hope for the
 best. What it may do is resolved before a model is ever called, from the
-warrant and the workflow together, and handed to the duty as a fact. The
-model's own claims about what it was told to do are irrelevant to that
-resolution — the check is always "does the file say so," run in code against
-the parsed file. That is what makes the model's output harmless to over-trust:
-text in a thread can persuade a model to say almost anything, and none of it
-can edit a file it was never given access to.
+warrant file alone, and handed to the duty as a fact. The model's own claims
+about what it was told to do are irrelevant to that resolution — the check is
+always "does the file say so," run in code against the parsed file. That is
+what makes the model's output harmless to over-trust: text in a thread can
+persuade a model to say almost anything, and none of it can edit a file it
+was never given access to.
 
-Two authorities are consulted, and the narrower one wins. A workflow's own
-input can restrict what the warrant granted; it can never widen it beyond what
-the warrant already allows. That asymmetry is deliberate — a warrant that
-looks permissive on paper should never be quietly outrun by a workflow file
-nobody thought to review as carefully.
+There is no second authority to be narrower than. The workflow file says when
+a run happens and how the runtime operates — `dry-run`, `number`, provider
+settings; it cannot grant a capability. The `duties:` block in the warrant is
+the whole authority, and the absence of a block is a default written in code,
+not a promise the workflow can quietly outrun. A workflow cannot widen what
+the file grants, because it was never a second half of the gate to begin
+with.
 
 ## Some doors have no handle
 
@@ -86,8 +88,8 @@ everyone, rather than left open to be reasoned around by a well-crafted
 prompt.
 
 That is the whole model: nothing assumed at install, everything legible in
-one file, the narrower of two authorities always winning, and a small set of
-actions no file can ever unlock.
+one file, that file the sole authority, and a small set of actions no file can
+ever unlock.
 
 ---
 

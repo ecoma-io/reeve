@@ -72,11 +72,12 @@ everything the core provides: the GitHub API (through `forge.js`), the warrant
 duties also read from the local checkout (corrections, guidance) or the Contents
 API (manifests, blobs), which the core does not gate — but these reads are of
 files the maintainer controls, not of untrusted input. The boundary that matters
-is the one between what the core validates (the verdict, the authority, the
-intersection) and what a duty decides on its own.
+is the one between what the core validates (the verdict, the authority) and
+what a duty decides on its own.
 
 **Decide its own authority.** A duty does not read the warrant file. It is handed
-what it may do, already parsed and already intersected with the workflow's input.
+what it may do, already parsed, and nothing the workflow input does can widen
+that grant.
 
 **Trust its own output.** A duty's parser hands the verdict to the guardrail
 stage, which re-checks it against the file. A duty that validated its own result
@@ -92,8 +93,8 @@ that only reads well in English is not finished.
 
 These are not implementation notes — they are the reason [the warrant](../guides/warrant.md)
 can be a single, small file that governs every duty at once, and the reason
-adding an eighth duty tomorrow changes nothing about how the first seven are
-trusted today.
+adding a new duty changes nothing about how the existing ones are trusted
+today.
 
 ---
 
