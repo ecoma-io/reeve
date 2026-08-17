@@ -96,6 +96,8 @@ same thing. Accuracy is measured deliberately, against a real provider, with
 REEVE_EVAL_BASE_URL=https://.../v1 REEVE_EVAL_API_KEY=sk-... \
 REEVE_EVAL_MODELS=oc/deepseek-v4-flash-free \
 node --experimental-strip-types eval/live.ts   # all three language duties
+# one model per run — set REEVE_EVAL_MODELS to the model under measurement
+# (e.g. ollama/gpt-oss:120b or gemini/gemma-4-31b-it) and add its row below
 ```
 
 The GitHub side stays stubbed; only the completion endpoint is real. Each
@@ -104,29 +106,43 @@ fixture that asserts a language is scored by the language its run identified
 worst-language number is the lowest per-language accuracy — the language
 this model most often misidentifies, never the average.
 
-### 2026-08-17 — DeepSeek v4 flash (`oc/deepseek-v4-flash-free`)
+### 2026-08-17 — the same fixtures, three providers
 
-| Duty    | Languages measured             | Correct | Worst-language rate |
-| ------- | ------------------------------ | ------- | ------------------- |
-| triage  | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
-| respond | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
-| review  | id                             | 1/1     | 100%                |
+Worst-language rate is per model, per duty: each row is one model's copy of
+the fixture set. The model-dependent thread — Indonesian (`id`), the one
+language the script and profile steps together cannot narrow — reached the
+real provider in `triage/id-model`, `respond/id-model-reply` and
+`review/id-pr`; every other language resolves in the script or profile step,
+so the number guards the whole pipeline, not the model alone. In all three
+providers every language the fixture set declares was identified correctly on
+the first pass — the worst-language rate is 100% everywhere because no
+language fell below it.
 
-Every language the fixture set declares was identified correctly on the
-first full pass — the worst-language rate is 100% for every duty, because no
-language fell below it. The model-dependent thread — Indonesian (`id`), the
-one language the script and profile steps together cannot narrow — reached
-the real provider in `triage/id-model`, `respond/id-model-reply` and
-`review/id-pr`, and the provider identified it as `id` every time. All other
-languages resolve in the script or profile step; the number guards the whole
-pipeline, not the model alone.
+| Model                                           | Duty    | Languages measured             | Correct | Worst-language rate |
+| ----------------------------------------------- | ------- | ------------------------------ | ------- | ------------------- |
+| DeepSeek v4 flash (`oc/deepseek-v4-flash-free`) | triage  | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+|                                                 | respond | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+|                                                 | review  | id                             | 1/1     | 100%                |
+| gpt-oss 120B (`ollama/gpt-oss:120b`)            | triage  | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+|                                                 | respond | en, vi, ja, pt, es, ko, ar, id | 8/8¹    | 100%                |
+|                                                 | review  | id                             | 1/1     | 100%                |
+| Gemma 4 31B (`gemini/gemma-4-31b-it`)           | triage  | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+|                                                 | respond | en, vi, ja, pt, es, ko, ar, id | 8/8     | 100%                |
+|                                                 | review  | id                             | 1/1     | 100%                |
+
+¹ One respond run — `ja-first-reply` — came back with an empty draft:
+gpt-oss answered the draft completion with HTTP 200 and no content (a
+protocol error on the free-tier proxy, not a misidentification — the run
+still identified the thread as `日本語`). The language count is unaffected:
+the measure is the accuracy of the identification the pipeline produced, and
+every identification was correct.
 
 Reproduce: set the three `REEVE_EVAL_*` variables for a reachable provider
-and run the command above. A regression — a prompt change that makes a model
-misidentify a language — shows up here as a diff in this table (this is
-[Stage 6](../docs/doctrine/north-star.md#7-roadmap)'s "numbers are committed
-alongside the fixture set"). The next release's number goes below; a duty
-whose worst language fell is a duty that does not ship.
+and run the command above. A regression — a prompt change or a provider swap
+that makes a model misidentify a language — shows up here as a diff in this
+table (this is [Stage 6](../docs/doctrine/north-star.md#7-roadmap)'s "numbers
+are committed alongside the fixture set"). The next release's number goes
+below; a duty whose worst language fell is a duty that does not ship.
 
 ## The warrant contract
 
