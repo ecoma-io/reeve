@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/ecoma-io/reeve/compare/v0.6.0...v0.7.0) (2026-08-17)
+
+
+### Features
+
+* **dependa:** add dogfood conformance comparison against Renovate ([#63](https://github.com/ecoma-io/reeve/issues/63)) ([6351ce6](https://github.com/ecoma-io/reeve/commit/6351ce6d150b43351fb5104f26aa7d76ce51d515))
+* **workspace:** single-authority warrant, review duty, 8-duty eval gate — 1.0 prep ([#70](https://github.com/ecoma-io/reeve/issues/70)) ([8e57d08](https://github.com/ecoma-io/reeve/commit/8e57d0824f02ef5812e884729d4afb8cb52388cf))
+
+
+### Bug Fixes
+
+* close N1 fail-open on advisory auth + CI doc-links guards ([#69](https://github.com/ecoma-io/reeve/issues/69)) ([6650ed5](https://github.com/ecoma-io/reeve/commit/6650ed5777e0a56c2834727f792dd7570cbd1966))
+* **dependa:** f1 edit recomposition + d3 compareCommits + fail-closed attribution ([#67](https://github.com/ecoma-io/reeve/issues/67)) ([564fb04](https://github.com/ecoma-io/reeve/commit/564fb046368d9a4bb386b16e49d678aa7f149ac0))
+* first-contact usability audit — P0/P1 fixes, doc drift, protocol exhaustion ([#66](https://github.com/ecoma-io/reeve/issues/66)) ([efb5162](https://github.com/ecoma-io/reeve/commit/efb516276a0fd550b9f43506c4c943a58fc40ef8))
+* harden 0.6.x — dependa, harmonise, respond, translate, triage, core ([#65](https://github.com/ecoma-io/reeve/issues/65)) ([acfc4a9](https://github.com/ecoma-io/reeve/commit/acfc4a9b5dd56bce6e43f105f0b77cc15f053d11))
+
 ## [0.6.0](https://github.com/ecoma-io/reeve/compare/v0.5.0...v0.6.0) (2026-08-14)
 
 
