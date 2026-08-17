@@ -181,7 +181,7 @@ trips it.
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the same
 provider inputs every duty takes — the full grammar, the `model@alias` routing
 rule, and what more than one endpoint changes about auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 ## Policy
 

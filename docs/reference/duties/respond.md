@@ -141,7 +141,7 @@ Every input `respond/action.yml` declares.
 same four provider inputs every duty takes — the full grammar, the
 `model@alias` routing rule, and what more than one endpoint changes about
 auth failures are all in
-[Installation](../../getting-started/installation.md#more-than-one-endpoint).
+[Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
 **`confidence` is a floor worth measuring, not inheriting.** [Measure
 it](../../development/evaluation.md) against your own drafts before you move

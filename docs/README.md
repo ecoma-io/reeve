@@ -49,9 +49,9 @@ refuses to do before installing anything. Start at
 contract without installing it.
 
 **Running it day to day.** Already installed, need to write a warrant, add a
-language, run a sweep, control cost, or work out why a run did not do what you
-expected. Start at [the guides](guides/warrant.md), and keep
-[the duty reference pages](reference/duties/) open beside them.
+language, configure a provider, run a sweep, control cost, or work out why a
+run did not do what you expected. Start at [the guides](guides/warrant.md),
+and keep [the duty reference pages](reference/duties/) open beside them.
 
 **Reviewing it for security.** Deciding how much authority to grant, or
 auditing what is already granted. Start at
@@ -106,6 +106,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`guides/warrant.md`](guides/warrant.md)                                   | how-to                   | Write and extend a warrant file for your repository.                              |
 | [`guides/languages.md`](guides/languages.md)                               | how-to                   | Configure which languages Reeve recognizes and how detection works in practice.   |
 | [`guides/sweep.md`](guides/sweep.md)                                       | how-to                   | Run Reeve against a backlog instead of one thread.                                |
+| [`guides/providers.md`](guides/providers.md)                               | how-to                   | Configure the model endpoint a duty talks to, and the runtime inputs around it.   |
 | [`guides/cost.md`](guides/cost.md)                                         | how-to                   | Control and predict what a run costs.                                             |
 | [`guides/troubleshooting.md`](guides/troubleshooting.md)                   | how-to                   | Diagnose a run that didn't do what you expected.                                  |
 | [`guides/dry-run.md`](guides/dry-run.md)                                   | how-to                   | Rehearse a run with nothing written.                                              |
