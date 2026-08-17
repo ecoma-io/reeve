@@ -1,0 +1,50 @@
+{
+  "description": "The human-disposition axis: the stub serves the owned review comment from a previous run (a v2 envelope carrying a standing finding) plus a maintainer's eligible reply on the thread — `3: wont-fix` from an OWNER account. The run reads the reply, attributes it to the finding by intention, and renders the disposition beside the finding in the summary. The `disposition: wont-fix by @octocat` assertion pins exactly that: a maintainer's triage is read off the thread, never ignored, and never invented from the envelope alone.",
+  "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
+  "pr": {
+    "title": "Handle the debugger edge case",
+    "body": "This pull request hardens the save handler against a stray debugger statement."
+  },
+  "files": [
+    {
+      "filename": "src/settings.ts",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,5 @@\n+export function debug(): void {\n+  const x = 1;\n+  debugger;\n+  console.log(x);\n+}"
+    }
+  ],
+  "previous": {
+    "body": "<!-- reeve:review source=10de8a02dcb1bd1e eyJmaW5kaW5ncyI6W3siaWQiOiJkZWR1cDpzcmMvc2V0dGluZ3MudHM6MyIsInJ1bGVJZCI6ImRlZHVwIiwicnVsZU5hbWUiOiJkZWR1cCIsInJ1bGVCb2R5IjoiIiwicGF0aCI6InNyYy9zZXR0aW5ncy50cyIsImxpbmUiOjMsInNldmVyaXR5Ijoid2FybmluZyIsImJvZHkiOiJSZXBlYXRlZCBjb25zdGFudC4iLCJtYXJrZXIiOiIiLCJ3YXNSZXNvbHZlZCI6ZmFsc2UsImRpc3Bvc2l0aW9uIjpudWxsfV0sInJldmlld2VkU2hhcyI6WyJhYmMxMjIiXSwidmVyc2lvbiI6MiwiY2hlY2tzdW0iOiJkYWRhNGZjMzA0OWM0YzQ1In0= -->\n\n## Reeve · review\n\n### Verdict\n\n| Field | Value |\n| --- | --- |\n| Head | `abc122` |\n| Language | en |\n| Findings | 1 |\n| Posted | posted |\n\n### Findings\n\n| State | Location | Severity | Finding |\n| --- | --- | --- | --- |\n| created | `src/settings.ts`:3 | warning | Repeated constant. |"
+  },
+  "replies": [
+    {
+      "id": 42,
+      "login": "octocat",
+      "type": "User",
+      "association": "OWNER",
+      "createdAt": "2026-08-17T02:00:00Z",
+      "body": "3: wont-fix"
+    }
+  ],
+  "verdict-over": {
+    "findings": [
+      {
+        "rule": "dedup",
+        "severity": "warning",
+        "path": "src/settings.ts",
+        "line": 3,
+        "snippet": "debugger;",
+        "body": "Repeated constant."
+      }
+    ],
+    "confidence": 0.9
+  },
+  "expected": {
+    "commented": "true",
+    "findings": "1",
+    "head-sha": "abc123",
+    "wrote": "patch",
+    "disposition": "wont-fix by @octocat"
+  }
+}

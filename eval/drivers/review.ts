@@ -108,8 +108,24 @@ export interface ReviewScenario {
   readonly previous: { readonly body: string } | null;
   /** The review profile the run is given — `default` when the fixture is silent. */
   readonly profile: string;
+  /**
+   * Human replies on the thread, served after the owned comment. A reply
+   * carries its `author_association` so the run's disposition reader can
+   * attribute it — the thread is the durable home for a disposition.
+   */
+  readonly replies: readonly ReviewThreadReply[];
   /** The assertions this fixture declares. */
   readonly expected: ReviewAssertions;
+}
+
+/** One human reply the stub serves on the thread. */
+export interface ReviewThreadReply {
+  readonly id: number;
+  readonly login: string;
+  readonly type?: "User" | "Bot";
+  readonly association?: string;
+  readonly createdAt?: string;
+  readonly body: string;
 }
 
 /** The fixture's `.expected.json`: configuration at the top. */
@@ -145,6 +161,8 @@ export interface ReviewFixture {
   readonly previous?: {
     readonly body: string;
   };
+  /** Human replies on the thread after the owned comment — the disposition path. */
+  readonly replies?: readonly ReviewThreadReply[];
   readonly expected?: ReviewAssertions;
 }
 
@@ -180,6 +198,13 @@ export interface ReviewAssertions {
    * finding alone.
    */
   readonly "workspace-evidence"?: string;
+  /**
+   * A disposition the summary's `### Findings` table must show for the run's
+   * findings — `wont-fix by @octocat`. Pins the human-disposition axis: the
+   * run read a maintainer's eligible reply off the thread and rendered it
+   * beside the finding.
+   */
+  readonly disposition?: string;
 }
 
 /** A verdict, in the shape the review prompt asks for. */
@@ -245,7 +270,7 @@ export function reviewRoutes(scenario: ReviewScenario, tracker: ReviewTracker): 
       // The comment trio: list (the previous-run memory search reads it),
       // create (the run posts its review), update (a rerun replaces in place).
       if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.exec(url) !== null) {
-        const existing =
+        const owned =
           scenario.previous === null
             ? []
             : [
@@ -253,9 +278,18 @@ export function reviewRoutes(scenario: ReviewScenario, tracker: ReviewTracker): 
                   id: 7,
                   body: scenario.previous.body,
                   user: { login: "reeve[bot]", type: "Bot" },
+                  author_association: "NONE",
+                  created_at: "2026-08-17T00:00:00Z",
                 },
               ];
-        send(response, 200, existing);
+        const human = scenario.replies.map((reply) => ({
+          id: reply.id,
+          body: reply.body,
+          user: { login: reply.login, type: reply.type ?? "User" },
+          author_association: reply.association ?? "COLLABORATOR",
+          created_at: reply.createdAt ?? "2026-08-17T01:00:00Z",
+        }));
+        send(response, 200, [...owned, ...human]);
         return true;
       }
       if (
@@ -320,6 +354,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     detect: fixture.detect ?? "en",
     previous: fixture.previous ?? null,
     profile: fixture.profile ?? "default",
+    replies: fixture.replies ?? [],
     expected: fixture.expected ?? {},
   };
 }

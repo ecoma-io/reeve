@@ -109,6 +109,7 @@ function standingFinding(
     body: "debugger; statement on line 13.",
     marker: "",
     wasResolved: false,
+    disposition: null,
     ...over,
   };
 }

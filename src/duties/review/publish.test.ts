@@ -16,7 +16,7 @@ import {
   type Publication,
   type ReviewCommentApi,
 } from "./publish.js";
-import type { Finding, Previous } from "./findings.js";
+import { envelopeChecksum, type Finding, type Previous } from "./findings.js";
 
 const AT = { owner: "o", repo: "r", number: 1 };
 
@@ -33,8 +33,17 @@ function stubOf(initial: { id: number; body: string; user: Author | null }[] = [
         listComments: (params) =>
           Promise.resolve({
             data: comments
-              .slice(0, params.per_page ?? comments.length)
-              .map(({ id, body, user }) => ({ id, body, user: user ?? null })),
+              .slice(
+                ((params.page ?? 1) - 1) * (params.per_page ?? comments.length),
+                (params.page ?? 1) * (params.per_page ?? comments.length),
+              )
+              .map(({ id, body, user }) => ({
+                id,
+                body,
+                user: user ?? null,
+                author_association: user?.type === "Bot" ? "NONE" : "OWNER",
+                created_at: "2026-08-17T00:00:00Z",
+              })),
           }),
         createComment: (params) => {
           comments.push({ id: nextId, body: params.body, user: BOT });
@@ -74,7 +83,7 @@ function previous(overrides: Partial<Previous> = {}): Previous {
 
 function publication(overrides: Partial<Publication> = {}): Publication {
   return {
-    reconciled: [{ finding: finding(), status: "created" }],
+    reconciled: [{ finding: finding(), status: "created", disposition: null }],
     next: previous(),
     headSha: "abc",
     ...overrides,
@@ -90,8 +99,25 @@ describe("envelopeFingerprint", () => {
 
   it("differs when a status changes", () => {
     expect(envelopeFingerprint(publication().reconciled)).not.toBe(
-      envelopeFingerprint([{ finding: finding(), status: "resolved" }]),
+      envelopeFingerprint([{ finding: finding(), status: "resolved", disposition: null }]),
     );
+  });
+
+  it("differs when a disposition is added or removed", () => {
+    const base = publication().reconciled;
+    const withD = [
+      {
+        ...base[0]!,
+        disposition: {
+          value: "wont-fix" as const,
+          by: "octocat",
+          at: "2026-08-17T00:00:00Z",
+          replyId: 9,
+          replyUrl: "https://github.com/o/r/pull/1#issuecomment-9",
+        },
+      },
+    ];
+    expect(envelopeFingerprint(base)).not.toBe(envelopeFingerprint(withD));
   });
 });
 
@@ -103,21 +129,32 @@ describe("encodeEnvelope / decodeEnvelope", () => {
           ...finding(),
           line: null,
           wasResolved: true,
+          disposition: null,
         },
       ],
       reviewedShas: ["a", "b"],
     };
-    expect(decodeEnvelope(encodeEnvelope(payload))).toEqual(payload);
+    const markerPayload = `fp ${encodeEnvelope({ ...payload, version: 2, checksum: envelopeChecksum(payload) })}`;
+    const decoded = decodeEnvelope(markerPayload);
+    expect(decoded).toEqual({
+      kind: "ok",
+      previous: { ...payload, version: 2, checksum: envelopeChecksum(payload) },
+    });
   });
 
-  it("returns null on a null payload and on an empty envelope", () => {
-    expect(decodeEnvelope(null)).toBeNull();
-    expect(decodeEnvelope("fingerprint-only")).toBeNull();
+  it("returns none on a null payload and on an empty envelope", () => {
+    expect(decodeEnvelope(null)).toEqual({ kind: "none" });
+    expect(decodeEnvelope("fingerprint-only")).toEqual({ kind: "none" });
   });
 
-  it("returns null on corrupt base64 and on a non-mapping payload", () => {
-    expect(decodeEnvelope("fp not-base64-!-!")).toBeNull();
-    expect(decodeEnvelope("fp " + Buffer.from("[1,2]", "utf8").toString("base64"))).toBeNull();
+  it("returns corrupt on bad base64 and on a non-mapping payload", () => {
+    const badBase64 = decodeEnvelope("fp not-base64-!-!");
+    if (badBase64.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(badBase64.reason).toMatch(/not valid base64/);
+
+    const badJson = decodeEnvelope("fp " + Buffer.from("[1,2]", "utf8").toString("base64"));
+    if (badJson.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(badJson.reason).toMatch(/not a JSON mapping/);
   });
 
   it("round-trips the new optional verification fields", () => {
@@ -142,11 +179,19 @@ describe("encodeEnvelope / decodeEnvelope", () => {
             },
           ],
           wasResolved: false,
+          disposition: null,
         },
       ],
       reviewedShas: ["abc"],
     };
-    expect(decodeEnvelope(encodeEnvelope(payload))).toEqual(payload);
+    const markerPayload = `fp ${encodeEnvelope({ ...payload, version: 2, checksum: envelopeChecksum(payload) })}`;
+    const decoded = decodeEnvelope(markerPayload);
+    if (decoded.kind !== "ok") throw new Error("expected an ok payload");
+    expect(decoded.previous).toEqual({
+      ...payload,
+      version: 2,
+      checksum: envelopeChecksum(payload),
+    });
   });
 
   it("decodes an old envelope without the optional fields as undefined", () => {
@@ -167,14 +212,15 @@ describe("encodeEnvelope / decodeEnvelope", () => {
       ],
       reviewedShas: ["ok"],
     };
-    const out = decodeEnvelope(
+    const decoded = decodeEnvelope(
       "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
     );
-    expect(out?.findings[0]?.verification).toBeUndefined();
-    expect(out?.findings[0]?.evidence).toBeUndefined();
+    if (decoded.kind !== "ok") throw new Error("expected a migrated ok payload");
+    expect(decoded.previous.findings[0]?.verification).toBeUndefined();
+    expect(decoded.previous.findings[0]?.evidence).toBeUndefined();
   });
 
-  it("treats malformed optional fields as undefined, keeping the finding's core fields", () => {
+  it("preserves optional fields through a v1 migration, without shape-checking them", () => {
     const payload = {
       findings: [
         {
@@ -194,16 +240,18 @@ describe("encodeEnvelope / decodeEnvelope", () => {
       ],
       reviewedShas: ["ok"],
     };
-    const out = decodeEnvelope(
+    const decoded = decodeEnvelope(
       "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
     );
-    expect(out?.findings).toHaveLength(1);
-    expect(out?.findings[0]?.verification).toBeUndefined();
-    expect(out?.findings[0]?.evidence).toBeUndefined();
+    if (decoded.kind !== "ok") throw new Error("expected a migrated ok payload");
+    expect(decoded.previous.findings).toHaveLength(1);
+    expect(decoded.previous.findings[0]?.wasResolved).toBe(true);
+    expect(decoded.previous.findings[0]?.verification).toBe("bogus");
   });
 
-  it("drops malformed findings and keeps the readable ones", () => {
+  it("is corrupt when a v2 payload holds a malformed finding — never a partial read", () => {
     const payload = {
+      version: 2 as const,
       findings: [
         {
           id: "a",
@@ -219,14 +267,131 @@ describe("encodeEnvelope / decodeEnvelope", () => {
         },
         { id: 42 },
       ],
-      reviewedShas: ["ok", 7, "also-ok"],
+      reviewedShas: ["ok"],
+      checksum: "any",
     };
-    const out = decodeEnvelope(
+    const decoded = decodeEnvelope(
       "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
     );
-    expect(out?.findings).toHaveLength(1);
-    expect(out?.findings[0]?.wasResolved).toBe(true);
-    expect(out?.reviewedShas).toEqual(["ok", "also-ok"]);
+    if (decoded.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decoded.reason).toMatch(/malformed field/);
+  });
+
+  it("rejects a v2 payload whose checksum does not match — corrupt, never silent", () => {
+    const payload: Previous = {
+      findings: [
+        {
+          ...finding(),
+          wasResolved: true,
+          disposition: null,
+        },
+      ],
+      reviewedShas: ["a", "b"],
+    };
+    const forged = { ...payload, version: 2 as const, checksum: "0".repeat(16) };
+    const decoded = decodeEnvelope(
+      "fp " + Buffer.from(JSON.stringify(forged), "utf8").toString("base64"),
+    );
+    if (decoded.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decoded.reason).toMatch(/checksum/);
+  });
+
+  it("rejects a v2 finding whose line is not a positive integer, and an unknown severity", () => {
+    const withLine0: Previous = {
+      findings: [{ ...finding(), line: 0, wasResolved: false, disposition: null }],
+      reviewedShas: [],
+    };
+    const markerLine = `fp ${encodeEnvelope({ ...withLine0, version: 2, checksum: envelopeChecksum(withLine0) })}`;
+    const decodedLine = decodeEnvelope(markerLine);
+    if (decodedLine.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decodedLine.reason).toMatch(/positive integer/);
+
+    const withBadSeverity: Previous = {
+      findings: [
+        {
+          ...finding(),
+          line: 12,
+          severity: "loud" as unknown as Finding["severity"],
+          wasResolved: false,
+          disposition: null,
+        },
+      ],
+      reviewedShas: [],
+    };
+    const markerSeverity = `fp ${encodeEnvelope({
+      ...withBadSeverity,
+      version: 2 as const,
+      checksum: envelopeChecksum(withBadSeverity),
+    })}`;
+    const decodedSeverity = decodeEnvelope(markerSeverity);
+    if (decodedSeverity.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decodedSeverity.reason).toMatch(/severity/);
+  });
+
+  it("rejects a v2 disposition of the wrong shape", () => {
+    const withBadDisposition: Previous = {
+      findings: [
+        {
+          ...finding(),
+          wasResolved: false,
+          disposition: {
+            value: "wont-fix" as const,
+            by: "octocat",
+            at: "2026-08-17T00:00:00Z",
+            replyId: 0,
+            replyUrl: "https://github.com/o/r/pull/1#issuecomment-0",
+          },
+        },
+      ],
+      reviewedShas: [],
+    };
+    const marker = `fp ${encodeEnvelope({
+      ...withBadDisposition,
+      version: 2 as const,
+      checksum: envelopeChecksum(withBadDisposition),
+    })}`;
+    const decoded = decodeEnvelope(marker);
+    if (decoded.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decoded.reason).toMatch(/disposition/);
+  });
+
+  it("migrates a v1 payload: disposition null, version 2, checksum computed", () => {
+    const v1 = {
+      findings: [
+        {
+          id: "a",
+          ruleId: "r",
+          ruleName: "N",
+          ruleBody: "",
+          path: "p",
+          line: 1,
+          severity: "warning",
+          body: "b",
+          marker: "",
+          wasResolved: true,
+          resolvedAtSha: "s1",
+        },
+      ],
+      reviewedShas: ["ok", "also-ok"],
+    };
+    const decoded = decodeEnvelope(
+      "fp " + Buffer.from(JSON.stringify(v1), "utf8").toString("base64"),
+    );
+    if (decoded.kind !== "ok") throw new Error("expected a migrated ok payload");
+    expect(decoded.previous.version).toBe(2);
+    expect(decoded.previous.findings[0]?.disposition).toBeNull();
+    expect(decoded.previous.findings[0]?.wasResolved).toBe(true);
+    expect(decoded.previous.findings[0]?.resolvedAtSha).toBe("s1");
+    expect(decoded.previous.checksum).toBe(envelopeChecksum(decoded.previous));
+  });
+
+  it("is corrupt when a v1 payload holds a malformed finding", () => {
+    const v1 = { findings: [{ id: 42 }], reviewedShas: [] };
+    const decoded = decodeEnvelope(
+      "fp " + Buffer.from(JSON.stringify(v1), "utf8").toString("base64"),
+    );
+    if (decoded.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decoded.reason).toMatch(/malformed field/);
   });
 });
 
@@ -281,8 +446,8 @@ describe("render", () => {
 
   it("renders status groupings in canonical order", () => {
     const body = render([
-      { finding: finding({ id: "b" }), status: "resolved" },
-      { finding: finding({ id: "a", body: "X" }), status: "created" },
+      { finding: finding({ id: "b" }), status: "resolved", disposition: null },
+      { finding: finding({ id: "a", body: "X" }), status: "created", disposition: null },
     ]);
     expect(body).toContain("### New findings (1)");
     expect(body).toContain("### Resolved (1)");
@@ -295,19 +460,27 @@ describe("render", () => {
   });
 
   it("keeps the footer in a <sub>", () => {
-    const body = render([{ finding: finding(), status: "created" }]);
+    const body = render([{ finding: finding(), status: "created", disposition: null }]);
     expect(body).toContain("<sub>");
     expect(body).toContain("</sub>");
   });
 
   it("appends the verification badge to a model finding's line", () => {
     const verified = render([
-      { finding: finding({ verification: "verified" as const }), status: "created" },
+      {
+        finding: finding({ verification: "verified" as const }),
+        status: "created",
+        disposition: null,
+      },
     ]);
     expect(verified).toContain("· verified");
 
     const unverified = render([
-      { finding: finding({ verification: "unverified" as const }), status: "created" },
+      {
+        finding: finding({ verification: "unverified" as const }),
+        status: "created",
+        disposition: null,
+      },
     ]);
     expect(unverified).toContain("· not verified");
     expect(unverified).not.toContain("· verified");
@@ -315,12 +488,12 @@ describe("render", () => {
 
   it("renders no badge for deterministic findings or unverified fields absent", () => {
     const deterministic = render([
-      { finding: finding({ marker: "preflight:blocked" }), status: "created" },
+      { finding: finding({ marker: "preflight:blocked" }), status: "created", disposition: null },
     ]);
     expect(deterministic).not.toContain("· verified");
     expect(deterministic).not.toContain("· not verified");
 
-    const untouched = render([{ finding: finding(), status: "created" }]);
+    const untouched = render([{ finding: finding(), status: "created", disposition: null }]);
     expect(untouched).not.toContain("· verified");
     expect(untouched).not.toContain("· not verified");
   });
@@ -330,7 +503,11 @@ describe("render", () => {
     // events the model never intended — the same defang every other duty
     // applies to published text (see core/sanitize.ts).
     const body = render([
-      { finding: finding({ body: "Mention @alice and see #42 and GH-7." }), status: "created" },
+      {
+        finding: finding({ body: "Mention @alice and see #42 and GH-7." }),
+        status: "created",
+        disposition: null,
+      },
     ]);
     expect(body).toContain("@<!---->alice");
     expect(body).toContain("#<!---->42");
@@ -339,6 +516,24 @@ describe("render", () => {
     expect(body).toContain("G<!---->H-7");
     expect(body).not.toContain("@alice");
     expect(body).not.toContain("#42");
+  });
+
+  it("appends disposition attribution to a finding's line, escaping the login", () => {
+    const body = render([
+      {
+        finding: finding(),
+        status: "created",
+        disposition: {
+          value: "wont-fix" as const,
+          by: "octo<cat>",
+          at: "2026-08-17T00:00:00Z",
+          replyId: 9,
+          replyUrl: "https://github.com/o/r/pull/1#issuecomment-9",
+        },
+      },
+    ]);
+    expect(body).toContain("— **wont-fix** by @octo&lt;cat&gt;");
+    expect(body).toContain("([reply](https://github.com/o/r/pull/1#issuecomment-9))");
   });
 });
 
@@ -353,7 +548,9 @@ describe("postOrReplace", () => {
   it("replaces the existing comment without stacking a second one", async () => {
     const first = publicationFor(
       publication({
-        reconciled: [{ finding: finding({ body: "Old claim." }), status: "created" }],
+        reconciled: [
+          { finding: finding({ body: "Old claim." }), status: "created", disposition: null },
+        ],
       }),
     );
     const changed = publication();
@@ -376,16 +573,22 @@ describe("postOrReplace", () => {
 
   it("withholds when the search is uncertain and nothing was found", async () => {
     const body = (n: number) => `c${String(n)}`;
-    const { comments } = stubOf(
-      Array.from({ length: 100 }, (_, i) => ({ id: i + 1, body: body(i), user: BOT })),
-    );
+    const comments = Array.from({ length: 100 }, (_, i) => ({
+      id: i + 1,
+      body: body(i),
+      user: BOT,
+    }));
     let calls = 0;
     const measured: ReviewCommentApi = {
       rest: {
         issues: {
+          // The same full page, served for every page number — the shape of a
+          // thread past the walk's ceiling, so the walk ends `uncertain`.
           listComments: (params) => {
             calls += 1;
-            return Promise.resolve({ data: comments.slice(0, params.per_page ?? comments.length) });
+            return Promise.resolve({
+              data: comments.slice(0, params.per_page ?? comments.length),
+            });
           },
           createComment: () => Promise.resolve({}),
           updateComment: () => Promise.resolve({}),
@@ -393,7 +596,8 @@ describe("postOrReplace", () => {
       },
     };
     expect(await postOrReplace(measured, AT, publication())).toBe("withheld");
-    expect(calls).toBe(1);
+    // The paged walk spends all ten pages before giving up.
+    expect(calls).toBe(10);
   });
 });
 

@@ -19,17 +19,28 @@
  * has to say how each finding changed, because next run's `created`/`changed`/
  * `resolved`/`reopened` ladder derives from this run's findings and their
  * resolved flags. So the payload is a small base64-encoded JSON envelope
- * carrying the previous run's findings and the SHAs it reviewed. A human
- * reading the comment only sees the rendered review; the envelope rides in the
- * marker where the next run — and only the next run — parses it.
+ * carrying the previous run's findings, their resolved flags and their
+ * dispositions, and the SHAs it reviewed. A human reading the comment only sees
+ * the rendered review; the envelope rides in the marker where the next run —
+ * and only the next run — parses it.
+ *
+ * The envelope is versioned and checksummed. A payload this code wrote reads
+ * back as `ok`, a payload from before the schema carried a version reads back
+ * through a one-way migration, and a payload that fails its checksum reads back
+ * as `corrupt` — loudly, never as a silent cold start (D5).
  */
 import { chrome } from "../../core/chrome.js";
 import { isBotAuthor, type Author, type Location } from "../../core/forge.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 import { sanitize } from "../../core/sanitize.js";
-import type { Finding, Previous } from "./findings.js";
+import {
+  envelopeChecksum,
+  type Disposition,
+  type Finding,
+  type Previous,
+  type PreviousFinding,
+} from "./findings.js";
 import { findingFingerprint } from "./findings.js";
-import type { Evidence, VerificationStatus } from "./evidence.js";
 
 /** This duty's marker: `<!-- reeve:review source=<fingerprint> <envelope> -->`. */
 export const marker: Marker = markerFor("review");
@@ -43,24 +54,42 @@ export const marker: Marker = markerFor("review");
  * "did anything change since I last commented".
  *
  * The envelope payload is the memory: the previous findings and their resolved
- * flags, so the next run's `reopened` rung has something to work against. It
- * is written out-of-band — base64, so it rides in the marker tag without
- * corrupting the fingerprint comparison or the HTML parsing — and read back
- * lazily by `decodeEnvelope`.
+ * flags and dispositions, so the next run's `reopened` rung has something to
+ * work against. It is written out-of-band — base64, so it rides in the marker
+ * tag without corrupting the fingerprint comparison or the HTML parsing — and
+ * read back lazily by `decodeEnvelope`.
  */
 export function envelopeFingerprint(
-  reconciled: readonly { finding: Finding; status: string }[],
+  reconciled: readonly { finding: Finding; status: string; disposition: Disposition | null }[],
 ): string {
   const rendered = reconciled
-    .map((entry) => `${entry.status}:${findingFingerprint(entry.finding)}`)
+    .map(
+      (entry) =>
+        `${entry.status}:${findingFingerprint(entry.finding)}:${entry.disposition?.value ?? ""}`,
+    )
     .join("\n");
   return fingerprint(rendered, ["review"]);
 }
 
-/** The envelope payload: findings (with resolved flags) and reviewed SHAs. */
+/** The envelope payload: findings (with resolved flags and dispositions) and reviewed SHAs. */
 export function encodeEnvelope(previous: Previous): string {
   return Buffer.from(JSON.stringify(previous), "utf8").toString("base64");
 }
+
+/**
+ * What `decodeEnvelope` decided about a payload.
+ *
+ * `none` is an honest cold start — no payload, or an empty one. `ok` is a
+ * payload that validated, migrated and checksum-matched. `corrupt` is any
+ * payload that claimed to be memory but is not readable as one: a bad base64,
+ * a non-mapping, malformed fields, or a checksum mismatch. Corruption is
+ * reported loudly by the caller (a warning and a summary note), never silently
+ * treated as an empty memory.
+ */
+export type Decoded =
+  | { readonly kind: "none" }
+  | { readonly kind: "ok"; readonly previous: Previous }
+  | { readonly kind: "corrupt"; readonly reason: string };
 
 /**
  * Decodes the previous run's memory from the marker's payload.
@@ -68,119 +97,176 @@ export function encodeEnvelope(previous: Previous): string {
  * The payload is one envelope fingerprint followed by a space and the base64
  * envelope, so the whole tag reads `source=<fp> <b64>`. The fingerprint half is
  * for compare, the envelope half for read; this function reads.
+ *
+ * Validation is strict per version:
+ *
+ * - **no payload / empty envelope** → `none`, a genuine cold start.
+ * - **no `version`** → v1: every existing field check applies, `wasResolved` /
+ *   `resolvedAtSha` map as-is, every finding gains `disposition: null`, the
+ *   checksum is computed and `version: 2` is stamped → `ok`.
+ * - **`version: 2`** → every existing field check, plus `line` must be `null`
+ *   or an integer `> 0`, `severity` must be in the union, and `disposition`,
+ *   when present, must be a valid shape. The checksum is recomputed over
+ *   findings + SHAs; a mismatch is `corrupt`.
+ *
+ * Any parse failure — bad base64, not a mapping, malformed fields — is
+ * `corrupt` with a reason, never a silent `none`.
  */
-export function decodeEnvelope(payload: string | null): Previous | null {
-  if (payload === null) return null;
+export function decodeEnvelope(payload: string | null): Decoded {
+  if (payload === null) return { kind: "none" };
   const at = payload.indexOf(" ");
-  const envelope = at === -1 ? payload : payload.slice(at + 1);
-  if (envelope.length === 0) return null;
+  // No space means the payload holds only a fingerprint — the envelope half is
+  // empty, which is the same cold start as no payload at all.
+  const envelope = at === -1 ? "" : payload.slice(at + 1);
+  if (envelope.length === 0) return { kind: "none" };
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(Buffer.from(envelope, "base64").toString("utf8"));
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-    const map = parsed as Record<string, unknown>;
-    if (!Array.isArray(map.findings)) return null;
-    const findings = map.findings
-      .filter((entry): entry is Findable => {
-        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
-        const f = entry as Findable;
-        return (
-          typeof f.id === "string" &&
-          typeof f.ruleId === "string" &&
-          typeof f.ruleName === "string" &&
-          typeof f.ruleBody === "string" &&
-          typeof f.path === "string" &&
-          (f.line === null || Number.isInteger(f.line)) &&
-          typeof f.severity === "string" &&
-          typeof f.body === "string" &&
-          typeof f.marker === "string" &&
-          typeof f.wasResolved === "boolean"
-        );
-      })
-      .map((entry) => {
-        const raw = entry as Findable & { readonly resolvedAtSha?: unknown };
-        const resolvedAtSha =
-          typeof raw.resolvedAtSha === "string"
-            ? ({ resolvedAtSha: raw.resolvedAtSha } as const)
-            : {};
-        const {
-          snippet: _snippet,
-          verification: _verification,
-          evidence: _evidence,
-          ...core
-        } = entry as Findable & { readonly resolvedAtSha?: unknown };
-        return {
-          ...(core as unknown as Omit<Previous["findings"][number], "wasResolved">),
-          wasResolved: (entry as { wasResolved: unknown }).wasResolved === true,
-          ...resolvedAtSha,
-          ...optionalEvidence(raw),
-        };
-      });
-    const shas = Array.isArray(map.reviewedShas)
-      ? map.reviewedShas.filter((sha): sha is string => typeof sha === "string")
-      : [];
-    return { findings, reviewedShas: shas };
+    parsed = JSON.parse(Buffer.from(envelope, "base64").toString("utf8"));
   } catch {
-    return null;
+    return { kind: "corrupt", reason: "the envelope is not valid base64" };
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "corrupt", reason: "the envelope is not a JSON mapping" };
+  }
+  const map = parsed as Record<string, unknown>;
+  if (map.version === undefined) return migrateV1(map);
+  return validateV2(map);
 }
 
-interface Findable {
-  readonly id?: unknown;
-  readonly ruleId?: unknown;
-  readonly ruleName?: unknown;
-  readonly ruleBody?: unknown;
-  readonly path?: unknown;
-  readonly line?: unknown;
-  readonly severity?: unknown;
-  readonly body?: unknown;
-  readonly marker?: unknown;
-  readonly wasResolved?: unknown;
-  readonly snippet?: unknown;
-  readonly verification?: unknown;
-  readonly evidence?: unknown;
-}
-
-/**
- * The two optional verification fields ride the envelope for backwards
- * compatibility: old envelopes lack them and still decode (fields undefined),
- * and a malformed optional field is treated as undefined — the finding's core
- * fields always win.
- */
-function optionalEvidence(raw: Findable & { readonly snippet?: unknown }): {
-  readonly snippet?: string;
-  readonly verification?: VerificationStatus;
-  readonly evidence?: readonly Evidence[];
-} {
-  const out: {
-    snippet?: string;
-    verification?: VerificationStatus;
-    evidence?: readonly Evidence[];
-  } = {};
-  if (typeof raw.snippet === "string") out.snippet = raw.snippet;
-  if (raw.verification === "verified" || raw.verification === "unverified") {
-    out.verification = raw.verification;
-  }
-  if (Array.isArray(raw.evidence)) {
-    const items = raw.evidence.filter((entry): entry is Evidence => evidenceShaped(entry));
-    if (items.length > 0) out.evidence = items;
-  }
-  return out;
-}
-
-function evidenceShaped(raw: unknown): raw is Evidence {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
-  const entry = raw as Record<string, unknown>;
+/** The per-finding field checks every version shares. */
+function isFindable(entry: unknown): boolean {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const f = entry as Record<string, unknown>;
   return (
-    (entry.kind === "diff" || entry.kind === "rules") &&
-    typeof entry.weight === "number" &&
-    typeof entry.detail === "string" &&
-    typeof entry.provenance === "object" &&
-    entry.provenance !== null &&
-    typeof (entry.provenance as Record<string, unknown>).ruleId === "string"
+    typeof f.id === "string" &&
+    typeof f.ruleId === "string" &&
+    typeof f.ruleName === "string" &&
+    typeof f.ruleBody === "string" &&
+    typeof f.path === "string" &&
+    typeof f.body === "string" &&
+    typeof f.marker === "string" &&
+    typeof f.wasResolved === "boolean"
   );
 }
 
-/** The part of an Octokit client this module needs — same three methods as duplicate. */
+/** The v1 field checks — line and severity were already permissive, kept for the migration. */
+function isV1Findable(entry: unknown): boolean {
+  if (!isFindable(entry)) return false;
+  const f = entry as Record<string, unknown>;
+  return f.line === null || Number.isInteger(f.line);
+}
+
+/** A payload that predates `version` — one-way migrated to v2, dispositions start null. */
+function migrateV1(map: Record<string, unknown>): Decoded {
+  if (!Array.isArray(map.findings)) {
+    return { kind: "corrupt", reason: "the envelope has no `findings` array" };
+  }
+  const findings: PreviousFinding[] = [];
+  for (const entry of map.findings) {
+    if (!isV1Findable(entry)) {
+      return { kind: "corrupt", reason: "a v1 finding holds a malformed field" };
+    }
+    const raw = entry as Record<string, unknown> & { resolvedAtSha?: unknown };
+    const resolvedAtSha =
+      typeof raw.resolvedAtSha === "string" ? ({ resolvedAtSha: raw.resolvedAtSha } as const) : {};
+    findings.push({
+      ...(entry as unknown as Omit<
+        PreviousFinding,
+        "wasResolved" | "resolvedAtSha" | "disposition"
+      >),
+      wasResolved: raw.wasResolved === true,
+      disposition: null,
+      ...resolvedAtSha,
+    });
+  }
+  const shas = Array.isArray(map.reviewedShas)
+    ? map.reviewedShas.filter((sha): sha is string => typeof sha === "string")
+    : [];
+  const previous: Previous = { findings, reviewedShas: shas };
+  return {
+    kind: "ok",
+    previous: { ...previous, version: 2, checksum: envelopeChecksum(previous) },
+  };
+}
+
+const SEVERITIES: ReadonlySet<string> = new Set(["info", "warning", "critical"]);
+const DISPOSITION_VALUES: ReadonlySet<string> = new Set([
+  "verified",
+  "accepted-risk",
+  "wont-fix",
+  "rejected",
+]);
+
+/** A v2 payload — strict line/severity/disposition checks, then the checksum. */
+function validateV2(map: Record<string, unknown>): Decoded {
+  if (map.version !== 2) {
+    return {
+      kind: "corrupt",
+      reason: `the envelope declares unknown version \`${String(map.version)}\``,
+    };
+  }
+  if (!Array.isArray(map.findings)) {
+    return { kind: "corrupt", reason: "the envelope has no `findings` array" };
+  }
+  const findings: PreviousFinding[] = [];
+  for (const entry of map.findings) {
+    if (!isFindable(entry)) {
+      return { kind: "corrupt", reason: "a v2 finding holds a malformed field" };
+    }
+    const f = entry as Record<string, unknown>;
+    if (f.line !== null && !(Number.isInteger(f.line) && (f.line as number) > 0)) {
+      return { kind: "corrupt", reason: `a finding names a line that is not a positive integer` };
+    }
+    if (typeof f.severity !== "string" || !SEVERITIES.has(f.severity)) {
+      return { kind: "corrupt", reason: `a finding names an unknown severity` };
+    }
+    const disposition = validateDisposition(f.disposition);
+    if (disposition === "corrupt") {
+      return { kind: "corrupt", reason: "a finding carries a malformed disposition" };
+    }
+    const raw = entry as Record<string, unknown> & { resolvedAtSha?: unknown };
+    const resolvedAtSha =
+      typeof raw.resolvedAtSha === "string" ? ({ resolvedAtSha: raw.resolvedAtSha } as const) : {};
+    findings.push({
+      ...(entry as unknown as Omit<
+        PreviousFinding,
+        "wasResolved" | "resolvedAtSha" | "disposition"
+      >),
+      wasResolved: raw.wasResolved === true,
+      disposition,
+      ...resolvedAtSha,
+    });
+  }
+  const shas = Array.isArray(map.reviewedShas)
+    ? map.reviewedShas.filter((sha): sha is string => typeof sha === "string")
+    : [];
+  const previous: Previous = { findings, reviewedShas: shas };
+  if (typeof map.checksum !== "string" || envelopeChecksum(previous) !== map.checksum) {
+    return { kind: "corrupt", reason: "the envelope fails its checksum — it is damaged or forged" };
+  }
+  return { kind: "ok", previous: { ...previous, version: 2, checksum: map.checksum } };
+}
+
+/** A disposition field: `null` is valid; a mapping must carry a valid union value and strings. */
+function validateDisposition(value: unknown): Disposition | null | "corrupt" {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return "corrupt";
+  const d = value as Record<string, unknown>;
+  if (typeof d.value !== "string" || !DISPOSITION_VALUES.has(d.value)) return "corrupt";
+  if (typeof d.by !== "string" || typeof d.at !== "string" || typeof d.replyUrl !== "string") {
+    return "corrupt";
+  }
+  if (!Number.isInteger(d.replyId) || (d.replyId as number) <= 0) return "corrupt";
+  return {
+    value: d.value as Disposition["value"],
+    by: d.by,
+    at: d.at,
+    replyId: d.replyId as number,
+    replyUrl: d.replyUrl,
+  };
+}
+
+/** The part of an Octokit client this module needs — the issues comment trio. */
 export interface ReviewCommentApi {
   readonly rest: {
     readonly issues: {
@@ -190,7 +276,16 @@ export interface ReviewCommentApi {
         issue_number: number;
         per_page?: number;
         page?: number;
-      }): Promise<{ data: { id: number; body?: string | null; user?: Author | null }[] }>;
+      }): Promise<{
+        data: {
+          id: number;
+          body?: string | null;
+          user?: Author | null;
+          author_association?: string;
+          created_at?: string;
+          html_url?: string;
+        }[];
+      }>;
       createComment(params: {
         owner: string;
         repo: string;
@@ -208,12 +303,79 @@ export interface ReviewCommentApi {
 }
 
 const COMMENT_PAGE = 100;
+/** How many pages of the thread one run will walk — the pathological case reports honestly. */
+export const MAX_COMMENT_PAGES = 10;
 
 /** This duty's own comment, as a listing found it. */
 export interface Marked {
   readonly id: number;
   /** The envelope payload (a base64 string), or null when the comment predates the envelope's shape. */
   readonly payload: string | null;
+}
+
+/** One eligible reply on the owned thread, as the API listing read it. */
+export interface ThreadReply {
+  readonly id: number;
+  readonly login: string;
+  readonly isBot: boolean;
+  readonly association: string;
+  readonly createdAt: string;
+  readonly body: string;
+}
+
+/** What one read of the thread found. */
+export interface ThreadRead {
+  readonly marked: Marked | null;
+  readonly replies: readonly ThreadReply[];
+  /** `uncertain` means exactly duplicate's meaning — the walk stopped at a full page. */
+  readonly uncertain: boolean;
+}
+
+/**
+ * Walks the pull request's comments, pages of 100, up to `MAX_COMMENT_PAGES`.
+ *
+ * Returns the duty's own marked comment (guarded the same way duplicate's
+ * search is: a bot author AND the marker at the top — a forged or quoted marker
+ * must never be overwritten as if it were Reeve's own) plus every comment as a
+ * `ThreadReply` for disposition reading. `uncertain` is true when the walk
+ * stopped at a full page — the marker or a reply may sit beyond what was read.
+ */
+export async function readThread(api: ReviewCommentApi, at: Location): Promise<ThreadRead> {
+  let marked: Marked | null = null;
+  const replies: ThreadReply[] = [];
+  let uncertain = false;
+
+  for (let page = 1; page <= MAX_COMMENT_PAGES; page += 1) {
+    const { data } = await api.rest.issues.listComments({
+      owner: at.owner,
+      repo: at.repo,
+      issue_number: at.number,
+      per_page: COMMENT_PAGE,
+      page,
+    });
+
+    for (const comment of data) {
+      replies.push({
+        id: comment.id,
+        login: comment.user?.login ?? "",
+        isBot: isBotAuthor(comment.user),
+        association: comment.author_association ?? "",
+        createdAt: comment.created_at ?? "",
+        body: comment.body ?? "",
+      });
+      if (marked !== null) continue;
+      if (!isBotAuthor(comment.user)) continue;
+      const { official, fingerprint: found } = marker.split(comment.body ?? "");
+      if (found !== null && official === "") {
+        marked = { id: comment.id, payload: found };
+      }
+    }
+
+    if (data.length < COMMENT_PAGE) break;
+    if (page === MAX_COMMENT_PAGES) uncertain = true;
+  }
+
+  return { marked, replies, uncertain };
 }
 
 /** What one search of the comments found — `uncertain` means exactly duplicate's meaning. */
@@ -229,21 +391,8 @@ interface Search {
  * were Reeve's own.
  */
 export async function findMarked(api: ReviewCommentApi, at: Location): Promise<Search> {
-  const { data } = await api.rest.issues.listComments({
-    owner: at.owner,
-    repo: at.repo,
-    issue_number: at.number,
-    per_page: COMMENT_PAGE,
-  });
-
-  for (const comment of data) {
-    if (!isBotAuthor(comment.user)) continue;
-    const { official, fingerprint: found } = marker.split(comment.body ?? "");
-    if (found !== null && official === "") {
-      return { marked: { id: comment.id, payload: found }, uncertain: false };
-    }
-  }
-  return { marked: null, uncertain: data.length === COMMENT_PAGE };
+  const { marked, uncertain } = await readThread(api, at);
+  return { marked, uncertain };
 }
 
 /** What the write step did, for the summary and the `commented` output. */
@@ -251,7 +400,11 @@ export type Posted = "posted" | "replaced" | "unchanged" | "withheld";
 
 /** What one run wants the marker tag to carry, and the body it renders. */
 export interface Publication {
-  readonly reconciled: readonly { finding: Finding; status: string }[];
+  readonly reconciled: readonly {
+    finding: Finding;
+    status: string;
+    disposition: Disposition | null;
+  }[];
   /** The memory the next run reads back — see `findings.ts`'s `remember`. */
   readonly next: Previous;
   readonly headSha: string;
@@ -263,7 +416,7 @@ export interface Publication {
  * The payload is `<renderFingerprint> <envelope>`: the fingerprint half is the
  * idempotency digest the next run compares without decoding anything, and the
  * envelope half is the base64 memory the next run decodes when it needs the
- * findings' resolved flags and the SHAs already reviewed.
+ * findings' resolved flags, dispositions and the SHAs already reviewed.
  */
 export function publicationFor(pub: Publication): {
   readonly payload: string;
@@ -287,7 +440,7 @@ async function classify(
 ): Promise<Classification> {
   const { payload, body } = publicationFor(pub);
   const full = [marker.render(payload), body].join("\n\n");
-  const { marked: existing, uncertain } = await findMarked(api, at);
+  const { marked: existing, uncertain } = await readThread(api, at);
 
   if (existing === null && uncertain) {
     return { disposition: "withheld", body: full, existing: null };
@@ -304,15 +457,20 @@ async function classify(
 
 /**
  * The digest the marker's payload opens with — the idempotency comparison for
- * `unchanged`. Computed over the canonical reconciled findings, so a rerun
- * with the same findings — whatever their render formatting does — recognises
- * itself without decoding the envelope.
+ * `unchanged`. Computed over the canonical reconciled findings and their
+ * dispositions, so a rerun with the same findings — whatever their render
+ * formatting does — recognises itself without decoding the envelope. A new or
+ * removed disposition changes the digest, so adding a disposition to a finding
+ * is a real change the next run will render.
  */
 export function renderFingerprint(
-  reconciled: readonly { finding: Finding; status: string }[],
+  reconciled: readonly { finding: Finding; status: string; disposition: Disposition | null }[],
 ): string {
   const canonical = reconciled
-    .map((entry) => `${entry.status}:${findingFingerprint(entry.finding)}`)
+    .map(
+      (entry) =>
+        `${entry.status}:${findingFingerprint(entry.finding)}:${entry.disposition?.value ?? ""}`,
+    )
     .join("\n");
   return fingerprint(canonical, ["review"]);
 }
@@ -368,8 +526,12 @@ export async function rehearse(
  *
  * Pure and total: the same reconciled findings render the same bytes, which is
  * what lets `envelopeFingerprint` recognise a rerun that changed nothing.
+ * Dispositions render as attribution on the finding's line and never change
+ * the heading grouping (grouping stays by evidence status).
  */
-export function render(reconciled: readonly { finding: Finding; status: string }[]): string {
+export function render(
+  reconciled: readonly { finding: Finding; status: string; disposition: Disposition | null }[],
+): string {
   if (reconciled.length === 0) {
     return chrome("reviewEmpty", null);
   }
@@ -377,23 +539,29 @@ export function render(reconciled: readonly { finding: Finding; status: string }
   const sections: string[] = [];
   for (const [status, entries] of byStatus) {
     sections.push(
-      `### ${statusLabel(status)} (${String(entries.length)})\n${entries.map((entry) => findingLine(entry.finding)).join("\n")}`,
+      `### ${statusLabel(status)} (${String(entries.length)})\n${entries.map((entry) => findingLine(entry.finding, entry.disposition)).join("\n")}`,
     );
   }
   return sections.join("\n\n") + "\n\n" + footer();
 }
 
 function group(
-  reconciled: readonly { finding: Finding; status: string }[],
+  reconciled: readonly { finding: Finding; status: string; disposition: Disposition | null }[],
   order: readonly string[],
-): [string, { finding: Finding; status: string }[]][] {
-  const map = new Map<string, { finding: Finding; status: string }[]>();
+): [string, { finding: Finding; status: string; disposition: Disposition | null }[]][] {
+  const map = new Map<
+    string,
+    { finding: Finding; status: string; disposition: Disposition | null }[]
+  >();
   for (const entry of reconciled) {
     const bucket = map.get(entry.status) ?? [];
     bucket.push(entry);
     map.set(entry.status, bucket);
   }
-  const result: [string, { finding: Finding; status: string }[]][] = [];
+  const result: [
+    string,
+    { finding: Finding; status: string; disposition: Disposition | null }[],
+  ][] = [];
   for (const status of order) {
     const bucket = map.get(status);
     if (bucket !== undefined) result.push([status, bucket]);
@@ -418,7 +586,15 @@ function statusLabel(status: string): string {
   }
 }
 
-function findingLine(finding: Finding): string {
+/** The one status a finding may be triaged into after a disposition — never on its own. */
+const DISPOSITION_LABELS: Record<Disposition["value"], string> = {
+  verified: "verified",
+  "accepted-risk": "accepted-risk",
+  "wont-fix": "wont-fix",
+  rejected: "rejected",
+};
+
+function findingLine(finding: Finding, disposition: Disposition | null): string {
   const where = finding.path.replace(/`/g, "");
   const at = finding.line === null ? "" : `:${String(finding.line)}`;
   // The finding's body is the one piece of model prose this duty prints on the
@@ -427,9 +603,14 @@ function findingLine(finding: Finding): string {
   // not become link events the model never intended. Deterministic pre-check
   // bodies are constant strings and pass through unchanged.
   const body = sanitize(finding.body);
-  const badge = verificationBadge(finding);
-  const suffix = badge.length === 0 ? "" : ` ${badge}`;
-  return `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+  const suffix = verificationBadge(finding);
+  let line = `- **\`${where}\`${at}** \`${finding.severity}\`: ${body}${suffix}`;
+  if (disposition !== null) {
+    // The value is a constant from the union — safe to print raw; the login is
+    // a stranger's and is escaped the same way the footer escapes its text.
+    line += ` — **${DISPOSITION_LABELS[disposition.value]}** by @${escapeHtml(disposition.by)} ([reply](${disposition.replyUrl}))`;
+  }
+  return line;
 }
 
 /**

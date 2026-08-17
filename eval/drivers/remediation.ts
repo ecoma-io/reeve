@@ -38,7 +38,7 @@ import { join } from "node:path";
 // real one. The envelope half is re-implemented here in three lines, exactly
 // the byte-for-byte transcription `encodeEnvelope` produces.
 import { fingerprint, markerFor } from "../../src/core/marker.ts";
-import type { Previous } from "../../src/duties/review/findings.ts";
+import type { Disposition, Previous } from "../../src/duties/review/findings.ts";
 
 import type { Route } from "../harness.ts";
 
@@ -59,6 +59,8 @@ export interface RemediationFinding {
   readonly body: string;
   readonly marker: string;
   readonly wasResolved: boolean;
+  /** Review's payload always carries a disposition key — null until a human triaged. */
+  readonly disposition?: Disposition | null;
 }
 
 /** The pull request the run reads comments from. */
@@ -110,7 +112,10 @@ export function reviewCommentBody(
   renderFingerprint: string,
 ): string {
   const previous: Previous = {
-    findings: findings.map((finding) => ({ ...finding })),
+    findings: findings.map((finding) => ({
+      ...finding,
+      disposition: finding.disposition ?? null,
+    })),
     reviewedShas: [],
   };
   const payload = `${renderFingerprint} ${encodeEnvelope(previous)}`;

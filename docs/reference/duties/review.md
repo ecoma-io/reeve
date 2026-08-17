@@ -227,19 +227,32 @@ cannot be found with certainty, the review is withheld — `withheld` — rather
 than risk a duplicate. Neither guard is configurable, because an input can be
 misconfigured and these two cannot be.
 
-**The ladder stops at `resolved` — a human resolving the conversation is
-invisible to it.** `reopened` is driven only by the model re-citing a finding
-this duty's own memory recorded as resolved; the duty never reads GitHub's
-thread or response state, so when a human or another bot replies "done",
-`out of scope`, or marks the thread resolved, this review does not observe it.
-A finding the diff has truly moved past is `resolved` by evidence — the line
-or file it named left this run's review — not by anything anyone said. The
-statuses a finding passes through are therefore always this duty's own claims
-about the diff, and "resolved" never means "the author agreed with the
-reviewer". Reopening an old claim is the newest model saying it again against
-new evidence, not a reply-based waking of the thread. This keeps the ladder
-honest (the duty documents only what its single owned comment decided) at the
-cost of the last rung a human review thread has — conversation itself. See
+**`resolved` is evidence, never agreement — and the ladder carries a human
+axis beside it.** A finding the diff has truly moved past is `resolved` by
+evidence — the line or file it named left this run's review — not by anything
+anyone said. `reopened` is driven only by the model re-citing a finding this
+duty's own memory recorded as resolved; a human resolving the GitHub
+conversation, or replying "done", never changes the statuses above, because
+those statuses are always this duty's own claims about the diff. "Resolved"
+never means "the author agreed with the reviewer".
+
+What a human _does_ say is read, attributed, and shown beside the ladder as a
+separate **disposition** axis. A maintainer (an `OWNER`, `COLLABORATOR` or
+`MEMBER` account — never a bot, never the pull request's own author) can
+reply to the owned comment with a strict, anchored line naming a finding and a
+judgment — `verified`, `accepted-risk`, `wont-fix`, or `rejected` — and the
+next run reads those replies off the thread and renders the disposition under
+that finding, keyed to the finding's intention (rule and file), not its
+mutable line or body, so it survives synchronize, force push, line movement
+and comment replacement. The thread reply is the durable home; the envelope
+only mirrors it, and a mirrored disposition that no longer has its reply on
+the thread is dropped. A disposition is additive — it records what a
+maintainer decided, it never overrules the evidence ladder, and it is never
+silently reverted.
+
+This keeps the ladder honest (the duty documents only what its single owned
+comment decided) while giving the thread the last rung a human review has —
+conversation itself, heard. See
 [what no capability can ever turn on](../../guides/warrant.md#what-no-capability-can-ever-turn-on).
 
 ## Deterministic findings, before any model

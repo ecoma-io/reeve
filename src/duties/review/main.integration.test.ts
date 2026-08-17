@@ -573,9 +573,11 @@ describe("the action", () => {
     expect(second.code).toBe(0);
     expect(stub.comments).toHaveLength(1); // still one comment — replaced, not stacked
     expect(stub.comments[0]?.body).toContain("Second claim.");
-    // The moved-on claim is resolved, not dropped — the thread keeps its history.
-    expect(stub.comments[0]?.body).toContain("### Resolved (1)");
-    expect(stub.comments[0]?.body).toContain("First claim.");
+    // The claim moved line with the code under it — same rule, same file, new
+    // line — so it is `changed`, not `resolved`: the thread keeps its history
+    // and the finding keeps its identity across line movement.
+    expect(stub.comments[0]?.body).toContain("### Changed (1)");
+    expect(stub.comments[0]?.body).toContain("Second claim.");
     expect(second.outputs.commented).toBe("true");
   });
 

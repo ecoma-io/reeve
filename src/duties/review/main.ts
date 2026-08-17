@@ -63,11 +63,12 @@ import { reconcile, remember, type Finding, type Previous, type Reconciled } fro
 import { architectureFindings } from "./architecture.js";
 import {
   decodeEnvelope,
-  findMarked,
   postOrReplace,
+  readThread,
   rehearse,
   type Posted,
   type Publication,
+  type ThreadRead,
 } from "./publish.js";
 import {
   collectContext,
@@ -76,6 +77,12 @@ import {
   type Context,
   type ContextTarget,
 } from "./context.js";
+import {
+  mergeDispositions,
+  readDispositions,
+  substantiatedDispositions,
+  dispositionKey,
+} from "./disposition.js";
 import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
 import { preflight, readPackedRules } from "./rules.js";
 import {
@@ -171,6 +178,8 @@ interface Outcome {
   readonly contextReadFiles: number;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
   readonly previous: Previous | null;
+  /** Why the comment memory was unreadable — set when corruption was found and recovered from, never silent. */
+  readonly memoryNote: string | null;
   /** What the diff showed the model, for the summary's coverage table. */
   readonly shown: readonly { path: string }[];
   readonly skipped: readonly { path: string; reason: string }[];
@@ -193,6 +202,7 @@ type Settled = Partial<
     | "rulesPath"
     | "contextReadFiles"
     | "previous"
+    | "memoryNote"
     | "shown"
     | "skipped"
     | "passes"
@@ -260,6 +270,7 @@ async function decide(
     rulesPath: null,
     contextReadFiles: 0,
     previous: null,
+    memoryNote: null,
     shown: [],
     skipped: [],
     passes: [],
@@ -340,13 +351,31 @@ async function decide(
   );
 
   // The memory half: what the previous run's comment left this run — read
-  // from its own marker's envelope, or empty on the first review.
-  const previous = await readEnvelope(api, at);
+  // from its own marker's envelope, or empty on the first review. The thread is
+  // read ONCE here: its replies are what dispositions are derived from, and
+  // re-reading it later (as the write classifier once did) would spend a
+  // second walk. A corrupted envelope is recovered from loudly — machine
+  // statuses reset, dispositions are re-derived from the thread, and the job
+  // summary carries a note that names the corruption.
+  const { previous, thread, memoryNote } = await readEnvelope(api, at);
   if (previous.findings.length > 0) {
     core.info(
       `#${String(at.number)}: previous review read (${String(previous.findings.length)} finding(s)).`,
     );
   }
+
+  // The human-disposition axis: maintainer triage read off the owned thread's
+  // replies, matched against the previous run's findings (the ones a human
+  // could have replied to). Fresh dispositions from eligible replies win;
+  // envelope-stored dispositions survive only when the reply that made them is
+  // still there and still from the same login (the forged-envelope defence).
+  const fresh = readDispositions(thread.replies, previous.findings, at, pr.author.login);
+  const substantiated = substantiatedDispositions(
+    previous.findings,
+    thread.replies,
+    pr.author.login,
+  );
+  const dispositions = mergeDispositions(fresh, substantiated);
 
   // The deterministic half. `preflight` fires on the bounded diff before any
   // model is asked; its findings are guaranteed by construction (a line the
@@ -406,7 +435,12 @@ async function decide(
   // last SHA this thread was reviewed against, not the current one. Declared
   // after the context collection so the Context row of the summary can carry
   // how many workspace files the engine read this run.
-  const withMemory: Settled = { previous, contextReadFiles: context.readFiles, ...settledBase };
+  const withMemory: Settled = {
+    previous,
+    memoryNote,
+    contextReadFiles: context.readFiles,
+    ...settledBase,
+  };
 
   // The expensive half, only when there is a diff to ask about. The profile
   // names one or more passes, each reading the same diff through its own
@@ -472,7 +506,15 @@ async function decide(
   for (const file of bounded.shown) StandingFiles.set(file.path, new Set(file.lines.keys()));
   for (const file of bounded.skipped) StandingFiles.set(file.path, null);
   const diffStanding = { files: StandingFiles, headSha: pr.headSha };
-  const final = reconcile([...deterministic, ...verified], previous, diffStanding);
+  const reconciled = reconcile([...deterministic, ...verified], previous, diffStanding);
+  // Overlay the merged dispositions onto every reconciled entry by identity —
+  // the intention key, not the fingerprint, so a disposition rides a finding
+  // across line movement, force pushes and comment replacements. A fresh
+  // disposition beats a substantiated mirror; the mirror fills the gaps.
+  const final = reconciled.map((entry) => ({
+    ...entry,
+    disposition: dispositions.get(dispositionKey(entry.finding)) ?? entry.disposition ?? null,
+  }));
   const confidence = synthesis.confidence;
 
   const next = remember(final, pr.headSha, previous);
@@ -628,15 +670,51 @@ function wrapPr(api: ReturnType<typeof getOctokit>): PrApi {
   return api;
 }
 
-/** Reads the previous run's memory: the envelope on this run's own comment, or none. */
+/**
+ * Reads the previous run's memory: the envelope on this run's own comment, and
+ * the thread it sits in.
+ *
+ * The thread is read once, here. On a `corrupt` envelope the run recovers the
+ * same way a cold start does — dispositions re-derive from the thread's
+ * replies, machine statuses reset — but the corruption is carried out loudly:
+ * a warning names the reason, and the returned `memoryNote` reaches the job
+ * summary so the damage is never silent (D5).
+ */
 async function readEnvelope(
   api: ReturnType<typeof getOctokit>,
   at: { owner: string; repo: string; number: number },
-): Promise<Previous> {
-  const { marked } = await findMarked(api, at);
+): Promise<{ previous: Previous; thread: ThreadRead; memoryNote: string | null }> {
+  const { marked, replies, uncertain } = await readThread(api, at);
   const payload = marked?.payload ?? null;
-  if (payload === null) return { findings: [], reviewedShas: [] };
-  return decodeEnvelope(payload) ?? { findings: [], reviewedShas: [] };
+  if (payload === null) {
+    const note =
+      uncertain && marked === null
+        ? "This run's comment could not be found with certainty — the write was withheld."
+        : null;
+    return {
+      previous: { findings: [], reviewedShas: [] },
+      thread: { marked, replies, uncertain },
+      memoryNote: note,
+    };
+  }
+  const decoded = decodeEnvelope(payload);
+  if (decoded.kind === "ok") {
+    return { previous: decoded.previous, thread: { marked, replies, uncertain }, memoryNote: null };
+  }
+  if (decoded.kind === "corrupt") {
+    const reason = `The review's stored memory failed its checksum and was rebuilt from the thread — ${decoded.reason}.`;
+    core.warning(`#${String(at.number)}: ${reason}`);
+    return {
+      previous: { findings: [], reviewedShas: [] },
+      thread: { marked, replies, uncertain },
+      memoryNote: reason,
+    };
+  }
+  return {
+    previous: { findings: [], reviewedShas: [] },
+    thread: { marked, replies, uncertain },
+    memoryNote: null,
+  };
 }
 
 /** A claim a pass made, admitted as a finding when the diff proved it — see `verdict.ts`. */
@@ -746,6 +824,7 @@ function page(
     dryRun: settings.dryRun,
     headSha: outcome?.headSha ?? "",
     note: outcome?.note ?? null,
+    memoryNote: outcome?.memoryNote ?? null,
     previousSha,
     shown: outcome?.shown ?? [],
     skipped: outcome?.skipped ?? [],

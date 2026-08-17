@@ -57,6 +57,30 @@ export interface RawFinding {
 export type Status = "created" | "persists" | "changed" | "resolved" | "reopened";
 
 /**
+ * A maintainer's triage of a finding, attributed on the thread.
+ *
+ * This is the human-disposition axis, deliberately orthogonal to the evidence
+ * ladder. `resolved` is what the diff evidence says; a disposition is what a
+ * maintainer said about a finding. The four values are judgment calls a
+ * maintainer can stand behind next to the finding itself: the claim is
+ * substantiated (`verified`), worth accepting as a risk (`accepted-risk`), a
+ * deliberate no-fix (`wont-fix`), or wrong (`rejected`).
+ */
+export type DispositionValue = "verified" | "accepted-risk" | "wont-fix" | "rejected";
+
+/** One attributed disposition, as a maintainer's eligible reply on the owned thread records it. */
+export interface Disposition {
+  readonly value: DispositionValue;
+  /** The login of the maintainer who triaged the finding. */
+  readonly by: string;
+  /** The reply's `created_at`, ISO — when the triage was made. */
+  readonly at: string;
+  /** The thread reply that carries the disposition — the durable home. */
+  readonly replyId: number;
+  readonly replyUrl: string;
+}
+
+/**
  * A finding exactly as the previous run recorded it.
  *
  * `wasResolved` is the memory that makes `reopened` meaningful: when a finding
@@ -66,24 +90,47 @@ export type Status = "created" | "persists" | "changed" | "resolved" | "reopened
  * silently disappears from the record would turn every reintroduction into a
  * `created`, and the review thread would lose the `reopened` rung it holds in
  * a human review.
+ *
+ * `disposition` is the human-disposition axis riding on the finding: `null`
+ * until a maintainer triaged it, then the attributed reply that did. A
+ * disposition survives synchronize, force push, line movement and comment
+ * replacement — it is keyed to the finding's *intention* (`ruleId` + `path`),
+ * not its mutable evidence.
  */
 export interface PreviousFinding extends Finding {
   readonly wasResolved: boolean;
-  /** The head SHA the review resolved this finding at — ties the status claim to a real change. */
+  /**
+   * The head SHA the review resolved this finding at — ties the status claim to a real change.
+   */
   readonly resolvedAtSha?: string;
+  /** The maintainer's triage of this finding, or null when nobody eligible has spoken. */
+  readonly disposition: Disposition | null;
 }
 
-/** What the previous run left in the owned comment's fingerprint payload. */
+/**
+ * What the previous run left in the owned comment's fingerprint payload.
+ *
+ * `version` and `checksum` are what make corruption LOUD rather than a silent
+ * cold start: every envelope this code writes carries the schema version and a
+ * digest over its own canonical findings and SHAs, and a payload that fails the
+ * digest is read as `corrupt`, never as an empty memory.
+ */
 export interface Previous {
   readonly findings: readonly PreviousFinding[];
   /** Every head SHA this thread has been reviewed against, oldest first. */
   readonly reviewedShas: readonly string[];
+  /** The envelope schema version this payload declares — always 2 when `remember` wrote it. */
+  readonly version?: 2;
+  /** Digest over findings + dispositions + SHAs; verifies a payload was ours and whole. */
+  readonly checksum?: string;
 }
 
 /** A candidate the model (or the preflight) produced, plus what the run decided became of it. */
 export interface Reconciled {
   readonly finding: Finding;
   readonly status: Status;
+  /** The maintainer's triage overlay, or null when nobody eligible has spoken. */
+  readonly disposition: Disposition | null;
 }
 
 /**
@@ -130,6 +177,10 @@ export function sameIntention(a: Finding, b: Finding): boolean {
  *   same fingerprint is `persists` — carried as-is, text unchanged;
  * - the same position with a different fingerprint is `changed` — the code
  *   moved under it, so the comment shows the delta rather than the echo;
+ * - a candidate with no position match but a match against an ACTIVE previous
+ *   finding by intention (rule + file) is `changed` too — the claim moved to a
+ *   new line rather than dying and being reborn, so it carries the old
+ *   finding's disposition instead of starting over;
  * - a candidate matching (by intention) a finding the previous run marked
  *   `resolved` is `reopened` — the claim is back, so the thread re-opens it;
  * - everything else is `created`.
@@ -139,7 +190,9 @@ export function sameIntention(a: Finding, b: Finding): boolean {
  * the claim did not survive the change. The comment renders it under a
  * "Resolved" heading (it stays part of the thread's history), and the payload
  * keeps it, marked resolved, so a reintroduction is later told apart from a
- * newborn claim.
+ * newborn claim. A disposition is keyed to intention, so it survives every
+ * status move: `changed` (line movement), `resolved`, and `reopened` all carry
+ * the old finding's disposition with them.
  *
  * **Resolved is tied to a diff that moved, never to model omission.** A review
  * that calls a finding resolved purely because this run's model did not
@@ -188,44 +241,127 @@ export function reconcile(
     if (atPosition !== undefined) {
       matched.add(findingFingerprint(atPosition));
       if (fp === findingFingerprint(atPosition)) {
-        out.push({ finding: candidate, status: "persists" });
+        out.push({ finding: candidate, status: "persists", disposition: atPosition.disposition });
       } else {
-        out.push({ finding: candidate, status: "changed" });
+        out.push({ finding: candidate, status: "changed", disposition: atPosition.disposition });
       }
+      continue;
+    }
+    // The claim moved: no position match, but an ACTIVE previous finding with
+    // the same intention (rule + file) exists. This is line movement, not a
+    // newborn claim — `changed`, and it carries the old disposition (see the
+    // reconcile module doc). Only one active intention may claim the candidate,
+    // or the match is ambiguous and the candidate reads as new.
+    const activeByIntention = active.filter((old) => sameIntention(old, candidate));
+    const activeOld = activeByIntention[0];
+    if (activeByIntention.length === 1 && activeOld !== undefined) {
+      matched.add(findingFingerprint(activeOld));
+      out.push({ finding: candidate, status: "changed", disposition: activeOld.disposition });
       continue;
     }
     const previouslyResolved = resolved.find((old) => sameIntention(old, candidate));
     if (previouslyResolved !== undefined) {
       matched.add(findingFingerprint(previouslyResolved));
-      out.push({ finding: candidate, status: "reopened" });
+      out.push({
+        finding: candidate,
+        status: "reopened",
+        disposition: previouslyResolved.disposition,
+      });
       continue;
     }
-    out.push({ finding: candidate, status: "created" });
+    out.push({ finding: candidate, status: "created", disposition: null });
   }
 
   for (const old of active) {
     const fp = findingFingerprint(old);
     if (matched.has(fp)) continue;
     if (doesNotStand(old)) {
-      out.push({ finding: old, status: "resolved" });
+      out.push({ finding: old, status: "resolved", disposition: old.disposition });
       continue;
     }
     // The evidence for the claim still stands — the model simply did not
     // re-cite it. Carry it forward unchanged rather than call a diff-move
     // that no diff made: `persists` keeps the thread stable on a reread.
-    out.push({ finding: old, status: "persists" });
+    out.push({ finding: old, status: "persists", disposition: old.disposition });
   }
 
   return out;
 }
 
 /**
- * What the next run should remember: the findings this run will show, each
- * marked resolved when this run resolved it, plus the head SHAs reviewed.
+ * The digest that makes a corrupted envelope LOUD.
+ *
+ * Every envelope `remember` writes carries this checksum, and `decodeEnvelope`
+ * recomputes it over the payload it reads. A payload whose digest does not
+ * match is not "an empty memory" — it is damage, and it is reported as such
+ * rather than silently cold-started past. The digest covers the canonical
+ * findings (fingerprint, resolved flag, resolving SHA and disposition) and the
+ * reviewed SHAs, so any alteration — a flipped resolved flag, a forged
+ * disposition, a truncated finding — fails the recomputation.
  */
-/** How many resolved findings the payload keeps, so the memory has a bounded tail. */
+export function envelopeChecksum(previous: Previous): string {
+  const findings = previous.findings
+    .map((entry) => {
+      const d = entry.disposition;
+      return [
+        findingFingerprint(entry),
+        entry.wasResolved ? "resolved" : "active",
+        entry.resolvedAtSha ?? "",
+        d === null ? "" : `${d.value}:${d.by}:${String(d.replyId)}`,
+      ].join("|");
+    })
+    .join("\n");
+  return fingerprint(`findings\n${findings}\nreviewedShas\n${previous.reviewedShas.join("\n")}`, [
+    "review",
+    "envelope",
+  ]);
+}
+
+/**
+ * The envelope's byte ceiling before compaction kicks in.
+ *
+ * GitHub's comment limit is 65,536 bytes and the comment carries the marker,
+ * the rendered review and the envelope, so the envelope alone is budgeted
+ * well below that — ~60,000 bytes. A payload that cannot be compacted back
+ * under it is thrown, loud, rather than silently truncated (D5).
+ */
+const ENVELOPE_BYTES = 60_000;
+
+function envelopeBytes(next: Previous): number {
+  return Buffer.byteLength(
+    JSON.stringify({ ...next, version: 2, checksum: envelopeChecksum(next) }),
+    "utf8",
+  );
+}
+
+/**
+ * How many resolved findings without a disposition the payload keeps, so the
+ * memory has a bounded tail on a long-lived pull request. Resolved findings
+ * WITH a disposition are exempt — a maintainer's triage never rolls off (D3).
+ */
 const MAX_REMEMBERED_RESOLVED = 8;
 
+/**
+ * What the next run should remember: the findings this run will show, each
+ * marked resolved when this run resolved it, plus the head SHAs reviewed.
+ *
+ * **The envelope is bounded.** GitHub's comment ceiling is the real bound, and
+ * the compaction order below keeps the payload under it without ever losing a
+ * maintainer's word (D3):
+ *
+ * 1. reviewed SHAs beyond the most recent one are evicted;
+ * 2. resolved findings *without* a disposition are evicted (the resolved tail
+ *    is machine memory — the old cap still applies with no dispositions to
+ *    protect);
+ * 3. resolved findings *with* a disposition are NEVER evicted — a maintainer's
+ *    triage never rolls off the memory, because a reintroduced claim that
+ *    carries it must not be handed back to the maintainer to say again.
+ *
+ * If evicting all machine memory still leaves the envelope over the ceiling,
+ * `remember` throws, naming the overflow — a payload that cannot be bounded is
+ * corruption-shaped, and a corruption is reported loudly (D5), never silently
+ * trimmed.
+ */
 export function remember(
   reconciled: readonly Reconciled[],
   headSha: string,
@@ -237,30 +373,74 @@ export function remember(
     if (entry.status === "resolved") {
       // The SHA this review resolved the finding at — the status claim names
       // the diff it is evidence of, so a later reader knows what moved.
-      findings.push({ ...entry.finding, wasResolved: true, resolvedAtSha: headSha });
+      findings.push({
+        ...entry.finding,
+        wasResolved: true,
+        resolvedAtSha: headSha,
+        disposition: entry.disposition,
+      });
       seen.add(findingFingerprint(entry.finding));
       continue;
     }
-    findings.push({ ...entry.finding, wasResolved: false });
+    findings.push({ ...entry.finding, wasResolved: false, disposition: entry.disposition });
     seen.add(findingFingerprint(entry.finding));
   }
   // Findings resolved in an earlier run but still in the payload stay there,
-  // so `reopened` keeps a memory to work against — capped so the payload does
-  // not grow without bound on a long-lived pull request that resolves many
-  // findings. The newest resolved findings are kept first; the oldest roll off
-  // and a reintroduction of one reads as `created`, which is the honest frame
-  // for a claim the payload no longer remembers resolving.
+  // so `reopened` keeps a memory to work against. The cap that follows bounds
+  // only resolved findings WITHOUT a disposition: resolved findings WITH a
+  // disposition are exempt, because a maintainer's triage is the one thing in
+  // the payload that never rolls off (D3). A reintroduction of an evicted
+  // claim reads as `created`, which is the honest frame for a claim the
+  // payload no longer remembers resolving.
   let keptResolved = 0;
   for (const old of previous.findings) {
     const fp = findingFingerprint(old);
-    if (old.wasResolved && !seen.has(fp) && keptResolved < MAX_REMEMBERED_RESOLVED) {
+    if (
+      old.wasResolved &&
+      !seen.has(fp) &&
+      old.disposition === null &&
+      keptResolved < MAX_REMEMBERED_RESOLVED
+    ) {
       findings.push(old);
       seen.add(fp);
       keptResolved += 1;
+    } else if (old.wasResolved && !seen.has(fp) && old.disposition !== null) {
+      findings.push(old);
+      seen.add(fp);
     }
   }
   const shas = previous.reviewedShas.includes(headSha)
     ? previous.reviewedShas
     : [...previous.reviewedShas, headSha].slice(-8);
-  return { findings, reviewedShas: shas };
+
+  let next: Previous = { findings, reviewedShas: shas };
+  if (envelopeBytes(next) <= ENVELOPE_BYTES) {
+    return { ...next, version: 2, checksum: envelopeChecksum(next) };
+  }
+
+  // Compaction stage 1: the reviewed-SHA tail is machine memory — keep the
+  // most recent SHA only.
+  next = { findings, reviewedShas: shas.slice(-1) };
+  if (envelopeBytes(next) <= ENVELOPE_BYTES) {
+    return { ...next, version: 2, checksum: envelopeChecksum(next) };
+  }
+
+  // Compaction stage 2: evict resolved findings without a disposition, oldest
+  // resolution first, until the payload fits. Resolved findings WITH a
+  // disposition stay — see the module doc.
+  const compacted: PreviousFinding[] = [];
+  for (const entry of next.findings) {
+    if (entry.wasResolved && entry.disposition === null) continue;
+    compacted.push(entry);
+  }
+  next = { findings: compacted, reviewedShas: next.reviewedShas };
+  if (envelopeBytes(next) > ENVELOPE_BYTES) {
+    throw new Error(
+      `review: the envelope cannot fit the comment ceiling — ${String(envelopeBytes(next))} bytes ` +
+        "after evicting every evictable SHA and resolved finding, with all maintained " +
+        "dispositions kept. A comment this large cannot be bounded, so it fails loud instead of " +
+        "being silently trimmed.",
+    );
+  }
+  return { ...next, version: 2, checksum: envelopeChecksum(next) };
 }
