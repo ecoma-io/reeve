@@ -872,6 +872,26 @@ describe("the action", () => {
     expect(stub.effects.comments[0]).toContain("> It regressed.");
   });
 
+  it("defangs mentions and cross-references in a model-published rationale", async () => {
+    // The rationale is model prose republished under the bot's identity — a
+    // mention or reference the verdict carries would notify and interlink a
+    // second time, from a trusted automation account. Sanitized on the way in,
+    // like every other posting duty.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, comment]"));
+    stub.answer = triaging(
+      verdict({ rationale: "per @alice, see #5 → GH-7; also https://example.com/x#42" }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    const comment = stub.effects.comments[0] ?? "";
+    // The prose reads the same, with every link-neutralising marker spliced in.
+    expect(comment).toContain("> per @<!---->alice, see #<!---->5 → G<!---->H-7;");
+    // A URL is passed through untouched — see `sanitize`'s REFERENCE comment.
+    expect(comment).toContain("https://example.com/x#42");
+  });
+
   it("says nothing on a rerun that applied nothing, so a thread gets one comment", async () => {
     // Idempotency without a marker: the second run's labels are already on the
     // thread, so enforcement refuses them all and there is nothing to announce.

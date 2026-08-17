@@ -37850,7 +37850,9 @@ function comment(outcome, done) {
     if (done.closed) parts.push(closeMarker.render(outcome.verdict.duplicateOf));
   }
   if (parts.length === 0) return "";
-  if (outcome.verdict.rationale.length > 0) parts.push("", `> ${outcome.verdict.rationale}`);
+  if (outcome.verdict.rationale.length > 0) {
+    parts.push("", `> ${sanitize2(outcome.verdict.rationale)}`);
+  }
   parts.push(
     "",
     "<sub>Proposed by a model and checked against this repository's own taxonomy. Correcting the labels is the intended way to disagree.</sub>"

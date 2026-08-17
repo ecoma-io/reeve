@@ -111,6 +111,7 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { recallCorrections } from "../../core/recall.js";
+import { sanitize } from "../../core/sanitize.js";
 import { screen } from "../../core/screen.js";
 import { sift } from "../../core/spam.js";
 import { ensureBranch, publishStatePr, type StateBranchApi } from "../../core/state-branch.js";
@@ -1293,7 +1294,15 @@ function comment(outcome: Outcome, done: Done): string {
   }
   if (parts.length === 0) return "";
 
-  if (outcome.verdict.rationale.length > 0) parts.push("", `> ${outcome.verdict.rationale}`);
+  // The rationale is model prose republished under the bot's own identity —
+  // every mention and cross-reference it carries would notify and interlink a
+  // second time, exactly what `sanitize` exists to stop (see its doc comment on
+  // the published block as a repost). Sanitized on the way in, like every other
+  // posting duty, so an injected "@alice, see #5 → GH-7" cannot ping a stranger
+  // from a trusted automation account.
+  if (outcome.verdict.rationale.length > 0) {
+    parts.push("", `> ${sanitize(outcome.verdict.rationale)}`);
+  }
   parts.push(
     "",
     "<sub>Proposed by a model and checked against this repository's own taxonomy. " +
