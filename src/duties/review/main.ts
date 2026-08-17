@@ -59,13 +59,7 @@ import { bounded, readCore, threadNumber, type Core } from "../../core/inputs.js
 import { type Language, parseLanguages } from "../../core/languages.js";
 
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-import {
-  reconcile,
-  remember,
-  type Finding,
-  type Previous,
-  type Reconciled,
-} from "./findings.js";
+import { reconcile, remember, type Finding, type Previous, type Reconciled } from "./findings.js";
 import { architectureFindings } from "./architecture.js";
 import {
   decodeEnvelope,
