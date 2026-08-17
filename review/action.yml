@@ -102,6 +102,19 @@ inputs:
     required: false
     default: .github/reeve-rules.yml
 
+  packs-path:
+    description: >-
+      A repo-relative path to the rule packs directory, holding reusable,
+      versioned review-policy files the rules file composes by reference
+      (`packs:` entries naming `namespace/name[@version]`). Packs are
+      repo-owned committed files — never fetched at runtime — describing review
+      policy only: rules, ignores, generated suffixes and blocked phrases.
+      They can never grant authority: a pack has no field for capabilities, and
+      the warrant stays the only source a duty's permissions are read from. A
+      referenced pack missing or malformed fails the run red, naming the pack.
+    required: false
+    default: .github/reeve-packs
+
   trigger:
     description: >-
       What kind of pull request this run reviews. `pr` — the default —

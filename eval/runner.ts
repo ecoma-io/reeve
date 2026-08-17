@@ -19,7 +19,7 @@
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import {
@@ -865,6 +865,14 @@ async function runReview(fixture: string, scratch: string): Promise<Line> {
     } else {
       await writeFile(join(scratch, ".github", "reeve-rules.yml"), scenario.rules);
     }
+    // Referenced packs live beside the rules file in the checkout — the run
+    // reads `packs-path` from `GITHUB_WORKSPACE`, so the fixture's pack files
+    // are flattened under `.github/reeve-packs` there.
+    for (const [rel, contents] of Object.entries(scenario.packs)) {
+      const target = join(scratch, ".github", "reeve-packs", rel);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, contents);
+    }
     const run = await runBundle(
       "review",
       stub.url,
@@ -886,6 +894,7 @@ const REVIEW_INPUTS: Record<string, string> = {
   models: "stub-model",
   warrant: "",
   "rules-path": ".github/reeve-rules.yml",
+  "packs-path": ".github/reeve-packs",
   trigger: "pr",
   "max-diff-chars": "none",
   confidence: "0.75",

@@ -89,6 +89,8 @@ export interface ReviewScenario {
   readonly files: readonly ReviewFile[];
   /** The rules file the run reads from the checkout. */
   readonly rules: string | null;
+  /** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
+  readonly packs: Record<string, string>;
   /** The review-stage model answer. */
   readonly verdict: string;
   /** The security pass's answer, when the fixture runs the `deep` profile. */
@@ -111,6 +113,8 @@ export interface ReviewFixture {
   readonly files: readonly ReviewFile[];
   /** The rules file to write into the checkout, or absent for the default rules. */
   readonly rules?: string;
+  /** Pack files to write into the checkout, keyed by `namespace/name.yml`. */
+  readonly packs?: Record<string, string>;
   /** Fields the review-stage verdict JSON spreads over an empty verdict. */
   readonly "verdict-over"?: Record<string, unknown>;
   /** Fields the security pass's verdict JSON spreads over an empty verdict. */
@@ -288,6 +292,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Revie
     },
     files: fixture.files,
     rules: fixture.rules ?? null,
+    packs: fixture.packs ?? {},
     verdict: verdictOf(fixture["verdict-over"] ?? {}),
     securityVerdict: verdictOf(fixture["security-verdict-over"] ?? {}),
     detect: fixture.detect ?? "en",

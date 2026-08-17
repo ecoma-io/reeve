@@ -23,7 +23,7 @@
  * nothing in this file reaches a network or a model.
  */
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -338,7 +338,12 @@ interface Run {
  * defaults, which the runner supplies and this file never sees. A case names
  * only what it changes.
  */
-function baseInputs(stub: Stub, warrant: string, rules: string): Record<string, string> {
+function baseInputs(
+  stub: Stub,
+  warrant: string,
+  rules: string,
+  packs: string,
+): Record<string, string> {
   return {
     "github-token": "stub-token",
     number: "42",
@@ -347,6 +352,7 @@ function baseInputs(stub: Stub, warrant: string, rules: string): Record<string, 
     models: "stub-model",
     warrant,
     "rules-path": rules,
+    "packs-path": packs,
     trigger: "pr",
     "max-diff-chars": "4000",
     confidence: "0.6",
@@ -362,6 +368,7 @@ function baseInputs(stub: Stub, warrant: string, rules: string): Record<string, 
 let scratch: string;
 let warrantPath: string;
 let rulesPath: string;
+let packsPath: string;
 
 async function runAction(
   stub: Stub,
@@ -383,7 +390,7 @@ async function runAction(
     ...extra,
   };
   for (const [name, value] of Object.entries({
-    ...baseInputs(stub, warrantPath, rulesPath),
+    ...baseInputs(stub, warrantPath, rulesPath, packsPath),
     ...inputs,
   })) {
     env[`INPUT_${name.toUpperCase()}`] = value;
@@ -432,6 +439,7 @@ beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), "reeve-review-"));
   warrantPath = join(scratch, "reeve.yml");
   rulesPath = join(scratch, "reeve-rules.yml");
+  packsPath = join(scratch, "reeve-packs");
   await writeFile(warrantPath, WARRANT);
 });
 
@@ -828,6 +836,140 @@ describe("the action", () => {
     expect(posted).toContain("No issues to report");
   });
 
+  it("composes a referenced pack's blocked phrase into the deterministic findings", async () => {
+    // The rules file composes a pack by reference; the pack's `blocked`
+    // phrase fires on the diff before any model is asked.
+    await writeFile(rulesPath, ["version: 1", "packs:", "  - pack: go/concurrency@1.0"].join("\n"));
+    await mkdir(join(packsPath, "go"), { recursive: true });
+    await writeFile(
+      join(packsPath, "go", "concurrency.yml"),
+      [
+        "version: 1.0",
+        "blocked:",
+        "  - phrase: TODO-FIXME",
+        "    severity: warning",
+        "    note: From the pack.",
+      ].join("\n"),
+    );
+    stub.pull.files = [
+      {
+        filename: "src/a.ts",
+        status: "modified",
+        additions: 2,
+        deletions: 1,
+        patch: "@@ -1 +12,2 @@\n+const todo = TODO-FIXME;\n+const two = 2;",
+      },
+    ];
+    stub.answer = stageAnswer({ review: JSON.stringify({ findings: [], confidence: 0.9 }) });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(1);
+    const posted = stub.comments[0]?.body ?? "";
+    expect(posted).toContain("### New findings (1)");
+    expect(posted).toContain("From the pack.");
+    expect(run.outputs.findings).toBe("1");
+  });
+
+  it("fails red when a referenced pack is missing", async () => {
+    await writeFile(rulesPath, ["version: 1", "packs:", "  - pack: security/owasp"].join("\n"));
+    stub.pull.files = [
+      {
+        filename: "src/a.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+const x = 1;",
+      },
+    ];
+    stub.answer = stageAnswer({ review: JSON.stringify({ findings: [], confidence: 0.9 }) });
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("security/owasp");
+  });
+
+  it("fails red when a pack attempts to carry authority", async () => {
+    await writeFile(rulesPath, ["version: 1", "packs:", "  - pack: evil/attempt"].join("\n"));
+    await mkdir(join(packsPath, "evil"), { recursive: true });
+    await writeFile(join(packsPath, "evil", "attempt.yml"), "duties:\n  review: [comment]\n");
+    stub.pull.files = [
+      {
+        filename: "src/a.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+const x = 1;",
+      },
+    ];
+    stub.answer = stageAnswer({ review: JSON.stringify({ findings: [], confidence: 0.9 }) });
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("evil/attempt");
+  });
+
+  it("lets a local rule id override the same id a pack defines", async () => {
+    await writeFile(
+      rulesPath,
+      [
+        "version: 1",
+        "rules:",
+        "  - id: shared",
+        "    name: Local shared",
+        "    body: The local definition wins.",
+        "packs:",
+        "  - pack: go/concurrency",
+      ].join("\n"),
+    );
+    await mkdir(join(packsPath, "go"), { recursive: true });
+    await writeFile(
+      join(packsPath, "go", "concurrency.yml"),
+      [
+        "rules:",
+        "  - id: shared",
+        "    name: Pack shared",
+        "    body: The pack definition loses.",
+      ].join("\n"),
+    );
+    stub.pull.files = [
+      {
+        filename: "src/a.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+const x = 1;",
+      },
+    ];
+    // The model cites the shared rule; the folded rule text a finding renders
+    // comes from the composed pool, where the local definition won.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "shared",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 1,
+            snippet: "const x = 1;",
+            body: "The local story.",
+          },
+        ],
+        confidence: 0.9,
+      }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments[0]?.body ?? "").toContain("The local story.");
+    expect(stub.asked.find((ask) => stageOf(ask) === "review")?.system ?? "").toContain(
+      "Local shared",
+    );
+  });
   it("withholds when a rules value is the sole reason nothing was shown — a rules-skipped diff is never stamped clean", async () => {
     // The rules file's own list is the only thing keeping every file from the
     // model. The empty chrome must not vouch for a diff nothing was shown of.

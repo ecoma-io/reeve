@@ -140,6 +140,7 @@ Every input `review/action.yml` declares.
 | `models`          | **yes**  | —                           | Model ids, comma or newline separated, in preference order. The roster that reads the diff.                                                                                                                                                                       |
 | `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `comment` is granted here, under `duties:`. A missing file grants `review` nothing, same as one that is silent about it.                                                                                                              |
 | `rules-path`      | no       | `.github/reeve-rules.yml`   | The repository's own review rules, in the same YAML grammar the warrant uses. Missing is an empty rules set, not an error — the built-in default rules alone review the diff.                                                                                     |
+| `packs-path`      | no       | `.github/reeve-packs`       | Where the rule packs this rules file references live — `<namespace>/<name>.yml` under it. A `packs:` reference resolves here; a missing or non-matching pack fails red. See [Rule packs](../rule-packs.md).                                                       |
 | `trigger`         | no       | `pr`                        | `pr` — the default — waits for ready-for-review and skips a draft green, with the reason in the job summary. `prod` also reviews drafts.                                                                                                                          |
 | `max-diff-chars`  | no       | `4000`                      | The whole-run budget of diff text one review may carry to the model, in characters — cumulative across files, walked in listing order, with the first file that does not fit and everything after it skipped as capped. `none` removes the bound. `0` is refused. |
 | `confidence`      | no       | `0.6`                       | The floor for the whole review's reported confidence, between 0 and 1 — one number for the whole answer, not a per-finding bar. Below it, findings are still reconciled and shown in the job summary, but the comment is withheld.                                |
@@ -170,6 +171,18 @@ request it came from, are a stranger's words and stay behind the sanitising
 boundary regardless. A repository that has not written the file yet is the
 cold start — reviewed by the built-in default rules alone — not a
 misconfiguration.
+
+**Rule packs let a rules file reuse policy by reference.** A `packs:` entry —
+`- pack: security/owasp@1` — resolves to `<packs-path>/security/owasp.yml` in
+the same pinned checkout, and its rules, ignores, generated suffixes and
+blocked phrases compose with the local file under
+[composition and precedence](../rule-packs.md#composition-and-precedence):
+the local rules file stays authoritative, then packs in reference order, then
+the built-in defaults. A pack is committed repo text on the same shelf as the
+rules file — it enters the prompt unwrapped, it is never fetched, and it can
+never grant authority: a pack carrying `duties:`, `capabilities:`, `warrant:`
+or `labels:` is refused red. The full grammar — references, version pins, hard
+limits, and the security model — is in [Rule packs](../rule-packs.md).
 
 **`confidence` is a whole-answer floor worth measuring, not inheriting.**
 The model states one confidence for the entire review — not a per-finding
@@ -361,18 +374,19 @@ watch how it does.
 
 ## Failure behavior
 
-| What happened                                                    | What you get                                                          |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------- |
-| A blocked phrase was in the diff                                 | Deterministic findings, `commented: true` when `comment` is granted   |
-| Confidence below the floor                                       | Findings reconciled and on the summary, `commented: false`, **green** |
-| `comment` not granted                                            | Findings on the summary, `commented: false`, **green**                |
-| No readable verdict, files were shown                            | Comment withheld, summary says why, **green**                         |
-| Every file skipped by the rules file                             | Comment withheld, coverage names each file and why, **green**         |
-| Every model failed on capacity                                   | `starved: true`, whatever survived, **green**                         |
-| A draft under `trigger: pr`, merged, closed, a Reeve proposal PR | `note` set, no model asked, **green**                                 |
-| The warrant or a readable rules file does not parse              | **Red**, naming the file                                              |
-| The pull request cannot be read                                  | **Red**                                                               |
-| This duty's own comment could not be found with certainty        | Comment withheld, **green**                                           |
+| What happened                                                        | What you get                                                          |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| A blocked phrase was in the diff                                     | Deterministic findings, `commented: true` when `comment` is granted   |
+| Confidence below the floor                                           | Findings reconciled and on the summary, `commented: false`, **green** |
+| `comment` not granted                                                | Findings on the summary, `commented: false`, **green**                |
+| No readable verdict, files were shown                                | Comment withheld, summary says why, **green**                         |
+| Every file skipped by the rules file                                 | Comment withheld, coverage names each file and why, **green**         |
+| Every model failed on capacity                                       | `starved: true`, whatever survived, **green**                         |
+| A draft under `trigger: pr`, merged, closed, a Reeve proposal PR     | `note` set, no model asked, **green**                                 |
+| The warrant or a readable rules file does not parse                  | **Red**, naming the file                                              |
+| A referenced pack is missing, over-budget, or does not match its pin | **Red**, naming the pack and the version it declares                  |
+| The pull request cannot be read                                      | **Red**                                                               |
+| This duty's own comment could not be found with certainty            | Comment withheld, **green**                                           |
 
 **The failure mode of this duty is a withheld write, never a wrong or a
 doubled comment.** Every branch above ends without posting, or posts exactly
@@ -426,6 +440,14 @@ full arithmetic.
   alone. When a rules value would be the sole reason the review has nothing to
   say, the review is withheld rather than stamped clean (see
   [Failure behavior](#failure-behavior)).
+- **Rule packs are the same shelf and the same boundary.** A pack is committed
+  repo text read from the same pinned checkout, parsed by the same grammar,
+  and it enters the prompt unwrapped like the rules file — but a pack can
+  never grant authority: composition yields only rules, ignores, generated
+  suffixes and blocked phrases, and a pack that names `duties:`,
+  `capabilities:`, `warrant:` or `labels:` is refused red. Referenced packs
+  are pinned and never optional, so a stale or missing pack is a red run, not
+  a silent empty review (see [Rule packs](../rule-packs.md)).
 - **The review comment is visibly machine-written, unconditionally.** The
   fixed closing line — "This review was written by a model, not decided by a
   maintainer — read each finding as a lead to check" — is unstrippable: there
