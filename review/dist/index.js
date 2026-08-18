@@ -38193,7 +38193,7 @@ async function listOwnedThreads(api, at) {
     lastFull = data.length === PAGE;
     if (!lastFull) break;
   }
-  return { threads, uncertain: threads.length === 0 && lastFull };
+  return { threads, uncertain: lastFull };
 }
 function planThreads(reconciled, standing, owned) {
   const creates = [];

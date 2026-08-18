@@ -212,17 +212,16 @@ describe("syncThreads — duplicate-write hunting", () => {
     expect(stub.comments).toHaveLength(1000);
   });
 
-  it("reports_certain_when_owned_threads_were_found_even_though_the_walk_hit_the_ceiling", async () => {
-    // The conjunct nothing pinned. `listOwnedThreads` reports
-    // `uncertain: threads.length === 0 && lastFull`, so finding ANY owned
-    // thread suppresses the uncertainty even when the walk stopped at the
-    // ceiling with a full page — i.e. even when more owned threads may sit
-    // past it. Replacing the expression with bare `lastFull` left the whole
-    // suite green, which is why this case exists.
+  it("reports_uncertain_when_the_walk_hit_the_ceiling_even_though_owned_threads_were_found", async () => {
+    // `uncertain` reports the WALK, not the result. It once read
+    // `threads.length === 0 && lastFull`, so finding ANY owned thread
+    // suppressed the uncertainty even when the walk stopped at the ceiling
+    // with a full page — i.e. even when more owned threads may sit past it.
+    // Replacing that expression with bare `lastFull` left the whole suite
+    // green, which is why this case exists.
     //
-    // ADJUDICATE — I believe the conjunct is WRONG, and this pins CURRENT
-    // behaviour rather than changing it. The argument, from the two producers
-    // side by side:
+    // Adjudicated 2026-08-18: the conjunct was WRONG. The argument is the two
+    // producers side by side:
     //
     //   `publish.ts`'s `readThread` sets `uncertain` from the WALK ALONE
     //   (`if (page === MAX_COMMENT_PAGES) uncertain = true`) and applies the
@@ -232,14 +231,14 @@ describe("syncThreads — duplicate-write hunting", () => {
     //   eliminates the uncertainty — there is nothing else left to find.
     //
     //   Inline threads are a COLLECTION: one per anchorable finding. Finding
-    //   some says nothing about whether more exist past the ceiling. Here the
-    //   singleton narrowing has been folded into the PRODUCER, where it
-    //   answers a question the walk cannot answer.
+    //   some says nothing about whether more exist past the ceiling. The
+    //   singleton narrowing had been folded into the PRODUCER, where it
+    //   answered a question the walk cannot answer.
     //
-    // Consequence, which is why it outranks its reachability: on a pull
+    // Consequence, which is why it outranked its reachability: on a pull
     // request with more than 1000 review comments, one owned thread inside the
-    // first 1000 makes the run report certainty it does not have, and every
-    // finding whose thread sits past the ceiling is created again — silently,
+    // first 1000 made the run report certainty it did not have, and every
+    // finding whose thread sat past the ceiling was created again — silently,
     // on every run, with `created` counts that read as ordinary work.
     const f = finding({ id: "mine" });
     const owned = { id: 42, body: threadBody(f), path: "a.ts", line: 12 };
@@ -251,16 +250,20 @@ describe("syncThreads — duplicate-write hunting", () => {
     expect(stub.pages).toBe(10);
     // ...and it really did find one of this duty's own threads.
     expect(listed.threads.map((thread) => thread.id)).toEqual([42]);
-    // Current behaviour: the uncertainty is suppressed by the find.
-    expect(listed.uncertain).toBe(false);
+    // The find does not discharge the walk's uncertainty.
+    expect(listed.uncertain).toBe(true);
   });
 
-  it("writes_against_a_truncated_listing_once_any_owned_thread_was_found", async () => {
-    // The consequence of the conjunct, at the boundary that performs the
-    // write. Because `uncertain` is false, `syncThreads` does not withhold: a
-    // finding whose own thread may sit past the ceiling is created, and the
-    // next run repeats it. Pinned as current behaviour alongside the flag, so
-    // a ruling changes both together and neither can drift alone.
+  it("withholds_thread_writes_when_the_walk_hit_the_ceiling_even_though_owned_threads_were_found", async () => {
+    // The same decision at the boundary that performs the write. Paired with
+    // the flag deliberately, so neither can drift alone: a finding whose own
+    // thread may sit past the ceiling is NOT created, because creating it is
+    // how the duplicate is made and the next run would repeat it.
+    //
+    // The cost is graceful and already modelled: on such a listing inline
+    // threads are withheld entirely, and the summary comment — a separate
+    // write — still renders every finding. That is the documented fallback
+    // for a finding that cannot be anchored.
     const found = finding({ id: "found", line: 12 });
     const beyond = finding({ id: "beyond", line: 11 });
     const stub = stubOf([
@@ -279,12 +282,11 @@ describe("syncThreads — duplicate-write hunting", () => {
       SHA,
     );
 
-    expect(out.uncertain).toBe(false);
-    // The thread it could see is left alone; the one it could not see is
-    // created — which is the duplicate, if a thread for it exists past page 10.
+    expect(out.uncertain).toBe(true);
     expect(out.updated).toBe(0);
-    expect(out.created).toBe(1);
-    expect(stub.comments).toHaveLength(1001);
+    expect(out.created).toBe(0);
+    // Nothing was written against a listing that could not be trusted.
+    expect(stub.comments).toHaveLength(1000);
   });
 
   it("dry_run_reports_no_thread_writes_when_the_listing_is_uncertain", async () => {

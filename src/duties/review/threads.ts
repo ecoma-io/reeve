@@ -106,9 +106,20 @@ export interface OwnedThread {
 export interface OwnedThreads {
   readonly threads: readonly OwnedThread[];
   /**
-   * Whether the walk ended at a full page with no owned thread found — a
-   * pathological listing could hide one past the walk's bound, so the caller
-   * withholds thread writes rather than risk a duplicate.
+   * Whether the walk ended at a full page — the listing may be truncated, so
+   * an owned thread could sit past the bound and the caller withholds thread
+   * writes rather than risk a duplicate.
+   *
+   * The walk alone decides this. Having found *some* owned threads does not
+   * discharge it: threads are one per anchorable finding, so finding a few
+   * says nothing about whether more exist past the ceiling. (`publish.ts`
+   * composes `existing === null && uncertain` at its own consumption site
+   * instead, which is sound there because the summary is a singleton —
+   * finding the one owned comment really does mean nothing is left to find.)
+   *
+   * This once read `threads.length === 0 && lastFull`, which suppressed the
+   * signal as soon as any owned thread was found. Adjudicated 2026-08-18: a
+   * producer/consumer conflation, and the walk alone decides.
    */
   readonly uncertain: boolean;
 }
@@ -223,7 +234,7 @@ export async function listOwnedThreads(api: ReviewThreadApi, at: Location): Prom
     lastFull = data.length === PAGE;
     if (!lastFull) break;
   }
-  return { threads, uncertain: threads.length === 0 && lastFull };
+  return { threads, uncertain: lastFull };
 }
 
 /**
