@@ -101,11 +101,12 @@ export type Decoded =
  * Validation is strict per version:
  *
  * - **no payload / empty envelope** → `none`, a genuine cold start.
- * - **no `version`** → `none`, a cold start. A payload with no schema version
- *   is not migrated on trust: doing so skipped every check `version: 2`
- *   applies and then re-sealed the result as a valid v2. See the routing
- *   comment in `decodeEnvelope` for the measured cases and why discarding a
- *   genuine legacy payload is bounded.
+ * - **no `version`** → `corrupt`, which the caller turns into a cold start it
+ *   announces. A payload with no schema version is not migrated on trust:
+ *   doing so skipped every check `version: 2` applies and then re-sealed the
+ *   result as a valid v2. It is reported rather than dropped silently because
+ *   state was found and discarded, and because the branch should never fire
+ *   in normal operation. See the routing comment in `decodeEnvelope`.
  * - **`version: 2`** → every existing field check, plus `line` must be `null`
  *   or an integer `> 0`, `severity` must be in the union, and `disposition`,
  *   when present, must be a valid shape. The checksum is recomputed over
@@ -150,7 +151,24 @@ export function decodeEnvelope(payload: string | null): Decoded {
   // first review after that upgrade rewrites it. Cold start is an
   // already-supported state — the run rebuilds its memory from the thread,
   // which is what a first-ever review does.
-  if (map.version === undefined) return { kind: "none" };
+  //
+  // `corrupt`, not `none`, and the difference is the whole point: `none` is
+  // "there was no state", which is silent and correct for a first review.
+  // Here there WAS state and this run threw it away, which a reader has to be
+  // able to learn. Because the legacy window is closed, this branch should
+  // essentially never fire in normal operation — so if it does, that is worth
+  // saying out loud: either a thread is carrying very stale state, or
+  // something is writing envelopes this project did not write.
+  //
+  // `corrupt` costs nothing but the note: the caller rebuilds from the thread
+  // on this path exactly as it does on `none`, and the run stays green.
+  if (map.version === undefined) {
+    return {
+      kind: "corrupt",
+      reason:
+        "it declares no schema version, so there is no digest to verify it against and it was not trusted",
+    };
+  }
   return validateV2(map);
 }
 

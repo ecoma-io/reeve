@@ -319,7 +319,7 @@ describe("the reviewed-SHA list is read defensively", () => {
   });
 });
 
-describe("DOWNGRADE — omitting `version` is a cold start, never a migration", () => {
+describe("DOWNGRADE — omitting `version` is a loud cold start, never a migration", () => {
   // P0, RULED AND CLOSED. `decodeEnvelope` used to route on one field:
   // `map.version === undefined` sent the payload to `migrateV1`, which COMPUTED
   // a checksum rather than verifying one and applied a strictly weaker
@@ -341,6 +341,20 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
   // narrowed: each asserts that the tamper no longer decodes, and the twin v2
   // assertion beside it shows the two versions now agree.
 
+  /**
+   * What a versionless payload decodes to: a LOUD cold start.
+   *
+   * `corrupt`, not `none`, so the caller announces that state was found and
+   * discarded — a silent branch that should never fire is a branch nobody
+   * learns fired. The reason must name the real cause; saying "failed its
+   * checksum" here would be false, because a payload with no version has no
+   * digest to fail.
+   */
+  const COLD_START = {
+    kind: "corrupt",
+    reason: expect.stringContaining("declares no schema version") as unknown as string,
+  };
+
   /** The same tampered body, offered with and without a `version` key. */
   function bothWays(body: Record<string, unknown>): { v2: string; v1: string } {
     const honest = { findings: [previousFinding()], reviewedShas: [SHA] };
@@ -356,7 +370,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
       reviewedShas: [SHA],
     });
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
-    expect(decodeEnvelope(v1).kind).toBe("none");
+    expect(decodeEnvelope(v1)).toMatchObject(COLD_START);
   });
 
   it("a_reviewed_sha_appended_in_place_is_corrupt_as_v2_and_no_longer_migrates", () => {
@@ -368,7 +382,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
     // The forged history no longer reaches the run at all — there is no
     // `previous` to carry it, so the summary's "Previously reviewed at" row
     // cannot name a SHA this thread was never reviewed against.
-    expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
+    expect(decodeEnvelope(v1)).toMatchObject(COLD_START);
   });
 
   it("an_unknown_severity_is_corrupt_as_v2_and_no_longer_migrates", () => {
@@ -379,7 +393,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
     // The out-of-union value used to ride onto the finding, where
     // `findingLine` prints `finding.severity` verbatim into the comment.
-    expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
+    expect(decodeEnvelope(v1)).toMatchObject(COLD_START);
   });
 
   it("a_line_of_zero_or_a_negative_line_is_corrupt_as_v2_and_no_longer_migrates", () => {
@@ -389,7 +403,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
         reviewedShas: [SHA],
       });
       expect(decodeEnvelope(v2).kind).toBe("corrupt");
-      expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
+      expect(decodeEnvelope(v1)).toMatchObject(COLD_START);
     }
   });
 
@@ -411,7 +425,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
     // Nothing to render: the invented body never becomes a `previous` finding,
     // so `reconcile` has no entry to report as `persists` or `resolved`.
-    expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
+    expect(decodeEnvelope(v1)).toMatchObject(COLD_START);
   });
 
   it("a_v1_tamper_can_no_longer_launder_itself_into_a_validly_sealed_v2_envelope", () => {
@@ -424,7 +438,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
       findings: [{ ...previousFinding(), wasResolved: true, id: "invented" }],
       reviewedShas: [SHA],
     });
-    expect(decodeEnvelope(tampered)).toEqual({ kind: "none" });
+    expect(decodeEnvelope(tampered)).toMatchObject(COLD_START);
   });
 
   it("the_checksum_is_a_damage_detector_not_a_forgery_defence_in_either_version", () => {
@@ -453,7 +467,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
       findings: [{ ...previousFinding(), disposition: DISPOSITION }],
       reviewedShas: [SHA],
     });
-    expect(decodeEnvelope(withForged)).toEqual({ kind: "none" });
+    expect(decodeEnvelope(withForged)).toMatchObject(COLD_START);
   });
 
   it("a_versionless_payload_that_would_have_migrated_cleanly_is_still_a_cold_start", () => {
@@ -467,7 +481,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
           reviewedShas: [SHA],
         }),
       ),
-    ).toEqual({ kind: "none" });
+    ).toMatchObject(COLD_START);
   });
 
   it("a_versionless_payload_is_a_cold_start_whether_or_not_its_findings_are_well_formed", () => {
@@ -478,8 +492,21 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
       { findings: [previousFinding(), { id: "half" }], reviewedShas: [] },
       { findings: [{ ...previousFinding(), line: 2.5 }], reviewedShas: [] },
     ]) {
-      expect(decodeEnvelope(rawPayload(body))).toEqual({ kind: "none" });
+      expect(decodeEnvelope(rawPayload(body))).toMatchObject(COLD_START);
     }
+  });
+
+  it("the_reason_names_the_missing_version_and_never_claims_a_checksum_failure", () => {
+    // The exact inaccuracy fixed one line away in `readEnvelope` must not be
+    // reintroduced here: a payload with no version never reached a checksum,
+    // so saying it failed one would send a reader looking for damage that
+    // does not exist.
+    const out = decodeEnvelope(rawPayload({ findings: [], reviewedShas: [] }));
+    expect(out.kind).toBe("corrupt");
+    const said = reasonOf(out);
+    expect(said).toContain("declares no schema version");
+    expect(said).not.toContain("checksum");
+    expect(said).not.toContain("damaged");
   });
 
   it("an_honest_versionless_envelope_is_also_a_cold_start_not_an_error", () => {
@@ -487,7 +514,7 @@ describe("DOWNGRADE — omitting `version` is a cold start, never a migration", 
     // too — it is not reported as damage, because it is not damaged. The run
     // rebuilds from the thread, which is the state a first-ever review is in.
     const honest = rawPayload({ findings: [previousFinding()], reviewedShas: [SHA] });
-    expect(decodeEnvelope(honest)).toEqual({ kind: "none" });
+    expect(decodeEnvelope(honest)).toMatchObject(COLD_START);
   });
 });
 
