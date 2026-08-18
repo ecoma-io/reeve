@@ -49,6 +49,7 @@
     "test": "vitest run --coverage",
     "test:contract": "vitest run --config eval/contract/vitest.config.ts",
     "test:mutation": "node tools/mutation.mjs",
+    "test:mutation:fast": "node tools/mutation.mjs --stage fast",
     "test:watch": "vitest",
     "build": "node tools/build.mjs",
     "try": "node tools/try.mjs",

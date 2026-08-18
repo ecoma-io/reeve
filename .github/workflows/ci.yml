@@ -140,6 +140,54 @@ jobs:
             exit 1
           fi
 
+  # Mutation testing, in its own job on its own runner rather than a step in
+  # `Verify`. Three reasons, in order of how much they cost to get wrong:
+  #
+  # 1. The harness *renames source files* while it runs (tools/mutation.mjs
+  #    moves a file aside, writes a mutated copy, runs vitest, puts it back).
+  #    Anything else reading `src/` in the same checkout at the same moment
+  #    reads a file that is briefly not there. A separate runner is the only
+  #    isolation that is actually isolation.
+  # 2. It runs in parallel with `Verify`, so the wall clock the pipeline adds
+  #    is zero — the mutation table takes well under a minute and `Verify`
+  #    takes minutes.
+  # 3. It gets its own check name. "a mutation survived" and "a test failed"
+  #    are different findings with different owners, and a reviewer should not
+  #    have to open a log to tell which one happened.
+  #
+  # The full table runs on every event, including pull requests. That is a
+  # measurement, not an oversight: the whole table is 23 mutations and roughly
+  # half a minute of vitest, against a `Verify` job that is minutes of test
+  # suite. `tools/mutation.mjs --stage fast` exists for the local pre-push loop
+  # and as the switch to reach for if the table ever grows enough to matter —
+  # see docs/internal/ci-gates.md for the threshold at which to flip it and the
+  # exact edit. A gate that only runs nightly is a gate whose regression merges.
+  mutation:
+    name: Mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Fails on a SURVIVED row (the suite does not assert what the mutation
+      # breaks) and on a STALE row (the mutation's `from` string no longer
+      # matches its file exactly once, so the mutation silently never ran).
+      # Staleness is the failure worth naming here: a gate that stopped
+      # applying reports nothing, and reported nothing for as long as nobody
+      # looked.
+      - run: pnpm test:mutation
+
   ci-gate:
     name: ci-gate
     # The single check name a branch ruleset requires, on pull requests and in
@@ -147,7 +195,7 @@ jobs:
     # while the job list is not: add a job to `needs` and the gate tightens
     # without anyone editing repository settings — and forgetting to add it is
     # the only way to widen what green means, which is visible in this file.
-    needs: [verify]
+    needs: [verify, mutation]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
