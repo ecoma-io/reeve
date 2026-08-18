@@ -26,7 +26,7 @@
  * from third-party registries by `gatherEvidence`, none of which anybody in
  * the repository wrote.
  *
- * ## Why this test does not fix it
+ * ## Why this test does not fix the turn-role divergence
  *
  * Moving an injection-fence rule between turn roles changes the prompt, and a
  * prompt change needs eval evidence rather than a test author's judgement.
@@ -102,12 +102,20 @@ function proposal(): UpdateProposal {
 }
 
 /**
- * The message array exactly as `dependa/main.ts:383` builds it.
+ * The message array in the shape `dependa/main.ts:384` builds it.
  *
- * Rebuilt here rather than imported, because the rotation it feeds lives
- * inside the entry point, which calls `run()` at import. Keeping the shape in
- * one expression is what makes the divergence legible: it is one `user` turn,
- * and there is no second element.
+ * **This helper REBUILDS the call; it does not observe it.** That limit is
+ * not incidental — it is how a real defect got past this file. `main.ts:379`
+ * passed the injection-fence rule as an OPTIONAL argument, the caller was made
+ * to drop it, and every assertion here still passed, because this helper
+ * constructs its own arguments and never reads what `main.ts` sends.
+ *
+ * So what this file pins is the PROMPT SHAPE — which turn roles are used, and
+ * that `interpretationPrompt` renders the rule when handed one. What the
+ * CALLER actually sends is pinned at the integration tier instead, by
+ * `main.integration.test.ts`'s "injection fence around third-party evidence"
+ * block, which reads the request the bundle really made. Both are needed and
+ * neither substitutes for the other.
  */
 function messagesAsMainSendsThem(
   enclosed = enclose("untrusted-evidence", "release notes here"),

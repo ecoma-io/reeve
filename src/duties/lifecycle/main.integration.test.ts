@@ -899,3 +899,113 @@ describe("the Reeve-proposal recursion guard", () => {
     expect(stub.effects.applied).toEqual([{ number: 42, label: "stale" }]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The `label` gate on the un-staling path (`main.ts:370`).
+//
+// Every existing case in this file asserts `unstaled === "0"` — none has ever
+// observed a removal actually happening. So the gate around it was
+// unobservable rather than unasserted: an auditor forced it open and the whole
+// repository stayed green, because no fixture ever reached the loop it guards.
+//
+// The clock-hand exception is the narrowest write this duty has — the one
+// place Reeve removes a label at all — and D3 makes it narrow on purpose: only
+// a label this run's own actor applied, only in the direction of un-staling.
+// A removal performed without the `label` grant would be a write outside the
+// warrant on the single path where a write is hardest to justify.
+// ---------------------------------------------------------------------------
+
+describe("the `label` gate on un-staling", () => {
+  /**
+   * A track whose `when:` label is absent, so it has no anchor to run from —
+   * `trackStart` returns null (`clock.ts:109`) and the whole track's labels are
+   * collected for un-staling. That is the un-stale path with the fewest moving
+   * parts: the step never fires, and the leftover label is ours to clean up.
+   */
+  const WHEN_WARRANT = [
+    "version: 1",
+    "labels:",
+    "  - name: bug",
+    "    description: A defect.",
+    "lifecycle:",
+    "  tracks:",
+    "    - name: stale",
+    "      when: needs-attention",
+    "      steps:",
+    "        - label: stale",
+    "          after: 14d",
+    "duties:",
+    "  lifecycle: [label, comment, close]",
+  ].join("\n");
+
+  /** A thread carrying a `stale` this run's own actor applied, on a track with no anchor. */
+  async function ownStaleWithoutAnchor(): Promise<void> {
+    await writeFile(warrantPath, WHEN_WARRANT);
+    stub.threads.set(
+      42,
+      thread({
+        // No `needs-attention`, so the track never started; `stale` is a
+        // leftover from a run when it had.
+        labels: ["stale"],
+        events: [
+          {
+            event: "labeled",
+            label: "stale",
+            login: stub.ownLogin,
+            bot: true,
+            createdAt: daysAgo(30).toISOString(),
+          },
+        ],
+      }),
+    );
+  }
+
+  it("removes the label this run's own actor left behind, when `label` is granted", async () => {
+    // The case that makes the gate observable at all. Without it every
+    // assertion below passes against a duty that simply never removes
+    // anything — which is exactly the state this file was in.
+    await ownStaleWithoutAnchor();
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([{ number: 42, label: "stale" }]);
+    expect(run.outputs.unstaled).toBe("1");
+  });
+
+  it("removes nothing when `label` is withheld", async () => {
+    await ownStaleWithoutAnchor();
+    await writeFile(
+      warrantPath,
+      WHEN_WARRANT.replace("lifecycle: [label, comment, close]", "lifecycle: [comment, close]"),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([]);
+    expect(run.outputs.unstaled).toBe("0");
+  });
+
+  it("says how many labels it left standing rather than removing them silently", async () => {
+    await ownStaleWithoutAnchor();
+    await writeFile(
+      warrantPath,
+      WHEN_WARRANT.replace("lifecycle: [label, comment, close]", "lifecycle: [comment, close]"),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.log + run.summary).toContain("`label` is withheld");
+  });
+
+  it("removes nothing on a dry run, but still reports what it would have removed", async () => {
+    await ownStaleWithoutAnchor();
+
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([]);
+    expect(run.outputs.unstaled).toBe("1");
+  });
+});

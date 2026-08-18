@@ -376,7 +376,7 @@ export async function run(): Promise<void> {
             },
             riskFacts.facts,
             enclosed?.block ?? "",
-            enclosed?.rule,
+            enclosed?.rule ?? "",
           );
 
           const rotation = await rotateModels(
