@@ -49,3 +49,11 @@ pre-commit:
         # code lives in src/duties/dependa/conformance/ which IS checked.
         - "dogfood/**"
       run: pnpm exec eslint {staged_files}
+
+    - name: doc-links
+      # A broken reference can be in a file untouched by this commit — the
+      # failure is the tree, not a staged path — so this gate runs on every
+      # commit rather than on a glob. It fails a docs/ page that links outside
+      # docs/ and any markdown link or prose citation to a path that does not
+      # exist; the same gate also runs at edit time through the editor hooks.
+      run: pnpm check-docs-links

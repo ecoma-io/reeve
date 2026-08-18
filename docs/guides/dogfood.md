@@ -30,7 +30,7 @@ whether the thread belongs to this repository or to someone else's.
 ## The workflow
 
 Every duty is dogfooded by one workflow —
-[`.github/workflows/reeve-dogfood.yml`](../../.github/workflows/reeve-dogfood.yml) —
+`.github/workflows/reeve-dogfood.yml` —
 whose one config table answers, in a glance, which repository, which duty,
 which event, which mode and which result a run produced:
 

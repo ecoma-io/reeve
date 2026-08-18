@@ -13,8 +13,8 @@ Report privately through GitHub's
 Everything else — the fallback channel, what to include, response targets,
 scope, how to verify a release's provenance, and the disclosure timeline —
 lives in one place, in the repository root where GitHub's own Security tab
-expects to find it: [`SECURITY.md`](../../SECURITY.md). That file is the
-policy; this page only routes you to it, so the two can never disagree.
+expects to find it: the root `SECURITY.md`. That file is the policy; this
+page only routes you to it, so the two can never disagree.
 
 For why the pipeline is shaped the way it is, see
 [Threat model](threat-model.md) and [Security](security.md).
@@ -22,4 +22,4 @@ For why the pipeline is shaped the way it is, see
 ---
 
 **Related:** [Threat model](threat-model.md) · [Security](security.md) ·
-[`SECURITY.md`](../../SECURITY.md)
+the root `SECURITY.md`

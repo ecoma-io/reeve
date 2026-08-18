@@ -6,7 +6,7 @@ _The mechanism: why the pipeline is ordered the way it is, what each defence act
 and why. This page is the mechanism underneath it, stage by stage.
 
 Reporting a vulnerability is a different document:
-[Reporting](reporting.md) and [`SECURITY.md`](../../SECURITY.md).
+[Reporting](reporting.md) and the root `SECURITY.md`.
 
 ## The position Reeve runs from
 

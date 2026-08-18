@@ -223,8 +223,8 @@ suppresses it to prevent recursion, silently. Pass a GitHub App token from
 Open an issue with the workflow file, the run log with the API key still masked —
 it is registered as a secret before anything can log it — and what you expected.
 
-Never a public issue for a vulnerability: [SECURITY.md](../../SECURITY.md) has
-the private channel.
+Never a public issue for a vulnerability: the root `SECURITY.md` names the
+private channel.
 
 ---
 
