@@ -32027,6 +32027,86 @@ function excerpt(text2) {
   return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}\u2026`;
 }
 
+// src/duties/dependa/cron.ts
+var CRON_MONTH_NAMES = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
+var CRON_DOW_NAMES = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6
+};
+function resolveCronAlias(token, aliases) {
+  const lower = token.toLowerCase();
+  if (lower in aliases) return String(aliases[lower]);
+  return token;
+}
+function cronFieldMatches(field, value, max, aliases = {}) {
+  const resolved = resolveCronAlias(field, aliases);
+  if (resolved === "*") return true;
+  if (resolved === String(value)) return true;
+  if (resolved.includes(",")) {
+    return resolved.split(",").some((p) => cronFieldMatches(p.trim(), value, max, aliases));
+  }
+  if (resolved.includes("/")) {
+    const slashParts = resolved.split("/");
+    const range = slashParts[0] ?? "*";
+    const stepStr = slashParts[1] ?? "1";
+    const step = Number(stepStr);
+    if (!Number.isSafeInteger(step) || step <= 0) return false;
+    let lo = 0;
+    let hi = max;
+    if (range === "*") {
+    } else if (range.includes("-")) {
+      const rangeParts = range.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
+      lo = rangeParts[0] ?? 0;
+      hi = rangeParts[1] ?? max;
+      if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
+    } else {
+      const start = Number(range);
+      if (!Number.isSafeInteger(start)) return false;
+      lo = start;
+    }
+    return value >= lo && value <= hi && (value - lo) % step === 0;
+  }
+  if (resolved.includes("-")) {
+    const rangeParts = resolved.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
+    const lo = rangeParts[0] ?? 0;
+    const hi = rangeParts[1] ?? 0;
+    return value >= lo && value <= hi;
+  }
+  return false;
+}
+function cronMatches(expression, date) {
+  const parts = expression.trim().split(/\s+/);
+  if (parts.length !== 5) return true;
+  const [minute, hour, dom, month, dow] = parts;
+  const minuteMatch = cronFieldMatches(minute, date.getMinutes(), 59);
+  const hourMatch = cronFieldMatches(hour, date.getHours(), 23);
+  const monthMatch = cronFieldMatches(month, date.getMonth() + 1, 12, CRON_MONTH_NAMES);
+  const domMatch = cronFieldMatches(dom, date.getDate(), 31);
+  const dowMatch = cronFieldMatches(dow, date.getDay(), 6, CRON_DOW_NAMES);
+  const domRestricted = dom !== "*";
+  const dowRestricted = dow !== "*";
+  const dayMatch = !domRestricted && !dowRestricted ? true : domRestricted && !dowRestricted ? domMatch : !domRestricted && dowRestricted ? dowMatch : domMatch || dowMatch;
+  return minuteMatch && hourMatch && monthMatch && dayMatch;
+}
+
 // src/core/summary.ts
 function authSection(failures) {
   if (failures.length === 0) return "";
@@ -33336,7 +33416,7 @@ async function resolve2(packageName) {
   const { registry, namespace, image } = parseImageName(packageName);
   if (registry !== null && !isSafeRegistry(registry)) {
     warning(
-      `dependa: Docker registry \`${registry}\` appears to be a private/internal address \u2014 skipping SSRF protection.`
+      `dependa: Docker registry \`${registry}\` appears to be a private/internal address \u2014 no request was made to it.`
     );
     return {
       status: "not-found"
@@ -37286,84 +37366,6 @@ async function listRepositoryFiles(api, at, paths) {
   }
   return files;
 }
-var CRON_MONTH_NAMES = {
-  jan: 1,
-  feb: 2,
-  mar: 3,
-  apr: 4,
-  may: 5,
-  jun: 6,
-  jul: 7,
-  aug: 8,
-  sep: 9,
-  oct: 10,
-  nov: 11,
-  dec: 12
-};
-var CRON_DOW_NAMES = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6
-};
-function resolveCronAlias(token, aliases) {
-  const lower = token.toLowerCase();
-  if (lower in aliases) return String(aliases[lower]);
-  return token;
-}
-function cronFieldMatches(field, value, max, aliases = {}) {
-  const resolved = resolveCronAlias(field, aliases);
-  if (resolved === "*") return true;
-  if (resolved === String(value)) return true;
-  if (resolved.includes(",")) {
-    return resolved.split(",").some((p) => cronFieldMatches(p.trim(), value, max, aliases));
-  }
-  if (resolved.includes("/")) {
-    const slashParts = resolved.split("/");
-    const range = slashParts[0] ?? "*";
-    const stepStr = slashParts[1] ?? "1";
-    const step = Number(stepStr);
-    if (!Number.isSafeInteger(step) || step <= 0) return false;
-    let lo = 0;
-    let hi = max;
-    if (range === "*") {
-    } else if (range.includes("-")) {
-      const rangeParts = range.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
-      lo = rangeParts[0] ?? 0;
-      hi = rangeParts[1] ?? max;
-      if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
-    } else {
-      const start = Number(range);
-      if (!Number.isSafeInteger(start)) return false;
-      lo = start;
-    }
-    return value >= lo && value <= hi && (value - lo) % step === 0;
-  }
-  if (resolved.includes("-")) {
-    const rangeParts = resolved.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
-    const lo = rangeParts[0] ?? 0;
-    const hi = rangeParts[1] ?? 0;
-    return value >= lo && value <= hi;
-  }
-  return false;
-}
-function cronMatches(expression, date) {
-  const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) return true;
-  const [minute, hour, dom, month, dow] = parts;
-  const minuteMatch = cronFieldMatches(minute, date.getMinutes(), 59);
-  const hourMatch = cronFieldMatches(hour, date.getHours(), 23);
-  const monthMatch = cronFieldMatches(month, date.getMonth() + 1, 12, CRON_MONTH_NAMES);
-  const domMatch = cronFieldMatches(dom, date.getDate(), 31);
-  const dowMatch = cronFieldMatches(dow, date.getDay(), 6, CRON_DOW_NAMES);
-  const domRestricted = dom !== "*";
-  const dowRestricted = dow !== "*";
-  const dayMatch = !domRestricted && !dowRestricted ? true : domRestricted && !dowRestricted ? domMatch : !domRestricted && dowRestricted ? dowMatch : domMatch || dowMatch;
-  return minuteMatch && hourMatch && monthMatch && dayMatch;
-}
 async function checkSchedule(schedule, api, at) {
   if (schedule.kind === "interval") {
     try {
@@ -37429,7 +37431,5 @@ function createDatasourceRegistry(token) {
 }
 void run();
 export {
-  cronFieldMatches,
-  cronMatches,
   run
 };
