@@ -33980,10 +33980,10 @@ async function resolve5(packageName) {
 }
 function parseRegistryResponse(body) {
   const versions = body.versions;
-  if (typeof versions !== "object" || versions === null) {
+  if (typeof versions !== "object" || versions === null || Array.isArray(versions)) {
     return {
       status: "malformed-metadata",
-      reason: "npm registry response has no `versions` field"
+      reason: "npm registry response has no usable `versions` map"
     };
   }
   const time = typeof body.time === "object" && body.time !== null ? body.time : {};
@@ -35712,7 +35712,7 @@ function parsePnpmLockYaml(content) {
       inPackages = false;
     }
     if (!inPackages) continue;
-    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine);
+    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine.replace(/(?:\([^)]*\))+(?=:$)/, ""));
     if (packageMatch !== null) {
       const name = packageMatch[1] ?? "";
       const version = packageMatch[2] ?? "";
