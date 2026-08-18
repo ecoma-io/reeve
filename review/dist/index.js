@@ -35418,43 +35418,13 @@ function decodeEnvelope(payload) {
     return { kind: "corrupt", reason: "the envelope is not a JSON mapping" };
   }
   const map = parsed;
-  if (map.version === void 0) return migrateV1(map);
+  if (map.version === void 0) return { kind: "none" };
   return validateV2(map);
 }
 function isFindable(entry) {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
   const f = entry;
   return typeof f.id === "string" && typeof f.ruleId === "string" && typeof f.ruleName === "string" && typeof f.ruleBody === "string" && typeof f.path === "string" && typeof f.body === "string" && typeof f.marker === "string" && typeof f.wasResolved === "boolean";
-}
-function isV1Findable(entry) {
-  if (!isFindable(entry)) return false;
-  const f = entry;
-  return f.line === null || Number.isInteger(f.line);
-}
-function migrateV1(map) {
-  if (!Array.isArray(map.findings)) {
-    return { kind: "corrupt", reason: "the envelope has no `findings` array" };
-  }
-  const findings = [];
-  for (const entry of map.findings) {
-    if (!isV1Findable(entry)) {
-      return { kind: "corrupt", reason: "a v1 finding holds a malformed field" };
-    }
-    const raw = entry;
-    const resolvedAtSha = typeof raw.resolvedAtSha === "string" ? { resolvedAtSha: raw.resolvedAtSha } : {};
-    findings.push({
-      ...entry,
-      wasResolved: raw.wasResolved === true,
-      disposition: null,
-      ...resolvedAtSha
-    });
-  }
-  const shas = Array.isArray(map.reviewedShas) ? map.reviewedShas.filter((sha) => typeof sha === "string") : [];
-  const previous = { findings, reviewedShas: shas };
-  return {
-    kind: "ok",
-    previous: { ...previous, version: 2, checksum: envelopeChecksum(previous) }
-  };
 }
 var SEVERITIES = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
 var DISPOSITION_VALUES = /* @__PURE__ */ new Set([
@@ -38890,7 +38860,7 @@ async function readEnvelope(api, at) {
     return { previous: decoded.previous, thread: { marked, replies, uncertain }, memoryNote: null };
   }
   if (decoded.kind === "corrupt") {
-    const reason = `The review's stored memory failed its checksum and was rebuilt from the thread \u2014 ${decoded.reason}.`;
+    const reason = `The review's stored memory could not be read and was rebuilt from the thread \u2014 ${decoded.reason}.`;
     warning(`#${String(at.number)}: ${reason}`);
     return {
       previous: { findings: [], reviewedShas: [] },
