@@ -38,7 +38,16 @@
  * crashed run can leave a source file renamed into it; the next run detects
  * that and puts it back before doing anything else — see `recover`.
  */
-import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { renameSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -69,7 +78,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * deliberate and visible rather than silent — which is the whole difference
  * between a gate that failed and a gate that was never asked.
  */
-const TABLE_FLOOR = 54;
+const TABLE_FLOOR = 60;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -85,10 +94,24 @@ const TABLE_FLOOR = 54;
  * the first run instead of on the hundredth.
  *
  * The critical list from the hardening brief is mapped to a seam each would
- * live in, and to the existing tests that made it a KILLED row. A mutation on
- * an entry point (`src/duties/{duty}/main.ts`) is deliberately not here: those are
- * excluded from coverage and driven via built bundles, so a mutation there is a
- * rebuild-and-integration concern, not a unit seam.
+ * live in, and to the existing tests that made it a KILLED row.
+ *
+ * **Entry points (`src/duties/{duty}/main.ts`) are `"full"`-tier rows, not
+ * absent ones.** This comment used to say a mutation there was "a
+ * rebuild-and-integration concern, not a unit seam" and leave it at that,
+ * which read as a reason to have none — and that sentence is how a hole
+ * stayed invisible for a whole round. `main.ts` was outside the coverage
+ * `include` list AND outside this table at the same time, for the same
+ * stated reason, so both auditors could flip `dependa`'s and `harmonise`'s
+ * publish gates fully open and every gate in the repository stayed green.
+ * Nobody had forgotten a test; the two mechanisms that would each have caught
+ * it shared one exclusion, and nobody had noticed they shared it.
+ *
+ * The true statement is narrower: an entry-point row costs a bundle rebuild
+ * and a spawned child, so it is too slow for the `"fast"` tier — not too
+ * slow to exist. Such a row carries `rebuilds: "<duty>"` so the harness can
+ * put the duty's committed bundle back afterwards, because the target suite
+ * rebuilds it from the mutated source.
  */
 export const MUTATIONS = [
   // ── model orchestration and fallback ────────────────────────────────────
@@ -685,6 +708,56 @@ export const MUTATIONS = [
     owner: "TL4",
     note: "A genuine permission refusal is laundered into weather and the run reports green.",
   },
+  // ── entry points: the authority gates the bundles actually run ──────────
+  //
+  // Slow — each spawns `tools/build.mjs` and then a child process — hence
+  // `"full"`. Every one of these is the last check standing between a run and
+  // a repository mutation, and until the bundle-driven suites landed there was
+  // nothing anywhere that would have noticed them being opened.
+  {
+    name: "dependa publishes without permission or dry-run",
+    file: "src/duties/dependa/main.ts",
+    from: "    const mayPublish = canEdit && canOpenPr && !settings.dryRun;",
+    to: "    const mayPublish = true;",
+    targets: ["src/duties/dependa/main.integration.test.ts"],
+    rebuilds: "dependa",
+    stage: "full",
+    owner: "TL2",
+    note: "The whole publish gate opens: no `edit-file`, no `open-pr`, and a dry run all publish anyway.",
+  },
+  {
+    name: "harmonise publishes without permission",
+    file: "src/duties/harmonise/main.ts",
+    from: '  const canPublish =\n    settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");',
+    to: "  const canPublish = true;",
+    targets: ["src/duties/harmonise/main.integration.test.ts"],
+    rebuilds: "harmonise",
+    stage: "full",
+    owner: "TL2",
+    note: "A warrant granting neither `edit-file` nor `open-pr` gets a branch and a pull request anyway.",
+  },
+  {
+    name: "lifecycle acts without the capability the step requires",
+    file: "src/duties/lifecycle/main.ts",
+    from: "  return { ok: missing.length === 0, missing };",
+    to: "  return { ok: true, missing };",
+    targets: ["src/duties/lifecycle/main.integration.test.ts"],
+    rebuilds: "lifecycle",
+    stage: "full",
+    owner: "TL2",
+    note: "Every step reports its capabilities satisfied, so an ungranted close or label happens anyway.",
+  },
+  {
+    name: "triage mints labels without the label capability",
+    file: "src/duties/triage/main.ts",
+    from: '  if (!permitted.includes("label")) {',
+    to: "  if (false) {",
+    targets: ["src/duties/triage/main.integration.test.ts"],
+    rebuilds: "triage",
+    stage: "full",
+    owner: "TL2",
+    note: "A `create: true` taxonomy entry mints a repository label on a run never granted `label`.",
+  },
 ];
 
 // ── argv ────────────────────────────────────────────────────────────────────
@@ -730,17 +803,29 @@ function selected(options) {
  * loop that set it. A harness that leaves a source file missing is worse than a
  * harness that reports nothing.
  */
-let inFlight = null;
+let inFlight = [];
 
-/** Synchronous on purpose: an `exit` handler cannot await, and this must run there. */
+/**
+ * Synchronous on purpose: an `exit` handler cannot await, and this must run there.
+ *
+ * A list rather than one pair, because a mutation on an entry point stashes two
+ * files. The mutated source is the point of the exercise; the **built bundle**
+ * is the collateral. A bundle-driven suite rebuilds `<duty>/dist/index.js` from
+ * whatever `main.ts` says at the time, so restoring only the source would leave
+ * a mutated bundle sitting in the working tree — committed output carrying an
+ * edit nobody wrote, which `git status` would report as ordinary build drift.
+ * Both go back, in reverse order, and each one is attempted even if an earlier
+ * one throws.
+ */
 function restoreSync() {
-  if (inFlight === null) return;
-  const { original, srcPath } = inFlight;
-  inFlight = null;
-  try {
-    renameSync(original, srcPath);
-  } catch {
-    console.error(`\nCOULD NOT RESTORE ${srcPath} — its original is at ${original}.`);
+  const pending = inFlight;
+  inFlight = [];
+  for (const { original, srcPath } of pending.reverse()) {
+    try {
+      renameSync(original, srcPath);
+    } catch {
+      console.error(`\nCOULD NOT RESTORE ${srcPath} — its original is at ${original}.`);
+    }
   }
 }
 
@@ -776,18 +861,36 @@ async function recover() {
   if (!(await exists(SCRATCH))) return;
   const stashed = new Set(await readdir(SCRATCH));
   for (const mutation of MUTATIONS) {
-    const name = scratchName(mutation);
-    if (!stashed.has(name)) continue;
-    const srcPath = join(ROOT, mutation.file);
-    if (await exists(srcPath)) continue;
-    await rename(join(SCRATCH, name), srcPath);
-    console.error(`recovered ${mutation.file} from a previous crashed run.`);
+    for (const { path, stash } of stashedFor(mutation)) {
+      if (!stashed.has(stash)) continue;
+      if (await exists(join(ROOT, path))) continue;
+      await rename(join(SCRATCH, stash), join(ROOT, path));
+      console.error(`recovered ${path} from a previous crashed run.`);
+    }
   }
 }
 
-/** The scratch filename one mutation stashes its original under. */
-function scratchName(mutation) {
-  return `orig-${mutation.name.replace(/[^a-z0-9]+/gi, "-")}.ts`;
+/** The slug a mutation's stashed files are named after. */
+function slug(mutation) {
+  return mutation.name.replace(/[^a-z0-9]+/gi, "-");
+}
+
+/**
+ * Every file this mutation moves aside, and the scratch name each is kept under.
+ *
+ * One entry for an ordinary row. Two for a row on an entry point, whose target
+ * suite rebuilds the duty's committed bundle from the mutated source — see
+ * `restoreSync`.
+ */
+function stashedFor(mutation) {
+  const files = [{ path: mutation.file, stash: `orig-${slug(mutation)}.ts` }];
+  if (mutation.rebuilds !== undefined) {
+    files.push({
+      path: `${mutation.rebuilds}/dist/index.js`,
+      stash: `bundle-${slug(mutation)}.js`,
+    });
+  }
+  return files;
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
@@ -929,10 +1032,22 @@ async function run() {
 
   const rows = [];
   for (const mutation of chosen) {
-    const srcPath = join(ROOT, mutation.file);
-    const original = join(SCRATCH, scratchName(mutation));
+    const [source, ...collateral] = stashedFor(mutation);
+    const srcPath = join(ROOT, source.path);
+    const original = join(SCRATCH, source.stash);
     await rename(srcPath, original);
-    inFlight = { original, srcPath };
+    inFlight = [{ original, srcPath }];
+    // A bundle the target suite is about to rebuild is copied aside, not moved:
+    // the build would recreate it either way, but a missing outfile turns a
+    // rebuild failure into a confusing "no such file" from the spawned child
+    // rather than the build error that actually happened.
+    for (const { path, stash } of collateral) {
+      const from = join(ROOT, path);
+      if (!(await exists(from))) continue;
+      const to = join(SCRATCH, stash);
+      await copyFile(from, to);
+      inFlight.push({ original: to, srcPath: from });
+    }
     try {
       await apply(original, srcPath, mutation);
       const result = spawnSync(VITEST, ["run", "--no-coverage", ...mutation.targets], {

@@ -19,11 +19,25 @@ node tools/mutation.mjs --list             # stage, owner and name, no runs
 
 ## The result
 
-Against the integrated Round 1 tree: **54 mutations, 54 KILLED, 0 SURVIVED, 0 STALE**, in about ninety seconds of wall clock on a four-core box. `node tools/mutation.mjs` exits 0.
+Against the integrated Round 1 tree: **60 mutations, 60 KILLED, 0 SURVIVED, 0 STALE**, in 3 m 27 s of wall clock on a four-core box. `node tools/mutation.mjs` exits 0.
 
-The table was 9 rows before this round and 23 after the first pass. The 31 rows added at integration were each proposed by the task lead who owns the seam, having watched it go red against their own new tests — and each was re-verified here rather than taken on trust. That re-verification was not a formality; see [What the second pass caught](#what-the-second-pass-caught).
+The table was 9 rows before this round and 23 after the first pass. It reached 54 at integration, 56 once A1 was decided and both directions of its 403 classification became live rows, and 60 with the four entry-point rows. The 31 rows added at integration were each proposed by the task lead who owns the seam, having watched it go red against their own new tests — and each was re-verified here rather than taken on trust. That re-verification was not a formality; see [What the second pass caught](#what-the-second-pass-caught).
 
 The first pass's one survivor — the cheap-roster ternary at `src/duties/triage/record.ts:177`, which `record.test.ts` could not observe because its single `settingsOf` helper hardcoded `screenModels: []` — is now KILLED. It is the worked example of the table doing its job: a gap found by mutation, owned by a named lead, closed by a test, and confirmed closed by the same row that found it.
+
+## Two gates that share an exclusion list are one gate
+
+This is the generalisable form of Phase 17's blocking finding, and it is the most transferable thing this round produced. Round 2 should treat it as a checklist item, not as history.
+
+**What happened.** `src/duties/*/main.ts` was excluded from coverage — for a good reason, stated in `vitest.config.ts`: those files call `run()` at import time, so importing one to measure it would execute the action inside the test worker. This table excluded the same files, also for a good reason, stated in its own comment: a mutation there needs a bundle rebuild, so it is "a rebuild-and-integration concern, not a unit seam."
+
+Each exclusion was defensible on its own. Together they were a hole, because **the two mechanisms that were supposed to cover each other's blind spots had the same blind spot.** Both auditors flipped `dependa`'s and `harmonise`'s publish gates fully open — `mayPublish = true`, `canPublish = true` — and every gate in the repository stayed green. Nobody had forgotten a test. The coverage floor could not see the file; the mutation table had chosen not to look at it; and nothing anywhere compared the two lists.
+
+**Why it was invisible.** Both exclusions were justified in prose, in different files, in the vocabulary of different concerns — one about import-time side effects, one about build steps. Nothing named them as the same set. A reader auditing either one would find a sound argument and move on, which is exactly what happened for a whole round.
+
+**The checklist item.** When a file is excluded from a gate, ask what _else_ excludes it. If a second, independent gate excludes the same file for its own good reason, the file is not doubly protected — it is unprotected, and the two sound arguments are what hide that. Write the overlap down where both gates can see it.
+
+**What closed it here.** Four entry-point rows, in the `"full"` tier — the staged split doing the job it was designed for rather than being a reason to have nothing. The exclusion comment in `tools/mutation.mjs` was rewritten at the same time and that mattered as much as the rows: the old sentence read as a reason to have none, and a comment that makes a hole sound principled is worse than no comment. It now says what is true — entry points are too slow for the `"fast"` tier, not too slow to exist.
 
 ## The STALE incident — why the preflight exists
 
@@ -50,7 +64,7 @@ Both are silent. The only defence against either is to run the row and read _whi
 
 ## The table
 
-54 rows. `stage` is `fast` or `full` and is a real field in `tools/mutation.mjs`, not a label — see [ci-gates.md](ci-gates.md) for what it drives.
+60 rows. `stage` is `fast` or `full` and is a real field in `tools/mutation.mjs`, not a label — see [ci-gates.md](ci-gates.md) for what it drives.
 
 |   # | Mutation                                                      | Seam                                 | Stage | Owner |
 | --: | ------------------------------------------------------------- | ------------------------------------ | ----- | ----- |
@@ -108,15 +122,23 @@ Both are silent. The only defence against either is to run the row and read _whi
 |  52 | a 404 no longer means not-there                               | `src/core/forge.ts`                  | fast  | TL4   |
 |  53 | a truncated atlas is reported as an empty one                 | `src/core/atlas.ts`                  | fast  | TL4   |
 |  54 | a tampered envelope checksum is accepted                      | `src/duties/review/publish.ts`       | fast  | TL4   |
+|  55 | a rate-limit 403 read as configuration                        | `src/core/forge.ts`                  | fast  | TL4   |
+|  56 | every 403 read as capacity                                    | `src/core/forge.ts`                  | fast  | TL4   |
+|  57 | dependa publishes without permission or dry-run               | `src/duties/dependa/main.ts`         | full  | TL2   |
+|  58 | harmonise publishes without permission                        | `src/duties/harmonise/main.ts`       | full  | TL2   |
+|  59 | lifecycle acts without the capability the step requires       | `src/duties/lifecycle/main.ts`       | full  | TL2   |
+|  60 | triage mints labels without the label capability              | `src/duties/triage/main.ts`          | full  | TL2   |
 
 ### What the harder rows are actually about
 
 - **4/25 — the auth/capacity colour scheme.** `classifyStatus` (`src/core/provider.ts:625`) is where D12 is read off the wire. Row 4 turns all of `401/403 → "auth"` into `"capacity"`, so a refused key rotates quietly and the job finishes green having asked nothing; row 25 is the narrower slip of dropping only 403, which is the one a careless edit actually produces.
 - **26/27 — the panel's second implementation of the roster rule.** `src/core/judge.ts` deliberately does not call `rotateModels` (its own comment explains that a seat stops on a usable _vote_, not a usable _completion_). A second implementation of a rule is a second place it can break, so it gets its own rows: one for dropping `reckon`, so a rate-limited model is asked again by the next seat, and one for dropping the spent-model filter, so three seats become one model consulted three times and reported as three votes.
-- **35/36 — the two capability defaults.** `capabilities:` written with nothing under it must grant nothing, and a repository with no warrant at all must fall back to the caller's default rather than to everything. Both are one-token edits and both are total authority bypasses.
-- **43 — the empty proven string.** `src/duties/review/providers.ts:26` is the guard the entire evidence boundary rests on: without it `claim.includes("")` is true for every claim, so every finding verifies against nothing. It is one line and it is the single highest-value row in the table.
-- **50/51 — the GitHub error classifiers.** `isCapacityError` no longer seeing 429 turns weather into a red run; `isMissing` no longer seeing 404 turns an absent file into a thrown error rather than the cold start it is. Both are the boundary where the platform's transient moods are told apart from this repository's own mistakes.
-- **52 — the truncated atlas.** Returning `EMPTY_ATLAS` instead of `{ packages, truncated: true }` loses both the packages the walk did read and the fact that it was partial — a silent narrowing of what a monorepo run considers to exist.
+- **32/35 — the two capability defaults.** `capabilities:` written with nothing under it must grant nothing, and a repository with no warrant at all must fall back to the caller's default rather than to everything. Both are one-token edits and both are total authority bypasses.
+- **46 — the empty proven string.** `src/duties/review/providers.ts:26` is the guard the entire evidence boundary rests on: without it `claim.includes("")` is true for every claim, so every finding verifies against nothing. It is one line and it is the single highest-value row in the table.
+- **51/52 — the GitHub error classifiers.** `isCapacityError` no longer seeing 429 turns weather into a red run; `isMissing` no longer seeing 404 turns an absent file into a thrown error rather than the cold start it is. Both are the boundary where the platform's transient moods are told apart from this repository's own mistakes.
+- **53 — the truncated atlas.** Returning `EMPTY_ATLAS` instead of `{ packages, truncated: true }` loses both the packages the walk did read and the fact that it was partial — a silent narrowing of what a monorepo run considers to exist.
+- **55/56 — both directions of the 403.** GitHub documents primary and secondary rate limits as answering "403 or 429", so `isCapacityError` has to widen enough to catch a throttle without swallowing a permission refusal. Two rows because the two failures land in different places: under-broadening reverts every consumer to red-on-rate-limit, over-broadening turns a genuine refusal green. Only the second needed a call-site pin built for it.
+- **57-60 — the entry-point authority gates.** `dependa`'s `mayPublish`, `harmonise`'s `canPublish`, `lifecycle`'s `checkRequired` and `triage`'s `create: true` label gate, each opened wholesale. These are the last check between a run and a repository mutation, and until the bundle-driven suites landed there was nothing anywhere that would have noticed them opening — see [the section on shared exclusions](#two-gates-that-share-an-exclusion-list-are-one-gate). They are `"full"` tier because each costs an esbuild rebuild plus a spawned child, roughly 35 seconds apiece; they are not `"full"` because they matter less.
 
 ## Are these gates real
 
@@ -211,13 +233,15 @@ Following `scripts/check-docs-links.mjs`'s own stated split, the judgement is se
 
 ## Harness defects found and fixed
 
-Five, in `tools/mutation.mjs`. The first was a data-loss bug and the last was found by an adversarial auditor rather than by me.
+Six, in `tools/mutation.mjs`. The first was a data-loss bug, the fourth was found by an adversarial auditor rather than by me, and the sixth only became possible once entry-point rows existed.
 
 1. **A crashed run could destroy a source file.** The harness renames `src/foo.ts` into `.tmp/mutation/orig-*.ts`, writes the mutated copy, and restores in a `finally`. A run killed between the rename and the `finally` — Ctrl-C, an OOM, a cancelled CI job — leaves the _only_ copy of the source in `.tmp/mutation/`. The next run's first act was `rm(SCRATCH, { recursive: true, force: true })`. It deleted it. There is now a `recover()` pass that runs before the clear and puts back any source file that is missing, plus `exit`/`SIGINT`/`SIGTERM`/`SIGHUP` handlers that restore synchronously.
 2. **A stale mutation aborted the board instead of reporting.** See [the STALE incident](#the-stale-incident--why-the-preflight-exists).
 3. **An ambiguous `from` was not checked at all.** `String.prototype.replace` with a string pattern rewrites only the first occurrence, so a `from` matching two places would quietly mutate a seam nobody chose and report whatever the targets said about it. The preflight now requires exactly one occurrence and reports `matches N places — the edit is ambiguous` otherwise. This is not hypothetical at 54 rows: `if (dryRun) {` occurs twice in `src/core/state-branch.ts`, `const existingPr = existing[0];` occurs twice in the same file, `const plan = planThreads(reconciled, standing, threads);` occurs twice in `threads.ts`, and `if (uncertain) return { created: 0, … };` occurs twice. Every one of those rows had to carry disambiguating context, and the preflight is what said so.
 4. **The table could be emptied and the gate would pass.** See [the section above](#the-gate-that-reported-success-when-asked-to-check-nothing).
 5. **A preflight/apply race.** `preflight` proves the match against the file as it was some milliseconds earlier; `apply` now refuses to run if its `replace` changed nothing, because a no-op edit would report the untouched suite's verdict as the mutation's.
+
+6. **An entry-point row left a mutated bundle in the working tree.** A row on `src/duties/{duty}/main.ts` is only observable through a suite that rebuilds the duty's bundle from source and spawns it. That rebuild overwrites `<duty>/dist/index.js` — which is _committed_, because a JavaScript action runs straight off the checked-out repository. Restoring only the source therefore left behind a bundle carrying an edit nobody wrote, indistinguishable in `git status` from ordinary build drift and one `git add -A` away from being committed. A row now declares `rebuilds: "<duty>"`; the harness copies that bundle aside and puts it back in the same `finally` that restores the source, and `tools/mutation.test.mjs` fails any entry-point row that does not declare one — because forgetting the field is silent.
 
 Both staleness directions were verified by deliberately breaking a row and observing the failure — a zero-match `from` and an ambiguous one, each reported by mutation name with a non-zero exit, then reverted. The recovery path was verified by stranding a real source file in the scratch directory and confirming the next run put it back byte for byte.
 
@@ -233,6 +257,7 @@ Both staleness directions were verified by deliberately breaking a row and obser
 
 Named so the next pass does not have to rediscover it:
 
+- **`src/main.ts` and the five duty entry points without rows** — `translate`, `duplicate`, `respond`, `review`, `remediation`. Four of the nine got rows this round because four gates were the ones auditors found open; the rest have bundle-driven suites and could take rows for the same price. Doing them one blocking finding at a time is how the first four got missed.
 - **`src/duties/dependa/datasources/*` beyond the three files that gained tests this round.** `crates.ts`, `go-proxy.ts` and `npm.ts` now have offline suites; their D12 status classifications (404 → `not-found`, 429/5xx → `temporarily-unavailable`, 401/403 → `auth-refused`) are the natural next rows and none is mutated yet.
 - **The lockfile name-confusion boundary in `dependa/managers/npm.ts`** — see [Equivalent mutants](#equivalent-mutants).
 - **`src/core/enclose.ts` and `src/core/sanitize.ts`.** Both at high coverage, both security-relevant, neither mutated. Coverage says they are exercised; nothing yet says an assertion would fail if the defanging stopped.
