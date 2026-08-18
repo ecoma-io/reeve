@@ -170,6 +170,40 @@ Not GitHub, but the same classifier was being asked — and that was a defect.
 | 6   | `review/threads.ts:185`                | `threadBody`'s cap does not apply when `budget <= 0` — a finding whose rule id and path alone exceed 8000 characters is carried uncapped. Bounded in practice by GitHub's own 65536 ceiling.                                                                                                                        | P3       |
 | 7   | `review/capabilities.contract.test.ts` | Evasions 2 and 3 in the table above — dynamic call-name construction, and a port method declared at a deeper indentation than the shape regex counts. Both need a type-level or module-graph check.                                                                                                                 | P2       |
 
+### Open P0 — a versionless envelope skips every v2 integrity check
+
+`review/publish.ts:133` routes on one field: `map.version === undefined` sends the payload to `migrateV1`, which **computes** a checksum rather than verifying one and applies a strictly weaker per-finding check than `validateV2`. Measured, same payload with and without the `version` key:
+
+| Tamper                   | as v2   | as v1 (no `version`)                                    |
+| ------------------------ | ------- | ------------------------------------------------------- |
+| flipped `wasResolved`    | corrupt | **ok**                                                  |
+| appended reviewed SHA    | corrupt | **ok**                                                  |
+| unknown severity         | corrupt | **ok**                                                  |
+| line `0` / negative line | corrupt | **ok**                                                  |
+| wholly invented finding  | corrupt | **ok**                                                  |
+| fractional line          | corrupt | corrupt                                                 |
+| forged disposition       | corrupt | **dropped** — `migrateV1` hardcodes `disposition: null` |
+
+Two things make this worth a P0 rather than a curiosity. First, **it launders**: `migrateV1` stamps `version: 2` and seals whatever it accepted, so the envelope the next run writes is a validly-sealed v2 carrying the tampered contents, and every run after that validates it. Second, an invented finding is **rendered** — `reconcile` reports it as `persists` or `resolved` either way, printing the attacker's `body` under this duty's own comment.
+
+Bounds, measured rather than assumed: a forged **disposition** cannot pass (migration nulls it), and `substantiatedDispositions` re-derives dispositions from live thread replies regardless. Findings and reviewed SHAs have no such downstream re-derivation.
+
+**The checksum is not a MAC.** `core/marker.ts`'s `fingerprint` is a keyless sha256 over public data, so anyone who can write the comment can compute a valid `checksum` for a payload they invented — no downgrade required. The checksum detects **damage**, not forgery. That means the envelope cannot defend itself in either version, and the only real boundary is who may write a comment this duty will adopt — the identity finding below. The two compose into one chain.
+
+Pinned by `publish.adversarial.test.ts`'s `DOWNGRADE — omitting \`version\` skips every v2 integrity check`. **Awaiting a ruling; no migration semantics were changed.** See the report for the recommendation and its measured cost.
+
+### Open P1 — the owned-comment guard asks "not a human", not "is this review"
+
+`review/publish.ts`'s `readThread` adopts a comment as this duty's memory when `isBotAuthor(comment.user)` (`core/forge.ts:128`) is true and the marker opens the body. That predicate is `type === "Bot" || login.endsWith("[bot]")` — "is this account not a human", which is wider than "is this account this review". Measured as adopted: `reeve[bot]`, `github-actions[bot]`, `dependabot[bot]`, `renovate[bot]`, any `*[bot]`, and even a `[bot]`-suffixed login GitHub reports as `type: "User"`.
+
+`github-actions[bot]` is the login **every** workflow in the repository posts under with the default token, so any workflow that echoes untrusted text into a comment is a path into review's state. The marker-at-the-top half of the guard still holds — a bot that quotes the marker below prose is not adopted.
+
+`docs/security/threat-model.md` does not mention this (zero occurrences of "bot" or "marker" in the file). Pinned by `publish.adversarial.test.ts`'s `IDENTITY —` block. **Not narrowed this round** — narrowing changes which existing state is readable and needs a ruling.
+
+### Settled since the first pass
+
+**`review/rules.ts` — a documented truncation warning that did not exist.** `MAX_RULES_CHARS`' own doc promised "the warning keeps the decision to drop the tail visible" and `readPackedRules` read "truncation-warn kept", but `readRules` sliced the text and warned about nothing: a rules file over 20,000 characters lost every rule past the cap in silence, so a maintainer had no way to learn the rules they wrote never ran. The sibling the doc names, `respond/guidance.ts`, has always warned on the identical decision. **Fixed** — the warning now names the file, the length and the cap. Red-first; regression `a_truncated_rules_file_warns_so_the_dropped_tail_is_not_silent`, with `a_rules_file_inside_the_cap_warns_about_nothing` holding the other side of the gate.
+
 ### Settled since the first pass
 
 **`core/forge.ts` `isCapacityError` — a rate limit's run colour depended on which status GitHub chose.** docs.github.com ("Rate limits for the REST API" → _Exceeding the rate limit_; "Troubleshooting the REST API" → _Rate limit errors_) states that a secondary limit "returns a 403 or 429 response" and that exceeding a primary limit answers "403 or 429" with `x-ratelimit-remaining` at 0. One cause, two statuses, GitHub's choice — so classifying by status alone made an identical rate limit green on 429 and red on 403.

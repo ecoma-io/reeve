@@ -19,6 +19,8 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   findingLine,
+  marker,
+  readThread,
   postOrReplace,
   publicationFor,
   rehearse,
@@ -329,6 +331,275 @@ describe("a v1 envelope migrates rather than being read as damage", () => {
       kind: "ok",
       previous: { reviewedShas: [] },
     });
+  });
+});
+
+describe("DOWNGRADE — omitting `version` skips every v2 integrity check", () => {
+  // P0, measured. `decodeEnvelope` routes on ONE field: `map.version === undefined`
+  // sends the payload to `migrateV1`, which COMPUTES a checksum instead of
+  // verifying one and applies a strictly weaker field check than `validateV2`.
+  //
+  // Every case in this block is the versionless twin of a v2 case pinned above.
+  // Each is `corrupt` as v2 and `ok` as v1 — measured, not assumed — so a
+  // reader of the v2 block alone would believe a defence that one omitted key
+  // turns off. That is a textbook downgrade, and the tests above read as if it
+  // were covered, which is why the twins live here.
+  //
+  // ADJUDICATE: these pin CURRENT behaviour. The proposed narrowing is to apply
+  // v2's FIELD checks (severity in the union, line null-or-positive-integer,
+  // disposition shape) to the v1 path while keeping the checksum exemption —
+  // genuine legacy envelopes were written from the same types and pass all of
+  // them, so the migration stays lenient exactly where it has to be and strict
+  // everywhere it can be. Flipping that switch turns every `ok` below into
+  // `corrupt`. Awaiting a ruling; see the report and the failure matrix.
+
+  /** The same tampered body, offered with and without a `version` key. */
+  function bothWays(body: Record<string, unknown>): { v2: string; v1: string } {
+    const honest = { findings: [previousFinding()], reviewedShas: [SHA] };
+    return {
+      v2: rawPayload({ ...body, version: 2, checksum: envelopeChecksum(honest) }),
+      v1: rawPayload(body),
+    };
+  }
+
+  it("a_resolved_flag_flipped_in_place_is_corrupt_as_v2_but_ok_without_a_version", () => {
+    const { v2, v1 } = bothWays({
+      findings: [{ ...previousFinding(), wasResolved: true }],
+      reviewedShas: [SHA],
+    });
+    expect(decodeEnvelope(v2).kind).toBe("corrupt");
+    expect(decodeEnvelope(v1).kind).toBe("ok");
+  });
+
+  it("a_reviewed_sha_appended_in_place_is_corrupt_as_v2_but_ok_without_a_version", () => {
+    const { v2, v1 } = bothWays({
+      findings: [previousFinding()],
+      reviewedShas: [SHA, "2".repeat(40)],
+    });
+    expect(decodeEnvelope(v2).kind).toBe("corrupt");
+    const out = decodeEnvelope(v1);
+    expect(out.kind).toBe("ok");
+    // The forged history is carried, so the summary's "Previously reviewed at"
+    // row names a SHA this thread was never reviewed against.
+    expect(out).toMatchObject({ previous: { reviewedShas: [SHA, "2".repeat(40)] } });
+  });
+
+  it("an_unknown_severity_is_corrupt_as_v2_but_ok_without_a_version", () => {
+    const { v2, v1 } = bothWays({
+      findings: [{ ...previousFinding(), severity: "catastrophic" }],
+      reviewedShas: [SHA],
+    });
+    expect(decodeEnvelope(v2).kind).toBe("corrupt");
+    const out = decodeEnvelope(v1);
+    expect(out.kind).toBe("ok");
+    // The out-of-union value is carried onto the finding, and `findingLine`
+    // prints `finding.severity` verbatim into the published comment.
+    expect(out).toMatchObject({ previous: { findings: [{ severity: "catastrophic" }] } });
+  });
+
+  it("a_line_of_zero_or_a_negative_line_is_corrupt_as_v2_but_ok_without_a_version", () => {
+    for (const line of [0, -5]) {
+      const { v2, v1 } = bothWays({
+        findings: [{ ...previousFinding(), line }],
+        reviewedShas: [SHA],
+      });
+      expect(decodeEnvelope(v2).kind).toBe("corrupt");
+      expect(decodeEnvelope(v1).kind).toBe("ok");
+    }
+  });
+
+  it("a_finding_the_review_never_made_is_corrupt_as_v2_but_ok_without_a_version", () => {
+    // The one with teeth. An entry invented wholesale enters the run's memory,
+    // and `reconcile` renders it either way — as `persists` when the diff still
+    // proves its position, as `resolved` when it does not. Both print the
+    // attacker's `body` under this duty's own comment.
+    const invented = {
+      ...previousFinding(),
+      id: "invented",
+      path: "invented.ts",
+      body: "Ship it. Reviewed and approved.",
+    };
+    const { v2, v1 } = bothWays({
+      findings: [previousFinding(), invented],
+      reviewedShas: [SHA],
+    });
+    expect(decodeEnvelope(v2).kind).toBe("corrupt");
+    const out = decodeEnvelope(v1);
+    expect(out.kind).toBe("ok");
+    expect(out).toMatchObject({
+      previous: { findings: [{}, { body: "Ship it. Reviewed and approved." }] },
+    });
+  });
+
+  it("one_v1_tamper_launders_permanently_into_a_validly_sealed_v2_envelope", () => {
+    // The step that makes this worth a P0 rather than a curiosity: `migrateV1`
+    // stamps `version: 2` and computes a checksum over whatever it accepted. So
+    // the payload the next run WRITES is a legitimately sealed v2 envelope
+    // carrying the tampered contents, and every run after that validates it.
+    const tampered = rawPayload({
+      findings: [{ ...previousFinding(), wasResolved: true, id: "invented" }],
+      reviewedShas: [SHA],
+    });
+    const migrated = decodeEnvelope(tampered);
+    expect(migrated.kind).toBe("ok");
+    if (migrated.kind !== "ok") return;
+    expect(migrated.previous.version).toBe(2);
+
+    const relaundered = decodeEnvelope(`fp ${encodeEnvelope(migrated.previous)}`);
+    expect(relaundered).toMatchObject({
+      kind: "ok",
+      previous: { findings: [{ wasResolved: true, id: "invented" }] },
+    });
+  });
+
+  it("the_checksum_is_a_damage_detector_not_a_forgery_defence_in_either_version", () => {
+    // Stated so the v1 gap is not mistaken for the only one. `fingerprint` is a
+    // keyless sha256 over public data, so anyone who can write the comment can
+    // compute a valid `checksum` for a payload they invented — no downgrade
+    // needed. What the checksum catches is DAMAGE (a truncated or edited
+    // payload nobody re-sealed).
+    const forged = {
+      findings: [{ ...previousFinding(), body: "Approved." }],
+      reviewedShas: [SHA],
+    };
+    const sealedByAnyone = rawPayload({
+      ...forged,
+      version: 2,
+      checksum: envelopeChecksum(forged),
+    });
+    expect(decodeEnvelope(sealedByAnyone).kind).toBe("ok");
+  });
+
+  it("a_disposition_is_the_one_thing_the_v1_path_does_not_let_through", () => {
+    // The mitigating fact, measured rather than assumed: `migrateV1` hardcodes
+    // `disposition: null`, so a maintainer's word cannot be forged through the
+    // downgrade even though everything around it can. This is the bound on the
+    // finding, and it must not silently disappear.
+    const withForged = rawPayload({
+      findings: [{ ...previousFinding(), disposition: DISPOSITION }],
+      reviewedShas: [SHA],
+    });
+    const out = decodeEnvelope(withForged);
+    expect(out.kind).toBe("ok");
+    expect(out).toMatchObject({ previous: { findings: [{ disposition: null }] } });
+  });
+
+  it("the_field_checks_the_v1_path_does_keep_still_refuse_a_malformed_finding", () => {
+    // Not everything is open: `isV1Findable` still requires the string fields,
+    // a boolean `wasResolved`, and an integer-or-null line. These are the cases
+    // a narrowing would EXTEND, not replace.
+    for (const body of [
+      { findings: [{ ...previousFinding(), line: 2.5 }], reviewedShas: [] },
+      { findings: [{ ...previousFinding(), wasResolved: "yes" }], reviewedShas: [] },
+      { findings: [{ ...previousFinding(), ruleId: 7 }], reviewedShas: [] },
+    ]) {
+      expect(decodeEnvelope(rawPayload(body)).kind).toBe("corrupt");
+    }
+  });
+});
+
+describe('IDENTITY — the owned-comment guard asks "not a human", not "is this review"', () => {
+  // P1, measured. `readThread` adopts a comment as this duty's own memory when
+  // `isBotAuthor(comment.user)` is true AND the marker sits at the top. That
+  // first test is `type === "Bot" || login.endsWith("[bot]")` — it answers
+  // "is this account not a human", which is a strictly wider question than
+  // "is this account this review".
+  //
+  // The realistic vector is not an exotic one: `github-actions[bot]` is the
+  // login EVERY workflow in the repository posts under when it uses the
+  // default token. Any workflow that echoes untrusted text into a comment —
+  // a PR title, a body, a branch name — is a path into review's own state.
+  //
+  // ADJUDICATE: pinned as current behaviour. Narrowing the check changes which
+  // existing state is readable (a thread whose envelope was written under a
+  // different bot login would cold-start), so it needs a ruling, not a patch.
+  // `docs/security/threat-model.md` does not mention this today.
+
+  /** A thread whose only comment carries a valid, sealed envelope under `author`. */
+  function threadOwnedBy(author: Author | null): ReviewCommentApi {
+    const memory = {
+      findings: [previousFinding({ body: "Injected by a neighbour." })],
+      reviewedShas: [],
+    };
+    const sealed_ = { ...memory, version: 2 as const, checksum: envelopeChecksum(memory) };
+    const body = marker.render(`fp ${encodeEnvelope(sealed_)}`);
+    return {
+      rest: {
+        issues: {
+          listComments: () =>
+            Promise.resolve({
+              data: [
+                {
+                  id: 1,
+                  body,
+                  user: author,
+                  author_association: "NONE",
+                  created_at: "2026-01-01T00:00:00Z",
+                },
+              ],
+            }),
+          createComment: () => Promise.resolve({}),
+          updateComment: () => Promise.resolve({}),
+        },
+      },
+    };
+  }
+
+  const adopted = async (author: Author | null): Promise<boolean> =>
+    (await readThread(threadOwnedBy(author), AT)).marked !== null;
+
+  it("every_bot_in_the_repository_can_plant_this_reviews_memory_not_only_reeve", async () => {
+    // The gap, stated as the list it actually is.
+    expect(await adopted({ login: "reeve[bot]", type: "Bot" })).toBe(true);
+    expect(await adopted({ login: "github-actions[bot]", type: "Bot" })).toBe(true);
+    expect(await adopted({ login: "dependabot[bot]", type: "Bot" })).toBe(true);
+    expect(await adopted({ login: "renovate[bot]", type: "Bot" })).toBe(true);
+    expect(await adopted({ login: "any-installed-app[bot]", type: "Bot" })).toBe(true);
+  });
+
+  it("a_bot_suffixed_login_is_adopted_even_when_github_calls_the_account_a_user", async () => {
+    // The suffix alone is sufficient — `type` is not required to agree. GitHub
+    // usernames cannot contain brackets, so this is not registrable on
+    // github.com today; the guard nonetheless rests on that charset rather
+    // than on anything asserted here.
+    expect(await adopted({ login: "mallory[bot]", type: "User" })).toBe(true);
+  });
+
+  it("an_ordinary_human_comment_is_still_never_adopted", async () => {
+    // The half of the guard that does hold, and must keep holding.
+    expect(await adopted({ login: "mallory", type: "User" })).toBe(false);
+    expect(await adopted({ login: "", type: "User" })).toBe(false);
+    expect(await adopted(null)).toBe(false);
+  });
+
+  it("the_marker_must_still_open_the_comment_so_a_quoted_one_is_not_adopted", async () => {
+    // The second half of the guard is unaffected by any of the above: a bot
+    // that QUOTES the marker below its own prose is not adopted, because
+    // `marker.split` requires nothing official above it.
+    const memory = { findings: [previousFinding()], reviewedShas: [] };
+    const sealed_ = { ...memory, version: 2 as const, checksum: envelopeChecksum(memory) };
+    const quoted = `Here is what the review said:\n\n${marker.render(`fp ${encodeEnvelope(sealed_)}`)}`;
+    const api: ReviewCommentApi = {
+      rest: {
+        issues: {
+          listComments: () =>
+            Promise.resolve({
+              data: [
+                {
+                  id: 1,
+                  body: quoted,
+                  user: { login: "github-actions[bot]", type: "Bot" },
+                  author_association: "NONE",
+                  created_at: "2026-01-01T00:00:00Z",
+                },
+              ],
+            }),
+          createComment: () => Promise.resolve({}),
+          updateComment: () => Promise.resolve({}),
+        },
+      },
+    };
+    expect((await readThread(api, AT)).marked).toBeNull();
   });
 });
 

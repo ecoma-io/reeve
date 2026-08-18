@@ -321,6 +321,58 @@ describe("readRules — the local file's failure semantics", () => {
       await c.dispose();
     }
   });
+
+  it("a_truncated_rules_file_warns_so_the_dropped_tail_is_not_silent", async () => {
+    // REGRESSION. `MAX_RULES_CHARS`' own doc says "truncation keeps a bounded
+    // prompt while the warning keeps the decision to drop the tail visible",
+    // and `readPackedRules` reads "truncation-warn kept" — but `readRules`
+    // sliced the text and warned about nothing. A rules file over 20k
+    // characters therefore lost every rule past the cap in silence: the
+    // maintainer who wrote those rules had no way to learn they never ran.
+    //
+    // The sibling this cap's doc names, `respond/guidance.ts`, does emit the
+    // warning on the identical decision — so the code had diverged from both
+    // its own doc and its stated model.
+    const filler = `# ${"z".repeat(200)}\n`;
+    const dropped = "dropped-past-the-cap";
+    const text = [
+      "version: 1",
+      "rules:",
+      "  - id: kept",
+      "    body: b",
+      filler.repeat(200),
+      `  - id: ${dropped}`,
+      "    body: never runs",
+    ].join("\n");
+    expect(text.length).toBeGreaterThan(MAX_RULES_CHARS);
+    const c = await checkout(text);
+    try {
+      const out = await readRules(c.rulesPath);
+      // The tail really is gone — the rule past the cap never reaches the run.
+      expect(out.rules.map((rule) => rule.id)).toContain("kept");
+      expect(out.rules.map((rule) => rule.id)).not.toContain(dropped);
+
+      // ...and the run says so, naming the cap and the file.
+      expect(core.warning).toHaveBeenCalledTimes(1);
+      const said = vi.mocked(core.warning).mock.calls[0]?.[0];
+      expect(String(said)).toContain(c.rulesPath);
+      expect(String(said)).toContain(String(MAX_RULES_CHARS));
+    } finally {
+      await c.dispose();
+    }
+  });
+
+  it("a_rules_file_inside_the_cap_warns_about_nothing", async () => {
+    // The other side of the same gate: the warning must mark a real decision,
+    // not fire on every ordinary run.
+    const c = await checkout("version: 1\nrules:\n  - id: small\n");
+    try {
+      await readRules(c.rulesPath);
+      expect(core.warning).not.toHaveBeenCalled();
+    } finally {
+      await c.dispose();
+    }
+  });
 });
 
 describe("a malformed rules file degrades to warnings, never to a silent guess", () => {
