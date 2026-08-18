@@ -13,7 +13,7 @@ The percentages are `@vitest/coverage-v8` over `src/**/*.ts`, minus the excluded
 
 ## Where it landed
 
-Round 1 raised the floor to 90 on all four metrics and then wrote the tests to meet it. Measured on the integrated tree, 187 test files and 4850 tests all passing:
+Round 1 raised the floor to 90 on all four metrics and then wrote the tests to meet it. Measured on the integrated tree, 187 test files and 4868 tests all passing:
 
 | Metric     | `0fa21e6` baseline | Round 1 | Change | Hit / total | Headroom above the 90 floor |
 | ---------- | -----------------: | ------: | -----: | ----------: | --------------------------: |
@@ -43,21 +43,30 @@ The one thing to watch is the shape of what closes the gap, not the size of it. 
 
 Three rules travel with it:
 
-1. **It never goes down.** A red threshold is a missing test, and the fix is the test.
-2. **`exclude` never grows to hide uncovered code.** An exclusion removes a file from the denominator, which raises the percentage while covering nothing. It is the one edit that can make this gate lie.
+1. **It never goes down.** A red threshold is a missing test, and the fix is the test. Pinned by `tools/coverage-config.test.mjs`.
+2. **`exclude` never grows to hide uncovered code.** An exclusion removes a file from the denominator, which raises the percentage while covering nothing. It is the one edit that can make this gate lie. Also pinned by `tools/coverage-config.test.mjs`, which additionally holds `include` at `src/**/*.ts` — narrowing the include is the same trick with the other hand.
 3. **It is not sufficient on its own.** A line can be executed by a test that asserts nothing. The paired gate is `tools/mutation.mjs`.
 
 ## The exclusions, restated
 
 `vitest.config.ts` excludes exactly three globs. Each is restated with the reason it is not a way of hiding code:
 
-| Glob                   | Why it is excluded                                                                                                                                                                                                                                                                           |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/main.ts`          | Calls `run()` at import time. Importing it to measure it would execute the action inside the test worker.                                                                                                                                                                                    |
-| `src/duties/*/main.ts` | Same shape, one per duty. Covered instead by driving the built bundles (`src/duties/*/main.integration.test.ts`), which is what a runner does — and which is why that coverage does not appear in these numbers: the bundle runs in a separate process the v8 provider is not instrumenting. |
-| `src/doctor/run.ts`    | Does not self-call at import, but calls `core.setOutput` / `core.setFailed` for real, mutating the worker's own `process.exitCode` and writing workflow commands to stdout rather than returning a value a test can assert on.                                                               |
+| Glob                   | Why it is excluded                                                                                                                                                                                                                                                | Actually exercised?                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `src/main.ts`          | Calls `run()` at import time. Importing it to measure it would execute the action inside the test worker.                                                                                                                                                         | Yes — the root listing action's bundle is driven by its own integration cases. |
+| `src/duties/*/main.ts` | Same shape, one per duty. Intended to be covered instead by driving the built bundles, which is what a runner does — and which is why that coverage does not appear in these numbers: the bundle runs in a separate process the v8 provider is not instrumenting. | **7 of 9. See below.**                                                         |
+| `src/doctor/run.ts`    | Does not self-call at import, but calls `core.setOutput` / `core.setFailed` for real, mutating the worker's own `process.exitCode` and writing workflow commands to stdout rather than returning a value a test can assert on.                                    | Yes, and now directly — see below.                                             |
 
-The list is defensible as it stands; the point of restating it is that **it must not grow**. A new exclusion is a coverage number that went up without a test being written.
+**The two duty entry points nothing executes.** The claim "covered instead by driving the built bundles" is true for seven of the nine duties and false for two, and stating it without that caveat would make this document a certificate for something nobody checked:
+
+- **`src/duties/dependa/main.ts` — no `main.integration.test.ts` exists at all.** It is the only duty without one.
+- **`src/duties/harmonise/main.ts` — the file exists but never runs the bundle.** `src/duties/harmonise/main.integration.test.ts` reads `action.yml` as text and asserts contract properties of it; its single reference to `dist/index.js` sits inside `expect(text).toContain("main: dist/index.js")`. The other seven duties spawn their bundle — between 17 and 112 bundle-driving call sites each. Harmonise has none.
+
+So those two files are excluded from the measurement **and** unexecuted by any test — the one combination an exclusion is not supposed to produce. TL2 has work in flight to close both; until it lands this is the honest reading, and neither file is small.
+
+**`src/doctor/run.ts` is stale in the opposite direction.** Its exclusion comment says the file is left to its bundle's integration test, but `src/doctor/run.test.ts` now imports `runDoctor` and `providerConfig` from `./run.js` and drives them directly. The file is unit-tested and still excluded, so that test's coverage is discarded from every percentage in this document — the numbers here are mildly _understated_, not overstated. Removing that exclusion is the right end state and is deliberately **not** done in this round: it moves the denominator late in a hardening pass, and the resulting figures would need re-verifying before anyone leaned on them. Recorded so it is a decision rather than an oversight.
+
+The list is defensible as it stands; the point of restating it is that **it must not grow**. A new exclusion is a coverage number that went up without a test being written — and since Round 1 that rule is pinned by `tools/coverage-config.test.mjs` rather than left to this paragraph. What that pin does and does not guarantee is set out in [ci-gates.md](ci-gates.md).
 
 There is a second, unwritten exclusion worth naming: the `include` glob is `src/**/*.ts`, so `eval/**`, `dogfood/**`, `scripts/**` and `tools/**` are outside the measurement entirely. `eval/` has its own suite (`pnpm test:contract`, `eval/contract/vitest.config.ts`) and `scripts/` has `pnpm test:docs-links`; `tools/` — including the mutation harness itself — has neither.
 
