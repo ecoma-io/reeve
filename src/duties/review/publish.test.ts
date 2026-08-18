@@ -121,6 +121,24 @@ describe("envelopeFingerprint", () => {
   });
 });
 
+/**
+ * A sealed v2 payload over arbitrary finding shapes — the checksum is computed
+ * over exactly what `validateV2` reconstructs, so a case can offer a malformed
+ * finding and still be testing the field check rather than the seal.
+ */
+function sealedV2(findings: readonly unknown[], reviewedShas: readonly string[]): string {
+  // `validateV2` normalises an absent `disposition` to `null` before it seals,
+  // so the checksum has to be computed over that same normalised shape.
+  const normalised = findings.map((entry) =>
+    typeof entry === "object" && entry !== null
+      ? { disposition: null, ...(entry as Record<string, unknown>) }
+      : entry,
+  );
+  const asRead = { findings: normalised, reviewedShas } as unknown as Previous;
+  const body = { findings, reviewedShas, version: 2, checksum: envelopeChecksum(asRead) };
+  return "fp " + Buffer.from(JSON.stringify(body), "utf8").toString("base64");
+}
+
 describe("encodeEnvelope / decodeEnvelope", () => {
   it("round-trips a full payload", () => {
     const payload: Previous = {
@@ -194,56 +212,47 @@ describe("encodeEnvelope / decodeEnvelope", () => {
     });
   });
 
-  it("decodes an old envelope without the optional fields as undefined", () => {
-    const payload = {
-      findings: [
-        {
-          id: "a",
-          ruleId: "r",
-          ruleName: "N",
-          ruleBody: "",
-          path: "p",
-          line: 1,
-          severity: "warning",
-          body: "b",
-          marker: "",
-          wasResolved: true,
-        },
-      ],
-      reviewedShas: ["ok"],
+  it("decodes an envelope without the optional fields as undefined", () => {
+    // `verification` and `evidence` are this-run values a stored finding may
+    // predate. Absent must read as absent, never as a default.
+    const finding = {
+      id: "a",
+      ruleId: "r",
+      ruleName: "N",
+      ruleBody: "",
+      path: "p",
+      line: 1,
+      severity: "warning",
+      body: "b",
+      marker: "",
+      wasResolved: true,
     };
-    const decoded = decodeEnvelope(
-      "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
-    );
-    if (decoded.kind !== "ok") throw new Error("expected a migrated ok payload");
+    const decoded = decodeEnvelope(sealedV2([finding], ["ok"]));
+    if (decoded.kind !== "ok") throw new Error("expected a valid payload");
     expect(decoded.previous.findings[0]?.verification).toBeUndefined();
     expect(decoded.previous.findings[0]?.evidence).toBeUndefined();
   });
 
-  it("preserves optional fields through a v1 migration, without shape-checking them", () => {
-    const payload = {
-      findings: [
-        {
-          id: "a",
-          ruleId: "r",
-          ruleName: "N",
-          ruleBody: "",
-          path: "p",
-          line: 1,
-          severity: "warning",
-          body: "b",
-          marker: "",
-          wasResolved: true,
-          verification: "bogus",
-          evidence: [{ kind: "not-a-kind", weight: 1, detail: 42, provenance: null }],
-        },
-      ],
-      reviewedShas: ["ok"],
+  it("preserves optional fields without shape-checking them", () => {
+    // The decoder validates the fields the ladder depends on and carries the
+    // rest through untouched — it is not a schema validator for the whole
+    // finding, and pretending otherwise would reject payloads it can read.
+    const finding = {
+      id: "a",
+      ruleId: "r",
+      ruleName: "N",
+      ruleBody: "",
+      path: "p",
+      line: 1,
+      severity: "warning",
+      body: "b",
+      marker: "",
+      wasResolved: true,
+      verification: "bogus",
+      evidence: [{ kind: "not-a-kind", weight: 1, detail: 42, provenance: null }],
     };
-    const decoded = decodeEnvelope(
-      "fp " + Buffer.from(JSON.stringify(payload), "utf8").toString("base64"),
-    );
-    if (decoded.kind !== "ok") throw new Error("expected a migrated ok payload");
+    const decoded = decodeEnvelope(sealedV2([finding], ["ok"]));
+    if (decoded.kind !== "ok") throw new Error("expected a valid payload");
     expect(decoded.previous.findings).toHaveLength(1);
     expect(decoded.previous.findings[0]?.wasResolved).toBe(true);
     expect(decoded.previous.findings[0]?.verification).toBe("bogus");
@@ -355,7 +364,13 @@ describe("encodeEnvelope / decodeEnvelope", () => {
     expect(decoded.reason).toMatch(/disposition/);
   });
 
-  it("migrates a v1 payload: disposition null, version 2, checksum computed", () => {
+  it("reads a versionless payload as a cold start rather than migrating it", () => {
+    // Ruled 2026-08-18. The migration this replaces computed a checksum
+    // instead of verifying one, so omitting `version` turned off every v2
+    // integrity check and then re-sealed the result as a valid v2. The window
+    // for a genuine versionless envelope is closed — v2 shipped before the
+    // 0.8.0 release — so the payload is discarded and the memory is rebuilt
+    // from the thread. See `publish.adversarial.test.ts` for the full matrix.
     const v1 = {
       findings: [
         {
@@ -377,18 +392,16 @@ describe("encodeEnvelope / decodeEnvelope", () => {
     const decoded = decodeEnvelope(
       "fp " + Buffer.from(JSON.stringify(v1), "utf8").toString("base64"),
     );
-    if (decoded.kind !== "ok") throw new Error("expected a migrated ok payload");
-    expect(decoded.previous.version).toBe(2);
-    expect(decoded.previous.findings[0]?.disposition).toBeNull();
-    expect(decoded.previous.findings[0]?.wasResolved).toBe(true);
-    expect(decoded.previous.findings[0]?.resolvedAtSha).toBe("s1");
-    expect(decoded.previous.checksum).toBe(envelopeChecksum(decoded.previous));
+    expect(decoded).toEqual({ kind: "none" });
   });
 
-  it("is corrupt when a v1 payload holds a malformed finding", () => {
-    const v1 = { findings: [{ id: 42 }], reviewedShas: [] };
+  it("is corrupt when a payload holds a malformed finding", () => {
+    // No real checksum is needed, and that is the assertion: the per-finding
+    // field check runs BEFORE the seal is compared, so a payload this
+    // malformed is refused on its shape rather than on its digest.
+    const body = { findings: [{ id: 42 }], reviewedShas: [], version: 2, checksum: "unused" };
     const decoded = decodeEnvelope(
-      "fp " + Buffer.from(JSON.stringify(v1), "utf8").toString("base64"),
+      "fp " + Buffer.from(JSON.stringify(body), "utf8").toString("base64"),
     );
     if (decoded.kind !== "corrupt") throw new Error("expected a corrupt payload");
     expect(decoded.reason).toMatch(/malformed field/);

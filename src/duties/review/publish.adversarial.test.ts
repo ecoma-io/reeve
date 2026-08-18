@@ -238,8 +238,7 @@ describe("a damaged envelope is loud, never an empty memory", () => {
     expect(reasonOf(out)).toContain("`3`");
   });
 
-  it("an_envelope_with_no_findings_array_is_corrupt_in_both_versions", () => {
-    expect(decodeEnvelope(rawPayload({ reviewedShas: [] })).kind).toBe("corrupt");
+  it("an_envelope_with_no_findings_array_is_corrupt", () => {
     expect(decodeEnvelope(rawPayload({ version: 2, reviewedShas: [] })).kind).toBe("corrupt");
   });
 
@@ -286,72 +285,61 @@ describe("a damaged envelope is loud, never an empty memory", () => {
   });
 });
 
-describe("a v1 envelope migrates rather than being read as damage", () => {
-  it("a_versionless_payload_migrates_with_every_disposition_starting_null", () => {
-    const out = decodeEnvelope(
-      rawPayload({
-        findings: [{ ...previousFinding(), resolvedAtSha: SHA, wasResolved: true }],
-        reviewedShas: [SHA],
-      }),
-    );
-    expect(out).toMatchObject({
-      kind: "ok",
-      previous: {
-        version: 2,
-        findings: [{ wasResolved: true, resolvedAtSha: SHA, disposition: null }],
-      },
+describe("the reviewed-SHA list is read defensively", () => {
+  // These two moved off the versionless path when the migration was removed —
+  // the filter they cover lives in `validateV2` too, and is what keeps junk in
+  // a stored SHA list from reaching the summary's "Previously reviewed at" row.
+  // A v2 payload must be sealed over the FILTERED result, which is exactly the
+  // property being asserted.
+
+  /** A sealed v2 payload whose `reviewedShas` is offered raw and read filtered. */
+  function sealedWithShas(raw: unknown, filtered: readonly string[]): string {
+    const asRead = { findings: [], reviewedShas: filtered };
+    return rawPayload({
+      findings: [],
+      reviewedShas: raw,
+      version: 2,
+      checksum: envelopeChecksum(asRead),
     });
-    // The migration seals it, so the next run reads its own write as whole.
-    const sealed_ = (out as { kind: "ok"; previous: Previous }).previous;
-    expect(decodeEnvelope(payloadOf(sealed_)).kind).toBe("ok");
-  });
-
-  it("a_versionless_payload_with_a_malformed_finding_is_corrupt_not_partially_migrated", () => {
-    const out = decodeEnvelope(
-      rawPayload({ findings: [previousFinding(), { id: "half" }], reviewedShas: [] }),
-    );
-    expect(out.kind).toBe("corrupt");
-  });
-
-  it("a_versionless_finding_with_a_fractional_line_is_corrupt", () => {
-    const out = decodeEnvelope(
-      rawPayload({ findings: [{ ...previousFinding(), line: 2.5 }], reviewedShas: [] }),
-    );
-    expect(out.kind).toBe("corrupt");
-  });
+  }
 
   it("non_string_reviewed_shas_are_dropped_rather_than_carried_as_junk", () => {
-    expect(
-      decodeEnvelope(rawPayload({ findings: [], reviewedShas: [SHA, 7, null, "2".repeat(40)] })),
-    ).toMatchObject({ kind: "ok", previous: { reviewedShas: [SHA, "2".repeat(40)] } });
+    const payload = sealedWithShas([SHA, 7, null, "2".repeat(40)], [SHA, "2".repeat(40)]);
+    expect(decodeEnvelope(payload)).toMatchObject({
+      kind: "ok",
+      previous: { reviewedShas: [SHA, "2".repeat(40)] },
+    });
   });
 
   it("a_non_array_reviewedShas_reads_as_no_history_rather_than_failing", () => {
-    expect(decodeEnvelope(rawPayload({ findings: [], reviewedShas: "abc" }))).toMatchObject({
+    expect(decodeEnvelope(sealedWithShas("abc", []))).toMatchObject({
       kind: "ok",
       previous: { reviewedShas: [] },
     });
   });
 });
 
-describe("DOWNGRADE — omitting `version` skips every v2 integrity check", () => {
-  // P0, measured. `decodeEnvelope` routes on ONE field: `map.version === undefined`
-  // sends the payload to `migrateV1`, which COMPUTES a checksum instead of
-  // verifying one and applies a strictly weaker field check than `validateV2`.
+describe("DOWNGRADE — omitting `version` is a cold start, never a migration", () => {
+  // P0, RULED AND CLOSED. `decodeEnvelope` used to route on one field:
+  // `map.version === undefined` sent the payload to `migrateV1`, which COMPUTED
+  // a checksum rather than verifying one and applied a strictly weaker
+  // per-finding check than `validateV2`. Every case below was `corrupt` as v2
+  // and `ok` as v1 — measured, not assumed — so one omitted key turned off
+  // every defence the v2 block above pins. It also LAUNDERED: the migration
+  // stamped `version: 2` and sealed whatever it accepted, so the envelope the
+  // next run wrote was a validly-sealed v2 carrying the tampered contents.
   //
-  // Every case in this block is the versionless twin of a v2 case pinned above.
-  // Each is `corrupt` as v2 and `ok` as v1 — measured, not assumed — so a
-  // reader of the v2 block alone would believe a defence that one omitted key
-  // turns off. That is a textbook downgrade, and the tests above read as if it
-  // were covered, which is why the twins live here.
+  // Ruled 2026-08-18, on measured evidence that the legacy window is closed:
+  // `git merge-base --is-ancestor fec2feb 0fa21e6` confirms v2 shipped BEFORE
+  // the 0.8.0 release, so a versionless envelope can only sit on a thread not
+  // reviewed since before 0.8.0, and the first review after upgrade rewrites
+  // it. A versionless payload is therefore read as a COLD START — the memory
+  // is rebuilt from the thread, which is an already-supported state — rather
+  // than migrated on trust.
   //
-  // ADJUDICATE: these pin CURRENT behaviour. The proposed narrowing is to apply
-  // v2's FIELD checks (severity in the union, line null-or-positive-integer,
-  // disposition shape) to the v1 path while keeping the checksum exemption —
-  // genuine legacy envelopes were written from the same types and pass all of
-  // them, so the migration stays lenient exactly where it has to be and strict
-  // everywhere it can be. Flipping that switch turns every `ok` below into
-  // `corrupt`. Awaiting a ruling; see the report and the failure matrix.
+  // These cases are kept, flipped, as the proof the path is GONE rather than
+  // narrowed: each asserts that the tamper no longer decodes, and the twin v2
+  // assertion beside it shows the two versions now agree.
 
   /** The same tampered body, offered with and without a `version` key. */
   function bothWays(body: Record<string, unknown>): { v2: string; v1: string } {
@@ -362,53 +350,50 @@ describe("DOWNGRADE — omitting `version` skips every v2 integrity check", () =
     };
   }
 
-  it("a_resolved_flag_flipped_in_place_is_corrupt_as_v2_but_ok_without_a_version", () => {
+  it("a_resolved_flag_flipped_in_place_is_corrupt_as_v2_and_no_longer_migrates", () => {
     const { v2, v1 } = bothWays({
       findings: [{ ...previousFinding(), wasResolved: true }],
       reviewedShas: [SHA],
     });
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
-    expect(decodeEnvelope(v1).kind).toBe("ok");
+    expect(decodeEnvelope(v1).kind).toBe("none");
   });
 
-  it("a_reviewed_sha_appended_in_place_is_corrupt_as_v2_but_ok_without_a_version", () => {
+  it("a_reviewed_sha_appended_in_place_is_corrupt_as_v2_and_no_longer_migrates", () => {
     const { v2, v1 } = bothWays({
       findings: [previousFinding()],
       reviewedShas: [SHA, "2".repeat(40)],
     });
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
-    const out = decodeEnvelope(v1);
-    expect(out.kind).toBe("ok");
-    // The forged history is carried, so the summary's "Previously reviewed at"
-    // row names a SHA this thread was never reviewed against.
-    expect(out).toMatchObject({ previous: { reviewedShas: [SHA, "2".repeat(40)] } });
+    // The forged history no longer reaches the run at all — there is no
+    // `previous` to carry it, so the summary's "Previously reviewed at" row
+    // cannot name a SHA this thread was never reviewed against.
+    expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
   });
 
-  it("an_unknown_severity_is_corrupt_as_v2_but_ok_without_a_version", () => {
+  it("an_unknown_severity_is_corrupt_as_v2_and_no_longer_migrates", () => {
     const { v2, v1 } = bothWays({
       findings: [{ ...previousFinding(), severity: "catastrophic" }],
       reviewedShas: [SHA],
     });
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
-    const out = decodeEnvelope(v1);
-    expect(out.kind).toBe("ok");
-    // The out-of-union value is carried onto the finding, and `findingLine`
-    // prints `finding.severity` verbatim into the published comment.
-    expect(out).toMatchObject({ previous: { findings: [{ severity: "catastrophic" }] } });
+    // The out-of-union value used to ride onto the finding, where
+    // `findingLine` prints `finding.severity` verbatim into the comment.
+    expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
   });
 
-  it("a_line_of_zero_or_a_negative_line_is_corrupt_as_v2_but_ok_without_a_version", () => {
+  it("a_line_of_zero_or_a_negative_line_is_corrupt_as_v2_and_no_longer_migrates", () => {
     for (const line of [0, -5]) {
       const { v2, v1 } = bothWays({
         findings: [{ ...previousFinding(), line }],
         reviewedShas: [SHA],
       });
       expect(decodeEnvelope(v2).kind).toBe("corrupt");
-      expect(decodeEnvelope(v1).kind).toBe("ok");
+      expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
     }
   });
 
-  it("a_finding_the_review_never_made_is_corrupt_as_v2_but_ok_without_a_version", () => {
+  it("a_finding_the_review_never_made_is_corrupt_as_v2_and_no_longer_migrates", () => {
     // The one with teeth. An entry invented wholesale enters the run's memory,
     // and `reconcile` renders it either way — as `persists` when the diff still
     // proves its position, as `resolved` when it does not. Both print the
@@ -424,32 +409,22 @@ describe("DOWNGRADE — omitting `version` skips every v2 integrity check", () =
       reviewedShas: [SHA],
     });
     expect(decodeEnvelope(v2).kind).toBe("corrupt");
-    const out = decodeEnvelope(v1);
-    expect(out.kind).toBe("ok");
-    expect(out).toMatchObject({
-      previous: { findings: [{}, { body: "Ship it. Reviewed and approved." }] },
-    });
+    // Nothing to render: the invented body never becomes a `previous` finding,
+    // so `reconcile` has no entry to report as `persists` or `resolved`.
+    expect(decodeEnvelope(v1)).toEqual({ kind: "none" });
   });
 
-  it("one_v1_tamper_launders_permanently_into_a_validly_sealed_v2_envelope", () => {
-    // The step that makes this worth a P0 rather than a curiosity: `migrateV1`
-    // stamps `version: 2` and computes a checksum over whatever it accepted. So
-    // the payload the next run WRITES is a legitimately sealed v2 envelope
-    // carrying the tampered contents, and every run after that validates it.
+  it("a_v1_tamper_can_no_longer_launder_itself_into_a_validly_sealed_v2_envelope", () => {
+    // The step that made this a P0 rather than a curiosity: `migrateV1` stamped
+    // `version: 2` and computed a checksum over whatever it accepted, so the
+    // payload the next run WROTE was a legitimately sealed v2 carrying the
+    // tampered contents, and every run after that validated it. One tamper,
+    // then permanent. The laundry is closed by never accepting the input.
     const tampered = rawPayload({
       findings: [{ ...previousFinding(), wasResolved: true, id: "invented" }],
       reviewedShas: [SHA],
     });
-    const migrated = decodeEnvelope(tampered);
-    expect(migrated.kind).toBe("ok");
-    if (migrated.kind !== "ok") return;
-    expect(migrated.previous.version).toBe(2);
-
-    const relaundered = decodeEnvelope(`fp ${encodeEnvelope(migrated.previous)}`);
-    expect(relaundered).toMatchObject({
-      kind: "ok",
-      previous: { findings: [{ wasResolved: true, id: "invented" }] },
-    });
+    expect(decodeEnvelope(tampered)).toEqual({ kind: "none" });
   });
 
   it("the_checksum_is_a_damage_detector_not_a_forgery_defence_in_either_version", () => {
@@ -470,31 +445,49 @@ describe("DOWNGRADE — omitting `version` skips every v2 integrity check", () =
     expect(decodeEnvelope(sealedByAnyone).kind).toBe("ok");
   });
 
-  it("a_disposition_is_the_one_thing_the_v1_path_does_not_let_through", () => {
-    // The mitigating fact, measured rather than assumed: `migrateV1` hardcodes
-    // `disposition: null`, so a maintainer's word cannot be forged through the
-    // downgrade even though everything around it can. This is the bound on the
-    // finding, and it must not silently disappear.
+  it("a_forged_disposition_offered_without_a_version_reaches_nothing_at_all", () => {
+    // Before the ruling this was bounded only because `migrateV1` happened to
+    // hardcode `disposition: null`. It is now bounded by the payload never
+    // being read, which does not depend on a migration detail staying true.
     const withForged = rawPayload({
       findings: [{ ...previousFinding(), disposition: DISPOSITION }],
       reviewedShas: [SHA],
     });
-    const out = decodeEnvelope(withForged);
-    expect(out.kind).toBe("ok");
-    expect(out).toMatchObject({ previous: { findings: [{ disposition: null }] } });
+    expect(decodeEnvelope(withForged)).toEqual({ kind: "none" });
   });
 
-  it("the_field_checks_the_v1_path_does_keep_still_refuse_a_malformed_finding", () => {
-    // Not everything is open: `isV1Findable` still requires the string fields,
-    // a boolean `wasResolved`, and an integer-or-null line. These are the cases
-    // a narrowing would EXTEND, not replace.
+  it("a_versionless_payload_that_would_have_migrated_cleanly_is_still_a_cold_start", () => {
+    // The shape the migration used to accept and carry forward — a resolved
+    // finding with its resolving SHA. It no longer decodes, so `reopened` has
+    // no forged memory to work against.
+    expect(
+      decodeEnvelope(
+        rawPayload({
+          findings: [{ ...previousFinding(), resolvedAtSha: SHA, wasResolved: true }],
+          reviewedShas: [SHA],
+        }),
+      ),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("a_versionless_payload_is_a_cold_start_whether_or_not_its_findings_are_well_formed", () => {
+    // Both used to be `corrupt` via the migration's own field checks. The
+    // routing decision now happens first, so shape no longer matters — which
+    // is the point: nothing downstream of the version test can be reached.
     for (const body of [
+      { findings: [previousFinding(), { id: "half" }], reviewedShas: [] },
       { findings: [{ ...previousFinding(), line: 2.5 }], reviewedShas: [] },
-      { findings: [{ ...previousFinding(), wasResolved: "yes" }], reviewedShas: [] },
-      { findings: [{ ...previousFinding(), ruleId: 7 }], reviewedShas: [] },
     ]) {
-      expect(decodeEnvelope(rawPayload(body)).kind).toBe("corrupt");
+      expect(decodeEnvelope(rawPayload(body))).toEqual({ kind: "none" });
     }
+  });
+
+  it("an_honest_versionless_envelope_is_also_a_cold_start_not_an_error", () => {
+    // The cost of the ruling, stated. A genuine pre-0.8.0 envelope is discarded
+    // too — it is not reported as damage, because it is not damaged. The run
+    // rebuilds from the thread, which is the state a first-ever review is in.
+    const honest = rawPayload({ findings: [previousFinding()], reviewedShas: [SHA] });
+    expect(decodeEnvelope(honest)).toEqual({ kind: "none" });
   });
 });
 
@@ -510,10 +503,30 @@ describe('IDENTITY — the owned-comment guard asks "not a human", not "is this 
   // default token. Any workflow that echoes untrusted text into a comment —
   // a PR title, a body, a branch name — is a path into review's own state.
   //
-  // ADJUDICATE: pinned as current behaviour. Narrowing the check changes which
-  // existing state is readable (a thread whose envelope was written under a
-  // different bot login would cold-start), so it needs a ruling, not a patch.
-  // `docs/security/threat-model.md` does not mention this today.
+  // RULED 2026-08-18: narrow adoption to the run's own identity. IMPLEMENTATION
+  // BLOCKED — reported rather than guessed, because the ruling itself said a
+  // fallback here would reopen exactly what it closes.
+  //
+  // The narrowing needs the login this run posts as, at the point `readThread`
+  // decides. That value does not exist in this code path and cannot be fetched:
+  //
+  //   - `Shared` settings carry only an opaque `token` string; no login, no app
+  //     slug, no configured identity input exists.
+  //   - No port here exposes `users` or `apps`, and adding a call would not
+  //     help: `GET /user` answers 403 "Resource not accessible by integration"
+  //     for a GitHub App installation token, which is exactly what the default
+  //     `GITHUB_TOKEN` is. There is no single endpoint that resolves an
+  //     identity for both a PAT and an installation token.
+  //   - Learning it from a comment this run wrote is circular — that comment is
+  //     the object under attack.
+  //
+  // The available resolution is a DECLARED identity input (`action.yml` plus
+  // `inputs.ts`), which is a design change on another lead's surface, not a
+  // test-round patch. Until then these cases pin the gap exactly, and the
+  // marker-at-the-top half below is pinned so a future narrowing cannot
+  // silently drop it while replacing the author half.
+  //
+  // `docs/security/threat-model.md` now names this boundary.
 
   /** A thread whose only comment carries a valid, sealed envelope under `author`. */
   function threadOwnedBy(author: Author | null): ReviewCommentApi {

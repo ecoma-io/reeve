@@ -522,7 +522,24 @@ afterEach(async () => {
   await rm(scratch, { recursive: true, force: true });
 });
 
-describe("the action", () => {
+/**
+ * Every suite in this file drives the review duty end to end — a real warrant
+ * on disk, a real temporary workspace, a stubbed forge and provider — so a
+ * case here costs whole seconds of genuine work rather than milliseconds of
+ * incidental setup. That is worth stating rather than inheriting: measured
+ * under `--maxWorkers=3` alongside the rest of `src/core` and
+ * `src/duties/review`, the slowest case in this file reached 4802 ms against
+ * vitest's 5000 ms default — 96% of the budget, and a flake the moment a
+ * runner is slower than this one.
+ *
+ * The 20 s budget below is set against that worst measurement (about 4x
+ * headroom) so a slow box does not turn real work into a red run, and so a
+ * genuine regression into double-digit seconds is still caught rather than
+ * absorbed. Raise it only with a fresh measurement recorded here.
+ */
+const INTEGRATION_TIMEOUT = 20_000;
+
+describe("the action", { timeout: INTEGRATION_TIMEOUT }, () => {
   it("reviews and posts one comment with the verdict, in the diff's language", async () => {
     stub.answer = stageAnswer({
       review: JSON.stringify({
@@ -1797,7 +1814,7 @@ describe("the action", () => {
   });
 });
 
-describe("the context engine", () => {
+describe("the context engine", { timeout: INTEGRATION_TIMEOUT }, () => {
   /** Writes a workspace source tree into the scratch checkout and lets the run read it. */
   async function withWorkspace(files: Record<string, string>): Promise<NodeJS.ProcessEnv> {
     for (const [rel, text] of Object.entries(files)) {
@@ -1931,7 +1948,7 @@ describe("the context engine", () => {
   });
 });
 
-describe("the action contract", () => {
+describe("the action contract", { timeout: INTEGRATION_TIMEOUT }, () => {
   /**
    * Every input `action.yml` declares, read straight out of it.
    *
