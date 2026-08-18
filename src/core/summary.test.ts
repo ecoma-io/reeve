@@ -358,3 +358,27 @@ describe("writeRunSummary", () => {
     expect(written).toContain("`fast`");
   });
 });
+
+describe("cost — the plurality of what it reports", () => {
+  const byModel = (entry: Spend) => entry.model;
+
+  it("says `1 of 1 request` in the singular when the one request under-reported", () => {
+    // The sentence is the whole point of the row: a reader who sees a plural
+    // where there was one request stops trusting the count.
+    expect(cost([spend({ requests: 1, unreported: 1 })], byModel)).toContain(
+      "1 of 1 request came back without a `usage` field",
+    );
+  });
+
+  it("says `requests were unusable` in the plural once more than one failed", () => {
+    expect(cost([spend({ requests: 3, failed: 2 })], byModel)).toContain(
+      "2 requests were unusable and rotated past.",
+    );
+  });
+
+  it("says neither sentence when nothing failed and nothing was under-reported", () => {
+    const rendered = cost([spend({ requests: 2 })], byModel);
+    expect(rendered).not.toContain("without a `usage` field");
+    expect(rendered).not.toContain("unusable and rotated past");
+  });
+});
