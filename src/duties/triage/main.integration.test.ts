@@ -3045,3 +3045,70 @@ describe("creating a label the repository does not have", () => {
     expect(run.log).toContain("Would create");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A6 — which roster pays for language detection (`main.ts:911`).
+//
+// `settings.screenModels.length > 0 ? settings.screenModels : settings.models`
+// survived all 4868 vitest tests. Its only defence was one eval fixture. The
+// reason no unit or integration case reached it: every case in this file runs
+// with the default `languages`, whose codes the bundled `eld` profile covers,
+// so detection is decided locally and the picker is never consulted at all.
+// A fixture that makes a branch unreachable is a fixture that makes the branch
+// unobservable, whatever the coverage number says.
+//
+// `pt-BR` is the lever. `detectByProfile` (`core/detect.ts:231`) declines the
+// whole step when ANY candidate is outside the bundled sixty — a regional tag
+// is not its base language to `eld` — so the model picker is reached, and
+// which roster it was built from becomes observable.
+// ---------------------------------------------------------------------------
+
+/** A warrant whose `languages:` forces detection past the local profile. */
+const REGIONAL_WARRANT = `${WARRANT}\nlanguages:\n  - en\n  - pt-BR\n`;
+
+/** The detection ask, told from the verdict ask by what its system message says. */
+function detectionAsks(): Ask[] {
+  // Matched on the detection prompt's own opening sentence (core/detect.ts:172)
+  // rather than on the word "language": triage's verdict prompt names the
+  // thread's language too, so a looser filter counts the verdict ask as a
+  // detection ask and the assertion stops discriminating.
+  return stub.asked.filter((ask) => ask.system.startsWith("You identify which language the body"));
+}
+
+describe("the roster language detection is bought from", () => {
+  it("pays the cheap screen roster when one is configured", async () => {
+    await writeFile(warrantPath, REGIONAL_WARRANT);
+
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    const asked = detectionAsks().map((ask) => ask.model);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).toContain("cheap-model");
+    expect(asked).not.toContain("stub-model");
+  });
+
+  it("falls back to the main roster when no cheap roster is configured", async () => {
+    // The documented default rather than a degraded mode: an unset
+    // `screen-models` means "use the one roster there is", not "skip
+    // detection". This is the arm the eval fixture was alone in defending.
+    await writeFile(warrantPath, REGIONAL_WARRANT);
+
+    const run = await runAction(stub, { "screen-models": "" });
+
+    expect(run.code).toBe(0);
+    const asked = detectionAsks().map((ask) => ask.model);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).toContain("stub-model");
+  });
+
+  it("asks nothing for language at all when the profile can decide locally", async () => {
+    // The control: with the default warrant every candidate is inside the
+    // bundled profile, so the picker is never reached — which is exactly why
+    // every other case in this file leaves `main.ts:911` unobserved.
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    expect(detectionAsks()).toEqual([]);
+  });
+});
