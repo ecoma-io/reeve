@@ -139,16 +139,19 @@ cannot pass on a fork is a check that closes the project to contributors.
 Measuring is therefore split from the CI gate: the stub harness **does** run
 in CI (`pnpm eval all`, on every push) and exercises the fail-closed
 contract — a fixture run must exit 0 only when every outcome was a finding
-and none failed or skipped. Accuracy itself is the other register: a real
-provider, run deliberately.
+and none failed or skipped. `pnpm eval` is that register and only that one:
+it drives every completion against the local stub, so there is no flag that
+points it at a provider. Accuracy is the other register, and it is a separate
+program — `eval/live.ts`, run deliberately, with the endpoint in the
+environment.
 
 So:
 
-| When                          | What runs                                                              |
-| ----------------------------- | ---------------------------------------------------------------------- |
-| Every pull request            | Unit and integration tests, against fakes. No provider, no cost.       |
-| Deliberately, by a maintainer | `pnpm eval <duty>` against a real provider, with the numbers recorded. |
-| Before a duty's release       | `pnpm eval <duty>`, and the numbers go in the release notes.           |
+| When                          | What runs                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Every pull request            | Unit and integration tests against fakes, plus `pnpm eval all` over the stub harness. No provider, no cost.        |
+| Deliberately, by a maintainer | `eval/live.ts` — the same fixtures with only the completion endpoint pointed at a real provider, numbers recorded. |
+| Before a duty's release       | `eval/live.ts` again, and the numbers go in the release notes.                                                     |
 
 The numbers are committed alongside the fixture set, so a change to a prompt shows
 up as a diff in the results rather than as a claim in a pull request description.

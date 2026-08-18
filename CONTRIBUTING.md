@@ -59,19 +59,47 @@ yourself bumping it by hand, that is the reason not to.
 
 ## The commands
 
-| Command             | What it does                                                                                                  |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `pnpm lint`         | ESLint, with type information, zero warnings tolerated                                                        |
-| `pnpm typecheck`    | `tsc --noEmit` — esbuild strips types without checking them, so this is the only place a type error is caught |
-| `pnpm test`         | Vitest, unit and integration, with coverage thresholds                                                        |
-| `pnpm build`        | esbuild, one bundle per action — the listing's, and each duty's beside its own `action.yml`                   |
-| `pnpm format`       | Prettier, in place                                                                                            |
-| `pnpm format:check` | Prettier, read-only — what CI runs                                                                            |
-| `pnpm try <duty>`   | Runs one duty here, against a real provider and a real thread — see below                                     |
+| Command                   | What it does                                                                                                                                                                 |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm lint`               | ESLint, with type information, zero warnings tolerated                                                                                                                       |
+| `pnpm typecheck`          | `tsc --noEmit` — esbuild strips types without checking them, so this is the only place a type error is caught                                                                |
+| `pnpm test`               | Vitest, unit and integration, with coverage thresholds                                                                                                                       |
+| `pnpm test:contract`      | The eval contract suite — the duties contract and the fail-closed exit-code gate. The root vitest config discovers only `src/**`, so `pnpm test` never reaches it            |
+| `pnpm eval all`           | Every duty's bundle driven over its committed fixtures. Fail-closed: green only when every fixture is a finding and none failed or skipped                                   |
+| `pnpm test:mutation`      | The whole mutation table — 60 rows. Red on a mutation the suite does not kill, on a row whose `from` no longer matches its file exactly once, and on a table that has shrunk |
+| `pnpm test:mutation:fast` | The 44 `fast`-tier rows of that table, for the local loop. The 16 `full` rows are the slow ones — four of them rebuild a duty's bundle                                       |
+| `pnpm test:tools`         | `node --test` over `tools/**` — the gates that check the gates: the mutation harness's own refusals, and the pins on `vitest.config.ts`'s thresholds and exclusions          |
+| `pnpm check-docs-links`   | Every markdown link, prose `docs/…` citation and bare `#anchor` resolves, and a page inside `docs/` links only within it                                                     |
+| `pnpm build`              | esbuild, one bundle per action — the listing's, and each duty's beside its own `action.yml`                                                                                  |
+| `pnpm format`             | Prettier, in place                                                                                                                                                           |
+| `pnpm format:check`       | Prettier, read-only — what CI runs                                                                                                                                           |
+| `pnpm try <duty>`         | Runs one duty here, against a real provider and a real thread — see below                                                                                                    |
 
-Before you push, run all of the first six. A shorter local run just moves the
-red to the pull request. `pnpm try` is not one of them: it needs a network and a
-token, so it is a thing you do when a change deserves it, not a gate.
+Everything above except `pnpm format` and `pnpm try` is a gate, and the gate set
+is what `ci-gate` requires rather than a habit. CI's `Verify` job runs
+`format:check`, `lint`, `typecheck`, `test`, `test:contract`, `eval all`,
+`check-docs-links` and `build` — plus two guards that have no script of their
+own, `node tools/check-uses-refs.mjs` and `node tools/check-anchors.mjs`, and a
+check that the rebuilt bundles match what you committed. A separate `Mutation`
+job runs `test:tools` and then the whole `test:mutation` table on its own
+runner, because the harness renames source files while it works and nothing else
+may be reading `src/` at that moment. `ci-gate` requires both jobs, so green
+means all of it.
+
+Before you push, run them. A shorter local run just moves the red to the pull
+request. The one deliberate shortcut is the mutation table:
+`pnpm test:mutation:fast` is the local loop, so the 16 `full` rows first run in
+CI — a red `Mutation` job is not always something the fast stage could have told
+you about.
+
+`pnpm try` is the command that is not a gate: it needs a network and a token, so
+it is a thing you do when a change deserves it. `pnpm eval` is the opposite, and
+the difference is worth stating because the two sound alike — the runner drives
+every bundle against a local HTTP stub with the model's answers scripted from
+the fixtures, so it needs neither a key nor an endpoint, which is exactly what
+lets `pnpm eval all` be a required check that a fork's pull request can pass.
+Measuring accuracy against a real provider is a different program run
+deliberately: `eval/live.ts`, never CI.
 
 `pnpm test` runs with coverage and the thresholds in `vitest.config.ts` apply,
 so the floor is enforced from the first test rather than retrofitted later. It
@@ -128,10 +156,13 @@ endpoint and holds no key. Two things are worth knowing before the first run:
   already exported in your shell is the one that will be used.
 
 This repository also runs its own duties on its own issues and pull requests —
-`.github/workflows/reeve-*.yml`, pointed at the working tree with
-`uses: ./translate` rather than at a tag, so a change is dogfooded on the pull
-request that makes it. The path is the duty's own directory for the same reason
-a consumer writes `ecoma-io/reeve/translate@v0.6`: the action at the root refuses.
+`.github/workflows/reeve-dogfood.yml`, one job per duty, each naming the real
+public leaf with `uses: ecoma-io/reeve/<duty>@main`. `@main` rather than a tag
+because dogfooding is how an un-released change gets exercised: what runs is the
+committed bundle on `main`, the one CI proved matches `src/`, so a change is
+dogfooded once it lands rather than on the pull request that makes it. The path
+is the duty's own directory for the same reason a consumer writes
+`ecoma-io/reeve/translate@v0.6`: the action at the root refuses.
 
 The provider comes from **organisation** secrets, which a maintainer sets, and
 they are named on two tiers because they change on two different schedules:
@@ -183,21 +214,34 @@ What that means for you:
 pnpm build && git add dist
 ```
 
-The `pre-push` hook rebuilds and refuses to push if the result differs from what
-you committed. CI checks the same thing, and so does the release workflow. If
-you have ever seen an action repository merge a fix that changed nothing in
-practice, this is the check that was missing.
+No hook catches a stale bundle for you: a rebuild is slow enough that a
+contributor learns to skip the hook, so it lives in CI instead. `Verify`
+rebuilds and fails if `git status --porcelain` reports anything afterwards —
+which answers for every duty's bundle, and for output nobody committed at all,
+in a way a `dist` pathspec would not. The release workflow rebuilds again at the
+release commit and refuses to move the floating tag. If you have ever seen an
+action repository merge a fix that changed nothing in practice, this is the
+check that was missing.
 
 Review the bundle diff the way you would review generated output — glance at it,
 do not read it. It is marked `linguist-generated` so GitHub collapses it.
 
 ## What the hooks do
 
-- **pre-commit** — Prettier formats the staged files and re-stages what it
-  rewrote, then ESLint runs over them. The commit contains formatted bytes
-  rather than a follow-up fixup.
-- **commit-msg** — commitlint checks the message shape.
-- **pre-push** — `typecheck`, `test`, and the bundle-freshness check above.
+- **pre-commit** — three jobs, in parallel. Prettier _checks_ the staged files
+  rather than rewriting them, so an unformatted file fails the commit instead of
+  changing under you: run `pnpm format`, stage the result, commit again. ESLint
+  runs over the staged code. And `check-docs-links` runs over the whole tree on
+  every commit rather than on a glob, because the reference a commit breaks can
+  sit in a file that commit never touched.
+- **commit-msg** — commitlint checks the message shape, with the same
+  configuration CI re-checks the pull request title against.
+- **There is no `pre-push` hook.** Everything that depends on _what_ changed —
+  `typecheck`, the suite, the bundle rebuild — is slow enough to be noticed, and
+  a hook slow enough to notice is a hook people learn to skip with
+  `--no-verify`, which defeats it more thoroughly than not having it at all.
+  Those are CI's `Verify` job, which is why the list above says to run them
+  yourself before you push.
 
 Bypassing a hook with `--no-verify` is occasionally the right call during a
 rebase. It is never the right way to land a change.
@@ -369,9 +413,22 @@ with no `permissions:` — are precisely the mistakes our own consumers will mak
 in workflows they copy from our README. Treat a finding in a workflow file as a
 finding in documentation as well as in code.
 
-There is no Semgrep configuration here yet, and
-[`analysis.yml`](.github/workflows/analysis.yml) explains why: the sinks worth
-writing rules for do not exist until the runtime does.
+**Semgrep** runs beside it, in two passes on purpose. The reporting pass carries
+this repository's own rules under `.github/semgrep/` alongside the `p/javascript`
+registry pack and uploads the result to code scanning; the blocking pass re-runs
+our own rules alone and fails the job on a finding. Only our rules block, because
+a registry pack can gain a rule overnight and turn `main` red for a change nobody
+made. The rules ship with fixtures beside them and `semgrep --test` runs before
+either scan — a rule that has quietly stopped matching would otherwise pass every
+scan by finding nothing.
+
+**Gitleaks** scans the whole history rather than the diff, because a secret
+removed in a later commit is still a leak for as long as it sits in the tree.
+
+All three report through one required check, `analysis-gate`, for the same reason
+CI has `ci-gate`: the name a branch ruleset requires stays stable while the job
+list does not. [`analysis.yml`](.github/workflows/analysis.yml) is the file that
+explains the rest.
 
 ## Opening a pull request
 
