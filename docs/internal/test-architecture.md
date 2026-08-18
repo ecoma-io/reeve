@@ -289,7 +289,7 @@ Verified against source; recorded, not fixed.
 - `docs/internal/intent-matrix.md:583-587` (GAP 4) describes an untested `asEditor` / `session.interactive` pattern in `getSettings`. **None of those three identifiers exists anywhere under `src/`.** The row is stale and should be struck rather than owned.
 - `docs/internal/intent-matrix.md:576-580` (GAP 3, lifecycle recursion guard) is still open and correctly stated: `isReeveProposalPr` is used at `lifecycle/main.ts:223` and `:450`, and the only test of it anywhere is `src/core/marker.test.ts:149-172`. `lifecycle/main.integration.test.ts` has no proposal-PR case.
 - `docs/internal/intent-matrix.md:569-575` (GAP 1, `screen-models` detect fallback) is partly closed. `roster.contract.test.ts:97` pins the callee side and names `main.ts:911` in its title, but the fallback expression itself appears at **five** call sites — `triage/main.ts:911`, `triage/record.ts:177`, `:320`, `:447`, `respond/main.ts:396` — and no test drives any of them.
-- All file paths cited in `intent-matrix.md` and `failure-matrix.md` resolve; spot-checked line anchors in `failure-matrix.md` (`provider.ts:624`, `:815`, `forge.ts:863`, `:885`, `warrant.ts:878`, `:907`, `review/threads.ts:270`, `review/verdict.ts:30`) are all accurate.
+- All file paths cited in `intent-matrix.md` and `failure-matrix.md` resolve; spot-checked line anchors in `failure-matrix.md` (`provider.ts:624`, `:815`, `forge.ts:863`, `:947`, `warrant.ts:878`, `:907`, `review/threads.ts:270`, `review/verdict.ts:30`) are all accurate.
 
 ## 10. Measured suite health at the time of writing
 
