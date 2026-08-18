@@ -392,7 +392,12 @@ describe("encodeEnvelope / decodeEnvelope", () => {
     const decoded = decodeEnvelope(
       "fp " + Buffer.from(JSON.stringify(v1), "utf8").toString("base64"),
     );
-    expect(decoded).toEqual({ kind: "none" });
+    // `corrupt`, not `none`: state WAS found and this run discarded it, so the
+    // caller announces it rather than cold-starting in silence. The reason
+    // names the missing version — there is no checksum here to have failed.
+    expect(decoded.kind).toBe("corrupt");
+    if (decoded.kind !== "corrupt") throw new Error("expected a corrupt payload");
+    expect(decoded.reason).toContain("declares no schema version");
   });
 
   it("is corrupt when a payload holds a malformed finding", () => {

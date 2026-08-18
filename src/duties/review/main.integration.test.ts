@@ -34,6 +34,17 @@ import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vite
 
 // A spawn per case, each loading a multi-megabyte bundle. Comfortably under
 // this, and not worth flaking over.
+//
+// The budget is measured, not guessed. Under `--maxWorkers=3` alongside the
+// rest of `src/core` and `src/duties/review`, the slowest case in this file
+// reached 4802 ms across three full runs — about 16% of the 30 s below, and
+// roughly 6x headroom. Every case here drives the duty end to end against a
+// real warrant, a real temporary workspace and a stubbed forge, so seconds of
+// genuine work is the expected cost rather than incidental setup.
+//
+// Raise it only against a fresh measurement recorded here, and do not lower it
+// without one either: a tighter number would turn real work red on a slower
+// runner than the one these figures came from.
 vi.setConfig({ testTimeout: 30_000 });
 
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -522,24 +533,7 @@ afterEach(async () => {
   await rm(scratch, { recursive: true, force: true });
 });
 
-/**
- * Every suite in this file drives the review duty end to end — a real warrant
- * on disk, a real temporary workspace, a stubbed forge and provider — so a
- * case here costs whole seconds of genuine work rather than milliseconds of
- * incidental setup. That is worth stating rather than inheriting: measured
- * under `--maxWorkers=3` alongside the rest of `src/core` and
- * `src/duties/review`, the slowest case in this file reached 4802 ms against
- * vitest's 5000 ms default — 96% of the budget, and a flake the moment a
- * runner is slower than this one.
- *
- * The 20 s budget below is set against that worst measurement (about 4x
- * headroom) so a slow box does not turn real work into a red run, and so a
- * genuine regression into double-digit seconds is still caught rather than
- * absorbed. Raise it only with a fresh measurement recorded here.
- */
-const INTEGRATION_TIMEOUT = 20_000;
-
-describe("the action", { timeout: INTEGRATION_TIMEOUT }, () => {
+describe("the action", () => {
   it("reviews and posts one comment with the verdict, in the diff's language", async () => {
     stub.answer = stageAnswer({
       review: JSON.stringify({
@@ -571,6 +565,88 @@ describe("the action", { timeout: INTEGRATION_TIMEOUT }, () => {
     expect(run.outputs.findings).toBe("1");
     expect(run.summary).toContain("### Verdict");
     expect(run.summary).toContain("This repeats the constant above.");
+  });
+
+  it("announces a versionless envelope, cold-starts from the thread, and stays green", async () => {
+    // The loud cold start, driven end to end rather than reasoned about.
+    //
+    // `decodeEnvelope` reads a payload with no `version` as `corrupt` — state
+    // WAS found and this run discarded it, which a reader has to be able to
+    // learn. `corrupt` here must mean exactly "there was state, it is not
+    // usable, cold-start and say so", and nothing more. This case pins all
+    // three halves of that at once, because the loud version is only worth
+    // having if it is as harmless as the silent one was:
+    //
+    //   1. the run's COLOUR is unchanged — a versionless envelope is not a
+    //      failure, and must never turn a run red;
+    //   2. the cold-start BEHAVIOUR is unchanged — the review still reads the
+    //      thread and still produces its findings;
+    //   3. the note is emitted and ACCURATE — it names the missing version and
+    //      never claims a checksum failure, because there was no checksum to
+    //      fail.
+    stub.answer = stageAnswer({
+      review: JSON.stringify({
+        findings: [
+          {
+            rule: "dedup",
+            severity: "warning",
+            path: "src/a.ts",
+            line: 13,
+            snippet: "const two = 2;",
+            body: "This repeats the constant above.",
+          },
+        ],
+        confidence: 0.8,
+      }),
+    });
+
+    // A previous run's comment carrying a pre-v2 envelope: valid base64 JSON
+    // with findings and SHAs, and no `version` key at all.
+    const legacy = {
+      findings: [
+        {
+          id: "dedup:src/a.ts:99",
+          ruleId: "dedup",
+          ruleName: "Repeated code",
+          ruleBody: "",
+          path: "src/a.ts",
+          line: 99,
+          severity: "warning",
+          body: "A claim from before the envelope had a version.",
+          marker: "",
+          wasResolved: false,
+        },
+      ],
+      reviewedShas: ["older-sha"],
+    };
+    const payload = `fp ${Buffer.from(JSON.stringify(legacy), "utf8").toString("base64")}`;
+    stub.comments.push({
+      id: stub.nextCommentId,
+      body: `<!-- reeve:review source=${payload} -->\n\nAn older review.`,
+      login: "reeve[bot]",
+      type: "Bot",
+    });
+    stub.nextCommentId += 1;
+
+    const run = await runAction(stub);
+
+    // 1. Green. A discarded envelope is not a failed run.
+    expect(run.code).toBe(0);
+
+    // 2. Cold start, not a refusal: the review still ran and still reported.
+    //    The stale claim is gone (the memory was not trusted) and this run's
+    //    own finding is present, derived from the thread and the diff.
+    expect(run.outputs.findings).toBe("1");
+    const posted = stub.comments.at(-1)?.body ?? "";
+    expect(posted).toContain("This repeats the constant above.");
+    expect(posted).not.toContain("A claim from before the envelope had a version.");
+    expect(run.summary).toContain("### Verdict");
+
+    // 3. Loud, and accurate. The note reaches the job summary and the log, and
+    //    it names the real cause rather than inventing a checksum failure.
+    expect(run.summary).toContain("declares no schema version");
+    expect(run.summary).not.toContain("failed its checksum");
+    expect(run.log).toContain("declares no schema version");
   });
 
   it("posts nothing but still reports when the rerun finds the same review unchanged", async () => {
@@ -1814,7 +1890,7 @@ describe("the action", { timeout: INTEGRATION_TIMEOUT }, () => {
   });
 });
 
-describe("the context engine", { timeout: INTEGRATION_TIMEOUT }, () => {
+describe("the context engine", () => {
   /** Writes a workspace source tree into the scratch checkout and lets the run read it. */
   async function withWorkspace(files: Record<string, string>): Promise<NodeJS.ProcessEnv> {
     for (const [rel, text] of Object.entries(files)) {
@@ -1948,7 +2024,7 @@ describe("the context engine", { timeout: INTEGRATION_TIMEOUT }, () => {
   });
 });
 
-describe("the action contract", { timeout: INTEGRATION_TIMEOUT }, () => {
+describe("the action contract", () => {
   /**
    * Every input `action.yml` declares, read straight out of it.
    *
