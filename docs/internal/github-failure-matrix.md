@@ -170,27 +170,35 @@ Not GitHub, but the same classifier was being asked — and that was a defect.
 | 6   | `review/threads.ts:185`                | `threadBody`'s cap does not apply when `budget <= 0` — a finding whose rule id and path alone exceed 8000 characters is carried uncapped. Bounded in practice by GitHub's own 65536 ceiling.                                                                                                                        | P3       |
 | 7   | `review/capabilities.contract.test.ts` | Evasions 2 and 3 in the table above — dynamic call-name construction, and a port method declared at a deeper indentation than the shape regex counts. Both need a type-level or module-graph check.                                                                                                                 | P2       |
 
-### Open P0 — a versionless envelope skips every v2 integrity check
+### The envelope contract — checksummed is NOT authenticated
 
-`review/publish.ts:133` routes on one field: `map.version === undefined` sends the payload to `migrateV1`, which **computes** a checksum rather than verifying one and applies a strictly weaker per-finding check than `validateV2`. Measured, same payload with and without the `version` key:
+**`core/marker.ts`'s `fingerprint` is a keyless sha256 over public data. Anyone who can write the comment can compute a valid checksum. The checksum detects damage, not forgery.**
 
-| Tamper                   | as v2   | as v1 (no `version`)                                    |
-| ------------------------ | ------- | ------------------------------------------------------- |
-| flipped `wasResolved`    | corrupt | **ok**                                                  |
-| appended reviewed SHA    | corrupt | **ok**                                                  |
-| unknown severity         | corrupt | **ok**                                                  |
-| line `0` / negative line | corrupt | **ok**                                                  |
-| wholly invented finding  | corrupt | **ok**                                                  |
-| fractional line          | corrupt | corrupt                                                 |
-| forged disposition       | corrupt | **dropped** — `migrateV1` hardcodes `disposition: null` |
+That sentence is the contract, and it is written here in full because one misreading of it — "checksummed, therefore authenticated" — is how someone deletes the identity check below as redundant. The envelope cannot defend itself in any schema version. What bounds it is **who may author a comment the run adopts as its own**, which is the identity row below. The two findings that follow are one chain, not two independent ones.
 
-Two things make this worth a P0 rather than a curiosity. First, **it launders**: `migrateV1` stamps `version: 2` and seals whatever it accepted, so the envelope the next run writes is a validly-sealed v2 carrying the tampered contents, and every run after that validates it. Second, an invented finding is **rendered** — `reconcile` reports it as `persists` or `resolved` either way, printing the attacker's `body` under this duty's own comment.
+Everything derived from the envelope is therefore re-derived from the thread wherever it can be: `substantiatedDispositions` reads a maintainer's triage back from the live replies on every run and drops any mirrored disposition whose reply is gone or whose login changed. Findings and reviewed SHAs have no such re-derivation, which is exactly why the versionless path below had to close.
 
-Bounds, measured rather than assumed: a forged **disposition** cannot pass (migration nulls it), and `substantiatedDispositions` re-derives dispositions from live thread replies regardless. Findings and reviewed SHAs have no such downstream re-derivation.
+### Closed P0 — a versionless envelope is now a cold start, never a migration
 
-**The checksum is not a MAC.** `core/marker.ts`'s `fingerprint` is a keyless sha256 over public data, so anyone who can write the comment can compute a valid `checksum` for a payload they invented — no downgrade required. The checksum detects **damage**, not forgery. That means the envelope cannot defend itself in either version, and the only real boundary is who may write a comment this duty will adopt — the identity finding below. The two compose into one chain.
+`review/publish.ts` used to route on one field: `map.version === undefined` sent the payload to `migrateV1`, which **computed** a checksum rather than verifying one and applied a strictly weaker per-finding check than `validateV2`. Measured, same payload with and without the `version` key:
 
-Pinned by `publish.adversarial.test.ts`'s `DOWNGRADE — omitting \`version\` skips every v2 integrity check`. **Awaiting a ruling; no migration semantics were changed.** See the report for the recommendation and its measured cost.
+| Tamper                   | as v2   | as v1 (before) | as v1 (now) |
+| ------------------------ | ------- | -------------- | ----------- |
+| flipped `wasResolved`    | corrupt | **ok**         | none        |
+| appended reviewed SHA    | corrupt | **ok**         | none        |
+| unknown severity         | corrupt | **ok**         | none        |
+| line `0` / negative line | corrupt | **ok**         | none        |
+| wholly invented finding  | corrupt | **ok**         | none        |
+| fractional line          | corrupt | corrupt        | none        |
+| forged disposition       | corrupt | dropped        | none        |
+
+Two things made it a P0 rather than a curiosity. It **laundered**: the migration stamped `version: 2` and sealed whatever it accepted, so the envelope the next run wrote was a validly-sealed v2 carrying the tampered contents, and every run after that validated it — one tamper, then permanent. And an invented finding was **rendered**: `reconcile` reports it as `persists` or `resolved` either way, printing the attacker's `body` under this duty's own comment.
+
+**Ruled and implemented: a versionless payload is a cold start.** The deciding evidence is that the legacy window is closed — `git merge-base --is-ancestor fec2feb 0fa21e6` confirms v2 shipped **before** the 0.8.0 release, so a versionless envelope can only sit on a thread not reviewed since before 0.8.0, and the first review after upgrade rewrites it. The cost is at most one cold start on a stale thread, and cold start is an already-supported, already-tested state. `migrateV1` and `isV1Findable` are deleted; nothing else called them.
+
+The narrower alternative — applying v2's field checks to the v1 path while keeping the checksum exemption — was measured and rejected: it closes only the severity and line cases, because flipped-resolved, appended-sha and invented-finding are semantically valid and only a checksum catches them, and the checksum is keyless anyway.
+
+Pinned by `publish.adversarial.test.ts`'s `DOWNGRADE — omitting \`version\` is a cold start, never a migration`, kept case-for-case as the proof the path is gone rather than narrowed.
 
 ### Open P1 — the owned-comment guard asks "not a human", not "is this review"
 
@@ -198,7 +206,15 @@ Pinned by `publish.adversarial.test.ts`'s `DOWNGRADE — omitting \`version\` sk
 
 `github-actions[bot]` is the login **every** workflow in the repository posts under with the default token, so any workflow that echoes untrusted text into a comment is a path into review's state. The marker-at-the-top half of the guard still holds — a bot that quotes the marker below prose is not adopted.
 
-`docs/security/threat-model.md` does not mention this (zero occurrences of "bot" or "marker" in the file). Pinned by `publish.adversarial.test.ts`'s `IDENTITY —` block. **Not narrowed this round** — narrowing changes which existing state is readable and needs a ruling.
+**Ruled: narrow it. IMPLEMENTATION BLOCKED, reported rather than guessed.** The narrowing needs the login this run posts as, at the point `readThread` decides, and that value does not exist in this code path:
+
+- `Shared` settings carry only an opaque `token`; there is no login, app slug, or configured identity input.
+- No port exposes `users` or `apps`, and adding a call does not help: `GET /user` answers `403 Resource not accessible by integration` for a GitHub App installation token, which is what the default `GITHUB_TOKEN` is. There is no single endpoint resolving an identity for both a PAT and an installation token (confirmed in GitHub's own `actions/runner` discussion #3289).
+- Learning it from a comment this run wrote is circular — that comment is the object under attack.
+
+The available resolution is a **declared identity input** (`action.yml` plus `inputs.ts`), which is the same resolution other Actions in this position have reached. That is a design change on another lead's surface, not a test-round patch, and the ruling itself warned that a fallback here would reopen what it closes. Recorded for Round 2.
+
+`docs/security/threat-model.md` now names this boundary under "Stored state is authored, never merely checksummed". Pinned by `publish.adversarial.test.ts`'s `IDENTITY —` block, with the marker-at-the-top half pinned separately so a future narrowing cannot silently drop it while replacing the author half.
 
 ### Settled since the first pass
 

@@ -836,7 +836,10 @@ async function readEnvelope(
     return { previous: decoded.previous, thread: { marked, replies, uncertain }, memoryNote: null };
   }
   if (decoded.kind === "corrupt") {
-    const reason = `The review's stored memory failed its checksum and was rebuilt from the thread — ${decoded.reason}.`;
+    // Not always a checksum failure — a payload can also be unreadable base64,
+    // a non-mapping, or a finding with a malformed field. The message names the
+    // reason it was given rather than asserting a cause it does not know.
+    const reason = `The review's stored memory could not be read and was rebuilt from the thread — ${decoded.reason}.`;
     core.warning(`#${String(at.number)}: ${reason}`);
     return {
       previous: { findings: [], reviewedShas: [] },
