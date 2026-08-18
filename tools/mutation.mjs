@@ -42,11 +42,34 @@ import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs
 import { renameSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCRATCH = join(ROOT, ".tmp", "mutation");
 const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
+
+/**
+ * The smallest table this harness will run.
+ *
+ * A gate whose own contents can be deleted is not a gate. Emptying `MUTATIONS`
+ * below used to print `KILLED 0 · SURVIVED 0 · STALE 0` and **exit 0** — the
+ * check this repository ranks first in `docs/internal/ci-gates.md` reporting
+ * success because it had been asked to check nothing. That is the same class of
+ * failure as a coverage `exclude` that hides a file: the number improves
+ * because the denominator moved.
+ *
+ * So the count is written down. **It never goes down, for exactly the reason
+ * the coverage thresholds in `vitest.config.ts` never go down:** a row that
+ * stops applying is a missing gate, and the fix is to re-point the row, not to
+ * shrink the floor. Raise it when the table grows; a diff that lowers it is a
+ * diff that should have to explain itself in review.
+ *
+ * This cannot stop somebody editing the constant and the table together, and
+ * nothing in a self-checking script could. What it does is make the deletion
+ * deliberate and visible rather than silent — which is the whole difference
+ * between a gate that failed and a gate that was never asked.
+ */
+const TABLE_FLOOR = 54;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -67,7 +90,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * excluded from coverage and driven via built bundles, so a mutation there is a
  * rebuild-and-integration concern, not a unit seam.
  */
-const MUTATIONS = [
+export const MUTATIONS = [
   // ── model orchestration and fallback ────────────────────────────────────
   {
     name: "roster uses models[0] instead of rotating",
@@ -763,26 +786,59 @@ function scratchName(mutation) {
  * first occurrence, so an ambiguous `from` quietly mutates a seam nobody chose
  * and calls whatever the targets said about it the answer.
  */
-async function preflight() {
+async function preflight(mutations = MUTATIONS) {
   const stale = [];
-  for (const mutation of MUTATIONS) {
+  for (const mutation of mutations) {
     const path = join(ROOT, mutation.file);
     if (!(await exists(path))) {
       stale.push({ mutation, why: `\`${mutation.file}\` does not exist` });
       continue;
     }
-    const text = await readFile(path, "utf8");
-    const count = occurrences(text, mutation.from);
-    if (count === 0) {
-      stale.push({ mutation, why: `no match for \`${excerpt(mutation.from)}\`` });
-    } else if (count > 1) {
-      stale.push({
-        mutation,
-        why: `\`${excerpt(mutation.from)}\` matches ${String(count)} places — the edit is ambiguous`,
-      });
-    }
+    const why = classifyRow(mutation, await readFile(path, "utf8"));
+    if (why !== null) stale.push({ mutation, why });
   }
   return stale;
+}
+
+/**
+ * The verdict on one row against one file's text, or null when the row is fine.
+ *
+ * Split out from the reading above on purpose, and for the reason
+ * `scripts/check-docs-links.mjs` gives for the same split: the facts come off
+ * the filesystem, the judgement is a pure function of them, so the tests need
+ * no filesystem and no mocking library. Every branch below fires only when
+ * something has already gone wrong, which is precisely the code that rots
+ * unwatched — see `tools/mutation.test.mjs`.
+ */
+export function classifyRow(mutation, text) {
+  const count = occurrences(text, mutation.from);
+  if (count === 0) return `no match for \`${excerpt(mutation.from)}\``;
+  if (count > 1) {
+    return `\`${excerpt(mutation.from)}\` matches ${String(count)} places — the edit is ambiguous`;
+  }
+  return null;
+}
+
+/**
+ * Why this table may not be run, or null when it may.
+ *
+ * Checked before anything else, because every other verdict this harness
+ * reports is a statement about the table's contents and means nothing if the
+ * table has been emptied.
+ */
+export function checkTable(mutations, floor = TABLE_FLOOR) {
+  if (mutations.length === 0) {
+    return "the mutation table is empty — there is nothing to gate, so this is a failure and not a pass.";
+  }
+  if (mutations.length < floor) {
+    return (
+      `the mutation table holds ${String(mutations.length)} rows and the recorded floor is ` +
+      `${String(floor)}. Rows were removed. A row is only ever retired by re-pointing it at ` +
+      `the seam the code moved to; if one genuinely no longer names real code, say so in the ` +
+      `commit and lower TABLE_FLOOR deliberately.`
+    );
+  }
+  return null;
 }
 
 function occurrences(haystack, needle) {
@@ -822,6 +878,15 @@ async function apply(original, srcPath, mutation) {
 
 async function run() {
   const options = parseArgs(process.argv.slice(2));
+
+  // Before `--list`, before the scratch directory, before anything: a table
+  // that has been emptied or shrunk cannot report a meaningful verdict, and the
+  // verdict it would report is `pass`.
+  const tableProblem = checkTable(MUTATIONS);
+  if (tableProblem !== null) {
+    console.error(`REFUSING TO RUN: ${tableProblem}`);
+    process.exit(1);
+  }
 
   if (options.list) {
     for (const mutation of MUTATIONS) {
@@ -900,8 +965,13 @@ async function run() {
   }
 }
 
-run().catch((error) => {
-  restoreSync();
-  console.error(error);
-  process.exit(1);
-});
+// Run only when this file is the program, never when a test imports it — the
+// same guard `eval/runner.ts` lacks, which is why its own `DUTIES` list has to
+// be read as text rather than imported.
+if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  run().catch((error) => {
+    restoreSync();
+    console.error(error);
+    process.exit(1);
+  });
+}

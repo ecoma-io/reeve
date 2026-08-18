@@ -149,19 +149,27 @@ jobs:
   #    reads a file that is briefly not there. A separate runner is the only
   #    isolation that is actually isolation.
   # 2. It runs in parallel with `Verify`, so the wall clock the pipeline adds
-  #    is zero — the mutation table takes well under a minute and `Verify`
-  #    takes minutes.
+  #    is zero — the mutation table is about ninety seconds and `Verify` takes
+  #    minutes.
   # 3. It gets its own check name. "a mutation survived" and "a test failed"
   #    are different findings with different owners, and a reviewer should not
   #    have to open a log to tell which one happened.
   #
   # The full table runs on every event, including pull requests. That is a
-  # measurement, not an oversight: the whole table is 23 mutations and roughly
-  # half a minute of vitest, against a `Verify` job that is minutes of test
+  # measurement, not an oversight: the whole table is 54 mutations and about
+  # ninety seconds of vitest, against a `Verify` job that is minutes of test
   # suite. `tools/mutation.mjs --stage fast` exists for the local pre-push loop
   # and as the switch to reach for if the table ever grows enough to matter —
   # see docs/internal/ci-gates.md for the threshold at which to flip it and the
   # exact edit. A gate that only runs nightly is a gate whose regression merges.
+  #
+  # The job also runs `pnpm test:tools`, which is what checks that the gate
+  # below can still fail. An adversarial review emptied the mutation table and
+  # watched the harness report `KILLED 0 · SURVIVED 0 · STALE 0` and exit 0, so
+  # the harness now refuses a table smaller than a recorded floor — and that
+  # refusal, along with the stale- and ambiguous-`from` detection, is code that
+  # only ever runs when something has already gone wrong, which is precisely
+  # the code that rots unwatched. It runs first, and takes under a second.
   mutation:
     name: Mutation
     runs-on: ubuntu-latest
@@ -180,12 +188,20 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The gates that check the gates: the mutation harness's own refusal
+      # paths, and the pins on `vitest.config.ts`'s coverage exclusions and
+      # thresholds. Both of those config rules were prose until this ran —
+      # adding one glob to `exclude` raises every coverage percentage and turns
+      # nothing red.
+      - run: pnpm test:tools
+
       # Fails on a SURVIVED row (the suite does not assert what the mutation
-      # breaks) and on a STALE row (the mutation's `from` string no longer
-      # matches its file exactly once, so the mutation silently never ran).
-      # Staleness is the failure worth naming here: a gate that stopped
-      # applying reports nothing, and reported nothing for as long as nobody
-      # looked.
+      # breaks), on a STALE row (the mutation's `from` string no longer matches
+      # its file exactly once, so the mutation silently never ran), and on a
+      # table that has shrunk below `TABLE_FLOOR`. Staleness is the failure
+      # worth naming here: a gate that stopped applying reports nothing, and
+      # reported nothing for as long as nobody looked. It has already caught
+      # one — see docs/internal/mutation-report.md.
       - run: pnpm test:mutation
 
   ci-gate:
