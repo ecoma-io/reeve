@@ -37178,6 +37178,9 @@ async function readRules(path) {
   }
   if (raw.trim().length === 0) return emptyRules();
   if (raw.length > MAX_RULES_CHARS) {
+    warning(
+      `review: the rules file at ${path} is ${String(raw.length)} characters, exceeding the ${String(MAX_RULES_CHARS)}-character limit. Truncating \u2014 every rule past the limit is not in effect this run.`
+    );
     raw = raw.slice(0, MAX_RULES_CHARS);
   }
   return parseRules(raw);
