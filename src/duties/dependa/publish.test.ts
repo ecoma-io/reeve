@@ -691,3 +691,292 @@ describe("closeSupersededPRs", () => {
     expect(count).toBe(0);
   });
 });
+
+// ── publishGroup: PR idempotency and the 409-conflict retry ──────────────
+//
+// Two write paths that decide whether a second run over the same repository
+// leaves a second pull request behind, and whether a commit races another
+// writer into silence. Neither was driven before this.
+
+describe("publishGroup: not opening a second pull request", () => {
+  const AT = { owner: "acme", repo: "widgets" };
+
+  /** Everything the stub was asked to do, so a case can assert on it. */
+  interface Recorded {
+    readonly createdPrs: { head: string; title: string }[];
+    readonly updatedPrs: number[];
+    readonly writes: { path: string; sha: string | undefined }[];
+    reads: number;
+  }
+
+  function apiOf(
+    options: {
+      /** An open PR already on the branch: its number and body. */
+      readonly openPr?: { number: number; body: string };
+      /** Statuses `createOrUpdateFileContents` throws, in order, before succeeding. */
+      readonly writeFailures?: readonly number[];
+      /** The sha `getContent` reports, or undefined for "no such file". */
+      readonly fileSha?: string;
+    } = {},
+  ): { api: PublishApi; recorded: Recorded } {
+    const recorded: Recorded = {
+      createdPrs: [],
+      updatedPrs: [],
+      writes: [],
+      reads: 0,
+    };
+    const failures = [...(options.writeFailures ?? [])];
+
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => {
+            recorded.reads += 1;
+            if (options.fileSha === undefined) {
+              return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
+            }
+            return Promise.resolve({ data: { sha: options.fileSha } });
+          },
+          createOrUpdateFileContents: (params) => {
+            const status = failures.shift();
+            if (status !== undefined) {
+              return Promise.reject(Object.assign(new Error("Conflict"), { status }));
+            }
+            recorded.writes.push({ path: params.path, sha: params.sha ?? undefined });
+            return Promise.resolve({});
+          },
+          listCommits: () =>
+            Promise.resolve({
+              data: [{ sha: "abc", author: { login: "reeve[bot]" }, committer: null }],
+            }),
+          compareCommits: () =>
+            Promise.resolve({
+              data: {
+                ahead_by: 1,
+                behind_by: 0,
+                commits: [{ sha: "abc", author: { login: "reeve[bot]" }, committer: null }],
+              },
+            }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "branch-sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: (params) =>
+            Promise.resolve({
+              data:
+                params.state === "open" && options.openPr !== undefined
+                  ? [
+                      {
+                        number: options.openPr.number,
+                        body: options.openPr.body,
+                        head: { sha: "head-sha", ref: "reeve/dependa/npm" },
+                        merged: false,
+                      },
+                    ]
+                  : [],
+            }),
+          create: (params) => {
+            recorded.createdPrs.push({ head: params.head, title: params.title });
+            return Promise.resolve({ data: { number: 101 } });
+          },
+          update: (params) => {
+            recorded.updatedPrs.push(params.pull_number);
+            return Promise.resolve({});
+          },
+        },
+      },
+    };
+    return { api, recorded };
+  }
+
+  /** The body a previous run of `publishGroup` would have left on the PR. */
+  async function bodyFromAPreviousRun(target: ProposalGroup): Promise<string> {
+    const { api, recorded } = apiOf();
+    await publishGroup(api, AT, target, false, true);
+    void recorded;
+    return buildPrBody(target);
+  }
+
+  it("opens one pull request when the branch carries none", async () => {
+    const { api, recorded } = apiOf();
+
+    const result = await publishGroup(api, AT, group(), false, true);
+
+    expect(recorded.createdPrs).toHaveLength(1);
+    expect(recorded.updatedPrs).toEqual([]);
+    expect(result.outcome).toBe("opened");
+    expect(result.pr).toBe(101);
+  });
+
+  it("leaves an unchanged pull request completely alone on a second run", async () => {
+    // Idempotency, by the fingerprint the previous run stamped into the body.
+    // A run that rewrote an identical body would send a notification to every
+    // watcher of the repository, once per scheduled run, forever.
+    const target = group();
+    const { api, recorded } = apiOf({
+      openPr: { number: 7, body: await bodyFromAPreviousRun(target) },
+    });
+
+    const result = await publishGroup(api, AT, target, false, true);
+
+    expect(result).toEqual({ pr: 7, outcome: "unchanged" });
+    expect(recorded.updatedPrs).toEqual([]);
+    expect(recorded.createdPrs).toEqual([]);
+  });
+
+  it("updates the open pull request when the proposals behind it changed", async () => {
+    // Same group id, different target version: the fingerprint moves, so the
+    // PR is brought up to date rather than left describing an old proposal.
+    const previous = group({ proposals: [proposal({ targetVersion: "4.17.22" })] });
+    const now = group({ proposals: [proposal({ targetVersion: "5.0.0" })] });
+    const { api, recorded } = apiOf({
+      openPr: { number: 7, body: await bodyFromAPreviousRun(previous) },
+    });
+
+    const result = await publishGroup(api, AT, now, false, true);
+
+    expect(result).toEqual({ pr: 7, outcome: "updated" });
+    expect(recorded.updatedPrs).toEqual([7]);
+    expect(recorded.createdPrs).toEqual([]);
+  });
+
+  it("updates rather than duplicating when the open PR carries no fingerprint at all", async () => {
+    // A body somebody edited by hand has no marker left. That is a reason to
+    // rewrite it, never a reason to open a second pull request beside it.
+    const { api, recorded } = apiOf({
+      openPr: { number: 7, body: "somebody replaced this description" },
+    });
+
+    const result = await publishGroup(api, AT, group(), false, true);
+
+    expect(result.outcome).toBe("updated");
+    expect(recorded.createdPrs).toEqual([]);
+  });
+});
+
+describe("publishGroup: a commit that lost a race", () => {
+  const AT = { owner: "acme", repo: "widgets" };
+
+  /** A group whose proposal actually edits a manifest, so a commit is made. */
+  function editing(): ProposalGroup {
+    return group({
+      proposals: [
+        proposal({
+          edits: [
+            {
+              path: "package.json",
+              content: '{"dependencies":{"lodash":"^4.17.22"}}',
+              message: "dependa: bump lodash to 4.17.22",
+            },
+          ],
+        }),
+      ],
+    });
+  }
+
+  interface Recorded {
+    readonly writes: { path: string; sha: string | undefined }[];
+    reads: number;
+  }
+
+  function apiOf(options: {
+    readonly writeFailures?: readonly number[];
+    /** Shas `getContent` reports, in call order. `null` means "no such file". */
+    readonly shas?: readonly (string | null)[];
+  }): { api: PublishApi; recorded: Recorded } {
+    const recorded: Recorded = { writes: [], reads: 0 };
+    const failures = [...(options.writeFailures ?? [])];
+    const shas = [...(options.shas ?? [])];
+
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => {
+            recorded.reads += 1;
+            const sha = shas.shift() ?? null;
+            if (sha === null) {
+              return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
+            }
+            return Promise.resolve({ data: { sha } });
+          },
+          createOrUpdateFileContents: (params) => {
+            const status = failures.shift();
+            if (status !== undefined) {
+              return Promise.reject(Object.assign(new Error("Conflict"), { status }));
+            }
+            recorded.writes.push({ path: params.path, sha: params.sha ?? undefined });
+            return Promise.resolve({});
+          },
+          listCommits: () =>
+            Promise.resolve({
+              data: [{ sha: "abc", author: { login: "reeve[bot]" }, committer: null }],
+            }),
+          compareCommits: () =>
+            Promise.resolve({
+              data: {
+                ahead_by: 1,
+                behind_by: 0,
+                commits: [{ sha: "abc", author: { login: "reeve[bot]" }, committer: null }],
+              },
+            }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "branch-sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () => Promise.resolve({ data: [] }),
+          create: () => Promise.resolve({ data: { number: 101 } }),
+          update: () => Promise.resolve({}),
+        },
+      },
+    };
+    return { api, recorded };
+  }
+
+  it("re-reads the file's sha and retries once after a 409", async () => {
+    // A 409 means another writer moved the file between the read and the
+    // write. Giving up would silently drop the manifest edit; retrying with a
+    // stale sha would 409 again forever. Re-read, then write once.
+    const { api, recorded } = apiOf({ writeFailures: [409], shas: ["stale-sha", "fresh-sha"] });
+
+    const result = await publishGroup(api, AT, editing(), false, true);
+
+    expect(recorded.writes).toHaveLength(1);
+    expect(recorded.writes[0]?.sha).toBe("fresh-sha");
+    expect(result.outcome).toBe("opened");
+  });
+
+  it("creates the file without a sha when the re-read finds it gone", async () => {
+    // The file was deleted between the failed write and the retry. A `sha`
+    // naming a blob that no longer exists would 422; omitting it creates.
+    const { api, recorded } = apiOf({ writeFailures: [409], shas: ["stale-sha", null] });
+
+    await publishGroup(api, AT, editing(), false, true);
+
+    expect(recorded.writes).toHaveLength(1);
+    expect(recorded.writes[0]?.sha).toBeUndefined();
+  });
+
+  it("propagates a write failure that is not a conflict rather than retrying it", async () => {
+    // Retrying a 403 or a 422 would spend a second request confirming the
+    // same refusal, and swallowing it would report a commit that never landed.
+    const { api } = apiOf({ writeFailures: [422], shas: ["stale-sha"] });
+
+    await expect(publishGroup(api, AT, editing(), false, true)).rejects.toThrow();
+  });
+
+  it("does not retry a second time when the retry itself conflicts", async () => {
+    // Once. A loop here would hammer a contended branch for the run's whole
+    // budget, and the caller has to be told the write did not land.
+    const { api } = apiOf({ writeFailures: [409, 409], shas: ["stale-sha", "fresh-sha"] });
+
+    await expect(publishGroup(api, AT, editing(), false, true)).rejects.toThrow();
+  });
+});

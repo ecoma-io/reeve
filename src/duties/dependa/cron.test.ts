@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { cronFieldMatches, cronMatches } from "./main.js";
+import { cronFieldMatches, cronMatches } from "./cron.js";
 
 // ── cronFieldMatches ────────────────────────────────────────────────────────
 
