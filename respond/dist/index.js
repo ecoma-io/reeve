@@ -35965,10 +35965,10 @@ async function walkReplies(api, at, settled) {
   }
   if (more) {
     warning(
-      `#${String(at.number)}: the reply list was truncated before this duty could rule out its own marker or a human reply \u2014 refusing to guess.`
+      `#${String(at.number)}: the reply list was truncated before this duty could rule out its own marker or a human reply \u2014 not answering this run.`
     );
     return settled({
-      note: "Could not verify the thread is unanswered (reply list truncated). This duty stops rather than draft \u2014 let alone post \u2014 a first reply it cannot be sure is still owed."
+      note: "Could not verify the thread is unanswered (reply list truncated). This duty stops rather than draft \u2014 let alone post \u2014 a first reply it cannot be sure is still owed. The next run over this thread can answer it as soon as the full list fits in one page."
     });
   }
   return null;
