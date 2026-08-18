@@ -5269,23 +5269,23 @@ var require_formdata_parser = __commonJS({
             break;
           }
           case "content-type": {
-            let headerValue = collectASequenceOfBytes(
+            let headerValue2 = collectASequenceOfBytes(
               (char) => char !== 10 && char !== 13,
               input,
               position
             );
-            headerValue = removeChars(headerValue, false, true, (char) => char === 9 || char === 32);
-            contentType = isomorphicDecode(headerValue);
+            headerValue2 = removeChars(headerValue2, false, true, (char) => char === 9 || char === 32);
+            contentType = isomorphicDecode(headerValue2);
             break;
           }
           case "content-transfer-encoding": {
-            let headerValue = collectASequenceOfBytes(
+            let headerValue2 = collectASequenceOfBytes(
               (char) => char !== 10 && char !== 13,
               input,
               position
             );
-            headerValue = removeChars(headerValue, false, true, (char) => char === 9 || char === 32);
-            encoding = isomorphicDecode(headerValue);
+            headerValue2 = removeChars(headerValue2, false, true, (char) => char === 9 || char === 32);
+            encoding = isomorphicDecode(headerValue2);
             break;
           }
           default: {
@@ -10557,8 +10557,8 @@ var require_mock_utils = __commonJS({
     }
     function lowerCaseEntries(headers) {
       return Object.fromEntries(
-        Object.entries(headers).map(([headerName, headerValue]) => {
-          return [headerName.toLocaleLowerCase(), headerValue];
+        Object.entries(headers).map(([headerName, headerValue2]) => {
+          return [headerName.toLocaleLowerCase(), headerValue2];
         })
       );
     }
@@ -10598,8 +10598,8 @@ var require_mock_utils = __commonJS({
         return false;
       }
       for (const [matchHeaderName, matchHeaderValue] of Object.entries(mockDispatch2.headers)) {
-        const headerValue = getHeaderByName(headers, matchHeaderName);
-        if (!matchValue(matchHeaderValue, headerValue)) {
+        const headerValue2 = getHeaderByName(headers, matchHeaderName);
+        if (!matchValue(matchHeaderValue, headerValue2)) {
           return false;
         }
       }
@@ -19414,9 +19414,9 @@ var require_lib = __commonJS({
       _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys2(this.requestOptions.headers)[header];
-          if (headerValue) {
-            clientHeader = typeof headerValue === "number" ? headerValue.toString() : headerValue;
+          const headerValue2 = lowercaseKeys2(this.requestOptions.headers)[header];
+          if (headerValue2) {
+            clientHeader = typeof headerValue2 === "number" ? headerValue2.toString() : headerValue2;
           }
         }
         const additionalValue = additionalHeaders[header];
@@ -19438,14 +19438,14 @@ var require_lib = __commonJS({
       _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys2(this.requestOptions.headers)[Headers2.ContentType];
-          if (headerValue) {
-            if (typeof headerValue === "number") {
-              clientHeader = String(headerValue);
-            } else if (Array.isArray(headerValue)) {
-              clientHeader = headerValue.join(", ");
+          const headerValue2 = lowercaseKeys2(this.requestOptions.headers)[Headers2.ContentType];
+          if (headerValue2) {
+            if (typeof headerValue2 === "number") {
+              clientHeader = String(headerValue2);
+            } else if (Array.isArray(headerValue2)) {
+              clientHeader = headerValue2.join(", ");
             } else {
-              clientHeader = headerValue;
+              clientHeader = headerValue2;
             }
           }
         }
@@ -31597,11 +31597,29 @@ async function listRepositoryLabels(api, at) {
 function isMissing(error2) {
   return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
 }
+function headerValue(headers, name) {
+  if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return void 0;
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name) return value;
+  }
+  return void 0;
+}
+function saysRateLimited(error2) {
+  const response = error2.response;
+  if (typeof response !== "object" || response === null) return false;
+  const headers = response.headers;
+  const retryAfter = headerValue(headers, "retry-after");
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) return true;
+  if (typeof retryAfter === "string" && retryAfter.trim() !== "") return true;
+  const remaining = headerValue(headers, "x-ratelimit-remaining");
+  return remaining === 0 || typeof remaining === "string" && remaining.trim() === "0";
+}
 function isCapacityError(error2) {
   if (typeof error2 === "object" && error2 !== null && "status" in error2) {
     const status = error2.status;
     if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
       return true;
+    if (status === 403 && saysRateLimited(error2)) return true;
   }
   if (typeof error2 === "object" && error2 !== null && "code" in error2) {
     const code = error2.code;
