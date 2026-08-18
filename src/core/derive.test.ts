@@ -83,6 +83,15 @@ describe("deriveLanguage", () => {
     expect(deriveLanguage("qqq")).toBeNull();
   });
 
+  it("refuses a code CLDR assigns a script to but knows no name for", () => {
+    // `aaa` (Ghotuo) maximizes to `Latn`, so the script half of the derivation
+    // succeeds and the label half does not — `DisplayNames` answers with the
+    // code itself. Deriving a "language" whose name is its own code would put
+    // `aaa` in a heading a reader was supposed to find their language by.
+    expect(deriveLanguage("aaa")).toBeNull();
+    expect(deriveLanguage("aab")).toBeNull();
+  });
+
   it("refuses a code CLDR knows but assigns no script to", () => {
     // `mul` is "multiple languages" and `zxx` is "no linguistic content".
     // Neither is something a thread can be written in.

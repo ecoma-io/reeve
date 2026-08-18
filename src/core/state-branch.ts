@@ -224,6 +224,14 @@ export async function publishState(
     return null;
   }
 
+  // Counted rather than inferred from the catch below, because the two are not
+  // the same fact: a capacity error can arrive before the first write, between
+  // two of them, or after the last, and only this counter can tell a run that
+  // left nothing behind from one that left half a state on the branch. See the
+  // warning at the bottom of this function for why that distinction is worth a
+  // variable.
+  let written = 0;
+
   try {
     // Ensure the branch exists and is current
     const branch = await ensureBranch(api, at, branchName);
@@ -259,6 +267,7 @@ export async function publishState(
         ...(fileSha !== undefined ? { sha: fileSha } : {}),
       });
 
+      written += 1;
       core.info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
 
@@ -300,8 +309,18 @@ export async function publishState(
     return { pr: pr.number };
   } catch (error) {
     if (isCapacityError(error)) {
+      // Says what actually happened rather than what usually happens. A
+      // capacity error partway through the loop leaves the files already
+      // committed on the branch, and a warning that claimed otherwise would
+      // send the next reader looking for state that is sitting right there —
+      // or, worse, leave a half-written state nobody knows to finish. Weather
+      // is allowed to interrupt a publish; it is not allowed to misreport one.
       core.warning(
-        `state-branch: could not publish to \`${branchName}\` — capacity error. Files were not written.`,
+        `state-branch: could not publish to \`${branchName}\` — capacity error. ` +
+          (written === 0
+            ? "no files were written."
+            : `${String(written)} of ${String(files.length)} files were already written to the branch, ` +
+              "and no pull request was opened for them — the next run completes the rest."),
       );
       return null;
     }
