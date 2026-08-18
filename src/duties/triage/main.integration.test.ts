@@ -125,7 +125,14 @@ interface State {
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
-  readonly effects: { applied: string[]; comments: string[]; assigned: string[]; closed: boolean };
+  readonly effects: {
+    applied: string[];
+    comments: string[];
+    assigned: string[];
+    closed: boolean;
+    /** Repository labels the run CREATED — the `create: true` path. */
+    created: string[];
+  };
   /**
    * The repository's committed files, as `record` sees them through the
    * Contents API — keyed by repo-relative path, with a sha the stub mints
@@ -229,7 +236,7 @@ async function startStub(): Promise<Stub> {
     issues: [],
     answer: triaging(verdict()),
     asked: [],
-    effects: { applied: [], comments: [], assigned: [], closed: false },
+    effects: { applied: [], comments: [], assigned: [], closed: false, created: [] },
     contentsFiles: new Map(),
     contentsWrites: [],
     contentsForbidden: false,
@@ -401,6 +408,17 @@ async function route(
         description: stub.labelDescriptions[name] ?? null,
       })),
     );
+    return;
+  }
+
+  // Creating a repository label — the `create: true` path, gated on the
+  // `label` capability at `main.ts:1109`.
+  if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/labels$/.test(path)) {
+    const payload = parsed(raw) as { name?: string };
+    const name = payload.name ?? "";
+    stub.effects.created.push(name);
+    stub.repositoryLabels.push(name);
+    send(response, 201, { name });
     return;
   }
 
@@ -2964,5 +2982,66 @@ describe("the sweep", () => {
       // The ordinary sweep labels the backlog instead of importing it.
       expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `create: true` — the one path where triage adds something to the REPOSITORY
+// rather than to a thread, gated on the `label` capability at `main.ts:1109`.
+//
+// An auditor forced that gate open and the whole repository stayed green: a
+// warrant granting triage nothing could still mint repository labels. The
+// gate is a plain `if (!permitted.includes("label"))` and nothing observed it.
+// ---------------------------------------------------------------------------
+
+/** A taxonomy whose second label does not exist yet and asks to be created. */
+const CREATING_WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: Something that used to work and does not.",
+  "  - name: needs-triage",
+  "    description: Nobody has looked at this yet.",
+  "    create: true",
+  "duties:",
+  "  triage: [label]",
+].join("\n");
+
+describe("creating a label the repository does not have", () => {
+  it("creates it when the warrant grants `label`", async () => {
+    // The case that proves the gate is a GATE. Without it the two below would
+    // pass against a duty that had simply stopped creating labels at all.
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT);
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual(["needs-triage"]);
+  });
+
+  it("creates nothing when `label` is not granted, and says so", async () => {
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT.replace("triage: [label]", "triage: [comment]"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual([]);
+    // Named rather than silent: a label that never appears is otherwise
+    // indistinguishable from a taxonomy nobody used.
+    expect(run.log).toContain("needs-triage");
+    expect(run.log).toContain("not permitted");
+  });
+
+  it("creates nothing on a dry run, and says what it would have created", async () => {
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT);
+
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual([]);
+    expect(run.log).toContain("Would create");
   });
 });

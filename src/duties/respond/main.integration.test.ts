@@ -30,6 +30,8 @@ import { fileURLToPath } from "node:url";
 
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
+import { fingerprint, markerFor } from "../../core/marker.js";
+
 // A spawn per case, each loading a multi-megabyte bundle and identifying a
 // language from bundled profile data. Comfortably under this, and not worth
 // flaking over.
@@ -96,6 +98,8 @@ interface Comment {
 
 /** Everything a request is answered from, and everything a case may change. */
 interface State {
+  /** Whether the thread this run reads is a pull request. */
+  isPullRequest: boolean;
   title: string;
   body: string;
   author: { login: string; type: "User" | "Bot" };
@@ -162,6 +166,7 @@ function stageAnswer(
 
 async function startStub(): Promise<Stub> {
   const state: State = {
+    isPullRequest: false,
     title: "Crash on save",
     body: ENGLISH,
     author: { login: "reporter", type: "User" },
@@ -212,6 +217,10 @@ async function route(
       labels: stub.labels.map((name) => ({ name })),
       state: "open",
       user: { login: stub.author.login, type: stub.author.type },
+      // GitHub marks a pull request by the PRESENCE of this key on the issue
+      // payload, which is what `forge.ts:530` reads. Absent by default, so
+      // every case above still drives an issue.
+      ...(stub.isPullRequest ? { pull_request: { url: "https://example.test/pr" } } : {}),
     });
     return;
   }
@@ -884,5 +893,57 @@ describe("the action contract", () => {
     }
 
     expect(offenders).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The Reeve-proposal recursion guard (`main.ts:329`).
+//
+// Reeve replying to its own proposal pull request is the infinite-loop failure
+// mode: the reply is a change, the change wakes the next run, and that run
+// replies again. `main.ts` says the guard is written explicitly rather than
+// left to the bot-author check that would usually also catch it — and an
+// auditor replaced it with `false` in this duty and two others at once with
+// the whole repository still green. Nothing observed it.
+// ---------------------------------------------------------------------------
+
+/** A body carrying `propose`'s marker — what Reeve's own proposal PR looks like. */
+function proposalBody(): string {
+  return `A proposal.\n\n${markerFor("propose").render(fingerprint("proposal", ["respond"]))}`;
+}
+
+describe("the Reeve-proposal recursion guard", () => {
+  it("says nothing at all on Reeve's own proposal pull request", async () => {
+    stub.isPullRequest = true;
+    stub.body = proposalBody();
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toEqual([]);
+    // And it does not spend a model request finding that out.
+    expect(stub.asked).toEqual([]);
+  });
+
+  it("names the reason rather than reporting an ordinary skip", async () => {
+    stub.isPullRequest = true;
+    stub.body = proposalBody();
+
+    const run = await runAction(stub);
+
+    expect(run.log + run.summary).toContain("own proposal pull request");
+  });
+
+  it("still answers an ordinary pull request that carries no proposal marker", async () => {
+    // The control for the two above: the guard must recognise its OWN pull
+    // request, not stand down on every one. Without this, a guard that always
+    // refused would pass both cases above.
+    stub.isPullRequest = true;
+    stub.body = ENGLISH;
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments.length).toBeGreaterThan(0);
   });
 });
