@@ -30,10 +30,11 @@
   semanticCommitScope: "deps",
   packageRules: [
     {
-      // Actions are pinned to a full commit SHA (OpenSSF Scorecard's
-      // Pinned-Dependencies check, and the reason a tag is not a fixed
-      // reference). Renovate keeps the `# vX.Y.Z` comment beside the SHA in
-      // step with what it bumps.
+      // Actions are pinned to a full commit SHA — the reason a tag is not a
+      // fixed reference, and what `.github/semgrep/workflows.yaml`'s
+      // `workflow-action-not-pinned-to-sha` rule enforces on every pull
+      // request. Renovate keeps the `# vX.Y.Z` comment beside the SHA in step
+      // with what it bumps.
       matchManagers: ["github-actions"],
       semanticCommitScope: "ci",
       pinDigests: true,
