@@ -24,7 +24,7 @@
  *
  * Usage:
  *   node tools/mutation.mjs                  every mutation
- *   node tools/mutation.mjs --stage fast     the critical subset CI runs per pull request
+ *   node tools/mutation.mjs --stage fast     the local pre-push subset; CI runs the whole table
  *   node tools/mutation.mjs --only roster    every mutation whose name contains "roster"
  *   node tools/mutation.mjs --list           print the table and exit
  *

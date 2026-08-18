@@ -1,8 +1,15 @@
 name: CI
 
 on:
+  # Deliberately unfiltered, for the reason `analysis.yml` gives for the same
+  # choice: `ci-gate` is a required status check, and a `branches: [main]`
+  # filter here means a pull request based on another branch never triggers
+  # this workflow at all — so nothing runs, and the one required check sits
+  # pending forever while `Analysis` reports green beside it. Nothing reaches
+  # `main` untested either way (`merge_group` and `push` below cover that), so
+  # the filter was never protecting anything; it only let a stacked pull
+  # request look reviewed.
   pull_request:
-    branches: [main]
   # The merge queue re-runs these checks against `main + every pull request
   # ahead in the queue + this one`, which is the only place a semantic conflict
   # between two independently-green pull requests can surface. GitHub reports
@@ -159,7 +166,8 @@ jobs:
   # measurement, not an oversight: the whole table is 60 mutations and about
   # three and a half minutes of vitest, against a `Verify` job that is longer
   # still, so this job is not the pipeline's critical path.
-  # `tools/mutation.mjs --stage fast` (44 rows, about a minute) is the local
+  # `tools/mutation.mjs --stage fast` (44 rows, about a minute and a half —
+  # measured repeatedly between 77s and 153s, never at or under sixty) is the local
   # pre-push loop and the switch to reach for if this job ever starts deciding
   # when the pipeline finishes. Note what NOT to defer if that day comes: the
   # four entry-point rows are `full`-tier because they rebuild a bundle, and
