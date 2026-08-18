@@ -56,6 +56,21 @@ in the wild; doing that under a `1.x` promise would mean `2.0` almost
 immediately, and a major version that means "we changed our minds" teaches
 consumers that majors are noise.
 
+**Reaching `1.0.0` is a deliberate act, not an accident of `feat!:`.**
+`bump-minor-pre-major` below `1.0.0` sends every breaking change to the minor
+digit, so release-please will never emit `1.0.0` on its own. When the roadmap
+above is done and every number is published, trigger the major explicitly —
+any one of these:
+
+- a commit body containing `Release-As: 1.0.0` (release-please reads it on the
+  next release; the PR it opens will target `1.0.0`);
+- `"release-as": "1.0.0"` on the `"."` package in `release-please-config.json`;
+- editing `.release-please-manifest.json` to `{".": "1.0.0"}`.
+
+All three make the next release PR bump to `1.0.0`, after which
+`bump-minor-pre-major` no longer applies and `feat!:` is a major as the table
+above says. The `floating-tag` job then reads `$MAJOR != 0` and points `v1`.
+
 ## Floating tags, and why `v0` must not exist
 
 The floating tag is what a consumer pins to get fixes without editing their
