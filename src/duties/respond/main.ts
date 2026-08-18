@@ -265,14 +265,14 @@ async function walkReplies(
     });
   }
   if (more) {
-    // Neither guard fired on the page this run actually read, and there is
+    // Neither guard fired on the replies this run actually read, and there is
     // more of the thread this run never saw — this duty's own marker, or a
-    // human's reply, could be sitting past the first hundred. The top rung
-    // will not draft a first reply on an "unanswered so far" guess this
-    // thin — but, unlike an auth failure, this is a miss that fixes itself
-    // on the next run, so the refusal note is green, exactly like the two
-    // guards above: see D12 and this file's own doc comment on why an input
-    // cannot widen this duty's authority to speak.
+    // human's reply, could be sitting just past `max`. The top rung will not
+    // draft a first reply on an "unanswered so far" guess this thin — but,
+    // unlike an auth failure, this is a miss that fixes itself on the next
+    // run, so the refusal note is green, exactly like the two guards above:
+    // see D12 and this file's own doc comment on why an input cannot widen
+    // this duty's authority to speak.
     core.warning(
       `#${String(at.number)}: the reply list was truncated before this duty could rule out its ` +
         "own marker or a human reply — not answering this run.",
