@@ -159,6 +159,10 @@ describe("the translate stage under D12 weather", () => {
 
     expect(asked).toEqual(["live"]);
     expect(translation.attempts.map((attempt) => attempt.model)).toEqual(["live"]);
+    // And off the list before rotation sees it, rather than rotated past
+    // inside it: the seed is what stops a second `draft:` warning being
+    // logged, on every thread of a sweep, for a model the run gave up on.
+    expect(translation.failures).toEqual([]);
   });
 
   it("grounds_a_capacity_failed_model_so_the_next_thread_skips_it", async () => {
