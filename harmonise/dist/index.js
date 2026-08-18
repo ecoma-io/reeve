@@ -35290,10 +35290,10 @@ async function run() {
             }
           }
         } else {
-          const canWriteDefault = settings.permitted.includes("edit-file");
+          const canWriteDefault = settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");
           if (!canWriteDefault) {
             notice(
-              "harmonise: provenance state cannot be written to the default branch because `edit-file` is not granted. State may become stale."
+              "harmonise: provenance state cannot be written to the default branch because `edit-file` and `open-pr` are not both granted. State may become stale."
             );
           } else {
             await writeState(api, context2.repo, provenancePath, state, stateSha);
