@@ -155,23 +155,35 @@ jobs:
   #    Anything else reading `src/` in the same checkout at the same moment
   #    reads a file that is briefly not there. A separate runner is the only
   #    isolation that is actually isolation.
-  # 2. It runs in parallel with `Verify`, so the wall clock the pipeline adds
-  #    is zero — the mutation table is about three and a half minutes and
-  #    `Verify` takes longer still.
+  # 2. It runs in parallel with `Verify`. That is what made it free, and it is
+  #    no longer quite free: at 9m39s the table is now within sight of
+  #    `Verify`'s own wall clock rather than comfortably under it. Read the
+  #    flip condition below as live rather than hypothetical.
   # 3. It gets its own check name. "a mutation survived" and "a test failed"
   #    are different findings with different owners, and a reviewer should not
   #    have to open a log to tell which one happened.
   #
-  # The full table runs on every event, including pull requests. That is a
-  # measurement, not an oversight: the whole table is 60 mutations and about
-  # three and a half minutes of vitest, against a `Verify` job that is longer
-  # still, so this job is not the pipeline's critical path.
-  # `tools/mutation.mjs --stage fast` (44 rows, about a minute and a half —
-  # measured repeatedly between 77s and 153s, never at or under sixty) is the local
-  # pre-push loop and the switch to reach for if this job ever starts deciding
-  # when the pipeline finishes. Note what NOT to defer if that day comes: the
-  # four entry-point rows are `full`-tier because they rebuild a bundle, and
-  # they are also the rows that caught a publish gate standing wide open.
+  # The full table still runs on every event, including pull requests, and
+  # that is now a closer call than it was. Measured on a four-core box: the
+  # whole table is 70 mutations in 9m39s; `tools/mutation.mjs --stage fast`
+  # is 47 rows in 1m09s. Nearly all of the difference is eleven entry-point
+  # rows that each rebuild a duty bundle with esbuild and spawn a child, at
+  # roughly forty-five seconds apiece.
+  #
+  # It stays unsplit deliberately, and the reason is what those eleven rows
+  # are. They are every capability gate an entry point carries — the last
+  # check between a run and a repository mutation — and they exist because an
+  # audit found all eleven reporting green while their branches were simply
+  # unreachable from any fixture. Deferring them to the merge queue means a
+  # pull request that opens one goes green on the pull request, which is the
+  # exact failure they were added to catch.
+  #
+  # So the naive fast/full split documented below defers precisely the wrong
+  # rows, and if this job does start deciding when the pipeline finishes, the
+  # first thing to try is NOT that split but a second parallel job carrying
+  # the entry-point rows (`--only` accepts a substring, and every one of them
+  # names a duty). Both jobs then go in `ci-gate`'s `needs`, nothing is
+  # deferred, and the wall clock roughly halves.
   # The condition to flip on is not a fixed number of seconds but a comparison
   # CI already reports: flip when this job's wall clock approaches `Verify`'s,
   # so that it starts deciding when the pipeline finishes. A constant would
@@ -192,7 +204,13 @@ jobs:
   mutation:
     name: Mutation
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised from 15 when the table reached seventy rows. The full table
+    # measures 9m39s on a four-core box, and eleven of its rows each rebuild a
+    # duty bundle with esbuild and then spawn a child process to run it — so
+    # the cost scales with runner speed in a way the other jobs do not. Fifteen
+    # minutes left roughly a third of headroom, which is not enough margin for
+    # a gate whose timeout reads as a red `ci-gate` rather than as a slow one.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
