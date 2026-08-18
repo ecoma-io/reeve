@@ -43,6 +43,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
+    "check-docs-links": "node scripts/check-docs-links.mjs",
+    "test:docs-links": "node --test \"scripts/**/*.test.mjs\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
     "test:contract": "vitest run --config eval/contract/vitest.config.ts",

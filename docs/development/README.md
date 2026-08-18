@@ -43,8 +43,8 @@ rather than taste:
 3. **A duty is not done when it works; it is done when it is measured, in every
    language it claims.** (D1, D11)
 
-[`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) covers the mechanics —
-branches, commit scopes, hooks, and what CI will reject.
+The root `CONTRIBUTING.md` covers the mechanics — branches, commit scopes,
+hooks, and what CI will reject.
 
 ---
 

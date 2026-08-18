@@ -48,7 +48,7 @@ and dogfooded — in the 1.x line:
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | The warrant — `.github/reeve.yml`, an allowlist checked in code ([D2](../doctrine/north-star.md#d2--authority-is-granted-written-and-bounded)) | `.reeve/authority.yaml` — the same grant, plus a `forbidden:` floor ([the governance tree](agent-governance.md))   |
 | A duty — a fixed pipeline invoked by name                                                                                                      | A capability — the same pipeline, invocable by the agent as well as by a workflow line                             |
-| A duty's proposed effects, checked by [`src/core/enforce.ts`](../../src/core/enforce.ts) before publish                                        | A capability request, checked by the Authority Kernel — the same module's job, given a name and a boundary         |
+| A duty's proposed effects, checked by `src/core/enforce.ts` before publish                                                                     | A capability request, checked by the Authority Kernel — the same module's job, given a name and a boundary         |
 | The warrant's `duties:` block, the whole authority, checked in code                                                                            | The kernel's grant resolution — unchanged rule, more callers                                                       |
 | Idempotency markers in the thread ([D9](../doctrine/north-star.md#d9--re-running-is-cheap-and-safe))                                           | The Verify stage — a loop step that reads the marker the publish step wrote                                        |
 | The corrections store, plain files in the repository ([D6](../doctrine/north-star.md#d6--the-repository-is-the-database))                      | `.reeve/memory/` — the same files, relocated under the governance roof                                             |
@@ -87,7 +87,7 @@ the page is anchored to something checkable rather than to an idea of 1.x.
 [`review`](../reference/duties/review.md) and
 [`remediation`](../reference/duties/remediation.md). Seven of the nine are dogfooded
 on this repository — every duty but `remediation`, through the single
-[`.github/workflows/reeve-dogfood.yml`](../../.github/workflows/reeve-dogfood.yml)
+`.github/workflows/reeve-dogfood.yml`
 — which is the same discipline Phase 3 below borrows. `review` dogfoods in
 report-only mode, granted nothing until a warrant names it, and is additionally
 driven end to end by its own integration suite against a stub API. Its claimed
@@ -130,8 +130,8 @@ about any of them, anywhere in these docs, is
 ## Phase 1 — the kernel extracted, nothing new granted
 
 The riskiest phase, done first and done cold: the enforcement path —
-[`src/core/warrant.ts`](../../src/core/warrant.ts) reading the grant,
-[`src/core/enforce.ts`](../../src/core/enforce.ts) checking every intended
+`src/core/warrant.ts` reading the grant,
+`src/core/enforce.ts` checking every intended
 effect against it — becomes a named component with a single interface: a
 **capability request** in, a grant or a refusal out. Every existing duty's
 effects are rerouted through that interface. No behaviour changes; that is

@@ -108,6 +108,15 @@ jobs:
       - name: Check documentation anchors
         run: node tools/check-anchors.mjs
 
+      # Resolves every docs reference the list above does not cover: markdown
+      # link targets must exist and, for pages INSIDE docs/, land only within
+      # docs/; prose `docs/…` citations must resolve; and a bare `#anchor` must
+      # match a heading in the same file. The same gate runs on every agent
+      # edit and in pre-commit, so CI checks the same health against main +
+      # queued pull requests instead of fresh eyes.
+      - name: Check docs links and containment
+        run: pnpm check-docs-links
+
       # The runner executes `dist/index.js` off the checked-out repository —
       # never `src/`, and never after an install. So the bundle is committed,
       # and this is the check that keeps it honest: rebuild, and fail if the

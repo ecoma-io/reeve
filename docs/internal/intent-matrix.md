@@ -526,7 +526,7 @@ deliberate-difference table is in **Disagreements**.
 
 D8 applies to every boundary: input arrives from the internet addressed to a
 process holding a write token, and containment is a property of the code path,
-not a prompt instruction (`docs/doctrine/north-star.md#d8--every-thread-is-hostile`).
+not a prompt instruction (`docs/doctrine/north-star.md#d8---every-thread-is-hostile`).
 
 - **G1 thread text (title/body) → prompt:** fenced behind a per-call 64-bit
   nonce whose closing tag repeats the id; forged delimiters without the id can

@@ -75,7 +75,7 @@ should never have to rule out the other first.
   injection, output sanitising, what is deliberately left undefended, and the
   ten checked invariants: [Security](security.md).
 - **Reporting a vulnerability**, and how to verify a release's provenance:
-  [Reporting](reporting.md) and [`SECURITY.md`](../../SECURITY.md).
+  [Reporting](reporting.md) and the root `SECURITY.md`.
 - **Per-duty security considerations** — what each duty specifically will
   never do, however it is configured: the "Security considerations" section
   on [`triage`](../reference/duties/triage.md#security-considerations),

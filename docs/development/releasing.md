@@ -1,8 +1,7 @@
 # Releasing
 
 How a commit becomes a version somebody can pin, and why each step in
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml) is where it
-is.
+`.github/workflows/release.yml` is where it is.
 
 ## What "publish" means here
 
@@ -184,8 +183,8 @@ both lists is still a step in [the duty checklist](duties.md).
 
 ## Cutting a release
 
-1. Merge work to `main` with conventional commits. Scopes are in
-   [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
+1. Merge work to `main` with conventional commits. Scopes are in the root
+   `CONTRIBUTING.md`.
 2. release-please opens or refreshes `chore(workspace): release X.Y.Z`.
 3. Review the changelog it wrote. It is the release notes, and it is generated
    from commit subjects — a subject nobody could read in a changelog is a subject

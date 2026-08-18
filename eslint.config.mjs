@@ -127,5 +127,14 @@ export default tseslint.config(
     rules: { "no-console": "off" },
   },
 
+  // Repository gate scripts (the editor-time format/lint/docs-link hooks and
+  // the docs-link gate itself). They are invoked from a terminal, where
+  // `console.log`/`console.error` on stdout/stderr is the interface the hooks
+  // and CI read back — the same terminal-is-the-UI argument as `tools/**`.
+  {
+    files: ["scripts/**/*.mjs"],
+    rules: { "no-console": "off" },
+  },
+
   prettier,
 );

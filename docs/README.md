@@ -43,7 +43,7 @@ system.
 
 **Deciding whether to adopt it.** Want to know what it does and what it
 refuses to do before installing anything. Start at
-[the root README's refusal table](../README.md#what-it-refuses-to-do), then
+the root README's refusal table (`README.md#what-it-refuses-to-do`), then
 [the authority model](concepts/authority-model.md), then skim
 [the duty reference pages](reference/duties/) — you can read a duty's whole
 contract without installing it.
@@ -102,7 +102,7 @@ Every page, one row each, for anyone the five paths above didn't fit.
 
 | Page                                                                       | Doc type                 | What it's for                                                                     |
 | -------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
-| [`README.md`](../README.md)                                                | overview                 | What Reeve is, a five-minute quick start, the duties, and what it refuses.        |
+| `README.md` (root — outside docs/)                                         | overview                 | What Reeve is, a five-minute quick start, the duties, and what it refuses.        |
 | [`doctrine/north-star.md`](doctrine/north-star.md)                         | doctrine                 | Normative doctrine — the document the others answer to. Unchanged.                |
 | [`getting-started/installation.md`](getting-started/installation.md)       | tutorial                 | Get a first workflow running in five minutes.                                     |
 | [`getting-started/first-workflow.md`](getting-started/first-workflow.md)   | tutorial                 | Walk a complete two-duty workflow end to end.                                     |
