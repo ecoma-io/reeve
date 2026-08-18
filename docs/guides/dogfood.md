@@ -4,51 +4,60 @@ _How Reeve runs on itself, and how the feedback loop works. Prerequisites: [The 
 
 Reeve is dogfooded: its duties run against this repository's own
 issues, pull requests, and dependencies. `triage` and `translate` act on
-real threads; `duplicate` and `respond` run in report-only mode, writing
-verdicts to job summaries and touching nothing; `lifecycle` observes in
-dry-run; and `dependa` maintains this repository's own dependencies.
-`harmonise` is configured to watch `README.md`, whose sync to
-Vietnamese/Chinese is pending the bootstrap of its first translations — see
-[the harmonise reference](../reference/duties/harmonise.md#bootstrap).
-`review` is the newest: it has no live workflow here yet, and its whole duty
-is driven end to end by its own integration suite against a stub API — see
-[the review reference](../reference/duties/review.md). This
-is not self-modification; it is **proving the execution path**. A duty that
-labels a stranger's issue and a duty that labels its own follow the same code,
-the same warrant, and the same guardrails.
+real threads; `duplicate`, `respond` and `review` run in report-only mode,
+writing verdicts to job summaries and touching nothing; `lifecycle` observes
+in dry-run; and `dependa` runs in shadow alongside Renovate, maintaining and
+comparing rather than owning. `harmonise` is configured to watch `README.md`,
+whose sync to Vietnamese/Chinese is pending the bootstrap of its first
+translations — see [the harmonise reference](../reference/duties/harmonise.md#bootstrap).
+This is not self-modification; it is **proving the execution path**. A duty
+that labels a stranger's issue and a duty that labels its own follow the same
+code, the same warrant, and the same guardrails.
 
 ## What dogfood means here
 
 Self-dogfood in Reeve is not a tool that writes its own prompts, adjusts its
 own taxonomy, or approves its own pull requests. It is this repository's
-`.github/reeve.yml` and the workflow files that point `uses:` at the working
-tree — the same files any other repository would write, reviewed the same way
-any other repository would review them.
+`.github/reeve.yml` and the workflow file that points `uses:` at the leaf
+actions — the same files any other repository would write, reviewed the same
+way any other repository would review them.
 
 The warrant constrains dogfood exactly as it constrains any consumer: the
 warrant is the whole authority — what the `duties:` block does not grant is
 never done — and `gateClose` refuses a duplicate close that a human reversed,
 whether the thread belongs to this repository or to someone else's.
 
-## The workflows
+## The workflow
 
-| Duty      | Workflow                                      | Trigger                                      | Gate                         | Status      |
-| --------- | --------------------------------------------- | -------------------------------------------- | ---------------------------- | ----------- |
-| triage    | `.github/workflows/reeve-triage-issue.yml`    | `opened`, `labeled`, `unlabeled`, `reopened` | —                            | Active      |
-| translate | `.github/workflows/reeve-translate-issue.yml` | `opened`, `edited`                           | —                            | Active      |
-| duplicate | `.github/workflows/reeve-duplicate-issue.yml` | `opened`                                     | `dry-run: true`              | Report-only |
-| respond   | `.github/workflows/reeve-respond-issue.yml`   | `opened`                                     | `dry-run: true`              | Report-only |
-| lifecycle | `.github/workflows/reeve-lifecycle-issue.yml` | schedule, `workflow_dispatch`                | `dry-run: true`              | Observing   |
-| harmonise | `.github/workflows/reeve-harmonise.yml`       | `push` (README.md)                           | —                            | Active      |
-| dependa   | `.github/workflows/reeve-dependa.yml`         | schedule, `workflow_dispatch`                | omitted from `duties:` block | Shadow      |
+Every duty is dogfooded by one workflow —
+[`.github/workflows/reeve-dogfood.yml`](../../.github/workflows/reeve-dogfood.yml) —
+whose one config table answers, in a glance, which repository, which duty,
+which event, which mode and which result a run produced:
 
-`duplicate` and `respond` run with `dry-run: true`, writing their verdicts to
-the job summary without touching a thread — the same path any consumer walks
-before letting a duty post. `lifecycle` starts in `dry-run: true`, so a
-maintainer can observe what the policy would do before allowing it to act.
-`dependa` is deliberately omitted from the `duties:` block, so it runs in
-shadow mode — it discovers and classifies, but there is no grant for it to act
-on.
+| Duty      | Event                                         | Mode       | Status      |
+| --------- | --------------------------------------------- | ---------- | ----------- |
+| triage    | `opened`, `labeled`, `unlabeled`, `reopened`  | controlled | Active      |
+| translate | issue `opened`/`edited`, PR `opened`/`edited` | propose    | Active      |
+| duplicate | `opened`                                      | observe    | Report-only |
+| respond   | `opened`                                      | observe    | Report-only |
+| lifecycle | daily schedule                                | observe    | Observing   |
+| harmonise | `push` (README.md)                            | propose    | Active      |
+| review    | PR `opened`/`ready_for_review`/`synchronize`  | observe    | Report-only |
+| dependa   | Wednesday (drafting), Thursday (conformance)  | observe    | Shadow      |
+| sweep     | Monday schedule                               | propose    | Active      |
+
+The three modes are what a job may write, and the boundary between them is a
+deliberate act, never a default — see the workflow header for the full
+definitions. `observe` is write-safe by construction (`duplicate`, `respond`,
+`lifecycle` and `review` run `dry-run: true`; `dependa` is omitted from the
+warrant's `duties:` block); `propose` (translate, harmonise) withholds nothing
+and lets the warrant decide; `controlled` (triage) writes what the warrant
+grants. A manual `workflow_dispatch` defaults to observation and needs
+`dry-run: false` to act — write authority is never granted by accident.
+
+Every job runs the real public leaf action — `uses: ecoma-io/reeve/<duty>@main`
+— so the committed `dist/` bundle CI proves matches `src/` is what is exercised,
+not a test-only shortcut around the architecture.
 
 ## The feedback loop
 
@@ -134,12 +143,40 @@ An unreadable answer is never converted into authority.
 
 | Action                    | How                                                                          |
 | ------------------------- | ---------------------------------------------------------------------------- |
-| Disable a duty            | Remove or disable its workflow file.                                         |
+| Disable a duty            | Remove or disable its job in `.github/workflows/reeve-dogfood.yml`.          |
 | Narrow what a duty may do | Remove a capability from the `duties:` block in the warrant.                 |
 | Turn off recording        | Remove `record` from the `duties:` block in the warrant.                     |
 | Turn off everything       | Remove the duty from the `duties:` block, or omit the block entirely.        |
 | Observe before acting     | Set `dry-run: true` — the pipeline runs, nothing is written.                 |
 | Remove a past correction  | Delete or edit the NDJSON file in `.reeve/corrections/` like any other file. |
+
+## Classifying a dogfood failure
+
+Dogfood failures are evidence, and the first question to answer is what kind
+of evidence. Every failure from the unified workflow lands in a job summary
+that names repository, duty, event, mode and outcome; what follows is the
+classification, and it is exactly one of four:
+
+1. **Bug → regression fixture.** The duty did not do what its own
+   documentation says it does — a wrong label, a republished block, a
+   comparison that classified a real discrepancy as a match. Reproduce the
+   failure with a minimal fixture under `eval/fixtures/<duty>/`, and carry the
+   fix in the same change.
+2. **Intent update.** The run exposed a decision this project had not made —
+   a threshold to raise, a guardrail to add, a mode to switch from observe to
+   propose once the backlog says the false-positive rate is acceptable.
+   Changing the workflow file or the warrant is the fix.
+3. **Doc correction.** The page said what the code does not do. Fix the page;
+   the CI doc-links and anchor guards keep the correction honest.
+4. **Explicitly-accepted limitation.** A measured, documented gap that is a
+   deliberate trade — dependa's `INTENTIONAL_DIFFERENCE` classifications are
+   this, and so is a free tier's `Weather` ending a sweep yellow with
+   `remaining` honest. The limitation must be written down before it can be
+   accepted; an undocumented failure is none of these four and stays open.
+
+The classification is recorded in the issue or pull request that names the
+failure — a job summary is evidence, not a decision, and the decision is the
+maintainer act that places it in one of the four buckets above.
 
 ---
 
