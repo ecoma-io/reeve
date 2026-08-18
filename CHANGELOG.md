@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.8.0](https://github.com/ecoma-io/reeve/compare/v0.7.0...v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **eval:** close review evaluation gaps — PR language, update path, shadow fixtures ([#72](https://github.com/ecoma-io/reeve/issues/72)) ([dbd1969](https://github.com/ecoma-io/reeve/commit/dbd1969f734b339f489f365327c619feff3e2987))
+* **eval:** publish Stage-6 worst-language measurements (3 providers, all 100%) ([#84](https://github.com/ecoma-io/reeve/issues/84)) ([bebe295](https://github.com/ecoma-io/reeve/commit/bebe295700e3225eb41ea61be387154f1773aa5d))
+* **review:** architecture and dependency-boundary review ([#75](https://github.com/ecoma-io/reeve/issues/75)) ([c84e58a](https://github.com/ecoma-io/reeve/commit/c84e58a4ed39161f979083bc44d078696ebb8973))
+* **review:** deep repository context engine ([#82](https://github.com/ecoma-io/reeve/issues/82)) ([06562ca](https://github.com/ecoma-io/reeve/commit/06562caf30a505780d0e5a8b3cc42adcc4525217))
+* **review:** evidence-based verification of model findings ([#76](https://github.com/ecoma-io/reeve/issues/76)) ([58bfd9c](https://github.com/ecoma-io/reeve/commit/58bfd9cac1756c82be8e40bc23033c2dd659e326))
+* **review:** finding lifecycle 2.0 — evidence, human disposition, audit ([#81](https://github.com/ecoma-io/reeve/issues/81)) ([fec2feb](https://github.com/ecoma-io/reeve/commit/fec2feb98d1df076a057696f423ae7af9b8fee92))
+* **review:** inline findings with owned review threads ([#85](https://github.com/ecoma-io/reeve/issues/85)) ([76f5162](https://github.com/ecoma-io/reeve/commit/76f5162322025e720054ca169439c48c8134f3a1))
+* **review:** multi-pass adversarial review engine with synthesis ([#77](https://github.com/ecoma-io/reeve/issues/77)) ([b7780d5](https://github.com/ecoma-io/reeve/commit/b7780d525dc64b57cf7287896a3442e59b314fac))
+* **review:** remediation proposals for blocked findings ([#83](https://github.com/ecoma-io/reeve/issues/83)) ([5076774](https://github.com/ecoma-io/reeve/commit/507677498418033a846121fc78e8e7750816d147))
+* **review:** risk-based review profiles ([#78](https://github.com/ecoma-io/reeve/issues/78)) ([c2aed45](https://github.com/ecoma-io/reeve/commit/c2aed45e75caea7ef46f217858659bdb3ad93873))
+* **review:** test-aware change-completeness review ([#80](https://github.com/ecoma-io/reeve/issues/80)) ([b02ad18](https://github.com/ecoma-io/reeve/commit/b02ad18676ff5bf8e84a24a356dca5126d085ccb))
+* **review:** versioned composed rule packs ([#79](https://github.com/ecoma-io/reeve/issues/79)) ([d3f557f](https://github.com/ecoma-io/reeve/commit/d3f557f597244d00ed368e6135fc36d32d57c95c))
+* **workspace:** shared format/lint/doc-link hooks for all three agents ([#95](https://github.com/ecoma-io/reeve/issues/95)) ([73bda1e](https://github.com/ecoma-io/reeve/commit/73bda1e2c7cb6659c779dce16751ca4462a778f2))
+
+
+### Bug Fixes
+
+* **harmonise:** run on push events without requiring a thread number ([#71](https://github.com/ecoma-io/reeve/issues/71)) ([a731ba2](https://github.com/ecoma-io/reeve/commit/a731ba234eba2a820c79d82ba47fefca9729f4b7))
+* **model-consumption:** uniform roster rotation for harmonise classify; cheap detect roster for respond ([#87](https://github.com/ecoma-io/reeve/issues/87)) ([8a0ebda](https://github.com/ecoma-io/reeve/commit/8a0ebda08c36745e70aa16108002bb9caba659d9))
+* **review:** api-freeze era — adjudicated respond/harmonise behaviors, orphaned exports, cleanup ([#93](https://github.com/ecoma-io/reeve/issues/93)) ([f08d0f8](https://github.com/ecoma-io/reeve/commit/f08d0f8481da264799a24d03334f60066f19f327))
+* **review:** skip interior lines of multi-line block comments during edge extraction ([#86](https://github.com/ecoma-io/reeve/issues/86)) ([2635c90](https://github.com/ecoma-io/reeve/commit/2635c90587e00a25b2f37eedce505f82660e0751))
+
 ## [0.7.0](https://github.com/ecoma-io/reeve/compare/v0.6.0...v0.7.0) (2026-08-17)
 
 
