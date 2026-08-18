@@ -212,6 +212,82 @@ describe("ensureBranch", () => {
     expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not ensure branch"));
   });
 
+  it("a_secondary_rate_limit_403_warns_and_continues_rather_than_ending_the_run", async () => {
+    // The ONE call-site pin on the green side of the 403 narrowing. GitHub
+    // sends a secondary rate limit as 403 *or* 429 at its own discretion
+    // (docs.github.com, "Rate limits for the REST API"), so this run must
+    // degrade exactly as the 429 case above does — not fail red on the
+    // half of the time GitHub picked the other status. Deleting the 403
+    // branch in `forge.ts`'s `isCapacityError` makes this case throw.
+    const reposGet = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("You have exceeded a secondary rate limit"), {
+          status: 403,
+          response: { status: 403, headers: { "retry-after": "60" } },
+        }),
+      ),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not ensure branch"));
+  });
+
+  it("a_primary_rate_limit_403_with_the_quota_spent_warns_and_continues", async () => {
+    const reposGet = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("API rate limit exceeded"), {
+          status: 403,
+          response: { status: 403, headers: { "x-ratelimit-remaining": "0" } },
+        }),
+      ),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    const result = await ensureBranch(api, AT, "reeve/provenance");
+
+    expect(result).toBeNull();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not ensure branch"));
+  });
+
+  it("a_403_on_a_healthy_quota_still_ends_the_run_at_this_call_site", async () => {
+    // The other half of the same pin: quota headers that do NOT say the
+    // limit is spent leave a permission refusal exactly as red as it was.
+    const reposGet = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("Resource not accessible by integration"), {
+          status: 403,
+          response: { status: 403, headers: { "x-ratelimit-remaining": "4999" } },
+        }),
+      ),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: { get: reposGet, getContent: vi.fn(), createOrUpdateFileContents: vi.fn() },
+        git: { getRef: vi.fn(), createRef: vi.fn(), updateRef: vi.fn() },
+        pulls: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
+      },
+    };
+
+    await expect(ensureBranch(api, AT, "reeve/provenance")).rejects.toThrow(
+      "Resource not accessible by integration",
+    );
+  });
+
   it("returns null when git.getRef (default branch) hits a capacity error (503)", async () => {
     const gitGetRef = vi.fn(() =>
       Promise.reject(Object.assign(new Error("service unavailable"), { status: 503 })),
@@ -647,6 +723,46 @@ describe("publishState", () => {
   it("returns null when writing a file hits a capacity error", async () => {
     const createOrUpdateFileContents = vi.fn(() =>
       Promise.reject(Object.assign(new Error("server error"), { status: 500 })),
+    );
+    const api: StateBranchApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: vi.fn(notFound),
+          createOrUpdateFileContents,
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: vi.fn(),
+          updateRef: vi.fn(),
+        },
+        pulls: {
+          list: vi.fn(() => Promise.resolve({ data: [] })),
+          create: vi.fn(),
+          update: vi.fn(),
+        },
+      },
+    };
+    const files = [{ path: "state.json", content: "{}", message: "update" }];
+
+    const result = await publishState(api, AT, BRANCH, files, "title", "body", false);
+
+    expect(result).toBeNull();
+    expect(createOrUpdateFileContents).toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish"));
+  });
+
+  it("a_rate_limit_403_partway_through_a_publish_warns_and_continues", async () => {
+    // Second call site, different consumer: a rate-limit 403 while writing
+    // files must leave the same honest half-written warning a 429 does,
+    // rather than ending the run and losing the files already committed.
+    const createOrUpdateFileContents = vi.fn(() =>
+      Promise.reject(
+        Object.assign(new Error("You have exceeded a secondary rate limit"), {
+          status: 403,
+          response: { status: 403, headers: { "retry-after": "30" } },
+        }),
+      ),
     );
     const api: StateBranchApi = {
       rest: {
