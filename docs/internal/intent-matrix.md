@@ -392,8 +392,25 @@ deliberate-difference table is in **Disagreements**.
   never act alone → withhold), `belowFloor` (nothing below the floor reaches
   the PR), comment-not-granted → green withheld, threads sync BEFORE the
   summary write (`review/main.ts:624-733`).
-- **46-2b:** a model finding must be verified against deterministic evidence
-  before it may be reported as a finding (`review/verify.ts`).
+- **46-2b:** every model finding is verified against deterministic evidence and
+  **badged with the result** — never dropped for failing verification
+  (`review/verify.ts`, `review/publish.ts:622-625`).
+  - **ADJUDICATED (2026-08-18): badging, code wins.** This row previously read
+    "must be verified … before it may be reported", which is false against the
+    code and was confirmed three ways: `publish.ts:625` renders `· not
+verified` on a finding's own line, `main.ts:577-592` passes
+    `verifyFindings`' output straight into `reconcile` with no filter on
+    `verification`, and `summary.ts:155-163` prints a `N verified · M not
+verified` tally that only means anything if unverified findings are
+    reported. The code is authoritative and its posture is the right one:
+    `verify.ts` proves a snippet against a line the diff actually carries,
+    which is a provenance check rather than a truth oracle. A real finding
+    whose snippet the model paraphrased would be discarded silently by a
+    gate; badged, it reaches the maintainer marked for exactly what is
+    unproven about it. No behavioural change — the matrix was wrong, not the
+    duty. The mutation table pins both halves of the boundary
+    (`tools/mutation.mjs`: "empty proven text verifies every claim",
+    "zero-weight evidence marks a finding verified").
 - **Failure:** corrupt envelope → loud, treated as nothing found, never a
   partial read (`review/publish.ts` decodeEnvelope); 422 on a thread write →
   fallback to the summary comment, never silence + no report.
