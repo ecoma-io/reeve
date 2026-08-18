@@ -41,7 +41,7 @@ const LINE_FORM =
   /^\s*(?:@[a-z0-9-]+\s+)?(?:line\s+)?(\d+)\s*:\s*(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
 /** The strict path grammar: `src/app.ts:3: rejected`. */
 const PATH_FORM =
-  /^\s*(?:@[a-z0-9-]+\s+)?([^\s:]+(?:\.[A-Za-z0-9]+)+):(\d+)\s*:(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
+  /^\s*(?:@[a-z0-9-]+\s+)?([^\s:]+(?:\.[A-Za-z0-9]+)+):(\d+)\s*:\s*(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
 
 /** A parsed disposition claim, before it is matched to a finding. */
 interface Parsed {
@@ -64,12 +64,16 @@ export function parseDispositionLine(line: string): Parsed | null {
     return {
       path: pathMatch[1] ?? null,
       line: Number(pathMatch[2]),
-      value: pathMatch[3] as DispositionValue,
+      value: pathMatch[3].toLowerCase() as DispositionValue,
     };
   }
   const lineMatch = LINE_FORM.exec(line);
   if (lineMatch?.[1] !== undefined && lineMatch[2] !== undefined) {
-    return { path: null, line: Number(lineMatch[1]), value: lineMatch[2] as DispositionValue };
+    return {
+      path: null,
+      line: Number(lineMatch[1]),
+      value: lineMatch[2].toLowerCase() as DispositionValue,
+    };
   }
   return null;
 }

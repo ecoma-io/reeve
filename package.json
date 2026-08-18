@@ -46,6 +46,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
     "test:contract": "vitest run --config eval/contract/vitest.config.ts",
+    "test:mutation": "node tools/mutation.mjs",
     "test:watch": "vitest",
     "build": "node tools/build.mjs",
     "try": "node tools/try.mjs",
