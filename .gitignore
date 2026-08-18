@@ -26,3 +26,6 @@ pnpm-debug.log*
 
 # Agent worktrees
 .claude/worktrees/
+
+# Mutation-harness scratch (tools/mutation.mjs) — safe to delete after a crash
+.tmp/
