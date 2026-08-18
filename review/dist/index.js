@@ -36086,19 +36086,23 @@ ${capped.trimEnd()}`);
 
 // src/duties/review/disposition.ts
 var LINE_FORM = /^\s*(?:@[a-z0-9-]+\s+)?(?:line\s+)?(\d+)\s*:\s*(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
-var PATH_FORM = /^\s*(?:@[a-z0-9-]+\s+)?([^\s:]+(?:\.[A-Za-z0-9]+)+):(\d+)\s*:(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
+var PATH_FORM = /^\s*(?:@[a-z0-9-]+\s+)?([^\s:]+(?:\.[A-Za-z0-9]+)+):(\d+)\s*:\s*(verified|accepted-risk|wont-fix|rejected)\s*(?:[,;:.].*)?$/i;
 function parseDispositionLine(line) {
   const pathMatch = PATH_FORM.exec(line);
   if (pathMatch?.[2] !== void 0 && pathMatch[3] !== void 0) {
     return {
       path: pathMatch[1] ?? null,
       line: Number(pathMatch[2]),
-      value: pathMatch[3]
+      value: pathMatch[3].toLowerCase()
     };
   }
   const lineMatch = LINE_FORM.exec(line);
   if (lineMatch?.[1] !== void 0 && lineMatch[2] !== void 0) {
-    return { path: null, line: Number(lineMatch[1]), value: lineMatch[2] };
+    return {
+      path: null,
+      line: Number(lineMatch[1]),
+      value: lineMatch[2].toLowerCase()
+    };
   }
   return null;
 }
