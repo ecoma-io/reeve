@@ -126,6 +126,39 @@ describe("the shipped table is structurally sound", () => {
     }
   });
 
+  it("gives every entry-point row a `rebuilds` bundle to put back", () => {
+    // An entry-point row's target suite rebuilds the duty's committed bundle
+    // from the mutated source. Without `rebuilds`, the harness restores the
+    // source and leaves the MUTATED BUNDLE in the working tree, where it reads
+    // as ordinary build drift and can be committed. Forgetting the field is
+    // silent, and this is the only thing that would say so.
+    for (const mutation of MUTATIONS) {
+      if (!/\/main\.ts$/.test(mutation.file)) continue;
+      ok(
+        typeof mutation.rebuilds === "string" && mutation.rebuilds.length > 0,
+        `${mutation.name} mutates an entry point but names no \`rebuilds\` bundle`,
+      );
+      ok(
+        mutation.file.includes(`/${mutation.rebuilds}/`),
+        `${mutation.name} rebuilds \`${String(mutation.rebuilds)}\`, which is not its own duty`,
+      );
+    }
+  });
+
+  it("only claims a rebuild where one actually happens", () => {
+    // The mirror: a `rebuilds` on a row that mutates a unit seam would stash
+    // and restore a bundle nothing rebuilt — harmless, but it would mean the
+    // field had stopped describing anything, which is how a field drifts into
+    // decoration.
+    for (const mutation of MUTATIONS) {
+      if (mutation.rebuilds === undefined) continue;
+      ok(
+        /\/main\.ts$/.test(mutation.file),
+        `${mutation.name} names \`rebuilds\` but does not mutate an entry point`,
+      );
+    }
+  });
+
   it("never repeats a name", () => {
     // Names are the addressing scheme twice over: `--only` matches a substring
     // of one, and the scratch file each row stashes its original under is
