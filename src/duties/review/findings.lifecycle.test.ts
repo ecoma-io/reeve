@@ -248,14 +248,15 @@ describe("a maintainer's word outlives every status move", () => {
     }
     const kept = memory.findings.find((entry) => entry.path === "src/kept.ts");
     expect(kept?.disposition).toEqual(DISPOSITION);
-    // The machine tail is bounded: at most the eight carried from the previous
-    // payload plus whatever this run itself resolved (one here), however many
-    // runs churned before it. Twelve resolutions did not become twelve rows.
+    // The machine tail is bounded at EXACTLY the eight carried from the
+    // previous payload plus the one this run itself resolved, however many
+    // runs churned before it. Asserted as the exact number rather than as a
+    // ceiling: a cap that drifted to ten would satisfy any `<= 12` and the
+    // test would have nothing to say about it.
     const machineTail = memory.findings.filter(
       (entry) => entry.wasResolved && entry.disposition === null,
     );
-    expect(machineTail.length).toBeLessThanOrEqual(9);
-    expect(machineTail.length).toBeLessThan(12);
+    expect(machineTail).toHaveLength(9);
   });
 
   it("no_status_move_ever_invents_a_disposition_that_was_not_there", () => {
