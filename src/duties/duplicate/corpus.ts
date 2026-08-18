@@ -1,17 +1,24 @@
 /**
  * The corpus a duplicate check ranks a thread against.
  *
- * Deliberately not `listOpenThreads` from `core/forge.ts`. That function stops
- * at a fixed `SWEEP_PAGES` ceiling because a sweep's own `limit` already bounds
- * how much work one run does — ten pages is generous for a budget spent a
- * handful of threads at a time, and the ceiling exists only to keep a
- * misconfigured `since` from crawling a repository's whole history. This
- * duty's corpus is a different kind of bound: `corpus-limit` and `corpus-since`
- * are the whole of what an operator asked the index to contain, not a work
- * budget layered on top of an index that already exists. A fixed page count
- * here would silently shrink the corpus a maintainer configured rather than
- * protect anything, so this module pages until its own two bounds are
- * satisfied or GitHub's own listing runs out — never a fixed page count.
+ * Deliberately not `listOpenThreads` from `core/forge.ts` — a sweep calls both
+ * in the same run, and they are not the same listing. `listOpenThreads` hands
+ * back a work list: raw bodies, every label, and an `isPullRequest` flag for
+ * the caller to decide about thread by thread. This hands back a ranking
+ * index, already shaped for BM25 — pull requests dropped outright rather than
+ * flagged, the thread being checked excluded, any Reeve-published block cut
+ * off by `authorText` so a rank measures what an author wrote, each body
+ * bounded by `maxBodyChars`.
+ *
+ * Their bounds differ in kind too. A sweep's `limit` is a work budget: it caps
+ * how many of the threads a listing returned one run then processes, leaving
+ * the listing itself to run to `since` or the end of the backlog.
+ * `corpus-limit` and `corpus-since` are the whole of what an operator asked
+ * the index to *contain*, not a work budget layered on top of an index that
+ * already exists — so `limit` here stops the paging itself the moment the
+ * corpus holds that many, and otherwise this module pages until `since` is
+ * satisfied or GitHub's own listing runs out. Anything stricter would silently
+ * shrink the corpus a maintainer configured rather than protect anything.
  */
 import { detectLanguage } from "../../core/detect.js";
 import type { Location, TrackerApi } from "../../core/forge.js";

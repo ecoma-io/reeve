@@ -13,13 +13,25 @@ export default defineConfig({
       // built bundles instead, which is what a runner does.
       //
       // `src/doctor/run.ts` does not call itself at import — see its own doc
-      // comment — but it belongs on this list for the same underlying reason:
-      // it calls `core.setOutput`/`core.setFailed` for real, which mutates
-      // this worker's own `process.exitCode` and writes workflow commands to
-      // stdout rather than returning a value a unit test can assert on. Every
-      // duty's own settings-reading code has the identical shape and is left
-      // to its bundle's integration test for the same reason — see
-      // `core/inputs.test.ts`'s doc comment for the one exception this
+      // comment — and it is no longer untestable either: `doctor/run.test.ts`
+      // mocks `setOutput`/`setFailed` and drives `runDoctor`/`providerConfig`
+      // directly. The exclusion is inherited from before that test existed,
+      // and it stays only because taking it off is a measurement rather than a
+      // tidy-up: an exclusion is a denominator, and moving one at the close of
+      // a hardening round means re-verifying every figure that round reported.
+      // The direction was measured rather than reasoned, because reasoning got
+      // it wrong: the file's own row reads 83.33% branches (15 of 18), which
+      // looks like it would drag the suite number down, and it does not —
+      // folding it back in moves the suite to 96.54 / 91.07 / 98.48 / 97.60
+      // from 96.50 / 91.05 / 98.48 / 97.60, so three numbers rise and the
+      // fourth is unchanged to two places. The exclusion is currently costing
+      // about 0.03 points of honest bookkeeping, not hiding anything. Removing
+      // it is a change of its own, on its own evidence.
+      //
+      // Every duty's own settings reader — the `readSettings` that calls
+      // `core.getInput` — lives in its `main.ts`, so it is already on this
+      // list by the rule above and is left to its bundle's integration test —
+      // see `core/inputs.test.ts`'s doc comment for the one exception this
       // repository makes (`readShared`, driven through real environment
       // variables) and why `setFailed`/`setOutput` are not it.
       exclude: ["src/main.ts", "src/duties/*/main.ts", "src/doctor/run.ts"],

@@ -146,9 +146,13 @@ export interface Reply {
  * A thread's replies are unbounded — a year-old issue can carry four hundred —
  * and every one of them is a body a duty would read, fingerprint, and possibly
  * spend a request on. `REPLY_PAGES` is the ceiling on how many pages of the
- * thread one run will ever fetch; a thread past `REPLY_PAGE * REPLY_PAGES`
- * comments (mirrors `SWEEP_PAGES`'s reasoning) is the pathological case this
- * reports honestly (`more: true`) rather than serves completely.
+ * thread one run will ever fetch, and nothing else here would bound that walk:
+ * `max` says how many replies a caller keeps, not how deep the walk has to go
+ * to find them — a `"newest"` read has to reach the end of the thread whatever
+ * `max` is — and a comment stream carries no operator-supplied date or budget
+ * the way `since` and `limit` bound a sweep's listing. A thread past
+ * `REPLY_PAGE * REPLY_PAGES` comments is the pathological case this reports
+ * honestly (`more: true`) rather than serves completely.
  *
  * A run that hits either ceiling says so rather than trimming quietly, so the
  * consumer sees a number to raise instead of a silence to misread.

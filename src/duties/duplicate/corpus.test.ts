@@ -101,10 +101,12 @@ describe("listCorpus", () => {
     expect(corpus.map((entry) => entry.number)).toEqual([1, 2]);
   });
 
-  it("pages past ten pages when unbounded — the sweep's fixed ceiling does not apply here", async () => {
-    // 1200 entries is twelve pages of 100, past `SWEEP_PAGES`'s cap of ten in
-    // `core/forge.ts`. A corpus lister that copied that cap would silently
-    // drop the last two hundred threads of a configured, unbounded corpus.
+  it("reads every page GitHub serves when neither `limit` nor `since` bounds the corpus", async () => {
+    // 1200 entries is twelve pages of 100. `limit` and `since` are both null
+    // here, so nothing but GitHub's own listing running out should stop the
+    // walk; a lister that stopped at a fixed page count instead would silently
+    // drop the last two hundred threads of a corpus a maintainer configured as
+    // unbounded on purpose.
     const api = stubOf(page(1200));
 
     const corpus = await listCorpus(api, AT, 999_999, null, null);
