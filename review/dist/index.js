@@ -35418,7 +35418,12 @@ function decodeEnvelope(payload) {
     return { kind: "corrupt", reason: "the envelope is not a JSON mapping" };
   }
   const map = parsed;
-  if (map.version === void 0) return { kind: "none" };
+  if (map.version === void 0) {
+    return {
+      kind: "corrupt",
+      reason: "it declares no schema version, so there is no digest to verify it against and it was not trusted"
+    };
+  }
   return validateV2(map);
 }
 function isFindable(entry) {
