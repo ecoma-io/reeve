@@ -1108,3 +1108,146 @@ describe("recordCorrection with stateBranch", () => {
     expect(writes[0]?.branch).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// A6 — which roster the pivot rendering is bought from.
+//
+// `computePivot` picks `screenModels` when one is configured and falls back to
+// `models` when it is not (`record.ts:177-178`) — the same rule `core/recall.ts:198`
+// and `triage/main.ts:911` each write out by hand. Only recall's copy was
+// pinned: every case above hands `settingsOf` an empty `screenModels`, so this
+// copy's first arm could not be taken and a change that spent the expensive
+// roster on the cheap job would have gone out green.
+//
+// Both arms are asserted by the models the pivot provider was actually asked,
+// never by reading the settings back.
+// ---------------------------------------------------------------------------
+
+/** A pivot provider that records which models it was asked, in order. */
+function recordingPivotProvider(rendered: { readonly title: string; readonly body: string }): {
+  provider: Provider;
+  asked: string[];
+} {
+  const asked: string[] = [];
+  return {
+    asked,
+    provider: {
+      complete: (model: string) => {
+        asked.push(model);
+        return Promise.resolve({
+          ok: true as const,
+          model,
+          content: JSON.stringify(rendered),
+          finishReason: null,
+        });
+      },
+    },
+  };
+}
+
+/** The two languages a pivot needs: the thread's own, and one to pivot into. */
+const PIVOT_LANGUAGES: readonly Language[] = [
+  { code: "en", label: "English", scripts: ["Latin"] },
+  { code: "zh", label: "Chinese", scripts: ["Han"] },
+];
+
+/** Everything a pivot-rendering case needs, minus the roster it is asking about. */
+async function recordWithPivot(
+  rosters: Pick<Settings, "models" | "screenModels">,
+): Promise<string[]> {
+  const { api } = apiOf();
+  const { provider, asked } = recordingPivotProvider({
+    title: "深色模式设置在会话之间丢失",
+    body: "每次关闭应用时都会重置。",
+  });
+
+  await recordCorrection(
+    api,
+    AT,
+    standingOf({
+      title: "Dark mode setting is lost between sessions",
+      body: "It resets every time I close the app, which is annoying for daily use.",
+      labels: ["bug"],
+    }),
+    {
+      warrant: { ...warrantOf(), pivot: "zh" },
+      implicit: false,
+      excludedLabels: [],
+    },
+    settingsOf({ languages: PIVOT_LANGUAGES, ...rosters }),
+    { ...stagesOf(), pivot: provider },
+    createWeather(),
+    "maintainer",
+    null,
+  );
+
+  return asked;
+}
+
+describe("the roster the pivot rendering is bought from", () => {
+  it("pays_the_cheap_screen_roster_when_one_is_configured", async () => {
+    // The pivot is a cheap job — a title and a body rendered into one other
+    // language for the corrections store. A repository that configured
+    // `screen-models` did so to keep exactly this kind of work off the
+    // expensive roster.
+    const asked = await recordWithPivot({ models: ["expensive"], screenModels: ["cheap"] });
+
+    expect(asked).toEqual(["cheap"]);
+    expect(asked).not.toContain("expensive");
+  });
+
+  it("falls_back_to_the_main_roster_when_no_cheap_roster_is_configured", async () => {
+    // The documented default rather than a degraded mode: an unset
+    // `screen-models` means "use the one roster there is", not "skip the
+    // pivot".
+    const asked = await recordWithPivot({ models: ["expensive"], screenModels: [] });
+
+    expect(asked).toEqual(["expensive"]);
+  });
+
+  it("rotates_the_cheap_roster_rather_than_locking_onto_its_first_entry", async () => {
+    const { api } = apiOf();
+    const asked: string[] = [];
+    const provider: Provider = {
+      complete: (model: string) => {
+        asked.push(model);
+        return Promise.resolve(
+          model === "cheap-b"
+            ? {
+                ok: true as const,
+                model,
+                content: JSON.stringify({ title: "深色模式", body: "会重置。" }),
+                finishReason: null,
+              }
+            : { ok: false as const, model, reason: "HTTP 500", kind: "capacity" as const },
+        );
+      },
+    };
+
+    await recordCorrection(
+      api,
+      AT,
+      standingOf({
+        title: "Dark mode setting is lost between sessions",
+        body: "It resets every time I close the app, which is annoying for daily use.",
+        labels: ["bug"],
+      }),
+      { warrant: { ...warrantOf(), pivot: "zh" }, implicit: false, excludedLabels: [] },
+      settingsOf({
+        languages: PIVOT_LANGUAGES,
+        models: ["expensive"],
+        screenModels: ["cheap-a", "cheap-b"],
+      }),
+      { ...stagesOf(), pivot: provider },
+      createWeather(),
+      "maintainer",
+      null,
+    );
+
+    // The whole cheap roster in order, and the expensive one still untouched:
+    // a cheap model being out of room is not a reason to reach for the
+    // expensive list.
+    expect(asked).toEqual(["cheap-a", "cheap-b"]);
+    expect(asked).not.toContain("expensive");
+  });
+});

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Provider } from "./provider.js";
+import {
+  AuthenticationFailure,
+  createWeather,
+  type Completion,
+  type Provider,
+} from "./provider.js";
 import { createLanguagePicker, detectLanguage } from "./detect.js";
 import type { LanguagePicker } from "./detect.js";
 import type { Language } from "./languages.js";
@@ -106,5 +111,98 @@ describe("createLanguagePicker contract", () => {
 
     expect(detection.language).toBeNull();
     expect(detection.by).toBe("none");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D12's run-wide memory, at this consumption site.
+//
+// `createLanguagePicker` takes a `Weather` and hands it to `rotateModels`.
+// Nothing pinned that it actually does — and a picker that drops it is silent:
+// the run still detects a language, it just pays a second time for a model an
+// earlier stage already found to be out of capacity, on every thread of a
+// sweep. These cases assert the argument by its consequence, never by
+// inspecting the call.
+// ---------------------------------------------------------------------------
+
+describe("createLanguagePicker under D12 weather", () => {
+  /** A provider that records which models it was asked, in order. */
+  function recording(answers: Record<string, string>): { provider: Provider; asked: string[] } {
+    const asked: string[] = [];
+    return {
+      asked,
+      provider: {
+        complete: vi.fn((model: string) => {
+          asked.push(model);
+          const answer = answers[model];
+          return Promise.resolve<Completion>(
+            answer === undefined
+              ? { ok: false, model, reason: "no answer", kind: "protocol" }
+              : { ok: true, model, content: answer, finishReason: "stop" },
+          );
+        }),
+      },
+    };
+  }
+
+  it("never_asks_a_model_an_earlier_stage_already_grounded_for_capacity", async () => {
+    const weather = createWeather();
+    weather.ground("busy");
+    const { provider, asked } = recording({ live: "qab" });
+
+    const picked = await createLanguagePicker(
+      provider,
+      ["busy", "live"],
+      weather,
+    )("some text", UNPROFILED);
+
+    // `busy` costs nothing and stops nothing: the roster carries on to `live`.
+    expect(asked).toEqual(["live"]);
+    expect(picked).toBe("qab");
+  });
+
+  it("grounds_a_capacity_failed_model_so_the_next_thread_skips_it", async () => {
+    const weather = createWeather();
+    const asked: string[] = [];
+    const provider: Provider = {
+      complete: vi.fn((model: string) => {
+        asked.push(model);
+        return Promise.resolve<Completion>(
+          model === "busy"
+            ? { ok: false, model, reason: "HTTP 429", kind: "capacity" }
+            : { ok: true, model, content: "qab", finishReason: "stop" },
+        );
+      }),
+    };
+    const pick = createLanguagePicker(provider, ["busy", "live"], weather);
+
+    await pick("first thread", UNPROFILED);
+    expect(asked).toEqual(["busy", "live"]);
+
+    // Second thread of the same sweep: `busy` is weather this run already
+    // knows about, and asking again would spend the request that mattered.
+    await pick("second thread", UNPROFILED);
+    expect(asked).toEqual(["busy", "live", "live"]);
+    expect(weather.grounded("busy")).toBe(true);
+  });
+
+  it("fails_the_run_red_when_the_language_model_reports_an_auth_failure", async () => {
+    // Detection is a cheap stage, but a refused key is still a refused key:
+    // it must not be swallowed into "detection reached no answer".
+    const provider: Provider = {
+      complete: vi.fn((model: string) =>
+        Promise.resolve<Completion>({
+          ok: false,
+          model,
+          reason: "HTTP 401: invalid api key",
+          kind: "auth",
+        }),
+      ),
+    };
+
+    await expect(
+      createLanguagePicker(provider, ["a", "b"], createWeather())("text", UNPROFILED),
+    ).rejects.toThrow(AuthenticationFailure);
+    expect(provider.complete).toHaveBeenCalledTimes(1);
   });
 });
