@@ -872,3 +872,287 @@ describe("isCapacityError — header shapes that must not decide a run's colour"
     expect(isCapacityError(error)).toBe(false);
   });
 });
+
+/**
+ * Totality at the OUTERMOST boundary, not one layer in.
+ *
+ * The block above hardened the header lookup; three reviewers in a row then
+ * found the same class one function further out. `isCapacityError` itself
+ * reads `.status`, `.code`, `.name` and `.message`, and does an `instanceof`
+ * and a `String()` — every one of those runs arbitrary user code when the
+ * input is a `Proxy` or carries an accessor. It is called from inside twelve
+ * `catch` blocks, so a throw does not merely misclassify: it REPLACES the
+ * failure being classified and the real fault is lost.
+ *
+ * So the contract this block pins is the strongest one available and the
+ * only one that ends the recursion: **no input, of any shape, makes
+ * `isCapacityError` throw.** It always answers `true` or `false`.
+ */
+describe("isCapacityError — total for every input shape", () => {
+  /** Every way an input can run code during classification, one entry each. */
+  const HOSTILE: readonly (readonly [string, () => unknown])[] = [
+    [
+      "a proxy whose `has` trap throws",
+      () =>
+        new Proxy(
+          {},
+          {
+            has: () => {
+              throw new Error("has");
+            },
+          },
+        ),
+    ],
+    [
+      "a proxy whose `get` trap throws",
+      () =>
+        new Proxy(
+          {},
+          {
+            get: () => {
+              throw new Error("get");
+            },
+          },
+        ),
+    ],
+    [
+      "a proxy whose `getPrototypeOf` trap throws",
+      () =>
+        new Proxy(
+          {},
+          {
+            getPrototypeOf: () => {
+              throw new Error("getPrototypeOf");
+            },
+          },
+        ),
+    ],
+    [
+      "a proxy whose `ownKeys` trap throws",
+      () =>
+        new Proxy(
+          { status: 403, response: { status: 403, headers: {} } },
+          {
+            ownKeys: () => {
+              throw new Error("ownKeys");
+            },
+          },
+        ),
+    ],
+    [
+      "an object whose `status` getter throws",
+      () => {
+        const shape = {};
+        Object.defineProperty(shape, "status", {
+          enumerable: true,
+          get: () => {
+            throw new Error("status");
+          },
+        });
+        return shape;
+      },
+    ],
+    [
+      "an object whose `code` getter throws",
+      () => {
+        const shape = {};
+        Object.defineProperty(shape, "code", {
+          enumerable: true,
+          get: () => {
+            throw new Error("code");
+          },
+        });
+        return shape;
+      },
+    ],
+    [
+      "an Error whose `name` getter throws",
+      () => {
+        const error = new Error("boom");
+        Object.defineProperty(error, "name", {
+          get: () => {
+            throw new Error("name");
+          },
+        });
+        return error;
+      },
+    ],
+    [
+      "an Error whose `message` getter throws",
+      () => {
+        const error = new Error("boom");
+        Object.defineProperty(error, "message", {
+          get: () => {
+            throw new Error("message");
+          },
+        });
+        return error;
+      },
+    ],
+    ["a null-prototype object, which cannot be stringified", () => Object.create(null) as unknown],
+    [
+      "an object whose `toString` throws",
+      () => ({
+        toString: () => {
+          throw new Error("toString");
+        },
+      }),
+    ],
+    [
+      "an object whose `Symbol.toPrimitive` throws",
+      () => ({
+        [Symbol.toPrimitive]: () => {
+          throw new Error("toPrimitive");
+        },
+      }),
+    ],
+    [
+      "a null-prototype object whose `valueOf` throws",
+      () =>
+        Object.assign(Object.create(null) as object, {
+          valueOf: () => {
+            throw new Error("valueOf");
+          },
+        }),
+    ],
+  ];
+
+  for (const [what, build] of HOSTILE) {
+    it(`answers rather than throws for ${what}`, () => {
+      expect(() => isCapacityError(build())).not.toThrow();
+      expect(typeof isCapacityError(build())).toBe("boolean");
+    });
+  }
+
+  it("a_hostile_status_getter_does_not_blind_the_rest_of_the_classification", () => {
+    // Totality is not bought by abandoning the input at the first hostile
+    // read. A socket reset whose `.status` accessor throws is still a socket
+    // reset, and the `.code` beside it still answers.
+    const error = Object.assign(new Error("connect"), { code: "ECONNRESET" });
+    Object.defineProperty(error, "status", {
+      enumerable: true,
+      get: () => {
+        throw new Error("hostile status");
+      },
+    });
+    expect(isCapacityError(error)).toBe(true);
+  });
+
+  it("a_hostile_message_getter_does_not_blind_an_answerable_status", () => {
+    const error = Object.assign(new Error("boom"), { status: 503 });
+    Object.defineProperty(error, "message", {
+      get: () => {
+        throw new Error("hostile message");
+      },
+    });
+    expect(isCapacityError(error)).toBe(true);
+  });
+});
+
+describe("isCapacityError — laundering paths that bypass the 403 narrowing", () => {
+  /**
+   * Runs `probe` with `Object.prototype[key]` set, and answers what it
+   * returned — restoring the prototype first, always.
+   *
+   * The result is returned rather than asserted inside the window on
+   * purpose. Polluting `Object.prototype.get` breaks `Object.defineProperty`
+   * process-wide (a descriptor is a plain object, so `descriptor.get` starts
+   * resolving to the polluted function), which is enough to take the test
+   * runner itself down mid-assertion. Nothing but the classifier runs while
+   * the prototype is dirty.
+   */
+  function whilePolluted<T>(key: PropertyKey, value: unknown, probe: () => T): T {
+    Object.defineProperty(Object.prototype, key, {
+      value,
+      configurable: true,
+      writable: true,
+      enumerable: false,
+    });
+    try {
+      return probe();
+    } finally {
+      Reflect.deleteProperty(Object.prototype, key);
+    }
+  }
+
+  it("a_polluted_object_prototype_get_cannot_mint_a_rate_limit", () => {
+    // The `Headers`-like strategy probes `.get` through the prototype chain,
+    // because a real `Headers` carries `get` on `Headers.prototype` and not
+    // as an own key. That reach is exactly what a polluted `Object.prototype`
+    // exploits: every plain header record suddenly answers "60", and every
+    // 403 in the process turns green.
+    const answer = whilePolluted(
+      "get",
+      (name: string) => (name === "retry-after" ? "60" : null),
+      () => isCapacityError({ status: 403, response: { status: 403, headers: {} } }),
+    );
+    expect(answer).toBe(false);
+  });
+
+  it("a_polluted_object_prototype_iterator_cannot_mint_a_rate_limit", () => {
+    const answer = whilePolluted(
+      Symbol.iterator,
+      function* (): Generator<readonly [string, string]> {
+        yield ["retry-after", "60"];
+      },
+      () => isCapacityError({ status: 403, response: { status: 403, headers: {} } }),
+    );
+    expect(answer).toBe(false);
+  });
+
+  it("a_genuine_headers_instance_still_answers_while_the_prototype_is_polluted", () => {
+    // The closure must exclude `Object.prototype`'s own copy, not the reach
+    // itself — a real `Headers` has to keep working.
+    const real = new Headers({ "retry-after": "60" });
+    const plain = { status: 403, response: { status: 403, headers: {} } };
+    const answers = whilePolluted(
+      "get",
+      () => "60",
+      () => [
+        isCapacityError({ status: 403, response: { status: 403, headers: real } }),
+        isCapacityError(plain),
+      ],
+    );
+    expect(answers).toEqual([true, false]);
+  });
+
+  it("a_401_whose_message_says_timed_out_is_still_credentials", () => {
+    // The message fallback reads TEXT. Text is not evidence about the cause
+    // when the status already is one: this is the same laundering the header
+    // narrowing refuses, arriving by the other door.
+    expect(isCapacityError(Object.assign(new Error("request timed out"), { status: 401 }))).toBe(
+      false,
+    );
+  });
+
+  it("a_403_whose_message_says_timed_out_is_still_a_permission_error", () => {
+    expect(isCapacityError(Object.assign(new Error("request timed out"), { status: 403 }))).toBe(
+      false,
+    );
+  });
+
+  it("an_auth_status_named_TimeoutError_is_still_not_capacity", () => {
+    const error = Object.assign(new Error("Bad credentials"), { status: 403 });
+    error.name = "TimeoutError";
+    expect(isCapacityError(error)).toBe(false);
+  });
+
+  it("a_statusless_or_non_auth_timeout_is_unaffected_by_that_gate", () => {
+    // The gate is 401/403 only. Nothing else about the message fallback moves.
+    expect(isCapacityError(new Error("request timed out"))).toBe(true);
+    expect(isCapacityError(Object.assign(new Error("request timed out"), { status: 404 }))).toBe(
+      true,
+    );
+    expect(isCapacityError("timed out")).toBe(true);
+  });
+
+  it("a_rate_limit_403_is_still_capacity_through_the_header_path", () => {
+    // The gate must not undo the fix it sits beside.
+    expect(
+      isCapacityError({
+        status: 403,
+        response: { status: 403, headers: { "retry-after": "60" } },
+      }),
+    ).toBe(true);
+  });
+});

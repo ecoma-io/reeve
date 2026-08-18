@@ -865,6 +865,68 @@ export function isMissing(error: unknown): boolean {
 }
 
 /**
+ * One property read that answers `undefined` rather than throwing.
+ *
+ * The property is read directly instead of being probed with `in` first:
+ * `in` fires a `Proxy`'s `has` trap, which is one more place an input gets
+ * to run code, and the answer is identical either way — a property that is
+ * not there reads as `undefined`, and `undefined` matches none of the values
+ * any caller here compares against.
+ */
+function readProperty(target: unknown, key: string): unknown {
+  if (typeof target !== "object" || target === null) return undefined;
+  try {
+    return (target as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/** `error instanceof Error`, without trusting a `getPrototypeOf` trap not to throw. */
+function isErrorLike(error: unknown): boolean {
+  try {
+    return error instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The error's text, lowercased, or `""` when it has none this code can read.
+ *
+ * `String(value)` runs `Symbol.toPrimitive`, `toString` and `valueOf`, any of
+ * which an input may define to throw — and a null-prototype object has none
+ * of them at all, so `String(Object.create(null))` throws on its own without
+ * anybody being hostile. Nothing readable means nothing said, which is `""`.
+ */
+function messageOf(error: unknown): string {
+  try {
+    if (isErrorLike(error)) {
+      const message = readProperty(error, "message");
+      return typeof message === "string" ? message.toLowerCase() : "";
+    }
+    return String(error).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Whatever `Object.prototype` currently carries under `key`, or `undefined`.
+ *
+ * Read fresh on every call rather than captured at module load: pollution
+ * that happens after this module is imported is the case that matters, and a
+ * captured `undefined` would compare unequal to it and let it through.
+ */
+function polluted(key: PropertyKey): unknown {
+  try {
+    return (Object.prototype as unknown as Record<PropertyKey, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * HTTP delta-seconds: digits, optionally fractional. Deliberately NOT
  * `Number(...)` — that reads `"0x0"` as 0, `"1e3"` as 1000 and `""` as 0,
  * and every one of those would be a junk header buying a green run.
@@ -898,13 +960,24 @@ const DELTA_SECONDS = /^\d+(?:\.\d+)?$/;
  * reachable only through a polluted prototype all answer nothing instead.
  * The guard is per strategy and per key, so one hostile header does not
  * blind the lookup to the header beside it that answers the question.
+ *
+ * **`Object.prototype` pollution is excluded, not merely unreached.** The
+ * first two strategies have to look up the prototype chain — a real WHATWG
+ * `Headers` carries `get` on `Headers.prototype`, not as an own key — so
+ * writing `Object.prototype.get` or `Object.prototype[Symbol.iterator]`
+ * would otherwise make every plain header record answer whatever the
+ * attacker chose, and turn every 403 in the process green. Each probe
+ * therefore rejects the function it finds when that function is
+ * `Object.prototype`'s own, which leaves a genuine `Headers` working and
+ * costs one identity comparison. The third strategy reads own keys only and
+ * never had the reach.
  */
 function headerValue(headers: unknown, name: string): unknown {
   if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return undefined;
 
   try {
     const get = (headers as { get?: unknown }).get;
-    if (typeof get === "function") {
+    if (typeof get === "function" && get !== polluted("get")) {
       const direct: unknown = (get as (key: string) => unknown).call(headers, name);
       if (direct !== undefined && direct !== null) return direct;
     }
@@ -913,7 +986,8 @@ function headerValue(headers: unknown, name: string): unknown {
   }
 
   try {
-    if (typeof (headers as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function") {
+    const iterate = (headers as { [Symbol.iterator]?: unknown })[Symbol.iterator];
+    if (typeof iterate === "function" && iterate !== polluted(Symbol.iterator)) {
       for (const entry of headers as Iterable<unknown>) {
         if (!Array.isArray(entry)) continue;
         const [key, value] = entry as readonly unknown[];
@@ -964,18 +1038,14 @@ function headerValue(headers: unknown, name: string): unknown {
  * quota is a spent quota) and is pinned as such rather than left to chance.
  *
  * **This function never throws, for any input** — same reason as
- * `headerValue`, and covering the `.response` and `.headers` reads that
- * happen before the lookup, either of which may be a hostile getter.
+ * `headerValue`. The `.response` and `.headers` reads that happen before the
+ * lookup go through `readProperty`, so a hostile accessor on either answers
+ * nothing rather than escaping into the `catch` block that called this.
  */
-function saysRateLimited(error: object): boolean {
-  let headers: unknown;
-  try {
-    const response = (error as { response?: unknown }).response;
-    if (typeof response !== "object" || response === null) return false;
-    headers = (response as { headers?: unknown }).headers;
-  } catch {
-    return false;
-  }
+function saysRateLimited(error: unknown): boolean {
+  const response = readProperty(error, "response");
+  if (typeof response !== "object" || response === null) return false;
+  const headers = readProperty(response, "headers");
 
   const retryAfter = headerValue(headers, "retry-after");
   if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0) return true;
@@ -1020,20 +1090,46 @@ function saysRateLimited(error: object): boolean {
  * exactly rather than coerced, so an empty or absent header cannot pass for
  * exhaustion. 401 is excluded outright: a bad token is a bad token whatever
  * headers ride along with it.
+ *
+ * **This function never throws, for any input.** It is called from inside a
+ * `catch` block at every one of its twelve call sites, so a throw here would
+ * not merely misclassify: it would REPLACE the failure being classified and
+ * lose the real fault. Every read it makes — `.status`, `.code`, `.name`,
+ * `.message`, the `instanceof`, the `String()` — can run arbitrary code when
+ * the input is a `Proxy` or carries an accessor, and `String()` throws on a
+ * null-prototype object without anybody being hostile at all. Each read is
+ * therefore guarded on its own rather than the whole body being wrapped, so
+ * one hostile property does not blind the classification to the answerable
+ * property beside it: an `ECONNRESET` whose `.status` accessor throws is
+ * still capacity.
+ *
+ * **The text branches are gated on the status.** A 401/403 whose message
+ * happens to contain "timed out", or whose `name` is "TimeoutError", is
+ * still credentials or permissions — the status is direct evidence about the
+ * cause and a message substring is not, so text may not overrule it. That is
+ * the same laundering the 403 narrowing above refuses, arriving by the other
+ * door. The gate is 401/403 only: a 404 or a statusless timeout is unchanged,
+ * and `.code` is deliberately left ungated, because a Node system error is a
+ * transport-level fact rather than a phrase that happens to appear in prose.
  */
 export function isCapacityError(error: unknown): boolean {
+  const status = readProperty(error, "status");
+
+  // Auth is decided by the status, and nothing softer may overrule it. Read
+  // once here because branches 3 and 4 below are gated on it.
+  const isAuthStatus = status === 401 || status === 403;
+
   // 1. HTTP status: 429 (rate limit) or 5xx (server error), plus the one 403
   //    GitHub sends for the very same rate limit it sometimes sends as 429.
-  if (typeof error === "object" && error !== null && "status" in error) {
-    const status = (error as { status?: unknown }).status;
+  if (status !== undefined) {
     if (status === 429 || (typeof status === "number" && status >= 500 && status < 600))
       return true;
     if (status === 403 && saysRateLimited(error)) return true;
   }
 
   // 2. Node.js system errors: exact `.code` match, no substring guessing.
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code?: unknown }).code;
+  {
+    const code = readProperty(error, "code");
     if (
       code === "ECONNRESET" ||
       code === "ETIMEDOUT" ||
@@ -1047,14 +1143,14 @@ export function isCapacityError(error: unknown): boolean {
   }
 
   // 3. AbortSignal.timeout fires a DOMException named "TimeoutError".
-  if (error instanceof Error && error.name === "TimeoutError") return true;
+  if (!isAuthStatus && isErrorLike(error) && readProperty(error, "name") === "TimeoutError")
+    return true;
 
   // 4. Fallback: message substring for "timed out" only — the phrase Node
   //    and Octokit actually use. "timeout" alone is too generic (matches
   //    "timeout is not a function", etc.).
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return message.includes("timed out");
+  if (isAuthStatus) return false;
+  return messageOf(error).includes("timed out");
 }
 
 /**
