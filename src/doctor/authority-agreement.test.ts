@@ -268,7 +268,12 @@ describe("doctor_fails_red_on_exactly_what_a_run_fails_red_on", () => {
   it.each(REFUSED)("%s — red in doctor, and thrown by the reader", async (_name, source) => {
     const report = await reportFor(source);
 
-    expect(problems(report)).toBeGreaterThan(0);
+    // Exactly one, not "at least one": a configuration this build refuses
+    // produces the reader's single sentence and stops. A report carrying two
+    // problems for one mistake would be a report that kept going after the
+    // authority failed to resolve.
+    expect(problems(report)).toBe(1);
+    expect(report.findings).toHaveLength(1);
     expect(report.authority).toEqual([]);
     expect(() => parseWarrant(warrantPath, source)).toThrow();
   });
@@ -333,9 +338,12 @@ describe("doctor_never_grants_anything_of_its_own", () => {
     const report = await reportFor(`${TAXONOMY}\nduties:\n  duplicate: [comment, close]\n`);
     const row = report.authority.find((entry) => entry.duty === "duplicate");
 
-    expect(row?.granted).not.toContain("close");
-    expect(row?.unused).toContain("close");
-    expect(problems(report)).toBeGreaterThan(0);
+    expect(row?.granted).toEqual(["comment"]);
+    expect(row?.unused).toEqual(["close"]);
+    // Exactly one problem: the inert grant. The taxonomy and the labels
+    // listing are both healthy in this fixture, so a second red finding would
+    // mean doctor had invented one.
+    expect(problems(report)).toBe(1);
   });
 
   it("a denied duty is a table row, never a problem — it is a decision, not a fault", async () => {

@@ -656,14 +656,33 @@ describe("input classes a workflow file produces by accident", () => {
     );
   });
 
-  it("rolls a date-shaped `since` the calendar overflows, rather than refusing it", () => {
-    // ADJUDICATE: `2026-02-30` is not a day that exists, and `Date` answers
-    // with 2 March rather than `Invalid Date`, so this input is accepted and
-    // silently means a date two days later than the one written. The bound
-    // still narrows a sweep rather than widening it — the failure direction is
-    // safe — so this is pinned as found rather than changed. Question for
-    // adjudication: should `parseSince` re-check the parsed date against the
-    // fields it was written with?
-    expect(parseSince("2026-02-30")?.toISOString()).toBe("2026-03-02T00:00:00.000Z");
+  it("refuses a date-shaped `since` the calendar overflows", () => {
+    // REGRESSION. `2026-02-30` is not a day that exists, and `Date` answers
+    // with 2 March rather than `Invalid Date` — so the input used to be
+    // accepted and silently meant a date two days later than the one written.
+    // The line above already refuses `2026-01-32` and `2026-13-01` as "not a
+    // real date"; 30 February is exactly as impossible, and a bound that
+    // quietly moves is a bound nobody can reason about. The failure direction
+    // was safe (a sweep narrowed rather than widened) — the inconsistency was
+    // the bug.
+    const written = ["2026-02-30", "2026-02-31", "2025-02-29", "2026-04-31", "2026-06-31"];
+    const messages = written.map((entry) => {
+      try {
+        parseSince(entry);
+        return `${entry}: accepted`;
+      } catch (error) {
+        return `${entry}: ${(error as Error).message}`;
+      }
+    });
+
+    expect(messages).toEqual(
+      written.map((entry) => `${entry}: since: \`${entry}\` is not a real date.`),
+    );
+  });
+
+  it("still reads a real leap day, which is the boundary the overflow check must not eat", () => {
+    expect(parseSince("2024-02-29")?.toISOString()).toBe("2024-02-29T00:00:00.000Z");
+    expect(parseSince("2026-12-31")?.toISOString()).toBe("2026-12-31T00:00:00.000Z");
+    expect(parseSince("2026-01-01")?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
 });
