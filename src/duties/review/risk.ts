@@ -29,7 +29,6 @@ import * as core from "@actions/core";
 import { readFile } from "node:fs/promises";
 import { parse, YAMLParseError } from "yaml";
 
-import { isMissing } from "../../core/forge.js";
 import { matchesGlob, isGenerated, type PrFile } from "./pr.js";
 import type { Rules } from "./rules.js";
 
@@ -317,12 +316,25 @@ export function defaultRiskProfile(): RiskProfile {
  * that asked to be priced by a profile and is not, which is loud (D5). Errors
  * that are not "missing" warn and keep going.
  */
+/**
+ * Whether a `readFile` failure means "the file is not there" — the
+ * filesystem's own `ENOENT`, the same question `warrant.ts`'s `isNotFound`
+ * asks. Deliberately not `forge.ts`'s `isMissing`, which reads an HTTP
+ * `status`: a `readFile` rejection never carries one, so asking it there
+ * answered "no" for every missing profile and warned on every run.
+ */
+function isMissingFile(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
 export async function readRiskProfile(path: string): Promise<RiskProfile> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if (isMissing(error)) return defaultRiskProfile();
+    if (isMissingFile(error)) return defaultRiskProfile();
     core.warning(`review: could not read risk profile at ${path}: ${String(error)}`);
     return defaultRiskProfile();
   }

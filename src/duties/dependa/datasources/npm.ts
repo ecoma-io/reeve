@@ -93,12 +93,20 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
  * Parse the npm registry response into a `ResolutionResult`.
  */
 function parseRegistryResponse(body: Record<string, unknown>): ResolutionResult {
-  // Extract versions map
+  // Extract versions map.
+  //
+  // `Array.isArray` beside the `typeof` check, because an array IS an object
+  // to `typeof` and this map is read with `Object.entries` — so a `versions`
+  // that arrived as `["1.0.0", "2.0.0"]` would yield releases named after the
+  // array INDICES and report them as `available`. A fabricated version number
+  // delivered confidently as an available upgrade is a wrong answer, not a
+  // degraded one; malformed upstream data has a status of its own to come
+  // back as.
   const versions = body.versions;
-  if (typeof versions !== "object" || versions === null) {
+  if (typeof versions !== "object" || versions === null || Array.isArray(versions)) {
     return {
       status: "malformed-metadata",
-      reason: "npm registry response has no `versions` field",
+      reason: "npm registry response has no usable `versions` map",
     };
   }
 

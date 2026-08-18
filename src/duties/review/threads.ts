@@ -252,12 +252,29 @@ export function planThreads(
     const key = keyOf(entry.finding);
     if (claimed.has(key)) continue;
     claimed.add(key);
-    const at = owned.find((thread) => thread.key === key);
+    // The owned thread GitHub still reports AT this finding's position — key,
+    // live line and live path all matching.
+    //
+    // A key-only match is not enough. A thread GitHub has marked outdated
+    // comes back with its `line` no longer equal to the finding's while its
+    // marker still names the position key, so a key-only match finds the
+    // outdated one, decides the line moved, and creates a fresh copy — on
+    // every run, for ever. Matching the live position means the replacement
+    // written last run is the one a rerun recognises, which is what "a rerun
+    // never stacks a second copy" (module doc) requires.
+    //
+    // No match is a create, and that one branch covers both of the cases the
+    // old key-only lookup separated: nothing owned at this key at all, and
+    // something owned whose position has drifted. Both want a thread at the
+    // position the diff proves now, and the drifted one is left for GitHub to
+    // mark outdated — the update endpoint cannot move a comment.
+    const at = owned.find(
+      (thread) =>
+        thread.key === key &&
+        thread.line === entry.finding.line &&
+        thread.path === entry.finding.path,
+    );
     if (at === undefined) {
-      creates.push({ key, finding: entry.finding });
-      continue;
-    }
-    if (at.line !== entry.finding.line || at.path !== entry.finding.path) {
       creates.push({ key, finding: entry.finding });
       continue;
     }
@@ -268,7 +285,10 @@ export function planThreads(
 }
 
 function isUnprocessable(error: unknown): boolean {
-  return (error as { status?: unknown }).status === 422;
+  // Optional-chained: a rejection value of `null`/`undefined` must reach the
+  // caller as it was, not be replaced by a TypeError raised inside this very
+  // classifier — a failure a catch block masks is a failure nobody can read.
+  return (error as { status?: unknown } | null | undefined)?.status === 422;
 }
 
 /**
@@ -287,6 +307,13 @@ export async function syncThreads(
   headSha: string,
 ): Promise<ThreadSync> {
   const { threads, uncertain } = await listOwnedThreads(api, at);
+  // An uncertain listing is one that ended at a full page having found none of
+  // this duty's own threads — the copy it is looking for may sit past the
+  // walk's bound. Writing against that listing is exactly how a duplicate is
+  // made, so nothing is written, the same posture the summary boundary already
+  // takes on the identical signal (`publish.ts`'s `classify`: no marked
+  // comment plus an uncertain search → `withheld`).
+  if (uncertain) return { created: 0, updated: 0, fallback: [], uncertain };
   const plan = planThreads(reconciled, standing, threads);
   const fallback: string[] = [];
   let created = 0;
@@ -339,6 +366,9 @@ export async function dryRunThreads(
   standing: DiffStanding,
 ): Promise<ThreadSync> {
   const { threads, uncertain } = await listOwnedThreads(api, at);
+  // The rehearsal rehearses the run that would actually happen — including the
+  // withholding above, so a dry run never promises a write the real run skips.
+  if (uncertain) return { created: 0, updated: 0, fallback: [], uncertain };
   const plan = planThreads(reconciled, standing, threads);
   return {
     created: plan.creates.length,

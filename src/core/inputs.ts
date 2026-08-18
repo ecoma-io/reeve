@@ -355,10 +355,22 @@ export function parseSince(raw: string): Date | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
 
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
   if (dateMatch) {
     const parsed = new Date(`${trimmed}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
+    // Two ways a date-shaped string is not a date, and `Date` only reports one
+    // of them. Month 13 and day 0 come back `Invalid Date`; 30 February comes
+    // back as 2 March, because the constructor rolls an overflowing field into
+    // the next unit rather than refusing it. Rolling is the worse failure of
+    // the two — the run gets a bound nobody wrote and no error to read — so the
+    // parsed date is compared back against the fields it was written with, and
+    // a date that moved is refused exactly as one that never parsed.
+    const [, year = "", month = "", day = ""] = dateMatch;
+    const rolled =
+      parsed.getUTCFullYear() !== Number(year) ||
+      parsed.getUTCMonth() + 1 !== Number(month) ||
+      parsed.getUTCDate() !== Number(day);
+    if (Number.isNaN(parsed.getTime()) || rolled) {
       throw new Error(`since: \`${raw}\` is not a real date.`);
     }
     return parsed;

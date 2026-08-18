@@ -16,7 +16,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, YAMLParseError } from "yaml";
 
-import { isMissing } from "../../core/forge.js";
 import {
   emptyArchitecture,
   type Architecture,
@@ -106,12 +105,28 @@ const PREFLIGHT_ID = "review-preflight";
  * Errors that are not "missing" warn and keep going, exactly `guidance.ts`'s
  * refusal to fail a run on a read that may be a transient workspace problem.
  */
+/**
+ * Whether a `readFile` failure means "the file is not there" rather than
+ * something worth reporting.
+ *
+ * The filesystem's own answer (`ENOENT`), the way `warrant.ts`'s `isNotFound`
+ * and `respond/guidance.ts` both ask it. Not `forge.ts`'s `isMissing`, which
+ * asks whether an HTTP response carried `status === 404` — a question no
+ * `readFile` rejection can answer, so reaching for it here made the
+ * "missing is the cold start" branch below unreachable.
+ */
+function isMissingFile(error: unknown): boolean {
+  return (
+    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
 export async function readRules(path: string): Promise<Rules> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if (isMissing(error)) return emptyRules();
+    if (isMissingFile(error)) return emptyRules();
     core.warning(`review: could not read rules file at ${path}: ${String(error)}`);
     return emptyRules();
   }
@@ -512,7 +527,7 @@ async function readPackFile(ref: PackRef, path: string): Promise<Pack> {
   try {
     raw = await readFile(path, "utf8");
   } catch (error) {
-    if (isMissing(error)) {
+    if (isMissingFile(error)) {
       throw new UnreadablePacks(
         `pack \`${ref.raw}\` is referenced by the rules file but no file is at ${path}`,
       );
@@ -606,6 +621,15 @@ export function preflight(
       });
     }
     for (const blocked of rules.blocked) {
+      // A phrase nobody wrote matches every line: `"x".includes("")` is true.
+      // Both readers fill an absent `phrase:` with "" (a mapping carrying only
+      // `severity:`, or a bare empty string), so without this an entry costing
+      // one line of a rule pack fires a finding — at whatever severity it
+      // asked for — on every line of every file in the diff. Preflight
+      // findings never pass through `verifyFindings`; they are trusted because
+      // they are deterministic, which is exactly why one that matches
+      // everything must not exist.
+      if (blocked.phrase.length === 0) continue;
       let count = 0;
       for (const [line, text] of file.lines) {
         if (count >= MAX_BLOCKED_PER_PHRASE) break;

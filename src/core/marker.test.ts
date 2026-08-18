@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { authorHalf, closeMarkerFor, fingerprint, isReeveProposalPr, markerFor } from "./marker.js";
+import {
+  authorHalf,
+  closeMarkerFor,
+  fingerprint,
+  isReeveProposalPr,
+  markerFor,
+  proposeEntryMarker,
+  readProposeEntryMarkers,
+} from "./marker.js";
 
 // Nothing is mocked: there is nothing project-internal here. The digest comes
 // from `node:crypto`, which is the platform rather than a collaborator.
@@ -237,5 +245,63 @@ describe("authorHalf", () => {
   it("keeps every byte a reader or a parser sees", () => {
     const body = "Fixes #42\n\n- [x] reproduced\n\nCo-authored-by: Ai <ai@example.com>";
     expect(authorHalf(body)).toBe(body);
+  });
+});
+
+describe("proposeEntryMarker / readProposeEntryMarkers", () => {
+  it("renders one entry marker per action and name, in the documented grammar", () => {
+    expect(proposeEntryMarker("add", "area:billing")).toBe(
+      "<!-- reeve:propose:entry add:area:billing -->",
+    );
+    expect(proposeEntryMarker("retire", "area:billing")).toBe(
+      "<!-- reeve:propose:entry retire:area:billing -->",
+    );
+  });
+
+  it("reads every entry marker a body carries, add and retire alike", () => {
+    const body = [
+      "Some prose a maintainer wrote.",
+      proposeEntryMarker("add", "area:billing"),
+      proposeEntryMarker("retire", "area:legacy"),
+      "More prose.",
+    ].join("\n");
+    expect([...readProposeEntryMarkers(body)].sort()).toEqual([
+      "add:area:billing",
+      "retire:area:legacy",
+    ]);
+  });
+
+  it("round-trips a name carrying spaces, colons and punctuation", () => {
+    // A label name may contain almost anything except a newline, which is why
+    // the marker is bounded by its own closer rather than by whitespace.
+    const name = "area:billing & invoicing (v2)";
+    const found = readProposeEntryMarkers(proposeEntryMarker("add", name));
+    expect([...found]).toEqual([`add:${name}`]);
+  });
+
+  it("reads nothing from a body with no entry markers", () => {
+    expect(readProposeEntryMarkers("").size).toBe(0);
+    expect(readProposeEntryMarkers("no markers here at all").size).toBe(0);
+  });
+
+  it("refuses an action outside add/retire — a forged verb names nothing", () => {
+    expect(readProposeEntryMarkers("<!-- reeve:propose:entry apply:area:billing -->").size).toBe(0);
+    expect(readProposeEntryMarkers("<!-- reeve:propose:entry area:billing -->").size).toBe(0);
+  });
+
+  it("refuses a marker with no closer — a truncation is not a record", () => {
+    expect(readProposeEntryMarkers("<!-- reeve:propose:entry add:area:billing").size).toBe(0);
+  });
+
+  it("never lets a marker span a newline into the next line's text", () => {
+    // The closer is matched without crossing a line break, so a body that
+    // opens a marker and never closes it cannot swallow the rest of the PR.
+    const body = "<!-- reeve:propose:entry add:area:billing\nretire:area:legacy -->";
+    expect(readProposeEntryMarkers(body).size).toBe(0);
+  });
+
+  it("de-duplicates the same entry marker written twice", () => {
+    const one = proposeEntryMarker("retire", "area:legacy");
+    expect([...readProposeEntryMarkers(`${one}\n${one}`)]).toEqual(["retire:area:legacy"]);
   });
 });

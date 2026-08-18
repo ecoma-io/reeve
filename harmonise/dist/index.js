@@ -32232,10 +32232,12 @@ function parseTemperature(raw) {
 function parseSince(raw) {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
   if (dateMatch) {
     const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
+    const [, year = "", month = "", day = ""] = dateMatch;
+    const rolled = parsed.getUTCFullYear() !== Number(year) || parsed.getUTCMonth() + 1 !== Number(month) || parsed.getUTCDate() !== Number(day);
+    if (Number.isNaN(parsed.getTime()) || rolled) {
       throw new Error(`since: \`${raw}\` is not a real date.`);
     }
     return parsed;
@@ -34991,6 +34993,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
     );
     return null;
   }
+  let written = 0;
   try {
     const branch = await ensureBranch(api, at, branchName);
     if (branch === null) return null;
@@ -35019,6 +35022,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
         branch: branchName,
         ...fileSha !== void 0 ? { sha: fileSha } : {}
       });
+      written += 1;
       info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
     const { data: existing } = await api.rest.pulls.list({
@@ -35054,7 +35058,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
   } catch (error2) {
     if (isCapacityError(error2)) {
       warning(
-        `state-branch: could not publish to \`${branchName}\` \u2014 capacity error. Files were not written.`
+        `state-branch: could not publish to \`${branchName}\` \u2014 capacity error. ` + (written === 0 ? "no files were written." : `${String(written)} of ${String(files.length)} files were already written to the branch, and no pull request was opened for them \u2014 the next run completes the rest.`)
       );
       return null;
     }

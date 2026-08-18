@@ -33213,10 +33213,12 @@ function parseTemperature(raw) {
 function parseSince(raw) {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
-  const dateMatch = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
   if (dateMatch) {
     const parsed = /* @__PURE__ */ new Date(`${trimmed}T00:00:00Z`);
-    if (Number.isNaN(parsed.getTime())) {
+    const [, year = "", month = "", day = ""] = dateMatch;
+    const rolled = parsed.getUTCFullYear() !== Number(year) || parsed.getUTCMonth() + 1 !== Number(month) || parsed.getUTCDate() !== Number(day);
+    if (Number.isNaN(parsed.getTime()) || rolled) {
       throw new Error(`since: \`${raw}\` is not a real date.`);
     }
     return parsed;

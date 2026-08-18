@@ -8,6 +8,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { classify } from "../semver.js";
+
 import { createNpmManager } from "./npm.js";
 
 const manager = createNpmManager();
@@ -651,5 +653,288 @@ describe("npm applyUpdate — indentation preservation", () => {
     });
     expect(result).not.toBeNull();
     expect(result!.endsWith("\n")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lockfile resolution — the half of `parse` that turns a constraint into the
+// version actually installed.
+//
+// `parseLockfile` (npm.ts:183) dispatches on the lockfile's own shape and
+// hands off to one of two readers. The pnpm reader (`parsePnpmLockYaml`,
+// npm.ts:255) had no coverage at all, and it is the one that decides what
+// `currentVersion` a proposal is measured FROM — a wrong answer there proposes
+// an update from a version the repository is not on.
+//
+// Everything below drives the real `manager.parse`, so a case is about what a
+// maintainer's lockfile produces rather than about a private function's shape.
+// ---------------------------------------------------------------------------
+
+/** The resolved `currentVersion` for one dependency, given a lockfile. */
+function resolved(
+  lockfile: string | null,
+  dependencies: Record<string, string> = { lodash: "^4.17.21" },
+): { version: string; partial: boolean } {
+  const result = manager.parse("package.json", JSON.stringify({ dependencies }), lockfile);
+  return {
+    version: result.dependencies[0]?.currentVersion ?? "",
+    partial: result.partial,
+  };
+}
+
+describe("npm parse: package-lock.json", () => {
+  it("reads the installed version out of a v2/v3 packages map", () => {
+    const lockfile = JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        "": { name: "root" },
+        "node_modules/lodash": { version: "4.17.21" },
+      },
+    });
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("skips the root entry, whose empty key is the project itself", () => {
+    const lockfile = JSON.stringify({
+      packages: { "": { version: "1.0.0" }, "node_modules/lodash": { version: "4.17.21" } },
+    });
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("strips the node_modules prefix so the name matches the manifest's", () => {
+    const lockfile = JSON.stringify({
+      packages: { "node_modules/@types/node": { version: "20.1.0" } },
+    });
+
+    expect(resolved(lockfile, { "@types/node": "^20" }).version).toBe("20.1.0");
+  });
+
+  it("reads a v1 dependencies map, which has no node_modules prefix", () => {
+    const lockfile = JSON.stringify({
+      lockfileVersion: 1,
+      dependencies: { lodash: { version: "4.17.20" } },
+    });
+
+    expect(resolved(lockfile).version).toBe("4.17.20");
+  });
+
+  it("ignores an entry whose version is not a string", () => {
+    const lockfile = JSON.stringify({
+      packages: {
+        "node_modules/lodash": { version: 4 },
+        "node_modules/other": { version: "1.0.0" },
+      },
+    });
+
+    expect(resolved(lockfile).version).toBe("");
+  });
+
+  it("reports partial for a lockfile that is JSON but names no versions at all", () => {
+    // A lockfile the manager could not read is a fact about the read, and
+    // `partial` is how a run says so rather than reporting a confident empty.
+    expect(resolved(JSON.stringify({ lockfileVersion: 3 })).partial).toBe(true);
+  });
+
+  it("reports partial for a lockfile that is not valid JSON despite starting with a brace", () => {
+    expect(resolved("{ not json at all").partial).toBe(true);
+  });
+});
+
+describe("npm parse: pnpm-lock.yaml", () => {
+  it("reads a version out of a slash-prefixed packages entry", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21:",
+      "    resolution: {integrity: sha512-abc}",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("keeps a scoped package's own slash out of the version", () => {
+    const lockfile = ["lockfileVersion: '6.0'", "packages:", "  /@types/node@20.1.0:"].join("\n");
+
+    expect(resolved(lockfile, { "@types/node": "^20" }).version).toBe("20.1.0");
+  });
+
+  it("strips a trailing parenthetical from a version with no `@` inside it", () => {
+    const lockfile = ["lockfileVersion: '6.0'", "packages:", "  /lodash@4.17.21(patched):"].join(
+      "\n",
+    );
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  // REGRESSION — pnpm 6+ peer-resolved entries resolved to an EMPTY version.
+  //
+  // pnpm writes a package resolved against a peer as
+  // `/lodash@4.17.21(react@18.0.0):`. `parsePnpmLockYaml`'s key pattern is
+  // `/^ {2}\\/(.+)@(.+):$/` and both groups are greedy, so the split landed on
+  // the LAST `@` — inside the parenthetical. The name came out as
+  // `lodash@4.17.21(react` and the version as `18.0.0)`, and the
+  // `cleanVersion` strip on the next line could not help because the
+  // parenthesis was no longer trailing. The manifest's `lodash` then matched
+  // nothing and `currentVersion` resolved to `""`.
+  //
+  // What that cost is pinned in `semver.test.ts`: `classify("")` returns null,
+  // so `main.ts:328` logs at `core.info` and skips the candidate. Every
+  // peer-resolved dependency in a pnpm repository was dropped from dependency
+  // maintenance entirely and silently, security updates included.
+  //
+  // The fix strips the parenthetical BEFORE the split rather than after, which
+  // is what the code's own comment always said it meant to do.
+  it("resolves a pnpm peer-suffixed entry to the version before the parenthesis", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21(react@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("resolves a peer-suffixed entry carrying several peers", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21(react@18.0.0)(react-dom@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("resolves a scoped package that is also peer-resolved", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /@testing-library/react@14.0.0(react@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@testing-library/react": "^14" }).version).toBe("14.0.0");
+  });
+
+  it("reports a peer-resolved dependency as a real read rather than a partial one", () => {
+    // `partial` is how a run says "a lockfile was there and I could not read
+    // it". A peer-resolved entry is readable, and reporting otherwise made
+    // every pnpm run look degraded.
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21(react@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile).partial).toBe(false);
+  });
+
+  it("leaves a version with a legitimate `@` in its own text alone", () => {
+    // The strip must only remove a TRAILING parenthetical before the colon,
+    // never reach into the id.
+    const lockfile = ["lockfileVersion: '6.0'", "packages:", "  /lodash@4.17.21:"].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("reads a version out of an importers entry", () => {
+    const lockfile = ["lockfileVersion: '6.0'", "importers:", "  .:", "    lodash: 4.17.21"].join(
+      "\n",
+    );
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("recognises a lockfile that opens with a comment rather than a version key", () => {
+    const lockfile = ["# yarn lockfile v1", "packages:", "  /lodash@4.17.21:"].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("recognises a lockfile identified only by its specifiers block", () => {
+    const lockfile = ["importers:", "  .:", "    specifiers:", "      lodash: ^4.17.21"].join("\n");
+
+    // The specifiers block names constraints, not resolved versions, so this
+    // resolves nothing — but it is recognised as a lockfile rather than
+    // reported unreadable.
+    expect(resolved(lockfile).partial).toBe(true);
+  });
+
+  it("stops reading at the next top-level key after the packages block", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21:",
+      "settings:",
+      "  /lodash@9.9.9:",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("ignores a packages entry naming no version", () => {
+    const lockfile = ["lockfileVersion: '6.0'", "packages:", "  /lodash@:"].join("\n");
+
+    expect(resolved(lockfile).partial).toBe(true);
+  });
+
+  it("reports partial for a pnpm lockfile that resolved nothing", () => {
+    expect(resolved("lockfileVersion: '6.0'\npackages:\n").partial).toBe(true);
+  });
+
+  it("reports partial for content that is neither JSON nor a recognised lockfile", () => {
+    expect(resolved("just some prose\nand another line").partial).toBe(true);
+  });
+});
+
+describe("a peer-resolved dependency flows all the way to a classification", () => {
+  // The other end of the regression. Pinning the parse alone would leave the
+  // fix looking correct while the dependency was still dropped downstream, so
+  // this walks the same lockfile through to the decision that was being lost:
+  // `classify(currentVersion, target)`, which returned null for every
+  // peer-resolved package and skipped it at `main.ts:328`.
+  const PEER_LOCKFILE = [
+    "lockfileVersion: '6.0'",
+    "packages:",
+    "  /lodash@4.17.21(react@18.0.0):",
+  ].join("\n");
+
+  it("yields a current version a patch update can be measured from", () => {
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(version).toBe("4.17.21");
+    expect(classify(version, "4.17.22", false)).toBe("patch");
+  });
+
+  it("yields a current version a security update can be measured from", () => {
+    // The case the defect cost most: `classify` returns null before it reaches
+    // the `isSecurity` override, so a peer-resolved package with an advisory
+    // against it was skipped as silently as any other.
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(classify(version, "4.17.22", true)).toBe("security");
+  });
+
+  it("yields a current version a major update can be measured from", () => {
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(classify(version, "5.0.0", false)).toBe("major");
+  });
+
+  it("skips a candidate identical to the resolved version rather than proposing a no-op", () => {
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(classify(version, "4.17.21", false)).toBeNull();
+  });
+});
+
+describe("npm parse: without a lockfile", () => {
+  it("resolves no current version and does not report a partial read", () => {
+    // No lockfile is not a failed read: a repository may simply not commit
+    // one, and reporting `partial` would make every such run look degraded.
+    const result = resolved(null);
+
+    expect(result.version).toBe("");
+    expect(result.partial).toBe(false);
   });
 });
