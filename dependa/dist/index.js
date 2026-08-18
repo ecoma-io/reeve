@@ -36673,7 +36673,7 @@ function factsOnly(fields) {
   };
 }
 function interpretationPrompt(proposal, facts, enclosedEvidence, enclosedRule) {
-  const ruleSection = enclosedRule !== void 0 && enclosedRule.length > 0 ? [enclosedRule, ""] : [];
+  const ruleSection = enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
     `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
     "",
@@ -37130,7 +37130,7 @@ async function run() {
             },
             riskFacts.facts,
             enclosed?.block ?? "",
-            enclosed?.rule
+            enclosed?.rule ?? ""
           );
           const rotation = await rotateModels(
             settings.models,
