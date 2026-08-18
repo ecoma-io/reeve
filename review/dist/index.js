@@ -38228,12 +38228,8 @@ function planThreads(reconciled, standing, owned) {
     claimed.add(key);
     const at = owned.find(
       (thread) => thread.key === key && thread.line === entry.finding.line && thread.path === entry.finding.path
-    ) ?? owned.find((thread) => thread.key === key);
+    );
     if (at === void 0) {
-      creates.push({ key, finding: entry.finding });
-      continue;
-    }
-    if (at.line !== entry.finding.line || at.path !== entry.finding.path) {
       creates.push({ key, finding: entry.finding });
       continue;
     }
