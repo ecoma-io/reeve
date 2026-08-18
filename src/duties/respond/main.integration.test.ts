@@ -766,7 +766,9 @@ describe("the action", () => {
     // A full page of bot replies, none carrying this duty's marker and none
     // human — this duty's own marker or a human's reply could be sitting
     // just past what this run read. Top rung: refuse to draft, let alone
-    // post, on a guess that thin.
+    // post, on a guess that thin. The refusal is a green run: it is a miss
+    // that fixes itself once the whole list fits in one page, not a
+    // misconfiguration.
     stub.comments = Array.from({ length: 100 }, (_, index) => ({
       id: index,
       body: "Ran the checks.",

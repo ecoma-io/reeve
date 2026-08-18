@@ -378,12 +378,13 @@ export async function run(): Promise<void> {
           }
         } else {
           // Default-branch write path: write state directly
-          const canWriteDefault = settings.permitted.includes("edit-file");
+          const canWriteDefault =
+            settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");
 
           if (!canWriteDefault) {
             core.notice(
               "harmonise: provenance state cannot be written to the default branch " +
-                "because `edit-file` is not granted. State may become stale.",
+                "because `edit-file` and `open-pr` are not both granted. State may become stale.",
             );
           } else {
             await writeState(api, context.repo, provenancePath, state, stateSha);

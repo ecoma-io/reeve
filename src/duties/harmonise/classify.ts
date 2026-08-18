@@ -34,9 +34,6 @@ export interface ClassificationResult {
   readonly hasSemantic: boolean;
 }
 
-/** The prompt shape for classification. */
-export const CLASSIFICATION_PURPOSE = "classify" as const;
-
 /**
  * Classifies a source diff against the target locale's current state.
  *

@@ -16,8 +16,3 @@ export type {
   RenovateFinding,
   DependaFinding,
 } from "../../src/duties/dependa/conformance/types.js";
-
-export {
-  DISCREPANCY_CLASSIFICATIONS,
-  COMPARISON_LEVELS,
-} from "../../src/duties/dependa/conformance/types.js";

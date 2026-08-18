@@ -28,7 +28,11 @@
  *      editing their issue does not earn a second reply, and there is no
  *      input that farms one. A human's own reply means this duty is too
  *      late, and stays too late for — there is no input that lets it speak
- *      over a person either.
+ *      over a person either. A page GitHub truncated before either guard
+ *      could fire is answered with the same green refusal note as the two
+ *      guards above — this duty never drafts a first reply it cannot be
+ *      sure is still owed, and the next run over the thread answers it once
+ *      the whole list fits in one page.
  *   4. Screen for spam and off-topic threads the same cheap way triage does,
  *      before a single expensive request is spent — a first-reply bot that
  *      courteously answers spam is a spam amplifier, not a feature.
@@ -211,8 +215,10 @@ type Settled = Partial<
  * Whichever comes first, on the thread's own page, oldest first: this duty's
  * own marker, or a human's own reply — see `decide`'s own doc comment,
  * point 3, for why both end the run for good. A page GitHub truncated before
- * either turned up means this duty cannot rule either out, and refuses to
- * guess. `null` is the only outcome that lets `decide` continue past it.
+ * either turned up means this duty cannot rule either out, and answers with
+ * the same green refusal note the other guards use — it never drafts a first
+ * reply it cannot be sure is still owed. `null` is the only outcome that
+ * lets `decide` continue past it.
  */
 async function walkReplies(
   api: ReturnType<typeof getOctokit>,
@@ -259,20 +265,23 @@ async function walkReplies(
     });
   }
   if (more) {
-    // Neither guard fired on the page this run actually read, and there is
+    // Neither guard fired on the replies this run actually read, and there is
     // more of the thread this run never saw — this duty's own marker, or a
-    // human's reply, could be sitting past the first hundred. The top rung
-    // fails closed rather than draft a reply on an "unanswered so far" guess
-    // this thin: see D12 and this file's own doc comment on why an input
-    // cannot widen this duty's authority to speak.
+    // human's reply, could be sitting just past `max`. The top rung will not
+    // draft a first reply on an "unanswered so far" guess this thin — but,
+    // unlike an auth failure, this is a miss that fixes itself on the next
+    // run, so the refusal note is green, exactly like the two guards above:
+    // see D12 and this file's own doc comment on why an input cannot widen
+    // this duty's authority to speak.
     core.warning(
       `#${String(at.number)}: the reply list was truncated before this duty could rule out its ` +
-        "own marker or a human reply — refusing to guess.",
+        "own marker or a human reply — not answering this run.",
     );
     return settled({
       note:
         "Could not verify the thread is unanswered (reply list truncated). This duty stops rather " +
-        "than draft — let alone post — a first reply it cannot be sure is still owed.",
+        "than draft — let alone post — a first reply it cannot be sure is still owed. The next " +
+        "run over this thread can answer it as soon as the full list fits in one page.",
     });
   }
   return null;

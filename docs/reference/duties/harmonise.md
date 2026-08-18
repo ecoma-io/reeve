@@ -177,10 +177,11 @@ file to force a full re-sync.
 **`state-branch` moves provenance to a review-first path.** When set and
 both `edit-file` and `open-pr` are granted, the state file is committed to
 this branch and a draft PR is opened for maintainer review, instead of
-writing directly to the default branch. When `open-pr` is not granted, the
-state file still lands on the default branch and a notice says so — the write
-is not lost, only the PR wrapping it. Set `state-branch: ""` to write
-directly to the default branch.
+writing directly to the default branch. Provenance state is only ever
+written when both capabilities are granted — a grant of one but not the
+other stops the write on whichever path it was configured for and says so
+in a notice, so state may go stale until the pair is configured. Set
+`state-branch: ""` to write directly to the default branch.
 
 **`glossary-dir` enforces project terms.** `.reeve/glossary.yml` lists terms
 that must not be translated — proper nouns, technical jargon, brand names.
