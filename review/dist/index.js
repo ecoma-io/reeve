@@ -33169,9 +33169,6 @@ async function listRepositoryLabels(api, at) {
   }
   return labels;
 }
-function isMissing(error2) {
-  return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
-}
 
 // src/duties/dependa/model.ts
 var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
@@ -36362,12 +36359,15 @@ function defaultRiskProfile() {
     warnings: []
   };
 }
+function isMissingFile(error2) {
+  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
+}
 async function readRiskProfile(path) {
   let raw;
   try {
     raw = await readFile3(path, "utf8");
   } catch (error2) {
-    if (isMissing(error2)) return defaultRiskProfile();
+    if (isMissingFile(error2)) return defaultRiskProfile();
     warning(`review: could not read risk profile at ${path}: ${String(error2)}`);
     return defaultRiskProfile();
   }
@@ -37164,12 +37164,15 @@ var DEFAULT_RULES = [
   }
 ];
 var PREFLIGHT_ID = "review-preflight";
+function isMissingFile2(error2) {
+  return error2 instanceof Error && "code" in error2 && error2.code === "ENOENT";
+}
 async function readRules(path) {
   let raw;
   try {
     raw = await readFile5(path, "utf8");
   } catch (error2) {
-    if (isMissing(error2)) return emptyRules();
+    if (isMissingFile2(error2)) return emptyRules();
     warning(`review: could not read rules file at ${path}: ${String(error2)}`);
     return emptyRules();
   }
@@ -37467,7 +37470,7 @@ async function readPackFile(ref, path) {
   try {
     raw = await readFile5(path, "utf8");
   } catch (error2) {
-    if (isMissing(error2)) {
+    if (isMissingFile2(error2)) {
       throw new UnreadablePacks(
         `pack \`${ref.raw}\` is referenced by the rules file but no file is at ${path}`
       );
@@ -37525,6 +37528,7 @@ function preflight(snapshot, rules) {
       });
     }
     for (const blocked of rules.blocked) {
+      if (blocked.phrase.length === 0) continue;
       let count2 = 0;
       for (const [line, text2] of file.lines) {
         if (count2 >= MAX_BLOCKED_PER_PHRASE) break;
@@ -38222,7 +38226,9 @@ function planThreads(reconciled, standing, owned) {
     const key = keyOf(entry.finding);
     if (claimed.has(key)) continue;
     claimed.add(key);
-    const at = owned.find((thread) => thread.key === key);
+    const at = owned.find(
+      (thread) => thread.key === key && thread.line === entry.finding.line && thread.path === entry.finding.path
+    ) ?? owned.find((thread) => thread.key === key);
     if (at === void 0) {
       creates.push({ key, finding: entry.finding });
       continue;
@@ -38237,10 +38243,11 @@ function planThreads(reconciled, standing, owned) {
   return { creates, updates, fallback: [] };
 }
 function isUnprocessable(error2) {
-  return error2.status === 422;
+  return error2?.status === 422;
 }
 async function syncThreads(api, at, reconciled, standing, headSha) {
   const { threads, uncertain } = await listOwnedThreads(api, at);
+  if (uncertain) return { created: 0, updated: 0, fallback: [], uncertain };
   const plan = planThreads(reconciled, standing, threads);
   const fallback = [];
   let created = 0;
@@ -38286,6 +38293,7 @@ async function syncThreads(api, at, reconciled, standing, headSha) {
 }
 async function dryRunThreads(api, at, reconciled, standing) {
   const { threads, uncertain } = await listOwnedThreads(api, at);
+  if (uncertain) return { created: 0, updated: 0, fallback: [], uncertain };
   const plan = planThreads(reconciled, standing, threads);
   return {
     created: plan.creates.length,

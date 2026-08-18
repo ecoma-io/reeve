@@ -34991,6 +34991,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
     );
     return null;
   }
+  let written = 0;
   try {
     const branch = await ensureBranch(api, at, branchName);
     if (branch === null) return null;
@@ -35019,6 +35020,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
         branch: branchName,
         ...fileSha !== void 0 ? { sha: fileSha } : {}
       });
+      written += 1;
       info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
     const { data: existing } = await api.rest.pulls.list({
@@ -35054,7 +35056,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
   } catch (error2) {
     if (isCapacityError(error2)) {
       warning(
-        `state-branch: could not publish to \`${branchName}\` \u2014 capacity error. Files were not written.`
+        `state-branch: could not publish to \`${branchName}\` \u2014 capacity error. ` + (written === 0 ? "no files were written." : `${String(written)} of ${String(files.length)} files were already written to the branch, and no pull request was opened for them \u2014 the next run completes the rest.`)
       );
       return null;
     }
