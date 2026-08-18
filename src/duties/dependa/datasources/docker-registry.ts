@@ -57,7 +57,8 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
   // must NOT cause dependa to make HTTP requests to those endpoints.
   if (registry !== null && !isSafeRegistry(registry)) {
     core.warning(
-      `dependa: Docker registry \`${registry}\` appears to be a private/internal address — skipping SSRF protection.`,
+      `dependa: Docker registry \`${registry}\` appears to be a private/internal address — ` +
+        "no request was made to it.",
     );
     return {
       status: "not-found",

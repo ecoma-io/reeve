@@ -4,7 +4,18 @@
  * Mocks global `fetch` to simulate Docker Hub API responses with pagination,
  * v2 registry responses, and error conditions. No real network calls.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import * as core from "@actions/core";
+
+// Only the two reporting functions are replaced; everything else in
+// `@actions/core` stays real. A warning is the whole visible outcome of an
+// SSRF refusal, so a case has to be able to read it back.
+vi.mock("@actions/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof core>()),
+  info: vi.fn(),
+  warning: vi.fn(),
+}));
 
 import { createDockerRegistryDatasource } from "./docker-registry.js";
 
@@ -190,28 +201,104 @@ describe("docker-registry pagination", () => {
 
 // ── SSRF protection ─────────────────────────────────────────────────────
 
+/**
+ * The image name reaches this datasource out of a Dockerfile `FROM` line —
+ * repository content, which is untrusted input. A `FROM 169.254.169.254/x`
+ * that made dependa fetch that host would turn a maintenance run into a
+ * credential read against the runner's own metadata service.
+ *
+ * The guard is therefore about the REQUEST, not about the verdict. A case
+ * asserting only `status === "not-found"` passes with the guard removed —
+ * fetching 127.0.0.1 from a CI runner usually gets connection-refused, which
+ * degrades to a verdict too — and while it passes, the suite is performing
+ * the SSRF it claims to test. So every case below asserts that `fetch` was
+ * never called, and stubs it so that a regression is a failed assertion
+ * rather than whatever the host's network happens to do.
+ */
 describe("docker-registry SSRF protection", () => {
+  beforeEach(() => {
+    vi.mocked(core.warning).mockReset();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("blocks loopback addresses", async () => {
-    const result = await datasource.resolve("127.0.0.1/internal/image");
+  /** A fetch that must not be reached — calling it is the failure. */
+  function forbiddenFetch(): ReturnType<typeof vi.fn<typeof fetch>> {
+    const spy = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response(JSON.stringify({ tags: ["1.0"] }), { status: 200 })),
+    );
+    globalThis.fetch = spy;
+    return spy;
+  }
+
+  it.each([
+    ["loopback by IP", "127.0.0.1/internal/image"],
+    ["loopback by name and port", "localhost:5000/internal/image"],
+    ["the cloud metadata endpoint", "169.254.169.254/latest/image"],
+    ["an RFC 1918 10.x address", "10.0.0.1/internal/image"],
+    ["an RFC 1918 192.168.x address", "192.168.1.1/internal/image"],
+    ["an RFC 1918 172.16.x address", "172.16.0.1/internal/image"],
+  ])("makes no request at all to %s", async (_case, image) => {
+    const fetchSpy = forbiddenFetch();
+
+    const result = await datasource.resolve(image);
+
+    // The assertion that actually pins the guard: no packet left the process.
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.status).toBe("not-found");
   });
 
-  it("blocks cloud metadata endpoints", async () => {
-    const result = await datasource.resolve("169.254.169.254/latest/image");
-    expect(result.status).toBe("not-found");
+  // ADJUDICATE: `isSafeRegistry` has a `localhost` arm (docker-registry.ts:310)
+  // that a BARE `localhost/x` can never reach. `parseImageName:366` classifies
+  // the first path component as a registry only when it contains a `.` or a
+  // `:`, and Docker's own reference additionally special-cases the literal
+  // `localhost` — so `localhost/internal/image` parses as the Docker Hub
+  // namespace `localhost` and is fetched from Docker Hub. That is NOT an SSRF
+  // (no request reaches the loopback interface) and `localhost:5000/x` above
+  // IS refused, so the question is whether the bare form should join it.
+  // Pinned to the source's current behaviour, unchanged, pending a ruling.
+  it("sends a bare `localhost/x` to Docker Hub rather than to the loopback interface", async () => {
+    const fetchSpy = vi.fn<typeof fetch>(() =>
+      Promise.resolve(new Response(JSON.stringify({ results: [] }), { status: 200 })),
+    );
+    globalThis.fetch = fetchSpy;
+
+    await datasource.resolve("localhost/internal/image");
+
+    const requested = fetchSpy.mock.calls
+      .map(([url]) => (typeof url === "string" ? url : url instanceof URL ? url.href : url.url))
+      .join(" ");
+    // The load-bearing half: whatever it did, it did not talk to localhost.
+    expect(requested).not.toContain("//localhost");
+    expect(requested).not.toContain("127.0.0.1");
+    expect(requested).toContain("docker.com");
   });
 
-  it("blocks RFC 1918 private addresses", async () => {
-    const result = await datasource.resolve("10.0.0.1/internal/image");
-    expect(result.status).toBe("not-found");
+  it("says out loud that it refused, rather than reporting a plain not-found", async () => {
+    // A silent `not-found` is indistinguishable from an image that does not
+    // exist, and a maintainer whose Dockerfile is being rewritten by somebody
+    // else's pull request needs to see the refusal.
+    forbiddenFetch();
+
+    await datasource.resolve("169.254.169.254/latest/image");
+
+    const said = vi
+      .mocked(core.warning)
+      .mock.calls.map(([message]) => String(message))
+      .join("\n");
+    expect(said).toContain("169.254.169.254");
+    expect(said).toContain("private/internal address");
+    // The message used to read "skipping SSRF protection" while the code was
+    // applying it — the opposite of what happened, in the one line a reader
+    // consults to find out what happened.
+    expect(said).not.toContain("skipping");
+    expect(said).toContain("no request was made");
   });
 
-  it("allows known safe registries", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+  it("allows a known safe registry through to a real request", async () => {
+    const fetchSpy = vi.fn<typeof fetch>(() =>
       Promise.resolve(
         new Response(JSON.stringify({ tags: ["1.0"] }), {
           status: 200,
@@ -219,8 +306,25 @@ describe("docker-registry SSRF protection", () => {
         }),
       ),
     );
+    globalThis.fetch = fetchSpy;
 
     const result = await datasource.resolve("ghcr.io/owner/image");
+
+    expect(fetchSpy).toHaveBeenCalled();
     expect(result.status).toBe("available");
+  });
+
+  it("allows the default registry, which has no hostname to check at all", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ results: [{ name: "1.0" }] }), { status: 200 }),
+        ),
+      );
+
+    await datasource.resolve("nginx");
+
+    expect(fetchSpy).toHaveBeenCalled();
   });
 });
