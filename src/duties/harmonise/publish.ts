@@ -63,6 +63,8 @@ export interface PublishApi {
           readonly number: number;
           readonly body?: string | null;
           readonly head: { readonly sha: string };
+          /** Whether a closed pull request was closed BY MERGING. */
+          readonly merged?: boolean;
         }[];
       }>;
       create(params: {
@@ -141,6 +143,34 @@ export async function publishSync(
     core.info(
       `dry-run: would create/update branch \`${branchName}\` and open PR for ` +
         `${result.group.id} with ${String(result.drafts.size)} locale update(s)`,
+    );
+    return null;
+  }
+
+  // D3 — never reopen what a maintainer closed.
+  //
+  // A maintainer who closes a sync pull request without merging it has made a
+  // decision, and `docs/doctrine/north-star.md:247` is repository-wide about
+  // those: Reeve "never reopens or reassigns or closes what a maintainer
+  // decided". Without this, the branch is still there, no OPEN pull request is
+  // found, and the next run writes the locale files again and opens a new one
+  // — re-proposing exactly what was just rejected, on every scheduled run.
+  //
+  // Merged is not refused: a merged pull request is work accepted, and the
+  // next source change earns a fresh sync. The same check, for the same
+  // reason, is `dependa/publish.ts:210-224`.
+  const { data: closedPrs } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "closed",
+    head: `${at.owner}:${branchName}`,
+    per_page: 10,
+  });
+  const closedUnmerged = closedPrs.find((pr) => pr.merged !== true);
+  if (closedUnmerged !== undefined) {
+    core.info(
+      `harmonise: PR #${String(closedUnmerged.number)} for \`${branchName}\` was ` +
+        "closed without merge — D3: refusing to recreate it.",
     );
     return null;
   }

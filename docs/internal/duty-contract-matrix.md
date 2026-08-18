@@ -218,6 +218,37 @@ Each was proven RED against the unfixed source before the fix landed.
    Fixed with an `Array.isArray` guard beside the `typeof` check. Regression:
    `dependa/datasources/npm.test.ts`.
 
+## The capability gates — closed in the Phase 17 fix round
+
+Two independent auditors forced these open and the whole 4868-test suite
+stayed green. They survived because `main.ts` is excluded from coverage AND
+deliberately excluded from the mutation table (`tools/mutation.mjs:66-69`, on
+the reasoning that an entry-point mutation is "a rebuild-and-integration
+concern, not a unit seam"). That reasoning is sound for a unit table and left
+a hole exactly the size of every duty's authority gate. All four are now
+observed by bundle-driven cases:
+
+| Gate                                    | Site                            | Observed at                          |
+| --------------------------------------- | ------------------------------- | ------------------------------------ |
+| dependa publish (authority + dry-run)   | `dependa/main.ts:487-489`       | `dependa/main.integration.test.ts`   |
+| harmonise state-branch / default / sync | `harmonise/main.ts:344,382,706` | `harmonise/main.integration.test.ts` |
+| lifecycle whole-step capability         | `lifecycle/main.ts:310`         | `lifecycle/main.integration.test.ts` |
+| triage `create: true` label minting     | `triage/main.ts:1109`           | `triage/main.integration.test.ts`    |
+
+The Reeve-proposal recursion guard — the infinite-loop failure mode, where an
+action on Reeve's own proposal PR is a change that wakes the next run — was
+unobserved in three duties at once and is now pinned in each
+(`lifecycle/main.ts:223`, `respond/main.ts:329`, `duplicate/main.ts:483`),
+each with a control case proving the fixture reaches a pull request at all.
+
+**RECOMMENDATION for `tools/mutation.mjs` (TL5 owns it):** the exclusion note
+should be narrowed rather than kept as-is. Entry-point gates are now driven by
+bundle-driven integration suites, so rows for
+`dependa/main.ts` `mayPublish`, `harmonise/main.ts` `canPublish`,
+`lifecycle/main.ts` `checkRequired` and `triage/main.ts`'s label gate would all
+be KILLED rows today — at integration cost, which is why they belong in a
+`"full"` tier rather than the fast one.
+
 ## GAPS, by priority
 
 ### P0 — none outstanding in this area

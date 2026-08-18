@@ -73,6 +73,10 @@ function apiOf(
     readonly files?: Record<string, string>;
     /** An open PR already on the branch, by number. */
     readonly openPr?: number;
+    /** A PR on the branch that a maintainer closed WITHOUT merging. */
+    readonly closedUnmergedPr?: number;
+    /** A PR on the branch that was closed because it merged. */
+    readonly mergedPr?: number;
   } = {},
 ): { api: PublishApi; recorded: Recorded } {
   const refs = new Set<string>(["heads/main", ...(options.refs ?? [])]);
@@ -114,13 +118,25 @@ function apiOf(
           },
         },
         pulls: {
-          list: () =>
-            Promise.resolve({
+          list: (params) => {
+            if (params.state === "closed") {
+              const closed = [
+                ...(options.closedUnmergedPr === undefined
+                  ? []
+                  : [{ number: options.closedUnmergedPr, head: { sha: "s" }, merged: false }]),
+                ...(options.mergedPr === undefined
+                  ? []
+                  : [{ number: options.mergedPr, head: { sha: "s" }, merged: true }]),
+              ];
+              return Promise.resolve({ data: closed });
+            }
+            return Promise.resolve({
               data:
                 options.openPr === undefined
                   ? []
                   : [{ number: options.openPr, head: { sha: "head-sha" } }],
-            }),
+            });
+          },
           create: (params) => {
             recorded.createdPrs.push({
               head: params.head,
@@ -286,5 +302,74 @@ describe("a real publish", () => {
         title: "harmonise: sync docs/getting-started",
       },
     ]);
+  });
+});
+
+describe("D3 — never reopening what a maintainer closed", () => {
+  /**
+   * A maintainer who closes a sync pull request without merging it has made a
+   * decision, and D3 (`docs/doctrine/north-star.md:247`) is repository-wide:
+   * "It never reopens or reassigns or closes what a maintainer decided."
+   *
+   * `dependa/publish.ts:210-224` implements exactly this refusal and names the
+   * doctrine in its own comment. harmonise did not: with the branch still
+   * present and no OPEN pull request on it, it wrote the locale files again
+   * and opened a NEW pull request — re-proposing precisely what the maintainer
+   * had just rejected, on every scheduled run, for ever.
+   *
+   * Not adjudicated as intentional, because nothing declares it: no comment,
+   * no doc, and the sibling duty does the opposite while citing the rule.
+   */
+  it("refuses to publish when a pull request on the branch was closed unmerged", async () => {
+    const { api, recorded } = apiOf({
+      refs: ["heads/reeve/harmonise/docs-getting-started"],
+      closedUnmergedPr: 9,
+    });
+
+    const published = await publishSync(api, AT, result(), false);
+
+    expect(published).toBeNull();
+    expect(recorded.writes).toEqual([]);
+    expect(recorded.createdPrs).toEqual([]);
+    expect(recorded.updatedPrs).toEqual([]);
+  });
+
+  it("says which pull request it is refusing on behalf of", async () => {
+    // Silence would read as "nothing to sync", which is the opposite of what
+    // happened and leaves the maintainer with no way to find out why their
+    // documentation stopped being synchronised.
+    const { api } = apiOf({
+      refs: ["heads/reeve/harmonise/docs-getting-started"],
+      closedUnmergedPr: 9,
+    });
+
+    await publishSync(api, AT, result(), false);
+
+    const said = vi
+      .mocked(core.info)
+      .mock.calls.map(([message]) => message)
+      .join("\n");
+    expect(said).toContain("#9");
+    expect(said).toContain("closed without merge");
+  });
+
+  it("publishes again after a pull request that was closed BY MERGING", async () => {
+    // The other half. A merged pull request is work accepted, not work
+    // refused, so the next source change gets a new sync — otherwise one
+    // successful merge would stop the duty for that document permanently.
+    const { api, recorded } = apiOf({ mergedPr: 8 });
+
+    const published = await publishSync(api, AT, result(), false);
+
+    expect(published?.pr).toBe(101);
+    expect(recorded.createdPrs).toHaveLength(1);
+  });
+
+  it("still publishes normally when the branch has no closed pull request at all", async () => {
+    const { api, recorded } = apiOf();
+
+    await publishSync(api, AT, result(), false);
+
+    expect(recorded.createdPrs).toHaveLength(1);
   });
 });

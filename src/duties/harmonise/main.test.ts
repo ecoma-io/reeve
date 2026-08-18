@@ -1,10 +1,17 @@
 /**
- * Unit tests for the main module's processGroup behaviour — specifically the
- * classifyDiff try/catch and edge cases in group processing.
+ * Unit tests for `classify.ts` — the classification rotation and its parser.
  *
- * `processGroup` is deeply coupled to the GitHub API, so rather than mocking
- * all of its dependencies, this file tests the behaviours that the integration
- * tests cannot reach: error paths and boundary conditions.
+ * The FILE NAME is a leftover, and the doc comment that used to sit here
+ * claimed this tested "the main module's `processGroup` behaviour". It does
+ * not: it imports `./classify.js` and nothing else, and never reaches
+ * `main.ts` at all. `main.ts` is driven by `main.integration.test.ts`, which
+ * became a real bundle-driven suite in the same change that corrected this
+ * comment.
+ *
+ * A test file whose name and doc comment assert coverage that does not exist
+ * is worse than no file, because the next reader counts it as evidence — which
+ * is what happened to harmonise's capability gates, unobserved until an
+ * auditor forced them open.
  */
 import { describe, expect, it, vi } from "vitest";
 

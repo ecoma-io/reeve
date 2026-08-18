@@ -125,7 +125,14 @@ interface State {
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
-  readonly effects: { applied: string[]; comments: string[]; assigned: string[]; closed: boolean };
+  readonly effects: {
+    applied: string[];
+    comments: string[];
+    assigned: string[];
+    closed: boolean;
+    /** Repository labels the run CREATED — the `create: true` path. */
+    created: string[];
+  };
   /**
    * The repository's committed files, as `record` sees them through the
    * Contents API — keyed by repo-relative path, with a sha the stub mints
@@ -229,7 +236,7 @@ async function startStub(): Promise<Stub> {
     issues: [],
     answer: triaging(verdict()),
     asked: [],
-    effects: { applied: [], comments: [], assigned: [], closed: false },
+    effects: { applied: [], comments: [], assigned: [], closed: false, created: [] },
     contentsFiles: new Map(),
     contentsWrites: [],
     contentsForbidden: false,
@@ -401,6 +408,17 @@ async function route(
         description: stub.labelDescriptions[name] ?? null,
       })),
     );
+    return;
+  }
+
+  // Creating a repository label — the `create: true` path, gated on the
+  // `label` capability at `main.ts:1109`.
+  if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/labels$/.test(path)) {
+    const payload = parsed(raw) as { name?: string };
+    const name = payload.name ?? "";
+    stub.effects.created.push(name);
+    stub.repositoryLabels.push(name);
+    send(response, 201, { name });
     return;
   }
 
@@ -2964,5 +2982,133 @@ describe("the sweep", () => {
       // The ordinary sweep labels the backlog instead of importing it.
       expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `create: true` — the one path where triage adds something to the REPOSITORY
+// rather than to a thread, gated on the `label` capability at `main.ts:1109`.
+//
+// An auditor forced that gate open and the whole repository stayed green: a
+// warrant granting triage nothing could still mint repository labels. The
+// gate is a plain `if (!permitted.includes("label"))` and nothing observed it.
+// ---------------------------------------------------------------------------
+
+/** A taxonomy whose second label does not exist yet and asks to be created. */
+const CREATING_WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: Something that used to work and does not.",
+  "  - name: needs-triage",
+  "    description: Nobody has looked at this yet.",
+  "    create: true",
+  "duties:",
+  "  triage: [label]",
+].join("\n");
+
+describe("creating a label the repository does not have", () => {
+  it("creates it when the warrant grants `label`", async () => {
+    // The case that proves the gate is a GATE. Without it the two below would
+    // pass against a duty that had simply stopped creating labels at all.
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT);
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual(["needs-triage"]);
+  });
+
+  it("creates nothing when `label` is not granted, and says so", async () => {
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT.replace("triage: [label]", "triage: [comment]"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual([]);
+    // Named rather than silent: a label that never appears is otherwise
+    // indistinguishable from a taxonomy nobody used.
+    expect(run.log).toContain("needs-triage");
+    expect(run.log).toContain("not permitted");
+  });
+
+  it("creates nothing on a dry run, and says what it would have created", async () => {
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT);
+
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual([]);
+    expect(run.log).toContain("Would create");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A6 — which roster pays for language detection (`main.ts:911`).
+//
+// `settings.screenModels.length > 0 ? settings.screenModels : settings.models`
+// survived all 4868 vitest tests. Its only defence was one eval fixture. The
+// reason no unit or integration case reached it: every case in this file runs
+// with the default `languages`, whose codes the bundled `eld` profile covers,
+// so detection is decided locally and the picker is never consulted at all.
+// A fixture that makes a branch unreachable is a fixture that makes the branch
+// unobservable, whatever the coverage number says.
+//
+// `pt-BR` is the lever. `detectByProfile` (`core/detect.ts:231`) declines the
+// whole step when ANY candidate is outside the bundled sixty — a regional tag
+// is not its base language to `eld` — so the model picker is reached, and
+// which roster it was built from becomes observable.
+// ---------------------------------------------------------------------------
+
+/** A warrant whose `languages:` forces detection past the local profile. */
+const REGIONAL_WARRANT = `${WARRANT}\nlanguages:\n  - en\n  - pt-BR\n`;
+
+/** The detection ask, told from the verdict ask by what its system message says. */
+function detectionAsks(): Ask[] {
+  // Matched on the detection prompt's own opening sentence (core/detect.ts:172)
+  // rather than on the word "language": triage's verdict prompt names the
+  // thread's language too, so a looser filter counts the verdict ask as a
+  // detection ask and the assertion stops discriminating.
+  return stub.asked.filter((ask) => ask.system.startsWith("You identify which language the body"));
+}
+
+describe("the roster language detection is bought from", () => {
+  it("pays the cheap screen roster when one is configured", async () => {
+    await writeFile(warrantPath, REGIONAL_WARRANT);
+
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    const asked = detectionAsks().map((ask) => ask.model);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).toContain("cheap-model");
+    expect(asked).not.toContain("stub-model");
+  });
+
+  it("falls back to the main roster when no cheap roster is configured", async () => {
+    // The documented default rather than a degraded mode: an unset
+    // `screen-models` means "use the one roster there is", not "skip
+    // detection". This is the arm the eval fixture was alone in defending.
+    await writeFile(warrantPath, REGIONAL_WARRANT);
+
+    const run = await runAction(stub, { "screen-models": "" });
+
+    expect(run.code).toBe(0);
+    const asked = detectionAsks().map((ask) => ask.model);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).toContain("stub-model");
+  });
+
+  it("asks nothing for language at all when the profile can decide locally", async () => {
+    // The control: with the default warrant every candidate is inside the
+    // bundled profile, so the picker is never reached — which is exactly why
+    // every other case in this file leaves `main.ts:911` unobserved.
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    expect(detectionAsks()).toEqual([]);
   });
 });
