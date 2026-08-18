@@ -34862,6 +34862,20 @@ async function publishSync(api, at, result, dryRun) {
     );
     return null;
   }
+  const { data: closedPrs } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "closed",
+    head: `${at.owner}:${branchName}`,
+    per_page: 10
+  });
+  const closedUnmerged = closedPrs.find((pr2) => pr2.merged !== true);
+  if (closedUnmerged !== void 0) {
+    info(
+      `harmonise: PR #${String(closedUnmerged.number)} for \`${branchName}\` was closed without merge \u2014 D3: refusing to recreate it.`
+    );
+    return null;
+  }
   const shas = /* @__PURE__ */ new Map();
   let branchExists = true;
   try {
