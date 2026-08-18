@@ -22,6 +22,7 @@ import {
   createReply,
   createRepositoryLabel,
   createThread,
+  isCapacityError,
   listLabelEvents,
   listOpenThreads,
   listReplies,
@@ -700,5 +701,78 @@ describe("shapes GitHub really sends that must not be read as something else", (
     );
     const api = { rest: { repos: { getContent } } } as unknown as ContentsApi;
     await expect(readContentsFile(api, AT, "store/a.ndjson")).resolves.toBeNull();
+  });
+});
+
+describe("isCapacityError — header shapes that must not decide a run's colour", () => {
+  /** A 403 carrying whatever `.response.headers` the wire, or an attacker, produced. */
+  const forbidden = (headers: unknown): Error =>
+    Object.assign(new Error("HTTP 403"), { status: 403, response: { status: 403, headers } });
+
+  it("a_403_whose_headers_are_a_string_stays_red_without_throwing", () => {
+    // A body-shaped or truncated response can hand this a string where a
+    // record belongs. Indexing it would find nothing; iterating it would
+    // walk its characters. Neither is allowed to end in `true`.
+    expect(() => isCapacityError(forbidden("retry-after: 60"))).not.toThrow();
+    expect(isCapacityError(forbidden("retry-after: 60"))).toBe(false);
+    expect(isCapacityError(forbidden("x-ratelimit-remaining: 0"))).toBe(false);
+  });
+
+  it("a_403_whose_headers_are_an_array_stays_red_without_throwing", () => {
+    expect(isCapacityError(forbidden([["retry-after", "60"]]))).toBe(false);
+    expect(isCapacityError(forbidden(["x-ratelimit-remaining", "0"]))).toBe(false);
+    expect(isCapacityError(forbidden([]))).toBe(false);
+  });
+
+  it("a_403_whose_retry_after_is_empty_or_unusable_stays_red", () => {
+    // Present-but-empty is not "GitHub told us how long to wait". Only a
+    // non-empty string or a number is that; a bare `true` or an object is
+    // not a duration and must not stand in for one.
+    expect(isCapacityError(forbidden({ "retry-after": "" }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": "   " }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": null }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": true }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": {} }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": Number.NaN }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": [60] }))).toBe(false);
+  });
+
+  it("a_403_whose_remaining_is_zero_shaped_but_not_zero_stays_red", () => {
+    // Only the string "0" or the number 0 is exhaustion. Values that merely
+    // coerce to zero — "", false, null, [], "0x0" — are not, because a
+    // coercing test would turn every empty header into a green run.
+    for (const value of ["", " ", false, null, [], [0], "0x0", "00", "-0"]) {
+      expect(isCapacityError(forbidden({ "x-ratelimit-remaining": value }))).toBe(false);
+    }
+  });
+
+  it("a_403_whose_rate_limit_headers_are_only_on_the_prototype_stays_red", () => {
+    // Own enumerable keys only. A polluted `Object.prototype`, or a headers
+    // object created over a poisoned parent, must not mint capacity for a
+    // response that never carried the header.
+    const inherited: unknown = Object.create({ "retry-after": "60", "x-ratelimit-remaining": "0" });
+    expect(isCapacityError(forbidden(inherited))).toBe(false);
+    expect(isCapacityError(forbidden(JSON.parse('{"__proto__":{"retry-after":"60"}}')))).toBe(
+      false,
+    );
+  });
+
+  it("a_403_whose_response_is_a_primitive_stays_red_without_throwing", () => {
+    for (const response of ["nope", 403, true, undefined, null]) {
+      const error = Object.assign(new Error("HTTP 403"), { status: 403, response });
+      expect(() => isCapacityError(error)).not.toThrow();
+      expect(isCapacityError(error)).toBe(false);
+    }
+  });
+
+  it("a_403_with_rate_limit_headers_at_the_top_level_only_stays_red", () => {
+    // The classifier reads `.response.headers`, which is where Octokit's
+    // `RequestError` puts them. A caller that invented a top-level `headers`
+    // is not evidence of anything GitHub said.
+    const error = Object.assign(new Error("HTTP 403"), {
+      status: 403,
+      headers: { "retry-after": "60" },
+    });
+    expect(isCapacityError(error)).toBe(false);
   });
 });

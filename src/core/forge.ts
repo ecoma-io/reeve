@@ -865,14 +865,57 @@ export function isMissing(error: unknown): boolean {
 }
 
 /**
+ * One response header by name, case-insensitively, from a shape nothing has
+ * typed.
+ *
+ * `GitHubApi` declares `headers` only as `{ link?: string }` for pagination,
+ * and widening it for a classifier that never calls the API would put a
+ * rate-limit concern into every port's contract. So the value arrives as
+ * `unknown` and is treated as such: only an own enumerable key of a plain
+ * record can answer, which is what Octokit's `RequestError` actually carries.
+ * A string, an array, or a key reachable only through a polluted prototype
+ * answers nothing rather than throwing — none of them is GitHub speaking.
+ */
+function headerValue(headers: unknown, name: string): unknown {
+  if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return undefined;
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a failure's own response headers say "rate limit" — the only
+ * evidence that promotes a 403 out of configuration and into capacity.
+ *
+ * `retry-after` counts as a non-empty string or a finite number, never a
+ * bare `true`, a `NaN`, or an object: the docs describe it as a duration to
+ * wait, and a value that is not one is not GitHub asking us to wait.
+ * `x-ratelimit-remaining` counts at exactly 0 — the number, or `"0"` after
+ * trimming — never by coercion, which would read `""`, `false` and `[]` as
+ * exhaustion and hand a green run to every response that merely omitted it.
+ */
+function saysRateLimited(error: object): boolean {
+  const response = (error as { response?: unknown }).response;
+  if (typeof response !== "object" || response === null) return false;
+  const headers = (response as { headers?: unknown }).headers;
+
+  const retryAfter = headerValue(headers, "retry-after");
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) return true;
+  if (typeof retryAfter === "string" && retryAfter.trim() !== "") return true;
+
+  const remaining = headerValue(headers, "x-ratelimit-remaining");
+  return remaining === 0 || (typeof remaining === "string" && remaining.trim() === "0");
+}
+
+/**
  * Whether a GitHub API failure is capacity, not configuration — D12's
  * "weather" side. A 429/5xx status, a Node system error (`.code`), or a
  * timeout-shaped error with no status at all, is the platform being slow or
- * briefly unavailable, not a mistake in the run's own setup; 401/403 (and
- * everything else) is not this classifier's business and stays red. Shared
- * rather than reimplemented per duty — `triage`'s `propose.ts` and
- * `lifecycle`'s sweep both need the identical answer to "is this worth
- * ending the run over."
+ * briefly unavailable, not a mistake in the run's own setup; 401 and a bare
+ * 403 are the run's own setup and stay red. Shared rather than
+ * reimplemented per duty — `triage`'s `propose.ts` and `lifecycle`'s sweep
+ * both need the identical answer to "is this worth ending the run over."
  *
  * Status codes are bounded to the 5xx range (500–599). Node system errors
  * are matched by their `.code` property — exact match, no substring — so
@@ -881,13 +924,34 @@ export function isMissing(error: unknown): boolean {
  * which is also capacity. The only message-level fallback is "timed out"
  * (what Node and Octokit actually report); "timeout" alone is too generic
  * and matches `TypeError: timeout is not a function`.
+ *
+ * **403 is the one status this classifies by more than its number,** because
+ * GitHub does not let the number decide. docs.github.com ("Rate limits for
+ * the REST API" → *Exceeding the rate limit*) states that a secondary limit
+ * "returns a 403 or 429 response" and that exceeding a primary limit answers
+ * "403 or 429" with `x-ratelimit-remaining` at 0 — one cause, two statuses,
+ * chosen by GitHub and not by anything this run did. Reading status alone
+ * therefore made the SAME rate limit green on 429 and red on 403: a
+ * non-deterministic run colour for an identical condition. So a 403 counts
+ * as capacity only when the response headers are GitHub itself naming the
+ * limit — a non-empty `retry-after` (the duration the docs say to wait), or
+ * `x-ratelimit-remaining` at exactly 0. Everything else about 403 is
+ * unchanged: no headers, headers that do not say this, a quota with requests
+ * left, or any shape that is not a header record, stays the permission error
+ * it has always been. The narrowing is deliberately unable to turn a genuine
+ * authorisation refusal green, and `x-ratelimit-remaining` is matched at 0
+ * exactly rather than coerced, so an empty or absent header cannot pass for
+ * exhaustion. 401 is excluded outright: a bad token is a bad token whatever
+ * headers ride along with it.
  */
 export function isCapacityError(error: unknown): boolean {
-  // 1. HTTP status: 429 (rate limit) or 5xx (server error).
+  // 1. HTTP status: 429 (rate limit) or 5xx (server error), plus the one 403
+  //    GitHub sends for the very same rate limit it sometimes sends as 429.
   if (typeof error === "object" && error !== null && "status" in error) {
     const status = (error as { status?: unknown }).status;
     if (status === 429 || (typeof status === "number" && status >= 500 && status < 600))
       return true;
+    if (status === 403 && saysRateLimited(error)) return true;
   }
 
   // 2. Node.js system errors: exact `.code` match, no substring guessing.
