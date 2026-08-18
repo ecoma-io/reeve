@@ -591,29 +591,50 @@ not a prompt instruction (`docs/doctrine/north-star.md#d8--every-thread-is-hosti
 ## IMPLEMENTATION-vs-DOC DISAGREEMENTS — for adjudication
 
 1. **`respond` truncated-reply-list failure colour.** The code returns a green
-   refusal note (`respond/main.ts:257-276`); the module doc says “better to
+   refusal note (`respond/main.ts`); the module doc once read as “better to
    fail a run than to draft on a guess”. A truncated thread is the one case
    where respond refuses under a _green_ run while the doc sentences read as
    expecting red. Neither side is blessed here.
+   - **ADJUDICATED (2026-08-18): GREEN, code wins.** The truncated-thread
+     refusal is a self-healing miss, not a misconfiguration: the next run over
+     the same thread answers it once the whole reply list fits in one page.
+     The module doc, `walkReplies`' doc comment and the inline comment now
+     state the green posture; the run still returns exit 0 and writes the
+     refusal `note`. No behavioural change.
 2. **`harmonise` requires edit-file AND open-pr for state-branch writes; the
    doctrine sentence at `north-star.md:607-610` says both duties require the
-   pair.** The doc matches for the branch; the default-branch merit write uses
-   `edit-file` alone (`harmonise/main.ts:375-381`) — that narrowing is not in
-   the doctrine text and is here recorded as the implementation's deliberate
-   choice, to confirm.
+   pair.** The doc matches for the branch; the default-branch merit write used
+   `edit-file` alone (`harmonise/main.ts`) — that narrowing is not in the
+   doctrine text and was recorded as the implementation's deliberate choice,
+   to confirm.
+   - **ADJUDICATED (2026-08-18): pair required on both paths.** The
+     default-branch state write now also requires both `edit-file` AND
+     `open-pr`, mirroring the state-branch sibling and the sync-PR gate; the
+     notice names both capabilities. A warrant granting only `edit-file` no
+     longer writes provenance state to the default branch.
 3. **`lifecycle` resolves languages leniently (`[]`→English) while every other
    duty's warrant resolution refuses an unconfigured list.** The divergence is
    declared in code (`lifecycle/main.ts:126-137`); the doctrine does not state
    it. Confirm it is intended product behaviour.
+   - **ADJUDICATED (2026-08-18): confirmed intended.** A repository whose
+     tracks all use built-in English text or an explicit `say:` map never had
+     a reason to configure `languages:`; `[]` reads as English throughout
+     `message.ts`. No code change.
 4. **`dry-run` placement differs per duty.** Triage dry-runs at the call-site
    boundary AND inside `act`; translate dry-runs AFTER drafting and BEFORE the
    `edit-body` gate (`text.ts:196-218`), and review dry-runs after the
    comment/floor gates. The variable is the duty's semantics (what “would have
    happened” means), not a mistake.
+   - **ADJUDICATED (2026-08-18): confirmed intended.** Each placement reflects
+     its duty's own answer to “what would have happened”. No code change.
 5. **`spam` fails open; `screen` fails closed.** The cheap spam screen's
    all-models-failed posture is carry-on (`spam.ts:67-78`); the length/evidence
    screen is deterministic and fails closed. This asymmetry is intended and is
    asserted by `spam.test.ts` 67 — recorded so a reader does not “fix” it.
+   - **ADJUDICATED (2026-08-18): confirmed intended.** Carry-on into the
+     expensive stage beats skipping a thread on a cheap model's verdict; the
+     deterministic screen must not let a hostile thread through on a read
+     error. No code change.
 6. **Disposition case-insensitivity change landing separately (TL2).** The
    parse grammar is already case-insensitive via the `/i` flag
    (`review/disposition.ts:41-44`); TL2's change normalizes the value through
@@ -621,6 +642,9 @@ not a prompt instruction (`docs/doctrine/north-star.md#d8--every-thread-is-hosti
    hardening of the same behaviour (a value can only be read as one of the
    four unions under `/i` anyway) — the matrix records it as a compatible
    refinement, to confirm no behavioural cliff.
+   - **ADJUDICATED (2026-08-18): confirmed intended.** Compatible hardening;
+     the `/i` flag already admitted every casing, so the normalization changes
+     no accepted value. No code change.
 
 ## Intent categories covered by existing tests (cited above)
 
