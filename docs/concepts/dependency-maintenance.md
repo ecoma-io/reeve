@@ -101,9 +101,22 @@ a 429 or a timeout is weather, not a failure.
 | **go-proxy**        | proxy.golang.org                        | Version list, module metadata      |
 | **docker-registry** | Docker Hub / registry v2 API            | Tag list, digest                   |
 
-Datasources are I/O wrappers around external APIs. They are covered by
-integration tests that drive the built bundles against mock registries, not
-by unit tests that would need to mock `fetch`.
+Datasources are I/O wrappers around external APIs, and every one of them is
+unit-tested offline by replacing `globalThis.fetch` with a stub that answers
+from a fixture — see `src/duties/dependa/datasources/*.test.ts`. That is the
+policy this repository follows for every datasource, without exception.
+
+What those suites assert is the reading, not the reaching: which URL was built
+for a given package name, how each HTTP status is classified (`not-found` for
+a 404, `auth-refused` for a 401/403, `temporarily-unavailable` for a 429 or a
+5xx — D12: capacity is weather, a refused token is not), and what a malformed
+or half-shaped registry document degrades to. A registry answer that cannot be
+read must become a named failure state, never a confident wrong answer, and
+that is a claim only a fixture can put a test behind.
+
+There is deliberately no live-registry test. `eval/drivers/dependa.ts` hits
+real registries and cannot force a 429 or a malformed body, so it can show
+that the happy path works and nothing else.
 
 ## Classification — update type
 
