@@ -359,9 +359,11 @@ branch for maintainer review. It needs `pull-requests: write` on the token,
 and must be granted alongside the duty's own write capability — `edit-file`
 for `harmonise`, `record` for `triage` — because `open-pr` only governs the
 PR, not the write that precedes it. When `state-branch` is set but `open-pr`
-is not granted, the duty falls back to writing directly to the default branch
-and says so in a notice — the state file still lands, just without the PR
-wrapping it. See [the `harmonise` duty](../reference/duties/harmonise.md) and
+is not granted, `triage` falls back to writing directly to the default branch
+and says so in a notice — the corrections still land, just without the PR
+wrapping them; `harmonise` never writes provenance state without both
+capabilities, on either path, and says so instead. See [the `harmonise`
+duty](../reference/duties/harmonise.md) and
 [the `triage` duty](../reference/duties/triage.md).
 
 **Neither does `remediation`.** It is the separate home for fixing what
