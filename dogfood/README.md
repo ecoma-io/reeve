@@ -39,11 +39,11 @@ classifies every discrepancy between what the two systems found.
 
 ### Shadow comparison (CI)
 
-The dogfood workflow runs automatically on Thursdays at 03:17 UTC, or
-manually via `workflow_dispatch`:
+The conformance row of the dogfood workflow runs automatically on Thursdays
+at 03:17 UTC, or manually via `workflow_dispatch`:
 
 ```
-gh workflow run reeve-dependa-dogfood.yml
+gh workflow run reeve-dogfood.yml
 ```
 
 ### Local comparison
