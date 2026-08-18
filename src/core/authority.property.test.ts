@@ -118,6 +118,87 @@ const anyConfidence = fc.oneof(
   fc.constantFrom(Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0),
 );
 
+/**
+ * A warrant source that is *sometimes* a warrant.
+ *
+ * `hostileText` alone never parses — measured: 0 of 400 draws — so a property
+ * written over it exercises only the refusal half and silently stops testing
+ * the half that returns a value. This arbitrary interleaves well-formed rows
+ * with hostile ones so both halves run, and the test below asserts that both
+ * halves were in fact reached rather than trusting that they were.
+ */
+const warrantSource = fc.oneof(
+  { weight: 1, arbitrary: rawText },
+  {
+    weight: 3,
+    arbitrary: fc
+      .record({
+        version: fc.constantFrom("1", "1.0", "2", '"1"', ""),
+        about: fc.option(hostileText, { nil: null }),
+        labels: fc.array(
+          fc.record({
+            name: fc.string({ minLength: 1, maxLength: 12 }).filter((n) => n.trim().length > 0),
+            description: fc
+              .string({ minLength: 1, maxLength: 20 })
+              .filter((d) => d.trim().length > 0),
+          }),
+          { maxLength: 3 },
+        ),
+        duties: fc.option(
+          fc.array(fc.constantFrom("label", "comment", "close", "edit-file", "nonsense"), {
+            maxLength: 3,
+          }),
+          { nil: null },
+        ),
+      })
+      .map(({ version, about, labels, duties }) => {
+        const lines = [`version: ${version}`];
+        if (about !== null) lines.push(`about: ${JSON.stringify(about)}`);
+        if (labels.length > 0) {
+          lines.push("labels:");
+          for (const entry of labels) {
+            lines.push(`  - name: ${JSON.stringify(entry.name)}`);
+            lines.push(`    description: ${JSON.stringify(entry.description)}`);
+          }
+        }
+        if (duties !== null) {
+          lines.push("duties:");
+          lines.push(`  triage: [${duties.join(", ")}]`);
+        }
+        return `${lines.join("\n")}\n`;
+      }),
+  },
+);
+
+/**
+ * A store line that is *sometimes* readable JSON.
+ *
+ * Same problem, same fix: `hostileText` is essentially never valid JSON, so a
+ * "never throws" property over it proves only that `JSON.parse` failing is
+ * caught. Real store lines, lines with one field corrupted, and pure noise are
+ * all drawn here, and the test asserts every class was actually produced.
+ */
+const storeLine = fc.oneof(
+  { weight: 1, arbitrary: rawText },
+  { weight: 1, arbitrary: fc.json() },
+  {
+    weight: 2,
+    arbitrary: fc
+      .record({
+        thread: fc.oneof(fc.integer(), fc.double({ noNaN: true }), hostileText),
+        decided: fc.oneof(fc.array(hostileText, { maxLength: 3 }), hostileText, fc.constant(null)),
+        outcome: fc.constantFrom("overruled", "approved", null, 7),
+        pivot: fc.option(
+          fc.record({ language: hostileText, title: hostileText, excerpt: hostileText }),
+          { nil: null },
+        ),
+        note: fc.option(hostileText, { nil: null }),
+        duplicateOf: fc.oneof(fc.integer(), hostileText),
+      })
+      .map((record) => JSON.stringify(record)),
+  },
+);
+
 const correctionArb: fc.Arbitrary<Correction> = fc.record({
   repo: hostileText,
   thread: fc.integer(),
@@ -234,9 +315,11 @@ describe("a grant is always a subset of the closed capability set", () => {
     );
   });
 
-  it("the reader throws an Error or returns a warrant — never anything else", () => {
+  it("the reader throws an Error or returns a warrant — never anything else, both halves reached", () => {
+    const seen = { warrant: 0, error: 0 };
+
     fc.assert(
-      fc.property(hostileText, (source) => {
+      fc.property(warrantSource, (source) => {
         // Rendered as one value rather than branched on, so the assertion is
         // the same shape either way: a warrant answers `granted` as a
         // function, and a refusal is an `Error` carrying a sentence.
@@ -254,12 +337,19 @@ describe("a grant is always a subset of the closed capability set", () => {
           }
         })();
 
+        seen[answer.kind === "warrant" ? "warrant" : "error"] += 1;
         expect(answer.detail).toBe(true);
         expect(["warrant", "error"]).toContain(answer.kind);
         return true;
       }),
       { numRuns: 400 },
     );
+
+    // The property is only worth what its generator reached. Asserting the
+    // counts is what stops this decaying into "every source was refused" the
+    // next time the arbitrary is edited.
+    expect(seen.warrant).toBeGreaterThan(20);
+    expect(seen.error).toBeGreaterThan(20);
   });
 });
 
@@ -452,14 +542,45 @@ describe("a store record is one line, and writing it is a fixed point", () => {
     );
   });
 
-  it("reading a line never throws, whatever the file holds", () => {
+  it("reading a line never throws, and both a readable and an unreadable line are reached", () => {
+    // The old version drew only from `hostileText`, which is essentially never
+    // valid JSON — so it proved "a `JSON.parse` failure is caught" and nothing
+    // about what happens once a line does parse. `storeLine` draws real
+    // records, records with one field corrupted, arbitrary JSON, and noise.
+    const seen = { correction: 0, refused: 0 };
+
     fc.assert(
-      fc.property(hostileText, (line) => {
-        expect(() => parseCorrection(line)).not.toThrow();
+      fc.property(storeLine, (line) => {
+        let answer: ReturnType<typeof parseCorrection> | "threw";
+        try {
+          answer = parseCorrection(line);
+        } catch {
+          answer = "threw";
+        }
+
+        // Rendered as one comparable value rather than branched on: a line
+        // that parsed is a whole correction — the two fields a correction IS
+        // are present and well-typed, whatever the rest held — and a line that
+        // did not is `null`. Either way the shape below is the same, so the
+        // assertion is unconditional.
+        const shape =
+          answer === "threw" || answer === null
+            ? "refused"
+            : Number.isInteger(answer.thread) &&
+                Array.isArray(answer.decided) &&
+                ["overruled", null].includes(answer.outcome)
+              ? "whole correction"
+              : "half-read";
+
+        expect(["refused", "whole correction"]).toContain(shape);
+        seen[shape === "refused" ? "refused" : "correction"] += 1;
         return true;
       }),
-      { numRuns: 400 },
+      { numRuns: 500 },
     );
+
+    expect(seen.correction).toBeGreaterThan(10);
+    expect(seen.refused).toBeGreaterThan(10);
   });
 
   it("tokenising is deterministic and produces no term carrying whitespace", () => {

@@ -410,27 +410,61 @@ describe("yaml_features_this_format_never_documented", () => {
     ).toEqual(refused.map((spelling) => [spelling, true]));
   });
 
-  it("a capability is matched after trimming, and after nothing else", () => {
-    // ADJUDICATE: `strings()` trims, so `"label "` and a block scalar both
-    // reach the closed set as `label`. Pinned as found: trimming is a
-    // normalisation of whitespace only — every other transformation an
-    // attacker might hope for (case, homoglyph, width, encoding) is refused.
-    expect(
-      parseWarrant(PATH, 'version: 1\nduties:\n  triage: ["  label\\t"]\n').granted(
-        "triage",
-        TRIAGE_FALLBACK,
-      ),
-    ).toEqual(["label"]);
+  it("a capability is matched after `String.trim()`, and after nothing else", () => {
+    // ADJUDICATE (root: PIN CORRECT, keep). `strings()` trims, so a capability
+    // written with surrounding whitespace still reaches the closed set. The
+    // exact surface matters and is measured here rather than asserted in
+    // general terms: `String.trim()` strips every character Unicode calls
+    // whitespace — ASCII space and tab, but also NBSP, the BOM/zero-width
+    // no-break space, the ideographic space and the line/paragraph separators
+    // — and strips nothing else. Zero-width space, zero-width joiner, the word
+    // joiner, a bidi override and NUL all survive it and are therefore refused
+    // by the closed-set check, which is the answer this boundary needs.
+    const stripped = [
+      ["ascii space and tab", '"  label\t"'],
+      ["vertical tab and form feed", '"\u000blabel\u000c"'],
+      ["no-break space", '"\u00a0label\u00a0"'],
+      ["BOM / zero-width no-break space", '"\ufefflabel"'],
+      ["ideographic space", '"\u3000label"'],
+      ["narrow no-break space", '"\u202flabel"'],
+      ["line and paragraph separators", '"\u2028label\u2029"'],
+    ] as const;
 
-    const refused = ['"Label"', '"label."', '"la bel"', '"labels"'];
     expect(
-      refused.map((written) => [
-        written,
+      stripped.map(([name, written]) => [
+        name,
+        parseWarrant(PATH, `version: 1\nduties:\n  triage: [${written}]\n`).granted(
+          "triage",
+          TRIAGE_FALLBACK,
+        ),
+      ]),
+    ).toEqual(stripped.map(([name]) => [name, ["label"]]));
+
+    // Everything else, refused. Case, homoglyph, width, encoding and every
+    // zero-width or bidi character `trim()` leaves in place.
+    const refused = [
+      ["case", '"Label"'],
+      ["punctuation", '"label."'],
+      ["inner space", '"la bel"'],
+      ["plural", '"labels"'],
+      ["zero-width space", '"\u200blabel"'],
+      ["zero-width joiner", '"label\u200d"'],
+      ["word joiner", '"label\u2060"'],
+      ["bidi override", '"\u202elabel\u202c"'],
+      ["NUL", '"label\u0000"'],
+      ["Cyrillic homoglyph", '"l\u0430bel"'],
+      ["fullwidth", '"\uff4cabel"'],
+      ["base64", '"bGFiZWw="'],
+    ] as const;
+
+    expect(
+      refused.map(([name, written]) => [
+        name,
         (outcome(`version: 1\nduties:\n  triage: [${written}]\n`) ?? "").includes(
           "is not something a duty can be granted",
         ),
       ]),
-    ).toEqual(refused.map((written) => [written, true]));
+    ).toEqual(refused.map(([name]) => [name, true]));
   });
 
   it("a YAML comment is never part of a value", () => {

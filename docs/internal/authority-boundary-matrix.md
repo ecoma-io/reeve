@@ -18,79 +18,122 @@ did exactly what it said — and then asserts the answer still changes nothing. 
 suite that assumed the model resisted would be measuring the model, which is
 the part this repository does not control.
 
-**A channel is only ever a string.** The twelve untrusted channels are listed
-by name because the intent matrix's row G lists them, but at the boundary under
-test none of them has a shape of its own: what makes a channel untrusted is
-that a stranger writes it. The tests therefore drive every payload through
-every channel name and assert the same table each time.
+**Ten of the twelve channels are only ever a string; two are not.** The row-G
+channels are listed by name because the intent matrix lists them, but at the
+boundary under test ten of them have no shape of their own — a stranger's text
+is a stranger's text, and there is one reader for all of it. Those ten share one
+test per claim, and §1 says so rather than printing ten rows that cannot fail
+independently. `rule-file` and `rule-pack` DO have readers of their own and get
+real tests against them.
 
 **Negative controls, not coincidences.** Every invariant below was verified by
 temporarily breaking the production check it depends on and confirming the test
-goes red. The table of those 24 mutations is at the bottom of this page.
+goes red — 26 of them, listed in §6. Two of those mutations survived on first
+attempt and the tests were fixed until they did not; that is recorded there
+rather than quietly dropped, because a control that never failed is a control
+nobody has calibrated.
+
+**This page has been through an independent adversarial review.** The reviewer
+broke the boundary once, with the whole suite green, and the corrections are
+marked in place. Where the first draft claimed more than it proved, the claim
+was narrowed rather than the evidence stretched.
 
 ---
 
 ## 1. Untrusted channel × escalation attempt
 
-Columns are the escalation attempts; every one is driven for every channel.
-The payload set is in `src/core/authority.adversarial.test.ts:94-121`:
+**Read this before the table.** The first draft of this page printed twelve
+channel rows × four columns and presented forty-eight cells as forty-eight
+pieces of evidence. It was not. Ten of the twelve channels share one reader,
+the tests behind them did not vary by channel, and three of the four columns
+could not fail independently per row. An independent reviewer said so, and the
+section has been corrected to claim only what the tests prove.
+
+**Ten channels, one reader, one test each.** A PR title, a PR body, an issue
+body, a comment, source code, a README, a commit message, a branch name, a
+filename and a model's own answer all reach the core the same way: as a string
+put in front of a model, whose answer then meets `enforceLabels` and the
+warrant. There is no per-channel parser, so there is no per-channel test — each
+row of §1a is **one** test that runs every payload once, and that single run is
+the whole evidence for all ten channels.
+
+**Two channels have a reader of their own**, and those get real, separate tests
+against the real parsers (`duties/review/rules.ts`, `duties/review/packs.ts`,
+imported read-only) — §1b.
+
+The payload set is `src/core/authority.adversarial.test.ts:95-125`:
 `ignore-previous`, `grant-edit-file`, `grant-open-pr`, `disable-security`,
 `change-configuration`, `approve-operation`, `reveal-secrets`,
-`elevate-authority`, four non-English variants (vi, zh, ru, ar), `homoglyph`
-(Cyrillic а/е inside capability words), `zero-width`, `base64`, `html-comment`,
-`yaml-injection`, `fence-escape`, `markdown-fence-escape`, `long-padding`
-(20 000 characters), `null-byte`, `rtl-override`.
+`elevate-authority`, `handle-mention` (an `@handle` — without it the `owner`
+column below is vacuous, which a mutation proved), four non-English variants
+(vi, zh, ru, ar), `homoglyph` (Cyrillic а/е inside capability words),
+`zero-width`, `base64`, `html-comment`, `yaml-injection`, `fence-escape`,
+`markdown-fence-escape`, `long-padding` (20 000 characters), `null-byte`,
+`rtl-override`.
 
-| Untrusted channel   | Cannot widen a grant                | Cannot invent an outcome | Cannot become a capability | Cannot close the prompt fence |
-| ------------------- | ----------------------------------- | ------------------------ | -------------------------- | ----------------------------- |
-| PR title            | `authority.adversarial.test.ts:212` | `:240`                   | `:263`                     | `:377`                        |
-| PR body             | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Issue body          | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Comment             | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Source code content | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| README              | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Commit message      | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Branch name         | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Filename            | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Rule file           | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Rule pack           | `:212`                              | `:240`                   | `:263`                     | `:377`                        |
-| Model output        | `:212`, `:312`                      | `:240`, `:331`           | `:263`                     | `:377`                        |
+### 1a. The ten channels that share a reader
+
+| Escalation attempt            | What is proved                                                                                                                                                                     | Test                                |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Cannot widen a grant          | `granted`/`unnamed` answer exactly what the `duties:` block wrote, with the payload in `about:`, `description`, `not` and `examples`                                               | `authority.adversarial.test.ts:223` |
+| Cannot set a label field      | `create`, `owner`, `confidence`, `exclusive_with`, `paths`, `color` all stay at their defaults on the **explicit** warrant path — the fields with teeth, on the path that has them | `:248`                              |
+| Cannot invent an outcome      | a verdict repeating the payload plus every capability name applies nothing                                                                                                         | `:292`                              |
+| Cannot become a capability    | level 0: a repository label description is carried as prose and sets no field                                                                                                      | `:315`                              |
+| Cannot close the prompt fence | the block carries the payload byte for byte, holds exactly one closer, and the id could not have been known in advance                                                             | `:429`                              |
 
 All paths in this section are relative to `src/core/`.
 
-**What each column proves.**
+**Why `Cannot set a label field` is its own row.** The reviewer broke the
+boundary without it, with the whole suite green: a patch deriving a label's
+`create:` from its `description` fired on this file's own fixture and nothing
+noticed, because the grant row observes only `granted`, `unnamed` and label
+NAMES. `create` is capability-shaped — `warrant.ts:507-529` makes
+`checkLabelsExist` hand a `create: true` entry back for the caller to CREATE on
+the repository instead of failing red, so a `create` derived from prose is a
+write derived from prose. `owner` becomes an assignee through `owners()`;
+`confidence` is that label's own floor; `exclusive_with` is what overrules a
+maintainer. The row now compares the whole entry, field by field, for every
+payload.
 
-- _Cannot widen a grant_ — the payload is carried verbatim in every free-text
-  field of a real warrant (`about:`, a label's `description`, its `not`, its
-  `examples`), and `granted`/`unnamed` answer exactly what the `duties:` block
-  wrote. Free text in the file is the field a maintainer pastes a stranger's
-  wording into; it is not where a capability is read from.
-- _Cannot invent an outcome_ — the compromised-model case: the verdict proposes
-  the payload plus every capability name, and `enforceLabels` applies nothing,
-  refusing each with `` `<path>` does not name it ``.
-- _Cannot become a capability_ — level 0, where the taxonomy is read off
-  repository label descriptions. The description is carried through as prose
-  and nothing else: no capability, owner, exclusivity, floor, colour, path or
-  `create`.
-- _Cannot close the prompt fence_ — `enclose` passes the payload byte for byte
-  and the block still contains exactly one closer, at the end.
+### 1b. The two channels with a reader of their own
+
+| Channel   | Claim                                                                                                                                                                             | Test                                |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Rule pack | a pack carrying `duties:` is refused red, naming authority                                                                                                                        | `authority.adversarial.test.ts:708` |
+| Rule pack | every payload written as a top-level key is refused                                                                                                                               | `:717`                              |
+| Rule pack | using an alias is refused outright (`maxAliasCount: 0`), unlike in the warrant — asserted on the message, with the alias-free twin parsing cleanly                                | `:733`                              |
+| Rule file | a `duties:` block is ignored with a warning and becomes no rule                                                                                                                   | `:753`                              |
+| Rule file | every payload as a top-level key is either refused red or ignored with a warning, never read — the oversized one is refused, because YAML caps an implicit key at 1024 characters | `:766`                              |
+| Both      | neither parsed shape has a field a capability could be stored in                                                                                                                  | `:809`                              |
+
+These three readers deliberately disagree, and the disagreement is why a
+name-only row was worth replacing: the warrant reader **refuses** an unknown
+root key, `parsePack` **refuses** an unknown top-level key red, and `parseRules`
+**warns and ignores** it. All three are safe; only two are loud.
 
 ### Property-based cover for the same rows
 
 | Claim                                                                        | Test                             |
 | ---------------------------------------------------------------------------- | -------------------------------- |
-| Any grant is a subset of the closed capability set, for any file             | `authority.property.test.ts:148` |
-| Free text never moves a grant off the block                                  | `:181`                           |
-| An implicit warrant returns exactly the caller's fallback, by identity       | `:211`                           |
-| The reader returns a warrant or throws an `Error` — never anything else      | `:237`                           |
-| Applied ⊆ taxonomy, deduplicated, disjoint from labels already on the thread | `:269`                           |
-| A fence encloses any text and is closed by exactly one thing                 | `:354`                           |
+| Any grant is a subset of the closed capability set, for any file             | `authority.property.test.ts:229` |
+| Free text never moves a grant off the block                                  | `:262`                           |
+| An implicit warrant returns exactly the caller's fallback, by identity       | `:292`                           |
+| The reader returns a warrant or throws an `Error` — never anything else      | `:318`                           |
+| Applied ⊆ taxonomy, deduplicated, disjoint from labels already on the thread | `:359`                           |
+| A fence encloses any text and is closed by exactly one thing                 | `:444`                           |
 
-The generator is not uniform noise: `authority.property.test.ts:45-92` mixes a
-vocabulary of warrant field names, capability names and handles into the random
-text, because uniform random strings never spell `create` or `edit-file` and a
-generator that only drew from them would prove the boundary holds against
-noise rather than against an attempt.
+Two of these generators were vacuous in the first round and are not any more.
+`:318` drew only hostile noise, so 0 of 400 sources parsed and the
+"returns a warrant" half never ran; the store-line property at `:545` drew noise
+that was never valid JSON, so it proved only that a `JSON.parse` failure is
+caught. Both now draw from a mixed arbitrary **and assert that both halves were
+actually reached**, so neither can decay back into testing one branch.
+
+The vocabulary generator is not uniform noise either:
+`authority.property.test.ts:47-94` mixes warrant field names, capability names
+and handles into the random text, because uniform random strings never spell
+`create` or `edit-file`. That half was measured sound — 300/300 runs reach the
+body at `:229`/`:262` — and is unchanged.
 
 ---
 
@@ -102,17 +145,17 @@ production systems.
 
 | Seeded value                                                                                                                                             | Stage that reads it               | Guaranteed outcome                       | Test                                |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------- | ----------------------------------- |
-| A label name only the verdict carries                                                                                                                    | `enforceLabels`                   | refused, named                           | `authority.adversarial.test.ts:420` |
-| A label name in the file but outside this run's scope                                                                                                    | `enforceLabels`                   | refused exactly as an unknown name       | `:429`                              |
-| Every `Label` field written into a repository label description (`create`, `owner`, `confidence`, `exclusive_with`, `color`, `paths`, `not`, `examples`) | `implicitWarrant`                 | none of them is set                      | `:453`                              |
-| Capability names in a label description                                                                                                                  | `implicitWarrant`                 | grant unchanged                          | `:501`                              |
-| `__proto__` / `constructor` as a label name                                                                                                              | `labelNamed`                      | ordinary map entry; no prototype reached | `:512`                              |
-| A capability spelled with a homoglyph, zero-width space, fullwidth form, case change or base64                                                           | `readDuties`                      | refused by name, never dropped           | `:527`                              |
-| A duty name spelled `__proto__`, `constructor`, `prototype`, `TRIAGE`, `triage `, `triаge`                                                               | `readDuties`                      | refused by name                          | `:545`                              |
-| An `outcome` other than `overruled` in a store line                                                                                                      | `parseCorrection`                 | the whole line is refused                | `:560`                              |
-| A label outside the taxonomy inside a committed store line                                                                                               | recall → prompt → `enforceLabels` | rendered as prose, applied never         | `:574`                              |
-| `__proto__` inside a store line's JSON                                                                                                                   | `parseCorrection`                 | no prototype pollution                   | `:590`                              |
-| A newline inside a store field, forging a second record                                                                                                  | `formatCorrection`                | one line, always                         | `:600`                              |
+| A label name only the verdict carries                                                                                                                    | `enforceLabels`                   | refused, named                           | `authority.adversarial.test.ts:482` |
+| A label name in the file but outside this run's scope                                                                                                    | `enforceLabels`                   | refused exactly as an unknown name       | `:491`                              |
+| Every `Label` field written into a repository label description (`create`, `owner`, `confidence`, `exclusive_with`, `color`, `paths`, `not`, `examples`) | `implicitWarrant`                 | none of them is set                      | `:515`                              |
+| Capability names in a label description                                                                                                                  | `implicitWarrant`                 | grant unchanged                          | `:563`                              |
+| `__proto__` / `constructor` as a label name                                                                                                              | `labelNamed`                      | ordinary map entry; no prototype reached | `:574`                              |
+| A capability spelled with a homoglyph, zero-width space, fullwidth form, case change or base64                                                           | `readDuties`                      | refused by name, never dropped           | `:592`                              |
+| A duty name spelled `__proto__`, `constructor`, `prototype`, `TRIAGE`, `triage `, `triаge`                                                               | `readDuties`                      | refused by name                          | `:610`                              |
+| An `outcome` other than `overruled` in a store line                                                                                                      | `parseCorrection`                 | the whole line is refused                | `:625`                              |
+| A label outside the taxonomy inside a committed store line                                                                                               | recall → prompt → `enforceLabels` | rendered as prose, applied never         | `:639`                              |
+| `__proto__` inside a store line's JSON                                                                                                                   | `parseCorrection`                 | no prototype pollution                   | `:655`                              |
+| A newline inside a store field, forging a second record                                                                                                  | `formatCorrection`                | one line, always                         | `:665`                              |
 
 ---
 
@@ -120,14 +163,14 @@ production systems.
 
 | Claim                                                                           | Test                                |
 | ------------------------------------------------------------------------------- | ----------------------------------- |
-| A refused label contributes no owner to assign                                  | `authority.adversarial.test.ts:625` |
-| A run under the confidence floor assigns nobody                                 | `:650`                              |
-| A maintainer's own label is never overruled                                     | `:664`                              |
-| A warrant that does not parse yields no warrant at all                          | `:687`                              |
-| Model confidence never grants: no value admits a name the file lacks            | `:331`                              |
-| Certainty does not clear a floor it is under; `NaN`/`±Infinity` never clear one | `:338`                              |
-| Model prose is defanged before it can act as a request to a human               | `:349`                              |
-| Model prose cannot smuggle an HTML comment into a published body                | `:362`                              |
+| A refused label contributes no owner to assign                                  | `authority.adversarial.test.ts:829` |
+| A run under the confidence floor assigns nobody                                 | `:854`                              |
+| A maintainer's own label is never overruled                                     | `:868`                              |
+| A warrant that does not parse yields no warrant at all                          | `:891`                              |
+| Model confidence never grants: no value admits a name the file lacks            | `:383`                              |
+| Certainty does not clear a floor it is under; `NaN`/`±Infinity` never clear one | `:390`                              |
+| Model prose is defanged before it can act as a request to a human               | `:401`                              |
+| Model prose cannot smuggle an HTML comment into a published body                | `:414`                              |
 | Dry-run touches nothing, however many times it is replayed                      | `state.idempotency.test.ts:342`     |
 | Dry-run after a real run still touches nothing                                  | `:355`                              |
 
@@ -140,45 +183,45 @@ that something threw. Determinism is asserted separately
 (`warrant.contract.test.ts:239`), as is the claim that the file path is the
 only thing a message varies by (`:250`).
 
-| Input class                                                                                          | Deterministic outcome                                                 | Test                                      |
-| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------- |
-| Valid — minimal, and a whole file                                                                    | parses                                                                | `warrant.contract.test.ts:220` (rows 1–2) |
-| Empty file / whitespace only / comments only                                                         | `is not a warrant`                                                    | `:220`                                    |
-| Malformed YAML                                                                                       | `is not valid YAML`                                                   | `:220`                                    |
-| A list or a bare string at the root                                                                  | `is not a warrant`                                                    | `:220`                                    |
-| Two YAML documents in one file                                                                       | `is not valid YAML`                                                   | `:220`, `:376`                            |
-| Duplicate keys, at the root and inside `duties:`                                                     | `is not valid YAML` — never last-wins                                 | `:220`                                    |
-| Unknown root field, incl. pre-1.0 `capabilities:` and legacy `apply`                                 | `unrecognized key`                                                    | `:220`                                    |
-| Unknown label field                                                                                  | `unrecognized key`                                                    | `:220`                                    |
-| Invalid duty                                                                                         | `is not a known duty`                                                 | `:220`, `:445`                            |
-| Invalid capability                                                                                   | `is not something a duty can be granted`                              | `:220`, `:413`                            |
-| Conflicting config (`[none]` beside a real capability)                                               | refused                                                               | `:220`                                    |
-| Missing required field (`version`, a label `description`)                                            | named                                                                 | `:220`                                    |
-| Invalid model config (`version: 2`)                                                                  | `declares version`                                                    | `:220`                                    |
-| `duties:` written with nothing under it                                                              | refused as a half-finished edit                                       | `:220`                                    |
-| Wrong types (`labels` as a mapping, `duties` as a list, description as a number, confidence as text) | refused, naming the type                                              | `:220`                                    |
-| Null vs absent (`labels:` null = empty; `duties:` null refused; a duty written null refused)         | distinguished                                                         | `:220`                                    |
-| Oversized free text (100 000 characters)                                                             | carried, not truncated                                                | `:220`                                    |
-| YAML anchors                                                                                         | accepted and inert; an alias cannot be parked under a second root key | `:332`                                    |
-| YAML merge keys (`<<`)                                                                               | refused at root, in `duties:`, and on a label                         | `:353`                                    |
-| `version` spellings `1`, `1.0`, `0x1`, `+1`, `0o1`                                                   | all accepted as one; `"1"`, `true`, `1.5`, `[1]`, `01a` refused       | `:393` **ADJUDICATE**                     |
-| Capability whitespace                                                                                | trimmed; case/homoglyph/width/encoding refused                        | `:413` **ADJUDICATE**                     |
-| YAML comment after a value                                                                           | never part of the value                                               | `:436`                                    |
-| `lifecycle.say`: `true`, `false`, text, mapping, empty mapping, empty string, list                   | each read or refused by name                                          | `:582`–`:635`                             |
-| `lifecycle` track / step / override that is not a mapping                                            | refused, naming the entry                                             | `:641`, `:647`, `:724`                    |
-| `lifecycle.exempt` not a mapping; a guard that is neither boolean nor list                           | refused                                                               | `:662`, `:685`                            |
-| `lifecycle.overrides:` written null                                                                  | no overrides                                                          | `:704`                                    |
-| Missing lifecycle labels                                                                             | named at once, singular/plural correct                                | `:747`                                    |
-| Durations (`soon`, `7`, `0d`) in step and override                                                   | refused, naming the grammar                                           | `:788`                                    |
-| `propose:` not a mapping; partial `propose.workspace`                                                | refused / each default filled independently                           | `:835`, `:841`, `:855`                    |
-| dependa ignore `ecosystem:` null; duplicate `types`                                                  | no ecosystem / deduplicated                                           | `:865`, `:876`                            |
-| Label `color:` (case, null, `#`-prefixed, non-hex, wrong length, list)                               | normalised to lower case, or refused                                  | `:899`–`:908`                             |
-| Label `create:` (null, non-boolean)                                                                  | defaults `false`, or refused                                          | `:924`, `:929`                            |
-| `endpoints` line with no alias                                                                       | quotes the whole entry                                                | `inputs.test.ts:604`                      |
-| `api-keys` line with no `=`                                                                          | masked first, then refused                                            | `inputs.test.ts:612`                      |
-| `api-keys` entry with no alias                                                                       | refused                                                               | `inputs.test.ts:635`                      |
-| `since` naming a field the calendar has not (`2026-13-01`, day 0, day 32)                            | refused                                                               | `inputs.test.ts:639`                      |
-| `since` the calendar overflows (`2026-02-30`)                                                        | rolls to 2 March                                                      | `inputs.test.ts:659` **ADJUDICATE**       |
+| Input class                                                                                          | Deterministic outcome                                                                                                                                                                                                                                                 | Test                                      |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Valid — minimal, and a whole file                                                                    | parses                                                                                                                                                                                                                                                                | `warrant.contract.test.ts:220` (rows 1–2) |
+| Empty file / whitespace only / comments only                                                         | `is not a warrant`                                                                                                                                                                                                                                                    | `:220`                                    |
+| Malformed YAML                                                                                       | `is not valid YAML`                                                                                                                                                                                                                                                   | `:220`                                    |
+| A list or a bare string at the root                                                                  | `is not a warrant`                                                                                                                                                                                                                                                    | `:220`                                    |
+| Two YAML documents in one file                                                                       | `is not valid YAML`                                                                                                                                                                                                                                                   | `:220`, `:376`                            |
+| Duplicate keys, at the root and inside `duties:`                                                     | `is not valid YAML` — never last-wins                                                                                                                                                                                                                                 | `:220`                                    |
+| Unknown root field, incl. pre-1.0 `capabilities:` and legacy `apply`                                 | `unrecognized key`                                                                                                                                                                                                                                                    | `:220`                                    |
+| Unknown label field                                                                                  | `unrecognized key`                                                                                                                                                                                                                                                    | `:220`                                    |
+| Invalid duty                                                                                         | `is not a known duty`                                                                                                                                                                                                                                                 | `:220`, `:479`                            |
+| Invalid capability                                                                                   | `is not something a duty can be granted`                                                                                                                                                                                                                              | `:220`, `:413`                            |
+| Conflicting config (`[none]` beside a real capability)                                               | refused                                                                                                                                                                                                                                                               | `:220`                                    |
+| Missing required field (`version`, a label `description`)                                            | named                                                                                                                                                                                                                                                                 | `:220`                                    |
+| Invalid model config (`version: 2`)                                                                  | `declares version`                                                                                                                                                                                                                                                    | `:220`                                    |
+| `duties:` written with nothing under it                                                              | refused as a half-finished edit                                                                                                                                                                                                                                       | `:220`                                    |
+| Wrong types (`labels` as a mapping, `duties` as a list, description as a number, confidence as text) | refused, naming the type                                                                                                                                                                                                                                              | `:220`                                    |
+| Null vs absent (`labels:` null = empty; `duties:` null refused; a duty written null refused)         | distinguished                                                                                                                                                                                                                                                         | `:220`                                    |
+| Oversized free text (100 000 characters)                                                             | carried, not truncated                                                                                                                                                                                                                                                | `:220`                                    |
+| YAML anchors                                                                                         | accepted and inert; an alias cannot be parked under a second root key                                                                                                                                                                                                 | `:332`                                    |
+| YAML merge keys (`<<`)                                                                               | refused at root, in `duties:`, and on a label                                                                                                                                                                                                                         | `:353`                                    |
+| `version` spellings `1`, `1.0`, `0x1`, `+1`, `0o1`                                                   | all accepted as one; `"1"`, `true`, `1.5`, `[1]`, `01a` refused                                                                                                                                                                                                       | `:393` — root: PIN CORRECT                |
+| Capability whitespace                                                                                | matched after `String.trim()` — which strips NBSP, BOM, the ideographic space and the line/paragraph separators as well as space and tab, and nothing else; case, homoglyph, fullwidth, base64, zero-width space, ZWJ, word joiner, bidi override and NUL all refused | `:413` — root: PIN CORRECT                |
+| YAML comment after a value                                                                           | never part of the value                                                                                                                                                                                                                                               | `:470`                                    |
+| `lifecycle.say`: `true`, `false`, text, mapping, empty mapping, empty string, list                   | each read or refused by name                                                                                                                                                                                                                                          | `:616`–`:669`                             |
+| `lifecycle` track / step / override that is not a mapping                                            | refused, naming the entry                                                                                                                                                                                                                                             | `:675`, `:681`, `:758`                    |
+| `lifecycle.exempt` not a mapping; a guard that is neither boolean nor list                           | refused                                                                                                                                                                                                                                                               | `:696`, `:719`                            |
+| `lifecycle.overrides:` written null                                                                  | no overrides                                                                                                                                                                                                                                                          | `:738`                                    |
+| Missing lifecycle labels                                                                             | named at once, singular/plural correct                                                                                                                                                                                                                                | `:781`                                    |
+| Durations (`soon`, `7`, `0d`) in step and override                                                   | refused, naming the grammar                                                                                                                                                                                                                                           | `:822`                                    |
+| `propose:` not a mapping; partial `propose.workspace`                                                | refused / each default filled independently                                                                                                                                                                                                                           | `:869`, `:875`, `:889`                    |
+| dependa ignore `ecosystem:` null; duplicate `types`                                                  | no ecosystem / deduplicated                                                                                                                                                                                                                                           | `:899`, `:910`                            |
+| Label `color:` (case, null, `#`-prefixed, non-hex, wrong length, list)                               | normalised to lower case, or refused                                                                                                                                                                                                                                  | `:933`–`:942`                             |
+| Label `create:` (null, non-boolean)                                                                  | defaults `false`, or refused                                                                                                                                                                                                                                          | `:958`, `:963`                            |
+| `endpoints` line with no alias                                                                       | quotes the whole entry                                                                                                                                                                                                                                                | `inputs.test.ts:604`                      |
+| `api-keys` line with no `=`                                                                          | masked first, then refused                                                                                                                                                                                                                                            | `inputs.test.ts:612`                      |
+| `api-keys` entry with no alias                                                                       | refused                                                                                                                                                                                                                                                               | `inputs.test.ts:635`                      |
+| `since` naming a field the calendar has not (`2026-13-01`, day 0, day 32)                            | refused                                                                                                                                                                                                                                                               | `inputs.test.ts:639`                      |
+| `since` the calendar overflows (`2026-02-30`, `2025-02-29`, `2026-04-31`)                            | refused — the parsed date is compared back against the fields it was written with                                                                                                                                                                                     | `inputs.test.ts:659` **FIXED**            |
 
 ### No partial mutation, and no spend before validation
 
@@ -187,11 +230,11 @@ only thing a message varies by (`:250`).
 | Every refused source yields no warrant at all                                           | `warrant.contract.test.ts:270` |
 | A written `duties:` block still denies every unnamed duty, whatever else is in the file | `:287`                         |
 | A taxonomy validated only at the end still refuses the whole file                       | `:308`                         |
-| Malformed YAML fails before any network call                                            | `:489`                         |
-| An unknown capability fails before any network call                                     | `:499`                         |
-| A chosen path that is not there fails before any network call                           | `:509`                         |
-| Only a genuine absence at the default path ever reaches the forge                       | `:518`                         |
-| A warrant read from disk equals the same bytes parsed in memory                         | `:527`                         |
+| Malformed YAML fails before any network call                                            | `:523`                         |
+| An unknown capability fails before any network call                                     | `warrant.contract.test.ts:533` |
+| A chosen path that is not there fails before any network call                           | `:543`                         |
+| Only a genuine absence at the default path ever reaches the forge                       | `:552`                         |
+| A warrant read from disk equals the same bytes parsed in memory                         | `:561`                         |
 
 ### Doctor and runtime agree
 
@@ -201,11 +244,11 @@ only thing a message varies by (`:250`).
 | A duty-scoped report equals that duty's row in the whole-run report                                                                                                                                    | `:205`                                        |
 | A level-0 report describes the same narrowest authority a level-0 run acts under                                                                                                                       | `:219`                                        |
 | Every configuration a run refuses is red in doctor too                                                                                                                                                 | `:268`                                        |
-| The finding is the reader's own sentence, not a second one                                                                                                                                             | `:276`                                        |
-| A chosen path with no file is red in doctor                                                                                                                                                            | `:293`                                        |
-| A warrant granting nothing produces a table of nothing, not a table of defaults                                                                                                                        | `:308`                                        |
-| An inert grant is red and narrowed out of effective authority                                                                                                                                          | `:329`                                        |
-| A denied duty is a table row, never a problem                                                                                                                                                          | `:341`                                        |
+| The finding is the reader's own sentence, not a second one                                                                                                                                             | `:281`                                        |
+| A chosen path with no file is red in doctor                                                                                                                                                            | `:298`                                        |
+| A warrant granting nothing produces a table of nothing, not a table of defaults                                                                                                                        | `:313`                                        |
+| An inert grant is red and narrowed out of effective authority                                                                                                                                          | `:334`                                        |
+| A denied duty is a table row, never a problem                                                                                                                                                          | `:349`                                        |
 | A forge failure that is not `Error`-shaped is classified, not crashed on                                                                                                                               | `doctor/diagnose.contract.test.ts:91`–`:141`  |
 | The provider probe reports a class of answer, never a provider's words                                                                                                                                 | `doctor/diagnose.contract.test.ts:186`–`:235` |
 
@@ -237,73 +280,103 @@ only thing a message varies by (`:250`).
 
 ### The fingerprint
 
-| Claim                                                          | Test                                            |
-| -------------------------------------------------------------- | ----------------------------------------------- |
-| The same decision written twice is the same bytes              | `state.idempotency.test.ts:500`                 |
-| Key order is fixed regardless of construction order            | `:504`                                          |
-| Write → read → write is a fixed point                          | `:525`, `authority.property.test.ts:386`        |
-| Every meaningful field changes the bytes when it changes       | `:533`                                          |
-| Decided-label order is part of the record, not normalised away | `:558`                                          |
-| A record is always exactly one NDJSON line                     | `:567`, `authority.property.test.ts:374`        |
-| An in-memory `note: "   "` settles on the first write          | `authority.property.test.ts:405` **ADJUDICATE** |
+| Claim                                                          | Test                                                              |
+| -------------------------------------------------------------- | ----------------------------------------------------------------- |
+| The same decision written twice is the same bytes              | `state.idempotency.test.ts:500`                                   |
+| Key order is fixed regardless of construction order            | `state.idempotency.test.ts:504`                                   |
+| Write → read → write is a fixed point                          | `state.idempotency.test.ts:525`, `authority.property.test.ts:476` |
+| Every meaningful field changes the bytes when it changes       | `state.idempotency.test.ts:533`                                   |
+| Decided-label order is part of the record, not normalised away | `state.idempotency.test.ts:558`                                   |
+| A record is always exactly one NDJSON line                     | `state.idempotency.test.ts:567`, `authority.property.test.ts:464` |
+| An in-memory `note: "   "` settles on the first write          | `authority.property.test.ts:495` **ADJUDICATE**                   |
 
 ### Corruption fails safely
 
-| Claim                                                                           | Test                             |
-| ------------------------------------------------------------------------------- | -------------------------------- |
-| A line that is not a correction is refused whole, never half-read               | `state.idempotency.test.ts:588`  |
-| A context field that is the wrong type defaults rather than losing the decision | `:609`                           |
-| A pivot rendering that is not one reads as no rendering                         | `:623`                           |
-| An unreadable shard is reported and the rest of the store still read            | `memory.test.ts:607`             |
-| Reading a line never throws, whatever the file holds                            | `authority.property.test.ts:455` |
+| Claim                                                                               | Test                             |
+| ----------------------------------------------------------------------------------- | -------------------------------- |
+| A line that is not a correction is refused whole, never half-read                   | `state.idempotency.test.ts:588`  |
+| A context field that is the wrong type defaults rather than losing the decision     | `:609`                           |
+| A pivot rendering that is not one reads as no rendering                             | `:623`                           |
+| An unreadable shard is reported and the rest of the store still read                | `memory.test.ts:607`             |
+| Reading a line never throws, and a readable and an unreadable line are both reached | `authority.property.test.ts:545` |
 
 ---
 
 ## 6. Negative controls
 
 Each row is a real production check, temporarily removed; `RED` means at least
-one test in this round's suites failed. All 24 were confirmed red after the
-final refactor of the assertions.
+one test in this round's suites failed. All 26 were confirmed red against the
+final code.
 
-| #   | Check removed                                          | File                   | Result |
-| --- | ------------------------------------------------------ | ---------------------- | ------ |
-| A   | taxonomy membership in the label gate                  | `core/enforce.ts`      | RED    |
-| B   | deny-by-default once `duties:` is written              | `core/warrant.ts`      | RED    |
-| C   | `unnamed` always false                                 | `core/warrant.ts`      | RED    |
-| D   | unknown capability accepted                            | `core/warrant.ts`      | RED    |
-| E   | unknown root key ignored                               | `core/warrant.ts`      | RED    |
-| F   | confidence finiteness gate dropped                     | `core/enforce.ts`      | RED    |
-| G   | store `outcome` enum relaxed                           | `core/memory.ts`       | RED    |
-| H   | dry-run early return removed                           | `core/state-branch.ts` | RED    |
-| I   | existing-PR check skipped                              | `core/state-branch.ts` | RED    |
-| J   | implicit warrant grants every capability               | `core/warrant.ts`      | RED    |
-| K   | fence nonce fixed                                      | `core/enclose.ts`      | RED    |
-| L   | `sanitize` made a no-op                                | `core/sanitize.ts`     | RED    |
-| M   | store line written unescaped                           | `core/memory.ts`       | RED    |
-| N   | `create` derived from a label description              | `core/warrant.ts`      | RED    |
-| O   | `owner` derived from a label description               | `core/warrant.ts`      | RED    |
-| P   | capability match lower-cased (homoglyph/case widening) | `core/warrant.ts`      | RED    |
-| Q   | human label ignored in exclusivity                     | `core/enforce.ts`      | RED    |
-| R   | store `thread` type check relaxed                      | `core/memory.ts`       | RED    |
-| S   | lifecycle step wrong-type guard removed                | `core/warrant.ts`      | RED    |
-| T   | `say:` mapping value unchecked                         | `core/warrant.ts`      | RED    |
-| U   | `isMissing` broadened past 404                         | `core/forge.ts`        | RED    |
-| V   | partial-write warning restored to the old wording      | `core/state-branch.ts` | RED    |
-| W   | doctor's ladder narrowing skipped                      | `doctor/diagnose.ts`   | RED    |
-| X   | doctor ignores `denied`                                | `doctor/diagnose.ts`   | RED    |
+Rows Y1–Y13 are the second round. Y1 is the mutation an independent reviewer
+used to break the boundary with the whole suite green — it is first in the list
+because it is the reason §1a gained its `Cannot set a label field` row.
 
----
+| #   | Check removed                                                       | File                     | Result |
+| --- | ------------------------------------------------------------------- | ------------------------ | ------ |
+| Y1  | `create` derived from a label description (**the reviewer's**)      | `core/warrant.ts`        | RED    |
+| Y2  | `owner` derived from a label description                            | `core/warrant.ts`        | RED    |
+| Y3  | `confidence` derived from a label description                       | `core/warrant.ts`        | RED    |
+| Y4  | `exclusive_with` derived from a label description                   | `core/warrant.ts`        | RED    |
+| Y5  | `paths` derived from a label description                            | `core/warrant.ts`        | RED    |
+| Y6  | fence nonce fixed                                                   | `core/enclose.ts`        | RED    |
+| Y7  | pack unknown top-level key accepted                                 | `duties/review/packs.ts` | RED    |
+| Y8  | pack alias resolution re-enabled                                    | `duties/review/packs.ts` | RED    |
+| Y9  | rules unknown top-level key silently dropped                        | `duties/review/rules.ts` | RED    |
+| Y10 | `since` calendar-overflow check removed                             | `core/inputs.ts`         | RED    |
+| Y11 | `since` overflow check made to reject every date                    | `core/inputs.ts`         | RED    |
+| Y12 | capability match widened past `String.trim()` (zero-width stripped) | `core/warrant.ts`        | RED    |
+| Y13 | doctor emits a second finding for one configuration mistake         | `doctor/diagnose.ts`     | RED    |
+| A   | taxonomy membership in the label gate                               | `core/enforce.ts`        | RED    |
+| B   | deny-by-default once `duties:` is written                           | `core/warrant.ts`        | RED    |
+| C   | `unnamed` always false                                              | `core/warrant.ts`        | RED    |
+| F   | confidence finiteness gate dropped                                  | `core/enforce.ts`        | RED    |
+| G   | store `outcome` enum relaxed                                        | `core/memory.ts`         | RED    |
+| H   | dry-run early return removed                                        | `core/state-branch.ts`   | RED    |
+| I   | existing-PR check skipped                                           | `core/state-branch.ts`   | RED    |
+| J   | implicit warrant grants every capability                            | `core/warrant.ts`        | RED    |
+| M   | store line written unescaped                                        | `core/memory.ts`         | RED    |
+| R   | store `thread` type check relaxed                                   | `core/memory.ts`         | RED    |
+| V   | partial-write warning restored to the old wording                   | `core/state-branch.ts`   | RED    |
+| W   | doctor's ladder narrowing skipped                                   | `doctor/diagnose.ts`     | RED    |
+| X   | doctor ignores `denied`                                             | `doctor/diagnose.ts`     | RED    |
+
+Round 1 also confirmed red, and re-verified by the reviewer, on checks whose
+mutations are unchanged: unknown root key, unknown capability, `sanitize`,
+lifecycle step and `say:` type guards, `isMissing`.
+
+Two round-2 mutations SURVIVED on first attempt and were fixed in the tests,
+not in production:
+
+- **Y2** — the payload set contained no `@handle`, so nothing could ever be
+  lifted into `owner`. A `handle-mention` payload was added, which makes the
+  `owner` column of every table in §1 non-vacuous.
+- **Y8** — the alias test asserted only `toThrow`, which a pack refused for any
+  unrelated reason would satisfy. It now asserts the message and pairs the
+  aliased file with an alias-free twin that parses cleanly.
 
 ## 7. Residual gaps and classified branches
 
 ### GAPs
 
-| ID   | Gap                                                                                                                                                                                                                                                                                    | Priority |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| G-A1 | The channel dimension in §1 is a name, not a wire fixture. The invariant is proved at the module boundary — where a channel genuinely is only a string — but nothing here drives a real GitHub event payload end to end. Duty-level integration suites cover that; this page does not. | P2       |
-| G-A2 | `docs/reference/warrant-format.md` does not state whether YAML anchors are permitted. `warrant.contract.test.ts:332` pins the behaviour; the reference should say it.                                                                                                                  | P3       |
-| G-A3 | `durationField`'s `allowNever: true` overload (`core/warrant.ts:1871-1889`) has no call site in `src/`. The `never` value and the " or `never`." half of its message are unreachable.                                                                                                  | P3       |
-| G-A4 | `diagnose.ts:503-506` is a ternary whose two arms produce the identical string. Harmless, but it is dead code masquerading as a branch.                                                                                                                                                | P3       |
+| ID   | Gap                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Priority |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| G-A1 | ~~The channel dimension in §1 is a name, not a wire fixture.~~ **RESOLVED.** §1 no longer claims a per-channel test it does not have: the ten channels that share a reader are stated as sharing one, and the two with a reader of their own (`rule-file`, `rule-pack`) now have real tests against the real parsers. What remains true and is now said in §1 rather than hidden here: no GitHub event payload is driven end to end from this page — duty-level integration suites own that. | closed   |
+| G-A5 | `parseRules` warns-and-ignores an unknown top-level key where `parsePack` refuses one red. Both are safe; a maintainer who assumed the two behaved alike would be wrong about which of their mistakes gets reported. Worth one sentence in the review duty's reference.                                                                                                                                                                                                                      | P3       |
+| G-A2 | `docs/reference/warrant-format.md` does not state whether YAML anchors are permitted. `warrant.contract.test.ts:332` pins the behaviour; the reference should say it.                                                                                                                                                                                                                                                                                                                        | P3       |
+| G-A3 | `durationField`'s `allowNever: true` overload (`core/warrant.ts:1871-1889`) has no call site in `src/`. The `never` value and the " or `never`." half of its message are unreachable.                                                                                                                                                                                                                                                                                                        | P3       |
+| G-A4 | `diagnose.ts:503-506` is a ternary whose two arms produce the identical string. Harmless, but it is dead code masquerading as a branch.                                                                                                                                                                                                                                                                                                                                                      | P3       |
+
+### Adjudicated pins
+
+Four behaviours were pinned as found in the first round and adjudicated by root:
+
+| Behaviour                                                                | Verdict                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version: 1.0` / `0x1` / `+1` / `0o1` accepted as the integer `1`        | PIN CORRECT — kept, with the accept-surface written out in §4                                                                                                                                                                                                                                                                                                                                                |
+| Capability entries matched after `String.trim()`                         | PIN CORRECT — kept, with the exact trim surface measured in `warrant.contract.test.ts:413`                                                                                                                                                                                                                                                                                                                   |
+| `since: 2026-02-30` rolling to 2 March                                   | **REAL DEFECT — FIXED.** The line above it already refused `2026-01-32` and `2026-13-01` as "not a real date"; 30 February is exactly as impossible, and the inconsistency was the bug. `inputs.ts` now compares the parsed date back against the fields it was written with. Regression proved red first (`inputs.test.ts:659`), with a leap-day guard so the check cannot eat a real 29 February (`:683`). |
+| `formatCorrection` not normalising `note` the way `parseCorrection` does | PIN DEFENSIBLE — kept as documented; unreachable in production, every writer sets `note` to `null` or a trimmed sentence                                                                                                                                                                                                                                                                                     |
 
 ### Branch coverage in this area
 
@@ -314,11 +387,12 @@ and `src/doctor/**` (`run.ts` stays coverage-excluded — it calls
 |                   | Branches | Covered       | Uncovered |
 | ----------------- | -------- | ------------- | --------- |
 | Before this round | 1045     | 961 (91.96%)  | 84        |
-| After             | 1045     | 1011 (96.75%) | 34        |
+| After             | 1053     | 1019 (96.77%) | 34        |
 
 `state-branch.ts`, `inputs.ts` and `pivot.ts` reach 100%; `warrant.ts` moves
-90.0% → 97.2% and `diagnose.ts` 80.5% → 90.2%. The 34 that remain are all in
-the table below.
+90.0% → 97.2% and `diagnose.ts` 80.5% → 90.2%. The branch total grew by 8
+because the `since` fix added a real check. The 34 that remain are all in the
+table below, classified rather than excluded.
 
 ### Branches deliberately left uncovered
 
