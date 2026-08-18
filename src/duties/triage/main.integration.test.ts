@@ -456,7 +456,7 @@ async function route(
               name: at.split("/").pop(),
               path: at,
               sha: file.sha,
-              content: Buffer.from(file.content, "utf8").toString("base64"),
+              content: encodedFor(file.content),
               encoding: "base64",
             },
       );
@@ -527,6 +527,29 @@ async function readAll(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk as Buffer));
   return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * The base64 of a file's content, computed once per distinct body.
+ *
+ * The shard-cap case seeds five hundred shards with the SAME 900 KB string and
+ * the duty reads every one of them, so without this the stub re-encodes an
+ * identical 900 KB buffer five hundred times — measured at 428 ms of pure
+ * repetition, on top of the transport the case actually exists to exercise.
+ * Keyed on the content itself, so two files that genuinely differ still get
+ * their own encoding and nothing about what the duty receives changes.
+ *
+ * A `Map` rather than a WeakMap: the keys are strings, and the cache lives
+ * exactly as long as the module does.
+ */
+const encodedContent = new Map<string, string>();
+
+function encodedFor(content: string): string {
+  const cached = encodedContent.get(content);
+  if (cached !== undefined) return cached;
+  const encoded = Buffer.from(content, "utf8").toString("base64");
+  encodedContent.set(content, encoded);
+  return encoded;
 }
 
 function send(response: ServerResponse, status: number, payload: unknown): void {
@@ -1792,34 +1815,75 @@ describe("record", () => {
     expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.2.ndjson`)).toBeUndefined();
   });
 
-  it("fails red, naming the limit, once every numbered sibling up to the cap is already full", async () => {
-    await writeFile(warrantPath, RECORDING_WARRANT);
-    const full = "x".repeat(900_001);
-    // Seed this month's shard and every numbered sibling through the cap
-    // (`MAX_SHARD_ATTEMPTS`, 500) already full — there is nowhere left to
-    // roll forward to, so a 501st shard must never be tried.
-    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-1" });
-    for (let n = 2; n <= 500; n += 1) {
-      stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.${String(n)}.ndjson`, {
-        content: full,
-        sha: `sha-${String(n)}`,
-      });
-    }
-    stub.labels = ["bug"];
-    const event = await labelEvent();
+  /**
+   * This case's own budget, deliberately larger than the file's 30s.
+   *
+   * Measured, not guessed. The case seeds five hundred shards — the production
+   * cap, `MAX_SHARD_ATTEMPTS` — each one 900,001 bytes, because
+   * `nextWritableShard` decides a shard is full by measuring
+   * `Buffer.byteLength(existing.text)` and so must actually receive that many
+   * bytes. It then reads all five hundred, in order, because that is what the
+   * production loop does. The cost is therefore 500 sequential HTTP
+   * round-trips carrying 1.14 MB of base64 each — 0.56 GB in total — plus the
+   * base64 decode and byte count the duty performs on every one. That is real
+   * work the case exists to exercise, not incidental setup: shrinking the
+   * fixture would stop proving the cap holds.
+   *
+   * Observed wall time for this case, on this machine:
+   *
+   *   standalone (file alone)            13,997 ms
+   *   default workers (whole area)       ~23,000 ms
+   *   `--maxWorkers=3` (whole area)      20,905 ms passing, >30,101 ms failing
+   *
+   * Against the file's 30s that is 1.15x headroom at DEFAULT workers and
+   * intermittently negative under contention — which is how this went red for
+   * three separate agents on a change that had nothing to do with it. A test
+   * whose result depends on what else is running is not a test, so the budget
+   * here is 90s: 6.4x the standalone measurement and 3.4x the slowest run ever
+   * observed. Only a genuine hang or a real complexity regression reaches it.
+   *
+   * The file's own 30s at the top stays exactly where it is. It is the canary
+   * for the other hundred cases in here, none of which comes close to it, and
+   * this is the one case with a reason to be slow.
+   *
+   * Note that ~1.7s was removed from this before the budget was raised: the
+   * stub was re-encoding the same 900 KB body to base64 once per shard (see
+   * `encodedFor`). What is left is transport the duty genuinely performs.
+   */
+  const SHARD_CAP_BUDGET_MS = 90_000;
 
-    const run = await runAction(
-      stub,
-      { "corrections-dir": CORRECTIONS },
-      { GITHUB_EVENT_PATH: event },
-    );
+  it(
+    "fails red, naming the limit, once every numbered sibling up to the cap is already full",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      const full = "x".repeat(900_001);
+      // Seed this month's shard and every numbered sibling through the cap
+      // (`MAX_SHARD_ATTEMPTS`, 500) already full — there is nowhere left to
+      // roll forward to, so a 501st shard must never be tried.
+      stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-1" });
+      for (let n = 2; n <= 500; n += 1) {
+        stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.${String(n)}.ndjson`, {
+          content: full,
+          sha: `sha-${String(n)}`,
+        });
+      }
+      stub.labels = ["bug"];
+      const event = await labelEvent();
 
-    expect(run.code).not.toBe(0);
-    expect(run.log).toContain("500 shards");
-    expect(run.log).toContain("shard 501");
-    // No 501st shard was ever written.
-    expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.501.ndjson`)).toBeUndefined();
-  });
+      const run = await runAction(
+        stub,
+        { "corrections-dir": CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).not.toBe(0);
+      expect(run.log).toContain("500 shards");
+      expect(run.log).toContain("shard 501");
+      // No 501st shard was ever written.
+      expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.501.ndjson`)).toBeUndefined();
+    },
+    SHARD_CAP_BUDGET_MS,
+  );
 
   it("finds and replaces an existing entry sitting in a numbered sibling shard, not only the first", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);

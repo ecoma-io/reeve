@@ -190,6 +190,34 @@ regression, and the cited test is what says so.
 
 ---
 
+## Defects found and FIXED this round
+
+Both were pinned to current behaviour first and adjudicated to a fix by root.
+Each was proven RED against the unfixed source before the fix landed.
+
+1. **`dependa/managers/npm.ts:282` — pnpm peer-resolved entries lost their
+   version.** A pnpm 6+ key `/lodash@4.17.21(react@18.0.0):` was split on the
+   LAST `@`, inside the parenthetical, so the name and version both came out
+   wrong and `currentVersion` resolved to `""`. The code's own comment said it
+   meant to strip the parenthetical; it stripped after the split, which is too
+   late. Fixed by stripping before the split.
+   **Downstream cost, traced and now pinned at `dependa/semver.test.ts`:**
+   `parse("")` is null, so `classify("", target)` returns null for BOTH
+   ordinary and security updates, and `main.ts:328` logs at `core.info` — not a
+   warning, so it reaches neither the run summary nor a workflow annotation —
+   and skips the candidate. Every peer-resolved dependency in a pnpm repository
+   was dropped from dependency maintenance entirely and silently, security
+   updates included. Regression: `dependa/managers/npm.test.ts`, including an
+   end-to-end block that walks the same lockfile through to a real
+   classification.
+2. **`dependa/datasources/npm.ts:95` — a `versions` ARRAY was accepted.** An
+   array passes `typeof !== "object"` and is then read with `Object.entries`,
+   so `versions: ["1.0.0","2.0.0"]` produced releases named `"0"` and `"1"`,
+   reported as `available`. That is malformed upstream data accepted as
+   success — the datasource analogue of A2, "malformed output is NOT success".
+   Fixed with an `Array.isArray` guard beside the `typeof` check. Regression:
+   `dependa/datasources/npm.test.ts`.
+
 ## GAPS, by priority
 
 ### P0 — none outstanding in this area
@@ -200,6 +228,19 @@ boundary (`remediation/envelope.adversarial.test.ts:112`), and the run-wide
 `Weather` threading at all nine model-consumption sites.
 
 ### P1
+
+0. **`dependa/main.ts:383` delivers the `enclose()` injection-fence rule in a
+   `user` turn** while all eight other model-facing sites deliver it as
+   `role: "system"`. ADJUDICATED 2026-08-18: **pinned, not changed** — moving a
+   fence rule between turn roles changes the prompt, and a prompt change in a
+   behaviour-freeze round needs eval evidence. The current shape and the
+   divergence are now asserted at
+   `dependa/risk-prompt.contract.test.ts`, which also holds the fence itself so
+   it cannot be dropped in the meantime. **Round 2: move the rule into a
+   `system` turn, with eval evidence.** It matters because a rule delivered in
+   the same turn as the material it governs has no more standing than that
+   material, and this duty's evidence is third-party release notes and advisory
+   text.
 
 1. **dependa's model roster has no contract test.** The risk-interpretation
    rotation lives at `dependa/main.ts:381`, inside the entry point, and dependa
@@ -217,28 +258,9 @@ boundary (`remediation/envelope.adversarial.test.ts:112`), and the run-wide
    test that runs it. Note that closing this earns NO coverage points
    (`main.ts` is coverage-excluded by design); it is a proof gap, not a
    percentage gap, and should not be deprioritised for that reason.
-4. **`dependa/main.ts:383` delivers the `enclose()` injection-fence rule in a
-   `user` message** while all eight other model-facing sites deliver it as
-   `role: "system"`. Untested either way, and NOT changed here — the divergence
-   is reported for a ruling rather than resolved by a test author's judgement.
 
 ### P2
 
-5. **`dependa/managers/npm.ts` pnpm peer-suffix defect**, pinned to current
-   behaviour with an `// ADJUDICATE:` block at
-   `dependa/managers/npm.test.ts:820`. A pnpm 6+ entry
-   `/lodash@4.17.21(react@18.0.0):` splits on the last `@`, so `currentVersion`
-   resolves EMPTY for every peer-resolved dependency. The code's own comment
-   says it means to strip the parenthetical, so the intent is declared and
-   unmet. One-line fix named in the test; not applied, because the downstream
-   treatment of an empty `currentVersion` is another owner's contract.
-6. **`npm` datasource accepts a `versions` ARRAY**, fabricating a release named
-   after the array index and reporting `available`. Pinned to current behaviour
-   with an `// ADJUDICATE:` block at
-   `dependa/datasources/npm.test.ts:333`. No real registry sends this shape and
-   a `"0"` target does not survive semver comparison, so the blast radius is
-   small — but the module's own doc says malformed documents degrade to
-   `malformed-metadata`.
 7. **`docker-registry`'s `isSafeRegistry` has a `localhost` arm that a bare
    `localhost/x` cannot reach**, because `parseImageName:366` classifies a
    first path component as a registry only when it contains a `.` or a `:`.
