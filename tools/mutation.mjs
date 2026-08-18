@@ -37,6 +37,51 @@
  * Scratch lives in `.tmp/mutation/` (gitignored) and is removed on exit. A
  * crashed run can leave a source file renamed into it; the next run detects
  * that and puts it back before doing anything else — see `recover`.
+ *
+ * ── Why a table and not a sample ───────────────────────────────────────────
+ *
+ * A suite can be green three ways: the assertion holds, the assertion is
+ * missing, or the branch was never reached. Coverage separates the third from
+ * the other two. **Nothing but a mutation separates the first from the
+ * second** — and at the integration tier, where a fixture decides which
+ * branches exist at all, the second and third are the same mistake wearing
+ * different clothes. TL2 put it exactly, after auditing eleven capability
+ * gates that every gate in this repository had reported green:
+ *
+ *   "Every one of these eleven gates was green under mutation because a
+ *    fixture made its branch UNREACHABLE, not because an assertion was
+ *    missing. At the integration tier an unreachable branch and an unasserted
+ *    one look identical from outside, and only a mutation tells them apart."
+ *
+ * That is the argument for gating every capability gate rather than a
+ * representative few, and it generalises well past this repository.
+ *
+ * ── Two lessons this table learned the hard way ────────────────────────────
+ *
+ * Both are checklist items for whoever extends this file, not history.
+ *
+ * **1. Two independent gates that share an exclusion list are one gate.**
+ * `src/duties/{duty}/main.ts` was excluded from coverage for a sound reason (those
+ * files call `run()` at import time, so importing one to measure it executes
+ * the action in the test worker) and excluded from this table for a different
+ * sound reason (a mutation there needs a bundle rebuild). Each argument held
+ * alone. Together they were a hole: the two mechanisms meant to cover each
+ * other's blind spots had the same blind spot, and nothing named them as the
+ * same set of files. Two auditors then flipped `dependa`'s and `harmonise`'s
+ * publish gates fully open and every gate in the repository stayed green.
+ * Nobody had forgotten a test. **When a file is excluded from a gate, ask what
+ * else excludes it** — and if a second, independent gate excludes it for its
+ * own good reason, the file is not doubly protected, it is unprotected, and
+ * the two sound arguments are what hide that.
+ *
+ * **2. A `from` string should match what the seam IS, not the order of things
+ * around it.** One row went STALE when two unrelated and entirely correct
+ * fixes moved the lines around the seam it named. Its `from` had matched four
+ * consecutive statements — this call, then that call, then this return — which
+ * is the part of a function most likely to change for reasons that have
+ * nothing to do with the invariant. The repaired row matches the return shape
+ * unique to the function it gates. A `from` spanning several statements in
+ * sequence will go stale the first time somebody legitimately inserts a line.
  */
 import {
   access,
@@ -79,7 +124,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * deliberate and visible rather than silent — which is the whole difference
  * between a gate that failed and a gate that was never asked.
  */
-const TABLE_FLOOR = 60;
+const TABLE_FLOOR = 70;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -758,6 +803,122 @@ export const MUTATIONS = [
     stage: "full",
     owner: "TL2",
     note: "A `create: true` taxonomy entry mints a repository label on a run never granted `label`.",
+  },
+  // ── every capability gate an entry point carries ────────────────────────
+  //
+  // The four rows above this block were the first entry-point mutations, added
+  // after two auditors flipped `dependa`'s and `harmonise`'s publish gates open
+  // and every gate in the repository stayed green. These seven finish the set:
+  // eleven capability gates, each one the last check between a run and a
+  // repository mutation, none of them observable any other way. The argument
+  // for gating all of them rather than a sample is in this file's header,
+  // under "Why a table and not a sample".
+  {
+    name: "dependa delivers an injection fence with no sentence saying what it is",
+    file: "src/duties/dependa/main.ts",
+    from: '            enclosed?.rule ?? "",',
+    to: '            "",',
+    targets: ["src/duties/dependa/main.integration.test.ts"],
+    rebuilds: "dependa",
+    stage: "full",
+    owner: "TL2",
+    note: "Enclosed third-party prose reaches the model fenced but unexplained, which is the fence doing nothing.",
+  },
+  {
+    name: "harmonise writes a state branch without permission",
+    file: "src/duties/harmonise/main.ts",
+    from: '          const canWriteBranch =\n            settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");',
+    to: "          const canWriteBranch = true;",
+    targets: ["src/duties/harmonise/main.integration.test.ts"],
+    rebuilds: "harmonise",
+    stage: "full",
+    owner: "TL2",
+    note: "`state-branch` is written and a pull request opened on a warrant granting neither capability.",
+  },
+  {
+    name: "triage proposes a warrant edit without the propose capability",
+    file: "src/duties/triage/main.ts",
+    from: '  if (!permitted.includes("propose")) return null;',
+    to: "",
+    targets: ["src/duties/triage/main.integration.test.ts"],
+    rebuilds: "triage",
+    stage: "full",
+    owner: "TL2",
+    note: "The row with the most teeth in the table: downstream this opens a pull request editing `.github/reeve.yml`, the warrant itself.",
+  },
+  {
+    name: "triage records to a branch without open-pr (sweep)",
+    file: "src/duties/triage/main.ts",
+    from: '    canRecordToBranch = recording && permitted.includes("open-pr");',
+    to: "    canRecordToBranch = recording;",
+    targets: ["src/duties/triage/main.integration.test.ts"],
+    rebuilds: "triage",
+    stage: "full",
+    owner: "TL2",
+    note: "A sweep commits corrections to a state branch nobody was asked to review.",
+  },
+  {
+    name: "triage records to a branch without open-pr (single thread)",
+    file: "src/duties/triage/main.ts",
+    from: '            canRecordToBranch = recordGrantedByRun(permitted) && permitted.includes("open-pr");',
+    to: "            canRecordToBranch = recordGrantedByRun(permitted);",
+    targets: ["src/duties/triage/main.integration.test.ts"],
+    rebuilds: "triage",
+    stage: "full",
+    owner: "TL2",
+    note: "The same rule written out a second time for the single-thread path — a rule copied is a rule that drifts, so it is gated twice.",
+  },
+  {
+    name: "lifecycle unstales a label without the label capability",
+    file: "src/duties/lifecycle/main.ts",
+    from: '  if (outcome.permitted.includes("label")) {',
+    to: "  if (true as boolean) {",
+    targets: ["src/duties/lifecycle/main.integration.test.ts"],
+    rebuilds: "lifecycle",
+    stage: "full",
+    owner: "TL2",
+    note: "Labels are removed from threads on a run the warrant never granted `label`.",
+  },
+  {
+    name: "remediation proposes without the propose capability",
+    file: "src/duties/remediation/main.ts",
+    from: '  if (!permitted.includes("propose")) {',
+    to: "  if (false as boolean) {",
+    targets: ["src/duties/remediation/main.integration.test.ts"],
+    rebuilds: "remediation",
+    stage: "full",
+    owner: "TL2",
+    note: "A warrant whose `duties:` block never names `remediation` gets proposals anyway.",
+  },
+  {
+    name: "untrusted label prose decides which proposals survive",
+    file: "src/duties/triage/propose.ts",
+    from: "    label.paths.some((p) => p === pkg.path || pkg.path.startsWith(`${p}/`)),",
+    to: '    label.paths.some((p) => p === pkg.path || pkg.path.startsWith(`${p}/`)) ||\n      (label.description ?? "").includes(pkg.path),',
+    targets: ["src/duties/triage/propose.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "A label's free-text description is read as if it were `paths:`, so prose anyone can edit silences a proposal.",
+  },
+  {
+    name: "the uncertain signal is never raised (producer)",
+    file: "src/duties/review/threads.ts",
+    from: "  return { threads, uncertain: threads.length === 0 && lastFull };",
+    to: "  return { threads, uncertain: false };",
+    targets: ["src/duties/review/threads.test.ts", "src/duties/review/threads.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "The load-bearing half: the consumer's withholding guard is already pinned, but nothing proved the signal it reads is ever raised.",
+  },
+  {
+    name: "the uncertain conjunct loses its truncation half",
+    file: "src/duties/review/threads.ts",
+    from: "uncertain: threads.length === 0 && lastFull };",
+    to: "uncertain: threads.length === 0 };",
+    targets: ["src/duties/review/threads.test.ts", "src/duties/review/threads.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "The other direction: a cold-start pull request with no owned threads reads as uncertain, so review withholds every first thread it would ever post.",
   },
 ];
 
