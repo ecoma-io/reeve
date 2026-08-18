@@ -185,14 +185,39 @@ The reason it is genuinely open rather than an oversight: GitHub documents **bot
 
 A row asserting the capacity reading is written out in `tools/mutation.mjs` and **left commented out**, so nothing here pins a behaviour the repository has not chosen. It lands the moment A1 is decided, in whichever direction.
 
+## The gate that reported success when asked to check nothing
+
+A fresh adversarial auditor emptied the `MUTATIONS` array and ran the harness. It printed `KILLED 0 · SURVIVED 0 · STALE 0` and **exited 0**.
+
+That is the most important finding in this document, because it is the same failure the whole table exists to detect, committed by the detector. A gate whose contents can be deleted is not a gate, and the deletion looks like an improvement while it happens: the board is clean, the job is green, and every number a reader would check is the number they wanted to see. It is precisely the shape of a coverage `exclude` that grows — the measurement improves because the denominator moved.
+
+`tools/mutation.mjs` now records `TABLE_FLOOR`, the row count the table may not fall below. An empty table is refused outright; a shrunken one is refused by name, and the refusal says what the correct fix is, because a refusal that does not name the right repair invites the wrong one — which here is lowering the floor until the run goes green:
+
+```
+REFUSING TO RUN: the mutation table holds 12 rows and the recorded floor is 54. Rows were
+removed. A row is only ever retired by re-pointing it at the seam the code moved to; if one
+genuinely no longer names real code, say so in the commit and lower TABLE_FLOOR deliberately.
+```
+
+The floor never goes down, for exactly the reason `vitest.config.ts`'s thresholds never go down. It cannot stop somebody editing the constant and the table in the same commit, and nothing in a self-checking script could; what it does is make that a deliberate, reviewable act rather than a silent one. [ci-gates.md](ci-gates.md#what-guards-the-guards) states that limit rather than implying a guarantee.
+
+### And the harness now has tests
+
+`tools/` had none — `scripts/` does, so the omission was the exception rather than the convention. `tools/mutation.test.mjs` and `tools/coverage-config.test.mjs` run under `node --test` via `pnpm test:tools`, which the CI mutation job runs ahead of the table itself.
+
+The argument for testing a test harness is narrower than it first sounds, and it is not "prove that mutation testing works" — the evidence for that is the board. It is this: **every branch worth testing here runs only when something has already gone wrong.** The empty-table refusal, the below-floor refusal, the zero-match `from`, the ambiguous `from` — none of them executes during a passing run. Code that only runs in emergencies is exactly the code that rots unnoticed, and verifying it by hand once, as was done when it was written, does not re-verify it after the next edit. The STALE detection has now caught one real regression; nothing was re-proving that it still could.
+
+Following `scripts/check-docs-links.mjs`'s own stated split, the judgement is separated from the I/O — `classifyRow(mutation, text)` and `checkTable(mutations, floor)` are pure — so the tests need no filesystem and no mocking library. The module's self-invocation is guarded so importing it does not run the table.
+
 ## Harness defects found and fixed
 
-Four, in `tools/mutation.mjs`. The first was a data-loss bug.
+Five, in `tools/mutation.mjs`. The first was a data-loss bug and the last was found by an adversarial auditor rather than by me.
 
 1. **A crashed run could destroy a source file.** The harness renames `src/foo.ts` into `.tmp/mutation/orig-*.ts`, writes the mutated copy, and restores in a `finally`. A run killed between the rename and the `finally` — Ctrl-C, an OOM, a cancelled CI job — leaves the _only_ copy of the source in `.tmp/mutation/`. The next run's first act was `rm(SCRATCH, { recursive: true, force: true })`. It deleted it. There is now a `recover()` pass that runs before the clear and puts back any source file that is missing, plus `exit`/`SIGINT`/`SIGTERM`/`SIGHUP` handlers that restore synchronously.
 2. **A stale mutation aborted the board instead of reporting.** See [the STALE incident](#the-stale-incident--why-the-preflight-exists).
 3. **An ambiguous `from` was not checked at all.** `String.prototype.replace` with a string pattern rewrites only the first occurrence, so a `from` matching two places would quietly mutate a seam nobody chose and report whatever the targets said about it. The preflight now requires exactly one occurrence and reports `matches N places — the edit is ambiguous` otherwise. This is not hypothetical at 54 rows: `if (dryRun) {` occurs twice in `src/core/state-branch.ts`, `const existingPr = existing[0];` occurs twice in the same file, `const plan = planThreads(reconciled, standing, threads);` occurs twice in `threads.ts`, and `if (uncertain) return { created: 0, … };` occurs twice. Every one of those rows had to carry disambiguating context, and the preflight is what said so.
-4. **A preflight/apply race.** `preflight` proves the match against the file as it was some milliseconds earlier; `apply` now refuses to run if its `replace` changed nothing, because a no-op edit would report the untouched suite's verdict as the mutation's.
+4. **The table could be emptied and the gate would pass.** See [the section above](#the-gate-that-reported-success-when-asked-to-check-nothing).
+5. **A preflight/apply race.** `preflight` proves the match against the file as it was some milliseconds earlier; `apply` now refuses to run if its `replace` changed nothing, because a no-op edit would report the untouched suite's verdict as the mutation's.
 
 Both staleness directions were verified by deliberately breaking a row and observing the failure — a zero-match `from` and an ambiguous one, each reported by mutation name with a non-zero exit, then reverted. The recovery path was verified by stranding a real source file in the scratch directory and confirming the next run put it back byte for byte.
 
@@ -211,4 +236,4 @@ Named so the next pass does not have to rediscover it:
 - **`src/duties/dependa/datasources/*` beyond the three files that gained tests this round.** `crates.ts`, `go-proxy.ts` and `npm.ts` now have offline suites; their D12 status classifications (404 → `not-found`, 429/5xx → `temporarily-unavailable`, 401/403 → `auth-refused`) are the natural next rows and none is mutated yet.
 - **The lockfile name-confusion boundary in `dependa/managers/npm.ts`** — see [Equivalent mutants](#equivalent-mutants).
 - **`src/core/enclose.ts` and `src/core/sanitize.ts`.** Both at high coverage, both security-relevant, neither mutated. Coverage says they are exercised; nothing yet says an assertion would fail if the defanging stopped.
-- **`tools/mutation.mjs` itself.** Outside the coverage `include` glob and untested. Its preflight was verified by hand rather than by a test — though it has now also been verified by the only evidence that really counts, which is catching a real regression in someone else's work.
+- **The I/O half of `tools/mutation.mjs`.** The refusal paths are now tested (`pnpm test:tools`), but the crash-recovery pass that restores a source file stranded by a killed run, and the signal handlers that restore on Ctrl-C, were verified by hand once and nothing re-verifies them. They are the paths whose failure mode is a missing source file, so they are worth a test the next time this file is opened.
