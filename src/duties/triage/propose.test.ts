@@ -991,3 +991,92 @@ describe("proposeSection", () => {
     expect(text).toContain("left untouched");
   });
 });
+
+// ---------------------------------------------------------------------------
+// `pathCovered` reads `paths:` and only `paths:`.
+//
+// A label's `paths:` is a maintainer's declaration of what that label already
+// speaks for — authority, written deliberately. A label's `description:` is
+// prose, and on a repository with no warrant file it is drawn from the GitHub
+// label descriptions (`warrant.ts` `resolveAuthority`), which any collaborator
+// can edit. The two must not be interchangeable here: `pathCovered` decides
+// whether a package gets a proposal at all, so prose reaching it means an
+// editable sentence can silently suppress a proposal — or, written the other
+// way, keep one alive.
+//
+// An auditor made `pathCovered` consult `description` as well as `paths` and
+// the whole suite stayed green: no case had a description whose text differed
+// from the paths in a way the outcome depended on. These assert the EFFECT —
+// which candidates survive — rather than what the function parsed.
+// ---------------------------------------------------------------------------
+
+describe("what suppresses a proposal, and what does not", () => {
+  it("suppresses a package a label's `paths:` already claims", () => {
+    const { candidates } = detectAdditions(
+      [label({ paths: ["packages/parser"], description: "Nothing to do with it." })],
+      atlasOf([pkg({ name: "parser", path: "packages/parser" })]),
+      cfg(),
+    );
+
+    expect(candidates).toEqual([]);
+  });
+
+  it("does NOT suppress a package merely NAMED in a label's description", () => {
+    // The mutation this closes. `description` mentioning the path must change
+    // nothing: the label claims no paths, so the package is still uncovered
+    // and still earns a proposal.
+    const { candidates } = detectAdditions(
+      [label({ paths: [], description: "Covers packages/parser and the tokenizer." })],
+      atlasOf([pkg({ name: "parser", path: "packages/parser" })]),
+      cfg(),
+    );
+
+    expect(candidates.map((candidate) => candidate.labelName)).toEqual(["area:parser"]);
+  });
+
+  it("still proposes when the description names the path and `paths:` claims a DIFFERENT one", () => {
+    // The sharper version: `paths:` is present and says something else, so a
+    // reader consulting the wrong field would reach the opposite answer.
+    const { candidates } = detectAdditions(
+      [label({ paths: ["apps/site"], description: "See packages/parser for details." })],
+      atlasOf([pkg({ name: "parser", path: "packages/parser" })]),
+      cfg(),
+    );
+
+    expect(candidates.map((candidate) => candidate.labelName)).toEqual(["area:parser"]);
+  });
+
+  it("suppresses a package under a directory a label's `paths:` claims", () => {
+    // Prefix coverage is the documented rule for `paths:`, and it is the one
+    // place a partial match is legitimate — on the authority field.
+    const { candidates } = detectAdditions(
+      [label({ paths: ["packages"] })],
+      atlasOf([pkg({ name: "parser", path: "packages/parser" })]),
+      cfg(),
+    );
+
+    expect(candidates).toEqual([]);
+  });
+
+  it("does not treat a `paths:` entry as a prefix of an unrelated sibling", () => {
+    // `packages/parse` must not cover `packages/parser`: the boundary is a
+    // path segment, not a string prefix.
+    const { candidates } = detectAdditions(
+      [label({ paths: ["packages/parse"] })],
+      atlasOf([pkg({ name: "parser", path: "packages/parser" })]),
+      cfg(),
+    );
+
+    expect(candidates.map((candidate) => candidate.labelName)).toEqual(["area:parser"]);
+  });
+
+  it("ignores a description that is empty, which is the implicit-warrant default", () => {
+    const { candidates } = detectAdditions(
+      [label({ paths: [], description: "" })],
+      atlasOf([pkg({ name: "parser", path: "packages/parser" })]),
+      cfg(),
+    );
+
+    expect(candidates.map((candidate) => candidate.labelName)).toEqual(["area:parser"]);
+  });
+});

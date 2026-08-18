@@ -125,6 +125,17 @@ interface State {
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
+  /**
+   * The repository tree `readAtlas` walks. Entries carry their own `type`,
+   * because `atlas.ts:124` builds its directory list from the `tree` entries
+   * ALONE — a fixture of blobs only yields no directories, so no workspace
+   * glob expands and the whole propose round finds nothing to do. Empty by
+   * default, so every case that is not about `propose` sees no workspace.
+   */
+  tree: { path: string; type: "blob" | "tree" }[];
+  /** Proposal pull requests the run opened, and the branches it created for them. */
+  readonly proposals: { title: string; head: string }[];
+  readonly proposalRefs: string[];
   readonly effects: {
     applied: string[];
     comments: string[];
@@ -143,7 +154,13 @@ interface State {
    */
   readonly contentsFiles: Map<string, { content: string; sha: string; oversized?: boolean }>;
   /** Every commit `record` made, in order — what a maintainer would see in the log. */
-  readonly contentsWrites: { path: string; message: string; content: string }[];
+  readonly contentsWrites: {
+    path: string;
+    message: string;
+    content: string;
+    /** The branch the write was aimed at, or undefined for the default branch. */
+    branch: string | undefined;
+  }[];
   /**
    * When true, every `createOrUpdateFileContents` call answers 403 — the read-
    * only token this duty's own docs describe, simulated without a real one.
@@ -237,6 +254,9 @@ async function startStub(): Promise<Stub> {
     answer: triaging(verdict()),
     asked: [],
     effects: { applied: [], comments: [], assigned: [], closed: false, created: [] },
+    tree: [],
+    proposals: [],
+    proposalRefs: [],
     contentsFiles: new Map(),
     contentsWrites: [],
     contentsForbidden: false,
@@ -461,6 +481,46 @@ async function route(
   // path arrives percent-encoded (Octokit encodes every `/` in it), which is
   // what `%2F` below is undoing.
   const contents = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(path);
+  // The repository itself, and the tree `readAtlas` walks to find a workspace.
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(path)) {
+    send(response, 200, { default_branch: "main" });
+    return;
+  }
+  if (method === "GET" && path.includes("/git/trees/")) {
+    send(response, 200, {
+      truncated: false,
+      tree: stub.tree,
+    });
+    return;
+  }
+  const gitRef = /^\/repos\/[^/]+\/[^/]+\/git\/ref\/(.+)$/.exec(path);
+  if (method === "GET" && gitRef) {
+    // Only the default branch exists; a proposal branch is created, not found.
+    if (decodeURIComponent(gitRef[1] ?? "") !== "heads/main") {
+      send(response, 404, { message: "Not Found" });
+      return;
+    }
+    send(response, 200, { object: { sha: "base-sha" } });
+    return;
+  }
+  if (method === "POST" && path.endsWith("/git/refs")) {
+    stub.proposalRefs.push((parsed(raw) as { ref: string }).ref);
+    send(response, 201, {});
+    return;
+  }
+  if (/^\/repos\/[^/]+\/[^/]+\/pulls$/.test(path)) {
+    if (method === "GET") {
+      send(response, 200, []);
+      return;
+    }
+    if (method === "POST") {
+      const payload = parsed(raw) as { title?: string; head?: string };
+      stub.proposals.push({ title: payload.title ?? "", head: payload.head ?? "" });
+      send(response, 201, { number: 909 });
+      return;
+    }
+  }
+
   if (method === "GET" && contents) {
     const at = decodeURIComponent(contents[1] ?? "");
     const file = stub.contentsFiles.get(at);
@@ -515,11 +575,21 @@ async function route(
     }
 
     const at = decodeURIComponent(contents[1] ?? "");
-    const payload = parsed(raw) as { message?: string; content?: string; sha?: string };
+    const payload = parsed(raw) as {
+      message?: string;
+      content?: string;
+      sha?: string;
+      branch?: string;
+    };
     const text = Buffer.from(payload.content ?? "", "base64").toString("utf8");
     const sha = `sha-${String(stub.contentsWrites.length + 1)}`;
     stub.contentsFiles.set(at, { content: text, sha });
-    stub.contentsWrites.push({ path: at, message: payload.message ?? "", content: text });
+    stub.contentsWrites.push({
+      path: at,
+      message: payload.message ?? "",
+      content: text,
+      branch: payload.branch,
+    });
     send(response, 200, { content: { name: at.split("/").pop(), path: at, sha } });
     return;
   }
@@ -617,6 +687,10 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     since: "",
     limit: "50",
     "sweep-state": "open",
+    // Present and empty by DEFAULT, not absent: every branch-write path in
+    // this duty is gated on it, and an input no case can set is a gate no
+    // case can reach.
+    "state-branch": "",
     endpoints: "",
     "api-keys": "",
     "request-timeout": "120s",
@@ -3110,5 +3184,269 @@ describe("the roster language detection is bought from", () => {
 
     expect(run.code).toBe(0);
     expect(detectionAsks()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `propose` — the sharpest capability this duty has, and the one nothing
+// observed.
+//
+// A `propose` round reads the workspace atlas, finds packages the taxonomy has
+// no label for, and calls `writeProposal` — which creates a branch, commits an
+// edited `.github/reeve.yml` and opens or updates a pull request. The file it
+// edits is THE AUTHORITY FILE. A duty able to propose changes to its own
+// warrant without the grant is the sharpest version of the boundary this whole
+// round exists to defend, and `main.ts:434` — `if (!permitted.includes("propose"))
+// return null;` — could be deleted with the entire suite green.
+//
+// It was unobservable rather than merely unasserted: `runProposeSweep` is only
+// reached under `sweep: true`, and it needs a workspace atlas, which needs a
+// repository tree. The stub answered none of that, so no case could have seen
+// the gate whatever it asserted. The fixture is fixed here (a `tree`, a
+// workspace manifest, and the git/pulls routes) and then the gate is asserted.
+// ---------------------------------------------------------------------------
+
+/**
+ * A pnpm workspace with one package the taxonomy below has no label for, plus
+ * the open issues that package needs as evidence.
+ *
+ * `gateByEvidence` (`propose.ts:311`) requires `cfg.evidence` open issues
+ * inside `cfg.window` whose text mentions the package's own path before a
+ * candidate becomes a proposal — the default is three. They are seeded already
+ * labelled so the sweep skips them as decided, keeping these cases about the
+ * capability gate rather than about triaging three extra threads.
+ */
+function seedWorkspace(): void {
+  stub.tree = [
+    { path: "pnpm-workspace.yaml", type: "blob" },
+    { path: "packages", type: "tree" },
+    { path: "packages/parser", type: "tree" },
+    { path: "packages/parser/package.json", type: "blob" },
+  ];
+  stub.contentsFiles.set("pnpm-workspace.yaml", {
+    content: "packages:\n  - packages/*\n",
+    sha: "sha-workspace",
+  });
+  stub.contentsFiles.set("packages/parser/package.json", {
+    content: JSON.stringify({ name: "@acme/parser", description: "Parses the thing." }),
+    sha: "sha-parser",
+  });
+  // `writeProposal` re-reads the warrant through the CONTENTS API in order to
+  // edit it — the local file the `warrant` input names is what the run parses,
+  // and the repository copy at the same path is what it proposes a change to.
+  // Both have to exist, under the same path.
+  stub.contentsFiles.set(warrantPath, { content: PROPOSE_WARRANT, sha: "sha-warrant" });
+  const recent = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  stub.issues = [1, 2, 3].map((number) => ({
+    number,
+    title: `Crash in packages/parser`,
+    body: `The stack trace points at packages/parser and nothing else.`,
+    labels: ["bug"],
+    createdAt: recent,
+  }));
+}
+
+/** The warrant a propose round runs against: a taxonomy with no package label. */
+const PROPOSE_WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: Something that used to work and does not.",
+  "duties:",
+  "  triage: [label, propose]",
+].join("\n");
+
+describe("the `propose` capability gate", () => {
+  it("opens a proposal pull request against the warrant when `propose` is granted", async () => {
+    // The case that proves the gate is a GATE. Without it, every "proposes
+    // nothing" assertion below would pass against a duty that had simply
+    // stopped proposing — which is exactly how this hole stayed open.
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT);
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toHaveLength(1);
+    expect(stub.proposalRefs[0]).toMatch(/^refs\/heads\//);
+    // The file it edited is the AUTHORITY FILE itself — the whole reason this
+    // gate is the sharpest one this duty has.
+    expect(stub.contentsWrites.map((write) => write.path)).toContain(warrantPath);
+  });
+
+  it("proposes nothing when the warrant does not grant `propose`", async () => {
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT.replace("[label, propose]", "[label]"));
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toEqual([]);
+    expect(stub.proposalRefs).toEqual([]);
+    expect(stub.contentsWrites.map((write) => write.path)).not.toContain(warrantPath);
+  });
+
+  it("proposes nothing when the warrant grants the duty nothing at all", async () => {
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT.replace("[label, propose]", "[none]"));
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toEqual([]);
+    expect(stub.contentsWrites.map((write) => write.path)).not.toContain(warrantPath);
+  });
+
+  it("writes no proposal on a dry run, even with `propose` granted", async () => {
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT);
+
+    const run = await runAction(stub, { sweep: "true", number: "", "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toEqual([]);
+    expect(stub.contentsWrites.map((write) => write.path)).not.toContain(warrantPath);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `state-branch` — the branch-write path, and the `open-pr` it needs.
+//
+// `main.ts:303` reads `canRecordToBranch = recording && permitted.includes("open-pr")`,
+// and dropping the `open-pr` half left every test in this repository green.
+// The reason is a fixture, not a missing assertion: `state-branch` was not in
+// `baseInputs` at all, so no case could set it, so `main.ts:302-311` — the
+// whole branch-write decision — was unreachable from this tier. The input is
+// now present and empty by default, which is what makes these cases possible.
+//
+// A correction written to a branch instead of the default branch is a
+// correction that lands behind a pull request a human reviews. Writing it to
+// the default branch when the run was told to use a branch is a silent
+// downgrade of exactly that review step.
+// ---------------------------------------------------------------------------
+
+describe("recording corrections to a state branch", () => {
+  const BRANCH = "reeve/state";
+  // Repo-relative, because `record` refuses an absolute path — the Contents
+  // API only understands a path inside the repository.
+  const CORRECTIONS_DIR = ".reeve/corrections";
+  const RECORD_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record, open-pr]");
+
+  /** The corrections write this run performed, if any. */
+  function correctionWrite(): { path: string; branch: string | undefined } | undefined {
+    return stub.contentsWrites.find((write) => write.path.includes("corrections"));
+  }
+
+  it("writes the correction to the branch when `record` and `open-pr` are both granted", async () => {
+    // The case that proves the gate is a GATE rather than a constant.
+    await writeFile(warrantPath, RECORD_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { "state-branch": BRANCH, "corrections-dir": CORRECTIONS_DIR },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(correctionWrite()).toBeDefined();
+    expect(correctionWrite()?.branch).toBe(BRANCH);
+  });
+
+  it("falls back to the default branch when `open-pr` is withheld, and says so", async () => {
+    // Not a refusal: the correction is still recorded, because losing a
+    // maintainer's decision would be worse than recording it in the ordinary
+    // place. What must not happen silently is the downgrade.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, record]"));
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { "state-branch": BRANCH, "corrections-dir": CORRECTIONS_DIR },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(correctionWrite()).toBeDefined();
+    expect(correctionWrite()?.branch).toBeUndefined();
+    expect(run.log).toContain("`state-branch` is set but `open-pr` is not granted");
+  });
+
+  it("writes a SWEEP's corrections to the branch when `open-pr` is granted", async () => {
+    // A second, independent copy of the same decision lives at `main.ts:303`
+    // for the sweep path. Both have to be driven: the single-thread cases
+    // above cannot see the sweep's copy, and an auditor mutating the sweep's
+    // copy found the whole repository green.
+    await writeFile(warrantPath, RECORD_WARRANT);
+    stub.issues = [
+      {
+        number: 7,
+        title: "Dark mode setting is lost between sessions",
+        body: "It resets every time I close the app, which is annoying for daily use.",
+        labels: ["bug"],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      {
+        sweep: "true",
+        number: "",
+        // `recording` composes with `sweep` only for a listing scoped past the
+        // open backlog (`main.ts:292`) — the default `open` turns it off by
+        // design, which is itself why no case had ever reached this path.
+        "sweep-state": "all",
+        "state-branch": BRANCH,
+        "corrections-dir": CORRECTIONS_DIR,
+      },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    // The sweep's state-branch decision is observable through the branch it
+    // created, which only happens on the `canRecordToBranch` path.
+    expect(run.log).toContain(`state-branch: created \`${BRANCH}\``);
+  });
+
+  it("creates no state branch for a SWEEP when `open-pr` is withheld, and says so", async () => {
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, record]"));
+    stub.issues = [];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      {
+        sweep: "true",
+        number: "",
+        "sweep-state": "all",
+        "state-branch": BRANCH,
+        "corrections-dir": CORRECTIONS_DIR,
+      },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.log).not.toContain("state-branch: created");
+    expect(run.log).toContain("`state-branch` is set but `open-pr` is not granted");
+  });
+
+  it("passes no branch at all when no state branch was configured", async () => {
+    await writeFile(warrantPath, RECORD_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { "corrections-dir": CORRECTIONS_DIR },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(correctionWrite()).toBeDefined();
+    expect(correctionWrite()?.branch).toBeUndefined();
   });
 });

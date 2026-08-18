@@ -387,7 +387,12 @@ describe("interpretationPrompt", () => {
   };
 
   it("includes all fact fields when non-null", () => {
-    const prompt = interpretationPrompt(baseProposal, baseProposal.risk.facts, "changelog content");
+    const prompt = interpretationPrompt(
+      baseProposal,
+      baseProposal.risk.facts,
+      "changelog content",
+      "",
+    );
 
     expect(prompt).toContain("lodash");
     expect(prompt).toContain("4.17.21");
@@ -406,7 +411,7 @@ describe("interpretationPrompt", () => {
       daysBetweenReleases: null,
       currentVersionStale: true,
     };
-    const prompt = interpretationPrompt(baseProposal, facts, "");
+    const prompt = interpretationPrompt(baseProposal, facts, "", "");
 
     expect(prompt).toContain("Days between releases: unknown");
     expect(prompt).toContain("Current version is stale (>1 year): true");
@@ -418,7 +423,7 @@ describe("interpretationPrompt", () => {
       daysBetweenReleases: null,
       currentVersionStale: null,
     };
-    const prompt = interpretationPrompt(baseProposal, facts, "");
+    const prompt = interpretationPrompt(baseProposal, facts, "", "");
 
     expect(prompt).toContain("Days between releases: unknown");
     expect(prompt).toContain("Current version staleness: unknown");
@@ -430,7 +435,7 @@ describe("interpretationPrompt", () => {
       isSecurity: true,
       isDev: true,
     };
-    const prompt = interpretationPrompt(baseProposal, facts, "");
+    const prompt = interpretationPrompt(baseProposal, facts, "", "");
 
     expect(prompt).toContain("Security update: true");
     expect(prompt).toContain("Dev dependency: true");
@@ -446,7 +451,7 @@ describe("interpretationPrompt", () => {
       currentVersion: "1.0\n.0",
       targetVersion: "2.0.0",
     };
-    const prompt = interpretationPrompt(proposal, baseProposal.risk.facts, "");
+    const prompt = interpretationPrompt(proposal, baseProposal.risk.facts, "", "");
 
     // Newlines and backticks must be sanitised
     expect(prompt).not.toContain("\n`backtick");
