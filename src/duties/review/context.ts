@@ -258,15 +258,6 @@ const SECTION_TITLES: Readonly<Record<ContextKind, string>> = {
   history: "--- CHANGE HISTORY ---",
 };
 
-/**
- * The one header each section renders. A fixed constant rather than anything
- * read from the repository, so a workspace file can never manufacture a
- * second fence or another heading style of its own.
- */
-export function sectionTitle(kind: ContextKind): string {
-  return SECTION_TITLES[kind];
-}
-
 /** A rendered section: header, entries, and the visible mark when anything was cut. */
 function renderSection(
   kind: ContextKind,

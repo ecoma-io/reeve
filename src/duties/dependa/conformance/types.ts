@@ -41,15 +41,6 @@ export type DiscrepancyClassification =
   /** Not enough information to classify the discrepancy. */
   | "INSUFFICIENT_EVIDENCE";
 
-export const DISCREPANCY_CLASSIFICATIONS: readonly DiscrepancyClassification[] = [
-  "MATCH",
-  "INTENTIONAL_DIFFERENCE",
-  "DEPENDA_MISSING_CAPABILITY",
-  "DEPENDA_BUG",
-  "RENOVATE_DIFFERENCE",
-  "INSUFFICIENT_EVIDENCE",
-];
-
 // ─── Comparison levels ─────────────────────────────────────────────────────
 
 /**
@@ -70,15 +61,6 @@ export type ComparisonLevel =
   | "grouping" // Did both group dependencies similarly?
   | "mutation" // Would the same files change?
   | "security"; // Did both detect the same security condition?
-
-export const COMPARISON_LEVELS: readonly ComparisonLevel[] = [
-  "discovery",
-  "version-selection",
-  "update-classification",
-  "grouping",
-  "mutation",
-  "security",
-];
 
 // ─── Per-dependency comparison ─────────────────────────────────────────────
 

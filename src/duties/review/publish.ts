@@ -631,14 +631,6 @@ function footer(): string {
   return `<sub>${escapeHtml(parts.join(" "))}</sub>`;
 }
 
-/**
- * The comment's fixed closing line: an only-when-needed machine, never a
- * second reviewer. The `id` names a rule; the label is human prose.
- */
-export function labelFor(ruleId: string): string {
-  return ruleId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

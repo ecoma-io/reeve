@@ -27,9 +27,6 @@ import type { ClassifiedHunk } from "./classify.js";
 import { extract, reinsert, type IgnoreSpan } from "./ignore.js";
 import { scoreDraft } from "./score.js";
 
-/** The purpose name for meter tracking. */
-export const DRAFT_PURPOSE = "draft" as const;
-
 /** One draft attempt for a stale locale, measured and made safe to publish. */
 export interface Draft {
   /** The model that produced it. */
