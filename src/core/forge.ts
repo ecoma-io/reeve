@@ -865,22 +865,81 @@ export function isMissing(error: unknown): boolean {
 }
 
 /**
+ * HTTP delta-seconds: digits, optionally fractional. Deliberately NOT
+ * `Number(...)` — that reads `"0x0"` as 0, `"1e3"` as 1000 and `""` as 0,
+ * and every one of those would be a junk header buying a green run.
+ */
+const DELTA_SECONDS = /^\d+(?:\.\d+)?$/;
+
+/**
  * One response header by name, case-insensitively, from a shape nothing has
  * typed.
  *
  * `GitHubApi` declares `headers` only as `{ link?: string }` for pagination,
  * and widening it for a classifier that never calls the API would put a
  * rate-limit concern into every port's contract. So the value arrives as
- * `unknown` and is treated as such: only an own enumerable key of a plain
- * record can answer, which is what Octokit's `RequestError` actually carries.
- * A string, an array, or a key reachable only through a polluted prototype
- * answers nothing rather than throwing — none of them is GitHub speaking.
+ * `unknown` and is treated as such, and three containers are tried in turn,
+ * first hit winning: a `Headers`-like `.get`, an iterable of `[key, value]`
+ * pairs, and a plain record's own enumerable keys.
+ *
+ * **The `Headers` case is not hypothetical.** `Object.keys(new Headers(…))`
+ * is `[]` — a WHATWG `Headers` keeps its entries off the object — so a
+ * record-only lookup reads a genuine rate limit from any fetch-based client
+ * as a permission error, which is the exact failure this whole narrowing
+ * exists to prevent. It is duck-typed rather than `instanceof Headers`: the
+ * global need not exist in a given runtime, and a cross-realm instance would
+ * fail that check anyway. Arrays are excluded from every strategy, so a bare
+ * array of header names or pairs is still not a header container.
+ *
+ * **This function never throws, for any input.** Not a style preference: it
+ * runs inside `catch` blocks at twelve call sites, and a throw here would
+ * replace the failure being classified with this one and lose it. A hostile
+ * getter, a `get` that throws, an iterator that throws, a string, or a key
+ * reachable only through a polluted prototype all answer nothing instead.
+ * The guard is per strategy and per key, so one hostile header does not
+ * blind the lookup to the header beside it that answers the question.
  */
 function headerValue(headers: unknown, name: string): unknown {
   if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return undefined;
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === name) return value;
+
+  try {
+    const get = (headers as { get?: unknown }).get;
+    if (typeof get === "function") {
+      const direct: unknown = (get as (key: string) => unknown).call(headers, name);
+      if (direct !== undefined && direct !== null) return direct;
+    }
+  } catch {
+    // Not a header container after all, or a hostile one. Try the next shape.
   }
+
+  try {
+    if (typeof (headers as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function") {
+      for (const entry of headers as Iterable<unknown>) {
+        if (!Array.isArray(entry)) continue;
+        const [key, value] = entry as readonly unknown[];
+        if (typeof key === "string" && key.toLowerCase() === name) return value;
+      }
+    }
+  } catch {
+    // Same: a container that cannot be walked has told us nothing.
+  }
+
+  try {
+    // `Object.keys` reads no values, so a hostile getter on an unrelated key
+    // cannot fire here; only the matching key is read, and only inside this
+    // guard.
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() !== name) continue;
+      try {
+        return (headers as Record<string, unknown>)[key];
+      } catch {
+        return undefined;
+      }
+    }
+  } catch {
+    // An exotic own-keys trap. Nothing was said.
+  }
+
   return undefined;
 }
 
@@ -888,21 +947,39 @@ function headerValue(headers: unknown, name: string): unknown {
  * Whether a failure's own response headers say "rate limit" — the only
  * evidence that promotes a 403 out of configuration and into capacity.
  *
- * `retry-after` counts as a non-empty string or a finite number, never a
- * bare `true`, a `NaN`, or an object: the docs describe it as a duration to
- * wait, and a value that is not one is not GitHub asking us to wait.
+ * `retry-after` counts only as **delta-seconds**: a non-negative finite
+ * number, or a string that is one after trimming. RFC 9110 also permits an
+ * HTTP-date, and this deliberately does not accept it — GitHub documents and
+ * sends seconds, while `Date.parse` accepts so much (`"0"`, `"2"`, a bare
+ * month name) that admitting dates would re-open the widening this narrowing
+ * closes. So `"unknown"`, `"-5"`, `"0x0"`, `"1e3"`, `true`, `NaN`,
+ * `Infinity` and `{}` are all *not* GitHub naming a wait: a proxy, WAF or
+ * GHES gateway 403 carrying a junk `Retry-After` stays the red it should be
+ * rather than buying a green run and a rotation.
+ *
  * `x-ratelimit-remaining` counts at exactly 0 — the number, or `"0"` after
  * trimming — never by coercion, which would read `""`, `false` and `[]` as
  * exhaustion and hand a green run to every response that merely omitted it.
+ * `-0` answers true through `-0 === 0`, which is the right answer (a spent
+ * quota is a spent quota) and is pinned as such rather than left to chance.
+ *
+ * **This function never throws, for any input** — same reason as
+ * `headerValue`, and covering the `.response` and `.headers` reads that
+ * happen before the lookup, either of which may be a hostile getter.
  */
 function saysRateLimited(error: object): boolean {
-  const response = (error as { response?: unknown }).response;
-  if (typeof response !== "object" || response === null) return false;
-  const headers = (response as { headers?: unknown }).headers;
+  let headers: unknown;
+  try {
+    const response = (error as { response?: unknown }).response;
+    if (typeof response !== "object" || response === null) return false;
+    headers = (response as { headers?: unknown }).headers;
+  } catch {
+    return false;
+  }
 
   const retryAfter = headerValue(headers, "retry-after");
-  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) return true;
-  if (typeof retryAfter === "string" && retryAfter.trim() !== "") return true;
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0) return true;
+  if (typeof retryAfter === "string" && DELTA_SECONDS.test(retryAfter.trim())) return true;
 
   const remaining = headerValue(headers, "x-ratelimit-remaining");
   return remaining === 0 || (typeof remaining === "string" && remaining.trim() === "0");

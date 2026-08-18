@@ -1131,6 +1131,76 @@ describe("isCapacityError — GitHub's 403/429 rate-limit ambiguity", () => {
     expect(isCapacityError(requestError(429, undefined))).toBe(true);
   });
 
+  it("a_rate_limit_403_from_a_fetch_based_client_is_capacity", () => {
+    // `Object.keys(new Headers(...))` is empty: a WHATWG `Headers` keeps its
+    // entries off the object. A classifier that only walked own keys read a
+    // genuine rate limit from any fetch-based client as a permission error —
+    // the exact case this narrowing exists to fix, silently not fixed.
+    const headers = new Headers({ "retry-after": "60" });
+    expect(Object.keys(headers)).toEqual([]);
+    expect(isCapacityError(requestError(403, headers))).toBe(true);
+    expect(isCapacityError(requestError(403, new Headers({ "x-ratelimit-remaining": "0" })))).toBe(
+      true,
+    );
+  });
+
+  it("a_whatwg_headers_instance_without_rate_limit_headers_still_stays_red", () => {
+    expect(
+      isCapacityError(requestError(403, new Headers({ "x-ratelimit-remaining": "4999" }))),
+    ).toBe(false);
+    expect(isCapacityError(requestError(403, new Headers()))).toBe(false);
+  });
+
+  it("a_headers_like_object_with_only_a_get_method_is_read", () => {
+    // Duck-typed, never `instanceof Headers`: the global may not exist in a
+    // given runtime, and a cross-realm instance would fail that check anyway.
+    const headers = { get: (name: string) => (name === "retry-after" ? "60" : null) };
+    expect(isCapacityError(requestError(403, headers))).toBe(true);
+    expect(isCapacityError(requestError(403, { get: () => null }))).toBe(false);
+  });
+
+  it("an_iterable_of_header_pairs_is_read", () => {
+    const headers = {
+      *[Symbol.iterator]() {
+        yield ["x-ratelimit-limit", "5000"];
+        yield ["x-ratelimit-remaining", "0"];
+      },
+    };
+    expect(isCapacityError(requestError(403, headers))).toBe(true);
+  });
+
+  it("a_map_of_headers_is_read_by_both_get_and_iteration", () => {
+    expect(isCapacityError(requestError(403, new Map([["retry-after", "60"]])))).toBe(true);
+    // Not lowercased by a `Map`, so the case-insensitive iteration is what
+    // answers here rather than `Map.get`, which is exact-match.
+    expect(isCapacityError(requestError(403, new Map([["Retry-After", "60"]])))).toBe(true);
+    expect(isCapacityError(requestError(403, new Map([["x-ratelimit-remaining", "4999"]])))).toBe(
+      false,
+    );
+  });
+
+  it("a_retry_after_that_is_not_a_duration_is_not_proof_of_a_rate_limit", () => {
+    // RFC 9110 also permits an HTTP-date, but GitHub documents and sends
+    // delta-seconds, and `Date.parse` accepts so much ("0", "2", bare month
+    // names) that admitting dates would re-open the widening this narrowing
+    // closes. Delta-seconds only, and a junk value proves nothing.
+    expect(isCapacityError(requestError(403, { "retry-after": "unknown" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": "-5" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": -5 }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": "0x0" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": "1e3" }))).toBe(false);
+    expect(
+      isCapacityError(requestError(403, { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" })),
+    ).toBe(false);
+  });
+
+  it("a_retry_after_of_zero_or_a_fractional_delay_is_still_a_rate_limit", () => {
+    expect(isCapacityError(requestError(403, { "retry-after": "0" }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "retry-after": " 60 " }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "retry-after": "0.5" }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "retry-after": 60 }))).toBe(true);
+  });
+
   it("the_header_lookup_is_case_insensitive_because_no_client_promises_a_case", () => {
     // Octokit lowercases in practice; the port type does not declare these
     // headers at all, so nothing in this repo can promise it stays that way.

@@ -765,6 +765,100 @@ describe("isCapacityError — header shapes that must not decide a run's colour"
     }
   });
 
+  it("a_403_whose_header_getter_throws_stays_red_without_throwing", () => {
+    // `isCapacityError` is called from inside `catch` blocks at every one of
+    // its call sites. A throw from here does not merely misclassify: it
+    // REPLACES the original failure with this one, and the thing that
+    // actually went wrong is lost. No input shape may throw.
+    const headers = {
+      get "retry-after"(): string {
+        throw new Error("hostile getter");
+      },
+    };
+    expect(() => isCapacityError(forbidden(headers))).not.toThrow();
+    expect(isCapacityError(forbidden(headers))).toBe(false);
+  });
+
+  it("a_403_whose_unrelated_header_getter_throws_still_reads_the_rate_limit", () => {
+    // Totality must not be bought by abandoning the whole record on the
+    // first hostile key — the header that answers the question is still read.
+    const headers = {
+      get "x-github-request-id"(): string {
+        throw new Error("hostile getter");
+      },
+      "retry-after": "60",
+    };
+    expect(() => isCapacityError(forbidden(headers))).not.toThrow();
+    expect(isCapacityError(forbidden(headers))).toBe(true);
+  });
+
+  it("a_403_whose_headers_get_method_throws_stays_red_without_throwing", () => {
+    const headers = {
+      get(): string {
+        throw new Error("hostile get");
+      },
+    };
+    expect(() => isCapacityError(forbidden(headers))).not.toThrow();
+    expect(isCapacityError(forbidden(headers))).toBe(false);
+  });
+
+  it("a_403_whose_headers_iterator_throws_stays_red_without_throwing", () => {
+    const headers = {
+      [Symbol.iterator]() {
+        throw new Error("hostile iterator");
+      },
+    };
+    expect(() => isCapacityError(forbidden(headers))).not.toThrow();
+    expect(isCapacityError(forbidden(headers))).toBe(false);
+  });
+
+  it("a_403_whose_response_getter_throws_stays_red_without_throwing", () => {
+    // Defined rather than assigned: `Object.assign` READS a source getter,
+    // so the hostile property has to be installed on the error directly.
+    const error = Object.assign(new Error("HTTP 403"), { status: 403 });
+    Object.defineProperty(error, "response", {
+      enumerable: true,
+      get: () => {
+        throw new Error("hostile response");
+      },
+    });
+    expect(() => isCapacityError(error)).not.toThrow();
+    expect(isCapacityError(error)).toBe(false);
+  });
+
+  it("a_403_whose_headers_getter_throws_stays_red_without_throwing", () => {
+    const response = {
+      status: 403,
+      get headers(): unknown {
+        throw new Error("hostile headers");
+      },
+    };
+    const error = Object.assign(new Error("HTTP 403"), { status: 403, response });
+    expect(() => isCapacityError(error)).not.toThrow();
+    expect(isCapacityError(error)).toBe(false);
+  });
+
+  it("a_403_whose_retry_after_is_junk_a_gateway_invented_stays_red", () => {
+    // A proxy, WAF or GHES gateway can put anything in `Retry-After` on its
+    // own 403. Only a delta-seconds value is GitHub naming a wait; anything
+    // else must not buy a green run plus a `starved` rotation.
+    for (const value of ["unknown", "-5", "0x0", "1e3", "60s", "Infinity", "  "]) {
+      expect(isCapacityError(forbidden({ "retry-after": value }))).toBe(false);
+    }
+    expect(isCapacityError(forbidden({ "retry-after": Number.POSITIVE_INFINITY }))).toBe(false);
+    expect(isCapacityError(forbidden({ "retry-after": -5 }))).toBe(false);
+  });
+
+  it("a_remaining_of_negative_zero_is_exhaustion_and_that_is_deliberate", () => {
+    // `-0 === 0` is true, so the numeric branch already answers `true` here.
+    // Asserted rather than left to chance: negative zero remaining IS a spent
+    // quota, and pinning it stops a later `Object.is` "tidy-up" changing the
+    // answer without anyone deciding to.
+    expect(isCapacityError(forbidden({ "x-ratelimit-remaining": -0 }))).toBe(true);
+    // The string form is matched exactly, so `"-0"` is not `"0"` and stays red.
+    expect(isCapacityError(forbidden({ "x-ratelimit-remaining": "-0" }))).toBe(false);
+  });
+
   it("a_403_with_rate_limit_headers_at_the_top_level_only_stays_red", () => {
     // The classifier reads `.response.headers`, which is where Octokit's
     // `RequestError` puts them. A caller that invented a top-level `headers`

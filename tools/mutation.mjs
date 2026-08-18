@@ -650,24 +650,41 @@ export const MUTATIONS = [
     note: "An envelope edited by hand is trusted as this duty's own previous state.",
   },
 
-  // A1 is undecided: GitHub documents BOTH primary and secondary rate limits as
-  // answering "403 or 429", so `isCapacityError` treating 403 as configuration
-  // rather than capacity is a real question and not yet a settled answer. The
-  // row below is written out rather than guessed at — it asserts the capacity
-  // reading, which is one of the two candidate behaviours — and stays commented
-  // out until the decision lands, so nothing here pins a behaviour the
-  // repository has not chosen.
-  //
-  // {
-  //   name: "GitHub 403 not treated as capacity",
-  //   file: "src/core/forge.ts",
-  //   from: "    if (status === 429 ||",
-  //   to: "    if (status === 403 || status === 429 ||",
-  //   targets: ["src/core/forge.test.ts"],
-  //   stage: "fast",
-  //   owner: "TL4",
-  //   note: "Awaiting the A1 decision — see docs/internal/mutation-report.md.",
-  // },
+  // A1 landed: GitHub documents BOTH primary and secondary rate limits as
+  // answering "403 or 429", so a 403 whose headers prove a rate limit is now
+  // capacity and a bare 403 is still configuration. Both directions are
+  // mutated, because they fail differently and are caught in different places
+  // — over-broadening turns a permission refusal green, under-broadening
+  // reverts every consumer to red-on-rate-limit, and only the second needed a
+  // call-site pin built for it.
+  {
+    name: "a rate-limit 403 read as configuration",
+    file: "src/core/forge.ts",
+    from: "    if (status === 403 && saysRateLimited(error)) return true;",
+    to: "",
+    targets: [
+      "src/core/forge.test.ts",
+      "src/core/state-branch.test.ts",
+      "src/doctor/diagnose.test.ts",
+    ],
+    stage: "fast",
+    owner: "TL4",
+    note: "A secondary rate limit GitHub sent as 403 rather than 429 fails the run red instead of rotating.",
+  },
+  {
+    name: "every 403 read as capacity",
+    file: "src/core/forge.ts",
+    from: "    if (status === 403 && saysRateLimited(error)) return true;",
+    to: "    if (status === 403) return true;",
+    targets: [
+      "src/core/forge.test.ts",
+      "src/core/forge.adversarial.test.ts",
+      "src/core/state.idempotency.test.ts",
+    ],
+    stage: "fast",
+    owner: "TL4",
+    note: "A genuine permission refusal is laundered into weather and the run reports green.",
+  },
 ];
 
 // ── argv ────────────────────────────────────────────────────────────────────
