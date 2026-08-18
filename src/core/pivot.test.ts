@@ -168,6 +168,37 @@ describe("translateToPivot", () => {
     expect(draft).toBeNull();
   });
 
+  it("is null when the answer is a JSON array rather than the object asked for", async () => {
+    // A list is not "an object with a title missing" — it is an answer that
+    // stopped being the shape this call asked for, which is what an injected
+    // completion produces. Refused whole rather than indexed into.
+    const { draft } = await translateToPivot(
+      request({ provider: answering({ a: '[{"title":"t","body":"b"}]' }) }),
+    );
+
+    expect(draft).toBeNull();
+  });
+
+  it("is null when the answer carries a body and no title at all", async () => {
+    // The other half of the shape check. A rendering with no title is not a
+    // short rendering — it is an answer that stopped being the object this
+    // call asked for, and a half-parsed one written into the store would
+    // teach whatever the corruption happened to say.
+    const { draft } = await translateToPivot(
+      request({ provider: answering({ a: '{"body":"Chỉ có nội dung."}' }) }),
+    );
+
+    expect(draft).toBeNull();
+  });
+
+  it("is null when the title is present but not text", async () => {
+    const { draft } = await translateToPivot(
+      request({ provider: answering({ a: '{"title":7,"body":"Nội dung."}' }) }),
+    );
+
+    expect(draft).toBeNull();
+  });
+
   it("is null for a blank title, the shape an injected answer produces", async () => {
     const { draft } = await translateToPivot(
       request({ provider: answering({ a: '{"title":"   ","body":"Nội dung."}' }) }),
