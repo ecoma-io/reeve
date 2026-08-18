@@ -132,6 +132,16 @@ export async function readRules(path: string): Promise<Rules> {
   }
   if (raw.trim().length === 0) return emptyRules();
   if (raw.length > MAX_RULES_CHARS) {
+    // The warning this cap's own doc promises, and the one `guidance.ts` —
+    // the sibling that doc names — has always emitted on the same decision.
+    // Truncating in silence loses every rule past the cap without telling the
+    // maintainer who wrote them, which is exactly the failure a bounded prompt
+    // is not supposed to cost.
+    core.warning(
+      `review: the rules file at ${path} is ${String(raw.length)} characters, exceeding the ` +
+        `${String(MAX_RULES_CHARS)}-character limit. Truncating — every rule past the limit is ` +
+        "not in effect this run.",
+    );
     raw = raw.slice(0, MAX_RULES_CHARS);
   }
   return parseRules(raw);

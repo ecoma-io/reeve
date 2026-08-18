@@ -180,11 +180,23 @@ describe("discoverTests", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("caps at the tree-entry budget", async () => {
+  it("caps at the tree-entry budget", { timeout: 15_000 }, async () => {
+    // The walk really does have to see more than MAX_TREE_ENTRIES entries and
+    // `stat` each one, so the 2010 files are the subject, not scaffolding.
+    // Building them is scaffolding, though, and building them one `await` at a
+    // time was costing more than the walk it sets up: the writes are batched
+    // below so the measured time is the walk's, not the fixture's.
+    //
+    // Chunked rather than one flat `Promise.all` over 2010 opens, which risks
+    // EMFILE on a constrained runner — the point is to stop serialising, not
+    // to open every file at once.
     const root = await makeTree({ "src/a.test.ts": "it('a')" });
     await mkdir(join(root, "bulk"));
-    for (let i = 0; i < MAX_TREE_ENTRIES + 10; i += 1) {
-      await writeFile(join(root, "bulk", `f${String(i)}.ts`), "// x");
+    const names = Array.from({ length: MAX_TREE_ENTRIES + 10 }, (_, i) => `f${String(i)}.ts`);
+    for (let at = 0; at < names.length; at += 200) {
+      await Promise.all(
+        names.slice(at, at + 200).map((name) => writeFile(join(root, "bulk", name), "// x")),
+      );
     }
     const result = await discoverTests(root);
     expect(result.capped).toBe(true);
