@@ -903,7 +903,7 @@ export const MUTATIONS = [
   {
     name: "the uncertain signal is never raised (producer)",
     file: "src/duties/review/threads.ts",
-    from: "  return { threads, uncertain: threads.length === 0 && lastFull };",
+    from: "  return { threads, uncertain: lastFull };",
     to: "  return { threads, uncertain: false };",
     targets: ["src/duties/review/threads.test.ts", "src/duties/review/threads.adversarial.test.ts"],
     stage: "fast",
@@ -911,14 +911,14 @@ export const MUTATIONS = [
     note: "The load-bearing half: the consumer's withholding guard is already pinned, but nothing proved the signal it reads is ever raised.",
   },
   {
-    name: "the uncertain conjunct loses its truncation half",
+    name: "the uncertain producer narrows on what it found",
     file: "src/duties/review/threads.ts",
-    from: "uncertain: threads.length === 0 && lastFull };",
-    to: "uncertain: threads.length === 0 };",
+    from: "uncertain: lastFull };",
+    to: "uncertain: threads.length === 0 && lastFull };",
     targets: ["src/duties/review/threads.test.ts", "src/duties/review/threads.adversarial.test.ts"],
     stage: "fast",
     owner: "TL4",
-    note: "The other direction: a cold-start pull request with no owned threads reads as uncertain, so review withholds every first thread it would ever post.",
+    note: "The regression this expression was adjudicated out of: finding any owned thread suppresses the walk\u2019s uncertainty, and every finding whose thread sits past the ceiling is created again on every run.",
   },
 ];
 
