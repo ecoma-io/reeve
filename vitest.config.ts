@@ -46,9 +46,11 @@ export default defineConfig({
       // Line coverage is also not the whole claim. A line can be executed by a
       // test that asserts nothing, so this floor is paired with the mutation
       // table in `tools/mutation.mjs`, which asks the stricter question: does
-      // the suite *fail* when the behaviour changes. See
-      // `docs/internal/ci-gates.md` for which of the two is the release gate
-      // and which is the advisory metric.
+      // the suite *fail* when the behaviour changes. Of the two, the mutation
+      // table is the release gate — it is the only one here that measures
+      // protection rather than execution. This floor is necessary and not
+      // sufficient: it catches a module that arrives with no tests, and a
+      // directory can go from 60% to 95% on tests that only call things.
       thresholds: {
         statements: 90,
         branches: 90,

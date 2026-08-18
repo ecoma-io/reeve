@@ -1,8 +1,9 @@
 /**
  * Tests for the mutation harness's own failure detection.
  *
- * The repository ranks `pnpm test:mutation` first among its gates
- * (`docs/internal/ci-gates.md`), and until this file existed that gate had no
+ * The repository ranks `pnpm test:mutation` first among its gates — it is the
+ * only one that measures whether the suite would *fail* on a regression rather
+ * than merely that the code ran — and until this file existed that gate had no
  * tests at all. That gap was not theoretical: an adversarial review emptied
  * `MUTATIONS` and the harness printed `KILLED 0 · SURVIVED 0 · STALE 0` and
  * exited 0.

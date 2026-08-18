@@ -40,8 +40,11 @@
  * standing between this duty and the Contents API is the token's own
  * `contents:` scope. What this file proves is that no review module ASKS for
  * that reach in its source — which is a real property worth keeping, and is
- * not the same claim as "the duty cannot reach it". See
- * `docs/internal/github-failure-matrix.md`.
+ * not the same claim as "the duty cannot reach it". Closing the gap for real
+ * means handing each port a genuinely reduced object instead of a cast, which
+ * is a design change rather than a hardening pass — so the runtime reach is
+ * recorded here as a known architectural fact, not quietly implied away by the
+ * green run below.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";

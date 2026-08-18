@@ -7,8 +7,10 @@
  * fallback, skip, rollback or fail — and that no status reaches a generic path
  * by accident. Every case below names the semantic it pins in its own name.
  *
- * `docs/internal/github-failure-matrix.md` is the table these cases fill in;
- * a row there without a test named here is a GAP, deliberately.
+ * The cases are an enumeration rather than a sample: every mutating call site
+ * is asked about the same `FAIL_STATUSES` list, so a call-site-and-status pair
+ * with no case here is behaviour nothing pins — a gap left visible rather than
+ * absorbed into a default nobody chose.
  *
  * Nothing here is retried anywhere in this module — that is the boundary's
  * actual, documented posture (`docs/internal/failure-matrix.md`'s "[GAP]

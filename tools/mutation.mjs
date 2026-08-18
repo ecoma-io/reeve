@@ -62,8 +62,9 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  *
  * A gate whose own contents can be deleted is not a gate. Emptying `MUTATIONS`
  * below used to print `KILLED 0 · SURVIVED 0 · STALE 0` and **exit 0** — the
- * check this repository ranks first in `docs/internal/ci-gates.md` reporting
- * success because it had been asked to check nothing. That is the same class of
+ * check this repository ranks first among its gates, and the only one that
+ * measures protection rather than execution, reporting success because it had
+ * been asked to check nothing. That is the same class of
  * failure as a coverage `exclude` that hides a file: the number improves
  * because the denominator moved.
  *

@@ -149,19 +149,30 @@ jobs:
   #    reads a file that is briefly not there. A separate runner is the only
   #    isolation that is actually isolation.
   # 2. It runs in parallel with `Verify`, so the wall clock the pipeline adds
-  #    is zero — the mutation table is about ninety seconds and `Verify` takes
-  #    minutes.
+  #    is zero — the mutation table is about three and a half minutes and
+  #    `Verify` takes longer still.
   # 3. It gets its own check name. "a mutation survived" and "a test failed"
   #    are different findings with different owners, and a reviewer should not
   #    have to open a log to tell which one happened.
   #
   # The full table runs on every event, including pull requests. That is a
-  # measurement, not an oversight: the whole table is 54 mutations and about
-  # ninety seconds of vitest, against a `Verify` job that is minutes of test
-  # suite. `tools/mutation.mjs --stage fast` exists for the local pre-push loop
-  # and as the switch to reach for if the table ever grows enough to matter —
-  # see docs/internal/ci-gates.md for the threshold at which to flip it and the
-  # exact edit. A gate that only runs nightly is a gate whose regression merges.
+  # measurement, not an oversight: the whole table is 60 mutations and about
+  # three and a half minutes of vitest, against a `Verify` job that is longer
+  # still, so this job is not the pipeline's critical path.
+  # `tools/mutation.mjs --stage fast` (44 rows, about a minute) is the local
+  # pre-push loop and the switch to reach for if this job ever starts deciding
+  # when the pipeline finishes. Note what NOT to defer if that day comes: the
+  # four entry-point rows are `full`-tier because they rebuild a bundle, and
+  # they are also the rows that caught a publish gate standing wide open.
+  # The condition to flip on is not a fixed number of seconds but a comparison
+  # CI already reports: flip when this job's wall clock approaches `Verify`'s,
+  # so that it starts deciding when the pipeline finishes. A constant would
+  # fire before the thing it stands for is true. The edit then is to split this
+  # job's run step — `pnpm test:mutation:fast` under
+  # `if: github.event_name == 'pull_request'`, the full table under the
+  # negation — which keeps `merge_group` and `push: main`, the two events that
+  # actually gate `main`, on the whole table. A gate that only runs nightly is
+  # a gate whose regression merges.
   #
   # The job also runs `pnpm test:tools`, which is what checks that the gate
   # below can still fail. An adversarial review emptied the mutation table and
@@ -201,7 +212,11 @@ jobs:
       # table that has shrunk below `TABLE_FLOOR`. Staleness is the failure
       # worth naming here: a gate that stopped applying reports nothing, and
       # reported nothing for as long as nobody looked. It has already caught
-      # one — see docs/internal/mutation-report.md.
+      # one for real: a row pinning the dry-run withholding in
+      # `src/duties/review/threads.ts` matched four consecutive lines, and two
+      # unrelated, entirely legitimate edits moved that seam without touching
+      # dry-run at all. The row was re-pointed at what the seam *is* rather
+      # than at the order of the statements around it.
       - run: pnpm test:mutation
 
   ci-gate:

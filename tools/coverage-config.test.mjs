@@ -14,8 +14,10 @@
  * silent improvement into a deliberate one: shrinking the measurement now
  * requires a second, explicit edit here, in a file whose whole subject is that
  * the first edit is suspicious. That is the same standing as `TABLE_FLOOR` in
- * `tools/mutation.mjs`, and `docs/internal/ci-gates.md` describes it in exactly
- * those terms rather than as a guarantee.
+ * `tools/mutation.mjs`, and it is worth naming for what it is: a deliberateness
+ * pin, not a guarantee. No gate in this repository survives a committer who
+ * means it; the goal is that none can be switched off by accident, or while
+ * appearing to improve something.
  *
  * Read as text rather than imported: `vitest.config.ts` is TypeScript that
  * `node --test` will not load, and parsing it as text keeps this file free of
@@ -35,10 +37,13 @@ const CONFIG = readFileSync(join(ROOT, "vitest.config.ts"), "utf8");
 /**
  * The globs `coverage.exclude` names, as recorded when this test was written.
  *
- * Each is justified in `docs/internal/coverage-baseline.md`, and each is an
- * entry point that calls `run()` or `core.setFailed` at import time — a file a
- * unit test cannot load without executing the action. That is the ONLY reason
- * this list is allowed to have anything in it.
+ * Each is an entry point that calls `run()` or `core.setFailed` at import
+ * time — a file a unit test cannot load without executing the action. That is
+ * the ONLY reason this list is allowed to have anything in it, and it is the
+ * whole of what the assertion below checks: that the list is these three globs
+ * and no others. It does not and cannot check the other half of the bargain —
+ * that each excluded entry point is genuinely exercised somewhere else, by an
+ * integration test that spawns its bundle.
  *
  * Adding a glob here is not a formatting change. It removes files from the
  * denominator of every coverage percentage in the repository, which raises all
@@ -60,8 +65,11 @@ describe("coverage exclusions", () => {
       globs,
       RECORDED_EXCLUSIONS,
       "coverage.exclude changed. An exclusion raises every percentage while covering " +
-        "nothing, so this is never an incidental edit: justify the new entry point in " +
-        "docs/internal/coverage-baseline.md and update RECORDED_EXCLUSIONS deliberately.",
+        "nothing, so this is never an incidental edit. This list may only name entry " +
+        "points that execute the action at import time, which a unit test cannot load. " +
+        "If the new glob is one of those, add it to RECORDED_EXCLUSIONS here and say in " +
+        "the commit message why the file cannot be imported; if it is not, the fix is a " +
+        "test, not an exclusion.",
     );
   });
 
