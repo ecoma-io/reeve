@@ -31893,20 +31893,52 @@ async function listRepositoryLabels(api, at) {
   }
   return labels;
 }
+var DELTA_SECONDS = /^\d+(?:\.\d+)?$/;
 function headerValue(headers, name) {
   if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return void 0;
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === name) return value;
+  try {
+    const get = headers.get;
+    if (typeof get === "function") {
+      const direct = get.call(headers, name);
+      if (direct !== void 0 && direct !== null) return direct;
+    }
+  } catch {
+  }
+  try {
+    if (typeof headers[Symbol.iterator] === "function") {
+      for (const entry of headers) {
+        if (!Array.isArray(entry)) continue;
+        const [key, value] = entry;
+        if (typeof key === "string" && key.toLowerCase() === name) return value;
+      }
+    }
+  } catch {
+  }
+  try {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() !== name) continue;
+      try {
+        return headers[key];
+      } catch {
+        return void 0;
+      }
+    }
+  } catch {
   }
   return void 0;
 }
 function saysRateLimited(error2) {
-  const response = error2.response;
-  if (typeof response !== "object" || response === null) return false;
-  const headers = response.headers;
+  let headers;
+  try {
+    const response = error2.response;
+    if (typeof response !== "object" || response === null) return false;
+    headers = response.headers;
+  } catch {
+    return false;
+  }
   const retryAfter = headerValue(headers, "retry-after");
-  if (typeof retryAfter === "number" && Number.isFinite(retryAfter)) return true;
-  if (typeof retryAfter === "string" && retryAfter.trim() !== "") return true;
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0) return true;
+  if (typeof retryAfter === "string" && DELTA_SECONDS.test(retryAfter.trim())) return true;
   const remaining = headerValue(headers, "x-ratelimit-remaining");
   return remaining === 0 || typeof remaining === "string" && remaining.trim() === "0";
 }
