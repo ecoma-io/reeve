@@ -62,7 +62,9 @@ Three rules travel with it:
 - **`src/duties/dependa/main.ts` — no `main.integration.test.ts` exists at all.** It is the only duty without one.
 - **`src/duties/harmonise/main.ts` — the file exists but never runs the bundle.** `src/duties/harmonise/main.integration.test.ts` reads `action.yml` as text and asserts contract properties of it; its single reference to `dist/index.js` sits inside `expect(text).toContain("main: dist/index.js")`. The other seven duties spawn their bundle — between 17 and 112 bundle-driving call sites each. Harmonise has none.
 
-So those two files are excluded from the measurement **and** unexecuted by any test — the one combination an exclusion is not supposed to produce. TL2 has work in flight to close both; until it lands this is the honest reading, and neither file is small.
+So those two files were excluded from the measurement **and** unexecuted by any test — the one combination an exclusion is not supposed to produce. Both are now driven by bundle-spawning integration suites, and both carry mutation rows besides.
+
+That pairing is the point, and it is the round's most transferable lesson. These files were excluded from coverage for a sound reason and excluded from the mutation table for a different sound reason, and the two sound reasons named the same set of files. **Two independent gates that share an exclusion list are one gate** — the argument is set out in [the mutation report](mutation-report.md#two-gates-that-share-an-exclusion-list-are-one-gate). An exclusion here should now be read as a question about the mutation table, and vice versa.
 
 **`src/doctor/run.ts` is stale in the opposite direction.** Its exclusion comment says the file is left to its bundle's integration test, but `src/doctor/run.test.ts` now imports `runDoctor` and `providerConfig` from `./run.js` and drives them directly. The file is unit-tested and still excluded, so that test's coverage is discarded from every percentage in this document — the numbers here are mildly _understated_, not overstated. Removing that exclusion is the right end state and is deliberately **not** done in this round: it moves the denominator late in a hardening pass, and the resulting figures would need re-verifying before anyone leaned on them. Recorded so it is a decision rather than an oversight.
 
@@ -131,7 +133,7 @@ Against the 72-branch headroom, the practical question is what a future pull req
 
 ## What this document does not measure
 
-Coverage says a line ran. It does not say anything failed when the line's behavior changed — a test that calls a function and asserts nothing covers it perfectly. That is the question `tools/mutation.mjs` asks, and [the mutation report](mutation-report.md) is where it is answered: 54 mutations, 54 killed, 0 survived, 0 stale.
+Coverage says a line ran. It does not say anything failed when the line's behavior changed — a test that calls a function and asserts nothing covers it perfectly. That is the question `tools/mutation.mjs` asks, and [the mutation report](mutation-report.md) is where it is answered: 60 mutations, 60 killed, 0 survived, 0 stale.
 
 The two belong together, and Round 1 produced the worked example of why. The coverage floor caught modules that arrived with no tests. The mutation table caught something coverage cannot see at all: a legitimate fix in `src/duties/review/threads.ts` moved a seam and silently disarmed a gate in the mutation table, which the preflight reported as `STALE` rather than passing over. Coverage was 97% in that file throughout.
 
