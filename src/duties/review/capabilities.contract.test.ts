@@ -13,8 +13,37 @@
  * them: the ladder is read from the exported constants, and the write surface
  * is read from the module source so a newly-imported file-writing port fails
  * here rather than in production.
+ *
+ * **KNOWN LIMITATIONS — read these before trusting a green run here.**
+ *
+ * The module list is a `readdir` of this directory, so a NEW file cannot slip
+ * past by not being on a list somebody forgot to update. That is the only
+ * evasion this file closes. Two others remain open, both confirmed defeats:
+ *
+ * 1. **Dynamic construction defeats the source scan.** The scan is a substring
+ *    and regex read of the file's text. `["write", "Contents", "File"].join("")`
+ *    behind an `await import("../../core/forge.js")` reads as none of the
+ *    banned strings and passes. Closing this needs the check to move from
+ *    source text to the resolved module graph.
+ * 2. **The port-shape regex is indentation-sensitive.** `/^\s{6}(\w+)\(params/gm`
+ *    counts methods declared at exactly six spaces, which is the nesting every
+ *    port in this duty happens to use. A method declared one level deeper —
+ *    `rest.repos.contents.put()` at eight spaces — widens the port without
+ *    changing the count this test reads.
+ *
+ * **And a boundary property no test in this file can change.** These ports are
+ * TypeScript interfaces, which are erased at runtime. `main.ts:952` builds one
+ * FULL Octokit client with `getOctokit(base.token)` and hands the same object
+ * to every port (`wrapPr`, `main.ts:803`, is a cast, not a wrapper). The
+ * warrant gate at `main.ts:648` is a plain `if (!permitted.includes("comment"))`
+ * around the comment write and nothing else. So at runtime the only thing
+ * standing between this duty and the Contents API is the token's own
+ * `contents:` scope. What this file proves is that no review module ASKS for
+ * that reach in its source — which is a real property worth keeping, and is
+ * not the same claim as "the duty cannot reach it". See
+ * `docs/internal/github-failure-matrix.md`.
  */
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +58,41 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE_MUTATION: readonly Capability[] = ["edit-file", "open-pr"];
 
 const source = (file: string): Promise<string> => readFile(join(HERE, file), "utf8");
+
+/**
+ * Every production module in this duty, read off the directory rather than
+ * off a list.
+ *
+ * A hardcoded list is a list somebody has to remember to extend, and the
+ * module that skips the ban is exactly the module whose author had no reason
+ * to add it. `main.ts` is included: it is excluded from COVERAGE (it calls
+ * `run()` at import), which is not a reason to exclude it from a source scan.
+ */
+async function reviewModules(): Promise<readonly string[]> {
+  const entries = await readdir(HERE);
+  const modules = entries
+    .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+    .sort((a, b) => a.localeCompare(b));
+  // A directory that answered with nothing would make every ban below vacuous.
+  expect(modules.length).toBeGreaterThan(15);
+  expect(modules).toContain("main.ts");
+  return modules;
+}
+
+/**
+ * Every `<module>: <what it reached>` this duty's source names, across every
+ * module in the directory — empty when the boundary holds.
+ */
+async function offenders(banned: readonly (readonly [string, RegExp])[]): Promise<string[]> {
+  const found: string[] = [];
+  for (const file of await reviewModules()) {
+    const text = await source(file);
+    for (const [what, pattern] of banned) {
+      if (pattern.test(text)) found.push(`${file} reaches ${what}`);
+    }
+  }
+  return found.sort((a, b) => a.localeCompare(b));
+}
 
 describe("the ladder review asks for", () => {
   it("review_defaults_to_no_capability_at_all", () => {
@@ -63,40 +127,44 @@ describe("the ladder review asks for", () => {
 });
 
 describe("the write surface review actually holds", () => {
-  it("no_review_module_imports_a_file_writing_port", async () => {
+  it("no_review_modules_source_names_a_file_writing_or_pr_opening_call", async () => {
     // `writeContentsFile`/`createOrUpdateFileContents` is the Contents API —
     // the only way this codebase changes a file in a repository. No module in
-    // this duty may reach it, and the import is the thing to catch, because a
-    // capability check can be added later while an import cannot be un-held.
-    for (const file of [
-      "main.ts",
-      "publish.ts",
-      "threads.ts",
-      "pr.ts",
-      "context.ts",
-      "findings.ts",
-      "verify.ts",
-      "rules.ts",
-      "risk.ts",
-      "packs.ts",
-      "passes.ts",
-      "testmap.ts",
-      "disposition.ts",
-      "summary.ts",
-      "verdict.ts",
-      "architecture.ts",
-      "evidence.ts",
-      "providers.ts",
-    ]) {
-      const text = await source(file);
-      expect(text).not.toContain("createOrUpdateFileContents");
-      expect(text).not.toContain("writeContentsFile");
+    // this duty may name one, and the source mention is what is caught,
+    // because a capability check can be added later while a reach cannot be
+    // un-held. Every module in the directory is scanned, including any added
+    // after this test was written.
+    //
+    // Collected into an offender list rather than asserted per file, so a
+    // failure names every module that reached rather than only the first —
+    // the same shape `harmonise/main.integration.test.ts` uses for its own
+    // whole-tree scan.
+    const banned: readonly [string, RegExp][] = [
+      ["the Contents API", /\bcreateOrUpdateFileContents\b/],
+      ["a file commit", /\bwriteContentsFile\b/],
       // `pulls.create(` exactly — `pulls.createReviewComment(` is this duty's
       // own inline comment and is not a pull request.
-      expect(text).not.toMatch(/\bpulls\.create\s*\(/);
-      expect(text).not.toMatch(/\bpulls\.merge\b/);
-      expect(text).not.toMatch(/\bgit\.createRef\b/);
-    }
+      ["opening a pull request", /\bpulls\.create\s*\(/],
+      ["merging", /\bpulls\.merge\b/],
+      ["pushing a ref", /\bgit\.createRef\b/],
+    ];
+    expect(await offenders(banned)).toEqual([]);
+  });
+
+  it("no_review_modules_source_names_a_workspace_write", async () => {
+    // The workspace half of the same claim, and it now covers every module
+    // rather than only `context.ts`. A review that wrote to the checkout would
+    // be mutating source with no warrant capability involved at all.
+    //
+    // Matched as CALLS, not as words: `testmap.ts` legitimately carries
+    // "writeFile" as one of the danger words it looks for in a diff, the same
+    // way it carries "child_process".
+    const verbs = ["writeFile", "appendFile", "unlink", "rmdir", "mkdir", "rename", "rm"];
+    const banned = verbs.map((verb): [string, RegExp] => [
+      `${verb}()`,
+      new RegExp(`\\b${verb}\\s*\\(`),
+    ]);
+    expect(await offenders(banned)).toEqual([]);
   });
 
   it("the_review_thread_port_declares_only_the_three_review_comment_methods", async () => {
@@ -107,6 +175,10 @@ describe("the write surface review actually holds", () => {
       text.indexOf("export interface ReviewThreadApi"),
       text.indexOf("/** This duty's own inline thread"),
     );
+    // KNOWN LIMITATION: this counts methods at exactly six spaces of
+    // indentation — the nesting every port here uses. A method declared one
+    // level deeper widens the port without moving this count. See the module
+    // doc; closing it needs a type-level check, not a text one.
     const methods = [...port.matchAll(/^\s{6}(\w+)\(params/gm)].map((m) => m[1]);
     expect(methods.sort()).toEqual(
       ["createReviewComment", "listReviewComments", "updateReviewComment"].sort(),
@@ -131,16 +203,6 @@ describe("the write surface review actually holds", () => {
     );
     const methods = [...port.matchAll(/^\s{6}(\w+)\(params/gm)].map((m) => m[1]);
     expect(methods.sort()).toEqual(["get", "listFiles"].sort());
-  });
-
-  it("the_repository_context_reader_never_writes_to_the_workspace", async () => {
-    // Context reads source to inform the review. A write here would turn the
-    // read-only half of the duty into a source mutator without any warrant
-    // capability being involved at all.
-    const text = await source("context.ts");
-    for (const forbidden of ["writeFile", "appendFile", "mkdir", "rm(", "unlink", "rename"]) {
-      expect(text).not.toContain(forbidden);
-    }
   });
 });
 
@@ -176,7 +238,7 @@ describe("remediation stays a proposal, from the review side of the boundary", (
     // Every other module in the duty runs nothing at all. Matched on the
     // IMPORT rather than the word, because `testmap.ts` legitimately carries
     // "child_process" as one of the danger words it looks for in a diff.
-    for (const file of ["main.ts", "testmap.ts", "passes.ts", "rules.ts", "risk.ts", "packs.ts"]) {
+    for (const file of (await reviewModules()).filter((name) => name !== "context.ts")) {
       const text = await source(file);
       expect(text).not.toMatch(/from "node:child_process"/);
       expect(text).not.toContain("execSync(");

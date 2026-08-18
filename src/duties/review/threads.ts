@@ -252,25 +252,29 @@ export function planThreads(
     const key = keyOf(entry.finding);
     if (claimed.has(key)) continue;
     claimed.add(key);
-    // Prefer an owned thread GitHub still reports AT this finding's position.
-    // A thread GitHub has marked outdated comes back with `line: null` while
-    // its marker still names the position key, so a key-only match would find
-    // the outdated one first, decide the line moved, and create a fresh copy —
-    // on every run, for ever. Matching the live position first means the
-    // replacement written last run is the one a rerun recognises, which is
-    // what "a rerun never stacks a second copy" (module doc) requires.
-    const at =
-      owned.find(
-        (thread) =>
-          thread.key === key &&
-          thread.line === entry.finding.line &&
-          thread.path === entry.finding.path,
-      ) ?? owned.find((thread) => thread.key === key);
+    // The owned thread GitHub still reports AT this finding's position — key,
+    // live line and live path all matching.
+    //
+    // A key-only match is not enough. A thread GitHub has marked outdated
+    // comes back with its `line` no longer equal to the finding's while its
+    // marker still names the position key, so a key-only match finds the
+    // outdated one, decides the line moved, and creates a fresh copy — on
+    // every run, for ever. Matching the live position means the replacement
+    // written last run is the one a rerun recognises, which is what "a rerun
+    // never stacks a second copy" (module doc) requires.
+    //
+    // No match is a create, and that one branch covers both of the cases the
+    // old key-only lookup separated: nothing owned at this key at all, and
+    // something owned whose position has drifted. Both want a thread at the
+    // position the diff proves now, and the drifted one is left for GitHub to
+    // mark outdated — the update endpoint cannot move a comment.
+    const at = owned.find(
+      (thread) =>
+        thread.key === key &&
+        thread.line === entry.finding.line &&
+        thread.path === entry.finding.path,
+    );
     if (at === undefined) {
-      creates.push({ key, finding: entry.finding });
-      continue;
-    }
-    if (at.line !== entry.finding.line || at.path !== entry.finding.path) {
       creates.push({ key, finding: entry.finding });
       continue;
     }

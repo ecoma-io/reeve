@@ -239,15 +239,26 @@ describe("the evidence budget is a downgrade, never an upgrade", () => {
       (total, entry) => total + entry.evidence.reduce((n, e) => n + e.detail.length, 0),
       0,
     );
-    expect(chars).toBeLessThanOrEqual(MAX_EVIDENCE_TOTAL_CHARS);
+    // Asserted against the LITERAL ceilings, not against the same `MAX_*`
+    // constants the implementation reads: a bound compared to itself moves
+    // whenever the implementation moves and can never catch it changing.
+    expect(chars).toBeLessThanOrEqual(4096);
     const items = out.reduce((n, entry) => n + entry.evidence.length, 0);
-    expect(items).toBeLessThanOrEqual(MAX_EVIDENCE_ITEMS_PER_RUN);
+    expect(items).toBe(128);
+    // And the constants really are the numbers the ceilings above name, so a
+    // change to either is a change this file reports rather than absorbs.
+    expect(MAX_EVIDENCE_TOTAL_CHARS).toBe(4096);
+    expect(MAX_EVIDENCE_ITEMS_PER_RUN).toBe(128);
   });
 
-  it("per_finding_evidence_is_capped_and_the_status_follows_what_was_kept", () => {
+  it("a_proved_finding_keeps_exactly_its_rule_and_its_diff_evidence_and_no_more", () => {
+    // The per-finding ceiling is 8, but only two providers exist, so the real
+    // observable is the pair: naming the exact evidence is a claim a change
+    // can break, where `<= MAX_EVIDENCE_PER_FINDING` is one that cannot.
     const out = verifyFindings(request());
-    expect(out[0]?.evidence.length).toBeLessThanOrEqual(MAX_EVIDENCE_PER_FINDING);
+    expect(out[0]?.evidence.map((entry) => entry.kind)).toEqual(["diff", "rules"]);
     expect(out[0]?.verification).toBe(deriveStatus(out[0]?.evidence ?? []));
+    expect(MAX_EVIDENCE_PER_FINDING).toBe(8);
   });
 
   it("verification_is_always_derivable_from_the_evidence_that_came_back", () => {

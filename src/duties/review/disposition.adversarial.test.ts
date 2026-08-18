@@ -128,18 +128,42 @@ describe("the grammar refuses everything it is not sure about", () => {
     ).toEqual({ path: "src/app.ts", line: 12, value: "accepted-risk" });
   });
 
-  it("a_multi_line_reply_carries_no_disposition_at_all", () => {
-    // ADJUDICATE — implementation vs. doc. `readDispositions`'s own doc comment
-    // reads "Multiple matching lines in one reply each produce a disposition
-    // for their own finding's identity", but the grammar is anchored with
-    // `^`/`$` and no `m` flag and is applied to the WHOLE reply body once. So a
-    // maintainer who writes two triage lines in one reply gets neither — not
-    // one, not the first. Pinned as current behaviour; the fail-safe direction
-    // (nothing is fabricated) is why this is reported rather than changed on a
-    // guess.
-    const body = "12: wont-fix\n20: rejected";
-    expect(parseDispositionLine(body)).toBeNull();
-    expect(read([reply({ body })], [previous(), previous({ line: 20 })]).size).toBe(0);
+  it("a_multi_line_reply_loses_every_disposition_including_the_one_that_would_have_worked", () => {
+    // P1 — SILENT DATA LOSS, not a shortfall, and adjudicated 2026-08-18 as
+    // "code wins as behaviour, the doc was wrong" (`disposition.ts` now says
+    // so). The grammar is anchored with `^`/`$` and carries no `m` flag, and
+    // `readDispositions` runs it ONCE against the whole reply body. So:
+    //
+    //   "12: wont-fix"                 -> one disposition
+    //   "12: wont-fix\n20: rejected"   -> ZERO dispositions
+    //
+    // The second line does not merely fail to register; it destroys the first.
+    // A maintainer who triages two findings in one reply is told nothing and
+    // loses both, and the next run re-presents both findings untriaged.
+    const first = "12: wont-fix";
+    const second = "20: rejected";
+    // Two DIFFERENT intentions, so two surviving dispositions are actually
+    // distinguishable — a disposition is keyed by rule+path, never by line.
+    const findings = [
+      previous(),
+      previous({ line: 20, ruleId: "naming", id: "naming:src/app.ts:20" }),
+    ];
+
+    // Each line, on its own, is a disposition this module accepts.
+    expect(read([reply({ body: first })], findings).size).toBe(1);
+    expect(read([reply({ body: second })], findings).size).toBe(1);
+
+    // Together in one reply: neither survives. This is the loss.
+    expect(parseDispositionLine(`${first}\n${second}`)).toBeNull();
+    expect(read([reply({ body: `${first}\n${second}` })], findings).size).toBe(0);
+
+    // Two separate replies are the working spelling, and are what a fix — if
+    // one is ever authorised — would have to keep behaving identically.
+    const separate = read(
+      [reply({ id: 11, body: first }), reply({ id: 12, body: second })],
+      findings,
+    );
+    expect(separate.size).toBe(2);
   });
 
   it("a_disposition_line_with_prose_above_it_is_also_refused", () => {

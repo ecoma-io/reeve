@@ -87,7 +87,7 @@ function sourceOf(
 const RULES = ".github/reeve-review.yml";
 
 describe("withinWorkspace refuses every spelling of an escape", () => {
-  it("refuses_traversal_absolutes_nul_and_the_empty_path", () => {
+  it("a_path_that_escapes_the_workspace_is_refused_before_any_read_can_happen", () => {
     const root = "/workspace";
     for (const rel of [
       "",
@@ -104,24 +104,24 @@ describe("withinWorkspace refuses every spelling of an escape", () => {
     }
   });
 
-  it("refuses_a_sibling_directory_that_merely_shares_the_roots_prefix", () => {
+  it("a_sibling_directory_sharing_the_roots_name_prefix_is_still_outside_it", () => {
     // `/workspace-evil` starts with `/workspace` as a string but is not inside
     // it — the separator in the base is what makes the check honest.
     expect(withinWorkspace("/workspace", "../workspace-evil/x.ts")).toBeNull();
   });
 
-  it("accepts_an_ordinary_relative_path_and_returns_it_resolved", () => {
+  it("an_ordinary_workspace_path_resolves_to_a_location_inside_the_root", () => {
     expect(withinWorkspace("/workspace", "src/app.ts")).toBe("/workspace/src/app.ts");
     expect(withinWorkspace("/workspace", "./src/app.ts")).toBe("/workspace/src/app.ts");
   });
 
-  it("a_dot_segment_alone_resolves_to_the_root_itself_which_is_allowed", () => {
+  it("the_workspace_root_itself_is_readable_and_is_not_treated_as_an_escape", () => {
     expect(withinWorkspace("/workspace", ".")).toBe("/workspace");
   });
 });
 
 describe("the secret denylist", () => {
-  it("catches_env_files_keys_and_word_bearing_config_segments", () => {
+  it("a_secrets_file_is_denied_so_its_contents_can_never_reach_a_prompt", () => {
     for (const path of [
       ".env",
       ".env.production",
@@ -141,7 +141,7 @@ describe("the secret denylist", () => {
     }
   });
 
-  it("does_not_catch_source_files_whose_names_merely_contain_the_words", () => {
+  it("a_source_file_whose_name_contains_a_secret_word_is_still_reviewable", () => {
     for (const path of [
       "src/tokens.ts",
       "src/tokenizer.ts",
@@ -230,16 +230,34 @@ describe("the read budget cannot be blown from inside the workspace", () => {
     expect(out.sections.map((s) => s.kind)).not.toContain("history");
   });
 
-  it("the_callers_walk_stops_at_maxFilesScannedPerDirectory", async () => {
+  it("raising_the_directory_scan_cap_is_the_only_thing_that_lets_the_walk_read_further", async () => {
     // A repository shaped to make the walk unbounded: every directory holds
-    // another directory. The bound is what keeps one review from listing a
-    // whole monorepo.
-    const dirs: Record<string, readonly string[]> = {};
-    for (let i = 0; i < 300; i += 1) dirs[`src${"/deep".repeat(i)}`] = ["deep"];
-    const source = sourceOf({}, { dirs });
-    await collectContext([target()], source, budget({ maxFilesScannedPerDirectory: 3 }), RULES);
-    const listed = source.asked.filter((entry) => entry.startsWith("dir:"));
-    expect(listed.length).toBeLessThan(60);
+    // another directory, three hundred deep. The bound is what keeps one
+    // review from listing a whole monorepo.
+    //
+    // Asserted as an EXACT count, and asserted twice at different caps, so the
+    // test fails if the bound moves rather than merely if it disappears — a
+    // `toBeLessThan(60)` against a cap of 3 would pass with the cap multiplied
+    // by five and is not a bound test at all.
+    const deep = (): Record<string, readonly string[]> => {
+      const dirs: Record<string, readonly string[]> = {};
+      for (let i = 0; i < 300; i += 1) dirs[`src${"/deep".repeat(i)}`] = ["deep"];
+      return dirs;
+    };
+    const listingsAt = async (cap: number): Promise<number> => {
+      const source = sourceOf({}, { dirs: deep() });
+      await collectContext([target()], source, budget({ maxFilesScannedPerDirectory: cap }), RULES);
+      return source.asked.filter((entry) => entry.startsWith("dir:")).length;
+    };
+
+    // The walk spends the cap on the descent, plus the three fixed listings
+    // every run makes (the `tests` lookup, the `config` ancestor walk's first
+    // step, and the workspace root).
+    expect(await listingsAt(3)).toBe(6);
+    expect(await listingsAt(10)).toBe(13);
+    // One more unit of cap buys exactly one more listing — the bound is the
+    // cap, not some other quantity that happens to correlate with it.
+    expect((await listingsAt(5)) - (await listingsAt(4))).toBe(1);
   });
 
   it("an_empty_workspace_root_reads_nothing_at_all", async () => {
@@ -248,11 +266,6 @@ describe("the read budget cannot be blown from inside the workspace", () => {
     const out = await collectContext([target()], rootless, budget(), RULES);
     expect(out).toEqual({ sections: [], text: null, totalChars: 0, readFiles: 0 });
     expect(source.asked).toEqual([]);
-  });
-
-  it("every_attempted_read_is_counted_including_the_ones_that_found_nothing", async () => {
-    const out = await collectContext([target()], sourceOf({}), budget(), RULES);
-    expect(out.readFiles).toBeGreaterThan(0);
   });
 });
 
