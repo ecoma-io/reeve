@@ -280,7 +280,17 @@ function parsePnpmLockYaml(content: string): Map<string, string> | null {
     if (!inPackages) continue;
 
     // Match package entries: /name@version:
-    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine);
+    //
+    // The trailing parenthetical is stripped BEFORE the split, not after it.
+    // pnpm 6+ writes a package resolved against a peer as
+    // `/name@version(peer@version):`, and both capture groups below are
+    // greedy — so a split on the raw line lands on the `@` INSIDE the
+    // parenthetical and hands back a name and a version that are both wrong,
+    // which is a dependency silently dropped from maintenance (see
+    // `semver.test.ts`'s empty-current-version block for what that costs).
+    // Stripping first leaves `/name@version:`, the shape this pattern was
+    // written for.
+    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine.replace(/(?:\([^)]*\))+(?=:$)/, ""));
     if (packageMatch !== null) {
       const name = packageMatch[1] ?? "";
       const version = packageMatch[2] ?? "";

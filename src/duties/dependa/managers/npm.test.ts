@@ -8,6 +8,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { classify } from "../semver.js";
+
 import { createNpmManager } from "./npm.js";
 
 const manager = createNpmManager();
@@ -766,37 +768,73 @@ describe("npm parse: pnpm-lock.yaml", () => {
     expect(resolved(lockfile).version).toBe("4.17.21");
   });
 
-  // ADJUDICATE — DEFECT, pinned to current behaviour rather than fixed here.
+  // REGRESSION — pnpm 6+ peer-resolved entries resolved to an EMPTY version.
   //
-  // pnpm 6+ writes a peer-resolved package as `/lodash@4.17.21(react@18.0.0):`.
-  // `parsePnpmLockYaml`'s key pattern is `/^ {2}\/(.+)@(.+):$/` (npm.ts:282),
-  // and both groups are greedy, so the split lands on the LAST `@` — inside
-  // the parenthetical. The name becomes `lodash@4.17.21(react` and the version
-  // `18.0.0)`, and the `cleanVersion` strip on the next line cannot help
-  // because the parenthesis is no longer trailing. The manifest's `lodash`
-  // then matches nothing and `currentVersion` comes back EMPTY.
+  // pnpm writes a package resolved against a peer as
+  // `/lodash@4.17.21(react@18.0.0):`. `parsePnpmLockYaml`'s key pattern is
+  // `/^ {2}\\/(.+)@(.+):$/` and both groups are greedy, so the split landed on
+  // the LAST `@` — inside the parenthetical. The name came out as
+  // `lodash@4.17.21(react` and the version as `18.0.0)`, and the
+  // `cleanVersion` strip on the next line could not help because the
+  // parenthesis was no longer trailing. The manifest's `lodash` then matched
+  // nothing and `currentVersion` resolved to `""`.
   //
-  // The code's own comment at npm.ts:287 says it means to strip parenthetical
-  // indicators, so the intent is declared and unmet — this is a defect, not a
-  // documented limitation. Effect: a pnpm repository gets no `currentVersion`
-  // for any peer-resolved dependency, so those dependencies are measured from
-  // nothing. The one-line fix is to strip the parenthetical before the split
-  // rather than after:
+  // What that cost is pinned in `semver.test.ts`: `classify("")` returns null,
+  // so `main.ts:328` logs at `core.info` and skips the candidate. Every
+  // peer-resolved dependency in a pnpm repository was dropped from dependency
+  // maintenance entirely and silently, security updates included.
   //
-  //   /^ {2}\/(.+)@(.+):$/.exec(trimmedLine.replace(/\([^)]*\)(?=:$)/, ""))
-  //
-  // Not applied here because this round is test-first and the downstream
-  // treatment of an empty `currentVersion` is another owner's contract.
-  // Reported to root for a ruling; this case is what proves the fix when it
-  // lands, and it is written against the source as it stands today.
-  it("does NOT resolve a pnpm peer-suffixed entry, leaving the version empty", () => {
+  // The fix strips the parenthetical BEFORE the split rather than after, which
+  // is what the code's own comment always said it meant to do.
+  it("resolves a pnpm peer-suffixed entry to the version before the parenthesis", () => {
     const lockfile = [
       "lockfileVersion: '6.0'",
       "packages:",
       "  /lodash@4.17.21(react@18.0.0):",
     ].join("\n");
 
-    expect(resolved(lockfile).version).toBe("");
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("resolves a peer-suffixed entry carrying several peers", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21(react@18.0.0)(react-dom@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("resolves a scoped package that is also peer-resolved", () => {
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /@testing-library/react@14.0.0(react@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@testing-library/react": "^14" }).version).toBe("14.0.0");
+  });
+
+  it("reports a peer-resolved dependency as a real read rather than a partial one", () => {
+    // `partial` is how a run says "a lockfile was there and I could not read
+    // it". A peer-resolved entry is readable, and reporting otherwise made
+    // every pnpm run look degraded.
+    const lockfile = [
+      "lockfileVersion: '6.0'",
+      "packages:",
+      "  /lodash@4.17.21(react@18.0.0):",
+    ].join("\n");
+
+    expect(resolved(lockfile).partial).toBe(false);
+  });
+
+  it("leaves a version with a legitimate `@` in its own text alone", () => {
+    // The strip must only remove a TRAILING parenthetical before the colon,
+    // never reach into the id.
+    const lockfile = ["lockfileVersion: '6.0'", "packages:", "  /lodash@4.17.21:"].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
   });
 
   it("reads a version out of an importers entry", () => {
@@ -846,6 +884,47 @@ describe("npm parse: pnpm-lock.yaml", () => {
 
   it("reports partial for content that is neither JSON nor a recognised lockfile", () => {
     expect(resolved("just some prose\nand another line").partial).toBe(true);
+  });
+});
+
+describe("a peer-resolved dependency flows all the way to a classification", () => {
+  // The other end of the regression. Pinning the parse alone would leave the
+  // fix looking correct while the dependency was still dropped downstream, so
+  // this walks the same lockfile through to the decision that was being lost:
+  // `classify(currentVersion, target)`, which returned null for every
+  // peer-resolved package and skipped it at `main.ts:328`.
+  const PEER_LOCKFILE = [
+    "lockfileVersion: '6.0'",
+    "packages:",
+    "  /lodash@4.17.21(react@18.0.0):",
+  ].join("\n");
+
+  it("yields a current version a patch update can be measured from", () => {
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(version).toBe("4.17.21");
+    expect(classify(version, "4.17.22", false)).toBe("patch");
+  });
+
+  it("yields a current version a security update can be measured from", () => {
+    // The case the defect cost most: `classify` returns null before it reaches
+    // the `isSecurity` override, so a peer-resolved package with an advisory
+    // against it was skipped as silently as any other.
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(classify(version, "4.17.22", true)).toBe("security");
+  });
+
+  it("yields a current version a major update can be measured from", () => {
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(classify(version, "5.0.0", false)).toBe("major");
+  });
+
+  it("skips a candidate identical to the resolved version rather than proposing a no-op", () => {
+    const { version } = resolved(PEER_LOCKFILE);
+
+    expect(classify(version, "4.17.21", false)).toBeNull();
   });
 });
 

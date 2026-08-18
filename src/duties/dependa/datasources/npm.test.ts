@@ -343,25 +343,47 @@ describe("the answers it refuses", () => {
     expect(result.status === "malformed-metadata" ? result.reason : "").toContain("versions");
   });
 
-  // ADJUDICATE: a `versions` ARRAY is accepted, and fabricates a release.
-  // `parseRegistryResponse` guards with `typeof versions !== "object"`
-  // (npm.ts:95), which an array passes, and then reads it with
-  // `Object.entries` — so `versions: ["1.0.0"]` yields one release whose
-  // `version` is the array INDEX, `"0"`, reported as `status: "available"`.
-  // The module's own doc (npm.ts:11) says malformed registry responses degrade
-  // to `malformed-metadata`, and `types.ts:38-44` says a datasource returns an
-  // explicit failure state rather than a confident wrong answer — both of
-  // which read as refusing this. The blast radius is small (a "0" target
-  // version does not survive semver comparison downstream) and no npm registry
-  // sends this shape, so the source's current behaviour is pinned here rather
-  // than changed. Reported for a ruling; an `Array.isArray` guard beside the
-  // `typeof` check is the one-line fix if the ruling goes the other way.
-  it("accepts a versions ARRAY and names the release after its index", async () => {
+  // REGRESSION — a `versions` ARRAY was accepted and fabricated releases.
+  //
+  // `parseRegistryResponse` guarded with `typeof versions !== "object"`, which
+  // an array passes, and then read it with `Object.entries` — so
+  // `versions: ["1.0.0", "2.0.0"]` produced two releases whose versions were
+  // the array INDICES, `"0"` and `"1"`, reported as `status: "available"`.
+  //
+  // That is malformed upstream data accepted as success: the datasource
+  // analogue of the intent matrix's A2, "malformed output is NOT success". A
+  // fabricated version number delivered confidently as an available upgrade is
+  // a wrong answer, not a degraded one, and the whole point of the
+  // `ResolutionResult` union is that an unreadable document has a name of its
+  // own to come back as.
+  it("reports malformed-metadata for a versions field that is an array", async () => {
     answering(new Response(JSON.stringify({ versions: ["1.0.0", "2.0.0"] }), { status: 200 }));
 
-    const result = available(await datasource.resolve("left-pad"));
+    const result = await datasource.resolve("left-pad");
 
-    expect(result.releases.map((release) => release.version)).toEqual(["1", "0"]);
+    expect(result.status).toBe("malformed-metadata");
+    expect(result.status === "malformed-metadata" ? result.reason : "").toContain("versions");
+  });
+
+  it("reports malformed-metadata rather than fabricating a release named after an index", async () => {
+    // The shape of the wrong answer, asserted directly: `"0"` and `"1"` were
+    // reported as available upgrades a maintainer could be proposed onto.
+    answering(new Response(JSON.stringify({ versions: ["1.0.0", "2.0.0"] }), { status: 200 }));
+
+    const result = await datasource.resolve("left-pad");
+
+    expect(result.status).not.toBe("available");
+    const versions = result.status === "available" ? result.releases.map((r) => r.version) : [];
+    expect(versions).not.toContain("0");
+    expect(versions).not.toContain("1");
+  });
+
+  it("still reads an ordinary versions object, which is also `typeof object`", async () => {
+    // The guard must reject an array without rejecting the shape the registry
+    // actually sends.
+    answering(new Response(JSON.stringify({ versions: { "1.0.0": {} } }), { status: 200 }));
+
+    expect(available(await datasource.resolve("left-pad")).releases[0]?.version).toBe("1.0.0");
   });
 
   it("reports malformed-metadata for a document whose versions map is empty", async () => {
