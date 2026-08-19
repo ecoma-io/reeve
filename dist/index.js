@@ -33249,15 +33249,15 @@ var DEFAULT_CAPABILITIES6 = [];
 var REVIEW_CAPABILITIES = ["comment"];
 
 // src/duties/remediation/capabilities.ts
-var REMEDIATION_DEFAULTS = [];
+var DEFAULT_CAPABILITIES7 = [];
 var REMEDIATION_CAPABILITIES = ["propose"];
 
 // src/duties/translate/capabilities.ts
-var DEFAULT_CAPABILITIES7 = ["edit-body"];
+var DEFAULT_CAPABILITIES8 = ["edit-body"];
 var TRANSLATE_CAPABILITIES = ["edit-body"];
 
 // src/duties/triage/capabilities.ts
-var DEFAULT_CAPABILITIES8 = ["label"];
+var DEFAULT_CAPABILITIES9 = ["label"];
 var TRIAGE_CAPABILITIES = [
   "label",
   "comment",
@@ -33336,15 +33336,15 @@ var PROFILE_CODES = /* @__PURE__ */ new Set([
 var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
 var PROBE_TURN = [{ role: "user", content: "ping" }];
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
-  ["translate", DEFAULT_CAPABILITIES7],
-  ["triage", DEFAULT_CAPABILITIES8],
+  ["translate", DEFAULT_CAPABILITIES8],
+  ["triage", DEFAULT_CAPABILITIES9],
   ["duplicate", DEFAULT_CAPABILITIES2],
   ["respond", DEFAULT_CAPABILITIES5],
   ["lifecycle", DEFAULT_CAPABILITIES4],
   ["harmonise", DEFAULT_CAPABILITIES3],
   ["dependa", DEFAULT_CAPABILITIES],
   ["review", DEFAULT_CAPABILITIES6],
-  ["remediation", REMEDIATION_DEFAULTS]
+  ["remediation", DEFAULT_CAPABILITIES7]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", TRANSLATE_CAPABILITIES],

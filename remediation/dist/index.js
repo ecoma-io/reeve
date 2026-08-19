@@ -32787,7 +32787,7 @@ function whole(name, raw) {
 }
 
 // src/duties/remediation/capabilities.ts
-var REMEDIATION_DEFAULTS = [];
+var DEFAULT_CAPABILITIES = [];
 
 // src/core/marker.ts
 import { createHash } from "node:crypto";
@@ -33002,7 +33002,7 @@ function forRefusal(permitted) {
   return FORBIDDEN.find((capability) => permitted.includes(capability)) ?? null;
 }
 async function decide(api, at, warrant, dryRun) {
-  const permitted = warrant.granted("remediation", REMEDIATION_DEFAULTS);
+  const permitted = warrant.granted("remediation", DEFAULT_CAPABILITIES);
   const refused = forRefusal(permitted);
   if (refused !== null) {
     throw new Error(

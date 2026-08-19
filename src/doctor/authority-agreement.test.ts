@@ -47,7 +47,7 @@ import {
 } from "../duties/lifecycle/capabilities.js";
 import {
   REMEDIATION_CAPABILITIES,
-  REMEDIATION_DEFAULTS,
+  DEFAULT_CAPABILITIES,
 } from "../duties/remediation/capabilities.js";
 import {
   DEFAULT_CAPABILITIES as RESPOND_DEFAULTS,
@@ -87,7 +87,7 @@ const OWN: ReadonlyMap<
   ["harmonise", { defaults: HARMONISE_DEFAULTS, ladder: HARMONISE_CAPABILITIES }],
   ["dependa", { defaults: DEPENDA_DEFAULTS, ladder: DEPENDA_CAPABILITIES }],
   ["review", { defaults: REVIEW_DEFAULTS, ladder: REVIEW_CAPABILITIES }],
-  ["remediation", { defaults: REMEDIATION_DEFAULTS, ladder: REMEDIATION_CAPABILITIES }],
+  ["remediation", { defaults: DEFAULT_CAPABILITIES, ladder: REMEDIATION_CAPABILITIES }],
 ]);
 
 const TAXONOMY = ["version: 1", "labels:", "  - name: bug", "    description: A defect."].join(

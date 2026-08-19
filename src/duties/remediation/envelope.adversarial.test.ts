@@ -236,7 +236,7 @@ describe("readEnvelope refuses an envelope a human could have planted", () => {
 //   4. `remediate` (proposal.ts:163) — interpolated into template prose,
 //      which reaches `core.setOutput` and the job summary and nothing else.
 //
-// It reaches NO capability decision (`REMEDIATION_DEFAULTS` is a constant and
+// It reaches NO capability decision (`DEFAULT_CAPABILITIES` is a constant and
 // the over-grant check reads the warrant), NO path (the path is its own
 // envelope field and is only ever rendered), NO command, and NO write — the
 // duty's whole GitHub surface is `CommentApi`, which declares `listComments`
