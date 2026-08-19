@@ -1,5 +1,7 @@
 # Reeve behavioral contract — frozen at Round 2
 
+**Landed on main 2026-08-19 (final adversarial freeze). Baseline: main @ `1a4fd29`. Round-2 refactor branches unmerged; any "removed in Round 2" claims elsewhere are reclassified to INTERNAL-BUT-EXPORTED until they land.**
+
 _The behavior freeze for the pre-1.0 sequence. Round 2 may simplify the
 implementation but must not change anything frozen here. This document is the
 adjudicated index of the contract; it distills the intent matrix, the contract
@@ -199,8 +201,12 @@ Frozen (M B3, F GitHub, C rows):
 failure read as not-there`, `a 404 no longer means not-there`, `GitHub rate
 limits no longer capacity`.
 - **Read vs propose vs mutate is explicit.** `Effects` is adds-only; the
-  octokit client is never handed to a duty; the only Contents-API writes are
-  `record` (triage) and lifecycle's bounded `removeLabel`. → F7, B3.
+  octokit client is never handed to a duty; Contents writes are `record`
+  (triage), lifecycle's bounded `removeLabel`, and the gated edit-file paths
+  of dependa/harmonise/triage-propose
+  (`createOrUpdateFileContents` in `dependa/publish.ts`,
+  `harmonise/publish.ts`, `triage/propose.ts`, `core/state-branch.ts`).
+  → F7, B3.
 - Mutations answer the idempotency marker first (a rerun posts nothing — 409
   re-reads the sha rather than aborting). → H `skip idempotency check`, `409
 conflict aborts instead of re-reading the sha`.
@@ -253,23 +259,33 @@ invent coverage claims:
 - `screen-models` empty-roster fallback at a duty boundary has no
   integration-level test (documented in M GAPS 1 — flagged, not free to
   silently change).
-- `failIfProtocolExhausted` from a real duty call (M GAPS 2).
-- `propose`-marked PR recursion guard lacks lifecycle-main coverage (M GAPS 3).
+- `failIfProtocolExhausted` from a real duty call (M GAPS 2) — **partially
+  covered**: `src/core/summary.contract.test.ts` drives the all-protocol red
+  vs all-capacity decision at the duty boundary (`setFailed` fires / does not
+  fire), and six of the nine duty call sites already invoke it after a
+  rotation (dependa, duplicate, harmonise, respond, translate, triage). The
+  remaining gap — the review and lifecycle boundaries, where the call is not
+  yet wired — lands with the separate review/lifecycle P1 fix units; it is NOT
+  fixed here.
+- `propose`-marked PR recursion guard lacks lifecycle-main coverage (M GAPS 3)
+  — **covered** by `src/duties/lifecycle/main.integration.test.ts` "the
+  Reeve-proposal recursion guard" describe block; moved out of the gap
+  register.
 - No provider failure is ever retried (F **[GAP] Retry** — deliberate).
 - Provider reachability accuracy is a measured register, not a test gate
   (`eval/README.md` measurement table — the 1.0 Stage-6 number).
-- **Deliberate re-scope (Round 2, adjudicated 2026-08-19):** the inlined
-  `deriveLanguage` (formerly `src/core/derive.ts`) dropped 10 of its 12
-  unit-test invariants at the module level (composite-script mapping,
-  `\p{Script=}` compile-check, sr-Latn override, case-indifference,
-  malformed/unknown/CLDR-known-but-unnameable refusals). The logic is
-  byte-identical — moved, not rewritten — and the surviving 2 assertions now
-  run at the `parseLanguages` boundary through real Intl tables (stronger than
-  the mocked module tests), plus the eval multilingual fixtures (ja/ko/zh)
-  assert the same behavior end-to-end. Recorded as an intentional re-scope of
-  coverage to the parser boundary, NOT a behavioral change; a future pass may
-  restore a derive-block in `languages.test.ts` if the boundary it guards
-  grows distinct from the parser's.
+- **Derive re-scope — corrected on main @ `1a4fd29`:** the earlier
+  "dropped 10 of its 12 unit-test invariants" claim is FALSE as built.
+  `src/core/derive.ts` (`deriveLanguage`/`Derived`) still exists on main and
+  `src/core/derive.test.ts` carries all 12 real-Intl unit tests (composite
+  script mapping, `\p{Script=}` compile-check, sr-Latn override,
+  case-indifference, malformed/unknown/CLDR-known-but-unnameable refusals).
+  The `parseLanguages` boundary tests in `languages.test.ts` run against a
+  MOCK of `./derive.js` (line 19), so the module-level protection is real and
+  the register's rationale — boundary tests as the "stronger" real-Intl seat
+  — was backwards. The eval multilingual fixtures (ja/ko/zh) assert the same
+  behavior end-to-end. A future pass may add a non-mocked derive-block at the
+  `languages.ts` boundary if that boundary grows distinct from derive's own.
 
 ---
 
