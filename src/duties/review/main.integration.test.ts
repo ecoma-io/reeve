@@ -1222,6 +1222,81 @@ describe("the action", () => {
     expect(clean.summary).toContain("bundle.min.js");
   });
 
+  it("a generated: [''] rules file does not sweep the diff and stamp it clean", async () => {
+    // An empty suffix matches every path (`endsWith("")` is true), so before the
+    // rule-parse fix a rules file of `generated: [""]` silently marked the whole
+    // diff as machine-made, showed nothing to the model and posted the "No issues
+    // to report" chrome green over a diff nothing was reviewed. The parse fix
+    // drops the empty entry, so the diff is shown and reviewed instead.
+    await writeFile(rulesPath, "version: 1\ngenerated: ['']\n");
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("`generated` entry 1 is empty; dropped");
+    // The review passes ran — the diff was actually shown to a model.
+    expect(stub.asked.some((ask) => stageOf(ask) === "review")).toBe(true);
+    expect(stub.comments[0]?.body).toContain("No issues to report");
+    // Nothing was skipped as generated: the summary's coverage table (which
+    // only renders named skips) carried no generated row, and the verdict's
+    // Passes row shows the model reviewed the diff rather than it being
+    // silently swept away.
+    expect(run.summary).not.toContain("### Coverage");
+    expect(run.summary).toContain("Correctness (0 findings)");
+  });
+
+  it("a pack's generated: [''] cannot sweep the diff either", async () => {
+    // Same hole as the local rules file, via the pack path: a pack's
+    // `generated: [""]` would put an empty suffix into the composed union and
+    // `path.endsWith("")` matches every path. The pack reader drops it with a
+    // warning, so the composed suffixes stay the default and the diff is shown
+    // and reviewed rather than swept and stamped clean.
+    await writeFile(rulesPath, ["version: 1", "packs:", "  - pack: go/concurrency@1.0"].join("\n"));
+    await mkdir(join(packsPath, "go"), { recursive: true });
+    await writeFile(join(packsPath, "go", "concurrency.yml"), 'version: 1.0\ngenerated: [""]\n');
+    stub.answer = stageAnswer({
+      review: JSON.stringify({ findings: [], confidence: 0.9 }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("`generated` entry 1 is empty; dropped");
+    // The review passes ran — the diff was actually shown to a model.
+    expect(stub.asked.some((ask) => stageOf(ask) === "review")).toBe(true);
+    expect(stub.comments[0]?.body).toContain("No issues to report");
+    expect(run.summary).not.toContain("### Coverage");
+    expect(run.summary).toContain("Correctness (0 findings)");
+  });
+
+  it("a genuine generated-only PR still posts the empty chrome green", async () => {
+    // Pinned behavior: a diff whose every file is generated is a real answer, so
+    // the run posts the empty "No issues to report" chrome — it must not be
+    // swallowed by any guard change.
+    await writeFile(rulesPath, "version: 1\ngenerated: ['.lock']\n");
+    stub.pull.files = [
+      {
+        filename: "Cargo.lock",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+lock",
+      },
+    ];
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    // Nothing reached the review passes: only the language detect stage ran.
+    expect(stub.asked.every((ask) => stageOf(ask) === "detect")).toBe(true);
+    expect(stub.comments[0]?.body).toContain("No issues to report");
+    expect(run.summary).toContain("generated");
+    expect(run.summary).toContain("Cargo.lock");
+  });
+
   it("reports ignored and capped files in the coverage table, and reviews what is left", async () => {
     await writeFile(
       rulesPath,

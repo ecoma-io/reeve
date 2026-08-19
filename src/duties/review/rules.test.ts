@@ -51,6 +51,25 @@ describe("parseRules", () => {
     expect(rules.ignoreFiles).toEqual([]);
   });
 
+  it("drops empty and whitespace-only generated suffixes with a warning, keeping the valid ones", () => {
+    // An empty suffix matches every path (`"src/a.ts".endsWith("")` is true), so
+    // `generated: [""]` would silently skip the whole diff as machine-made and
+    // stamp an unread diff as clean. Empty/whitespace-only is never a
+    // legitimate suffix: it is dropped at the parse boundary, so `[""]` behaves
+    // exactly like `generated:` (falls back to `DEFAULT_GENERATED`).
+    const onlyEmpty = parseRules("version: 1\ngenerated: ['']\n");
+    expect(onlyEmpty.generatedExtensions).toEqual([".min.js", ".min.css", ".map"]);
+    expect(onlyEmpty.warnings).toEqual(["`generated` entry 1 is empty; dropped"]);
+
+    const whitespace = parseRules("version: 1\ngenerated: [' ']\n");
+    expect(whitespace.generatedExtensions).toEqual([".min.js", ".min.css", ".map"]);
+    expect(whitespace.warnings).toEqual(["`generated` entry 1 is empty; dropped"]);
+
+    const mixed = parseRules("version: 1\ngenerated: ['', '.lock']\n");
+    expect(mixed.generatedExtensions).toEqual([".lock"]);
+    expect(mixed.warnings).toEqual(["`generated` entry 1 is empty; dropped"]);
+  });
+
   it("throws UnreadableRules on invalid YAML", () => {
     expect(() => parseRules(":not: [valid")).toThrow(UnreadableRules);
   });
