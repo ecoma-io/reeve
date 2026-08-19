@@ -209,10 +209,11 @@ export function isTestPath(rel: string): boolean {
 }
 
 /**
- * Walks the checkout for test files. Deterministic: breadth-first in `readdir`
- * order, so the same tree yields the same list on every run. Bounded by the
- * entry, depth and char budgets; a budget cut sets `capped` rather than
- * silently inventing a boundary nobody asked for.
+ * Walks the checkout for test files. Deterministic: breadth-first with every
+ * directory listing byte-sorted, so the same tree yields the same list on
+ * every run regardless of `readdir` order. Bounded by the entry, depth and
+ * char budgets; a budget cut sets `capped` rather than silently inventing a
+ * boundary nobody asked for.
  */
 export async function discoverTests(root: string): Promise<Discovery> {
   if (root.length === 0) return { tests: [], unavailable: true, capped: false };
@@ -233,7 +234,7 @@ export async function discoverTests(root: string): Promise<Discovery> {
     }
     let names: string[];
     try {
-      names = await readdir(join(root, rel));
+      names = (await readdir(join(root, rel))).sort();
     } catch {
       if (rel.length === 0) return { tests: [], unavailable: true, capped: false };
       continue; // an unreadable subdirectory is not evidence of anything (D5)

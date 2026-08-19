@@ -36112,7 +36112,7 @@ async function computePivot(warrant, standing, body, code, settings, stages, wea
   info(pivotNote);
   return { pivot: null, pivotNote };
 }
-async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed, stateBranch) {
+async function recordCorrection(api, at, standing, authority2, settings, stages, weather, by, changed, stateBranch, now = () => /* @__PURE__ */ new Date()) {
   const warrant = authority2.warrant;
   let decidedLabels = standing.labels.filter((name) => taxonomyNames(settings).has(name));
   if (by === "sweep" && decidedLabels.length > 0) {
@@ -36187,7 +36187,7 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     duty: "triage",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
+    at: now().toISOString(),
     title: standing.title,
     excerpt: body.slice(0, EXCERPT),
     language: code,
@@ -36216,7 +36216,7 @@ async function recordCorrection(api, at, standing, authority2, settings, stages,
     unattributable: false
   };
 }
-async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf, stateBranch) {
+async function recordReversal(api, at, standing, authority2, settings, stages, weather, by, duplicateOf, stateBranch, now = () => /* @__PURE__ */ new Date()) {
   const warrant = authority2.warrant;
   const limit = settings.maxBodyChars;
   const body = limit === null ? standing.body : standing.body.slice(0, limit);
@@ -36244,7 +36244,7 @@ async function recordReversal(api, at, standing, authority2, settings, stages, w
     repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     duty: "duplicate",
-    at: (/* @__PURE__ */ new Date()).toISOString(),
+    at: now().toISOString(),
     title: standing.title,
     excerpt: body.slice(0, EXCERPT),
     language: code,

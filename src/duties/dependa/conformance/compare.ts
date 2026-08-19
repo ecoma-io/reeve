@@ -72,9 +72,11 @@ export function compare(
       const pb = priority[b.classification] ?? 6;
       if (pa !== pb) return pa - pb;
     }
-    const ecoCmp = a.ecosystem.localeCompare(b.ecosystem);
+    // Byte order: a locale collation can flip which ecosystem/name sorts first
+    // and change the emitted report's row order.
+    const ecoCmp = a.ecosystem < b.ecosystem ? -1 : a.ecosystem > b.ecosystem ? 1 : 0;
     if (ecoCmp !== 0) return ecoCmp;
-    return a.name.localeCompare(b.name);
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   });
 
   return {

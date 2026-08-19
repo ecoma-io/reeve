@@ -59,13 +59,15 @@ export function evidenceFingerprint(evidence: readonly Evidence[]): string {
       atLine: entry.provenance.atLine,
       detail: entry.detail.slice(0, MAX_EVIDENCE_TEXT),
     }))
-    .sort(
-      (a, b) =>
-        a.kind.localeCompare(b.kind) ||
-        a.sourceFile.localeCompare(b.sourceFile) ||
-        (a.atLine ?? 0) - (b.atLine ?? 0) ||
-        a.detail.localeCompare(b.detail),
-    )
+    .sort((a, b) => {
+      // Byte order throughout — a locale collation can flip which row sorts
+      // first (e.g. `Foo.ts` vs `foo.ts`) and change the digest.
+      if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
+      if (a.sourceFile !== b.sourceFile) return a.sourceFile < b.sourceFile ? -1 : 1;
+      const line = (a.atLine ?? 0) - (b.atLine ?? 0);
+      if (line !== 0) return line;
+      return a.detail < b.detail ? -1 : a.detail > b.detail ? 1 : 0;
+    })
     .map(
       (entry) =>
         `${entry.kind}\n${entry.sourceFile}\n${String(entry.atLine ?? "")}\n${entry.detail}`,

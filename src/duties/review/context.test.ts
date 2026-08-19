@@ -154,7 +154,7 @@ describe("isSecretPath", () => {
 });
 
 describe("changedSymbols", () => {
-  it("extracts TS/JS declaration forms, sorted by localeCompare", () => {
+  it("extracts TS/JS declaration forms, sorted by byte order", () => {
     expect(
       changedSymbols([
         "export function open() {}",
@@ -166,10 +166,10 @@ describe("changedSymbols", () => {
         "export interface Shape {}",
         "type Alias = string",
       ]),
-    ).toEqual(["Alias", "Box", "legacy", "mutable", "open", "run", "Shape", "value"]);
+    ).toEqual(["Alias", "Box", "Shape", "legacy", "mutable", "open", "run", "value"]);
   });
 
-  it("extracts Go and Rust forms, sorted by localeCompare", () => {
+  it("extracts Go and Rust forms, sorted by byte order", () => {
     expect(
       changedSymbols([
         "func Do() {}",
@@ -178,7 +178,7 @@ describe("changedSymbols", () => {
         "struct Point {}",
         "impl Point {}",
       ]),
-    ).toEqual(["Config", "Do", "main", "Point"]);
+    ).toEqual(["Config", "Do", "Point", "main"]);
   });
 
   it("ignores comments and non-declarations, and reads a declaration's real name", () => {
@@ -236,6 +236,22 @@ describe("callerCandidates", () => {
   it("prunes the target and secrets, and sorts", () => {
     const paths = ["src/a.ts", "src/app.ts", ".env", "src/b.ts"];
     expect(callerCandidates(paths, "src/app.ts")).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("DETERMIN-02: sorts by byte order, invariant under locale collation", () => {
+    // `localeCompare` (collation-dependent) would interleave `Foo.ts`/`foo.ts`
+    // differently across `LANG`/ICU versions; byte order never moves.
+    const names = ["foo.ts", "Foo.ts", "strasse/x.ts", "straße/x.ts"];
+    const sorted = callerCandidates(names, "");
+    expect(sorted).toEqual([...names].sort()); // the byte-sorted order
+    // A case-insensitive collation would NOT produce this order — it groups
+    // equal-at-base pairs back-to-back, keeping `foo.ts` before `Foo.ts` and
+    // tying `strasse`/`straße`. This pins that the comparator really is byte
+    // order, not "whatever the host's collation says today".
+    const caseInsensitive = [...names].sort((a, b) =>
+      a.localeCompare(b, "de", { sensitivity: "base" }),
+    );
+    expect(sorted).not.toEqual(caseInsensitive);
   });
 });
 
@@ -364,6 +380,70 @@ describe("collectContext", () => {
     const text = section?.entries.join("\n") ?? "";
     expect(text).toContain("src/deep/package.json");
     expect(text).toContain("package.json");
+  });
+
+  it("DETERMIN-08: keeps the same caller candidates whatever the directory listing order", async () => {
+    // With `maxFilesScannedPerDirectory` low enough that the walk is cut
+    // short, WHICH directories get scanned is decided by the order the walk
+    // pops them — and an unsorted listing let the filesystem's `readdir`
+    // order decide that. This flips the listing order between two identical
+    // runs and pins that the surfaced candidates (the cap's deterministic
+    // tail) are identical.
+    const files: Record<string, string> = {
+      "src/app.ts": "export function keeper(): void {}\n",
+      "src/a/keeper.ts": "keeper();\n",
+      "src/b/keeper.ts": "keeper();\n",
+      "src/c/keeper.ts": "keeper();\n",
+    };
+    const sourceWith = (order: readonly string[]): WorkspaceSource & { reads: number } => {
+      let observed = 0;
+      return {
+        root: "/workspace",
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async readText(rel) {
+          observed += 1;
+          return Object.prototype.hasOwnProperty.call(files, rel) ? (files[rel] ?? null) : null;
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async readDir(rel) {
+          observed += 1;
+          if (rel === "src") return [...order];
+          if (rel.startsWith("src/")) return ["keeper.ts"];
+          return [];
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async history() {
+          observed += 1;
+          return null;
+        },
+        get reads() {
+          return observed;
+        },
+      };
+    };
+
+    const limited = budget({ maxFilesScannedPerDirectory: 2 });
+    const first = await collectContext(
+      [target()],
+      sourceWith(["a", "b", "c"]),
+      limited,
+      "rules.yml",
+    );
+    const second = await collectContext(
+      [target()],
+      sourceWith(["c", "b", "a"]),
+      limited,
+      "rules.yml",
+    );
+
+    const callers1 = first.sections.find((s) => s.kind === "callers");
+    const callers2 = second.sections.find((s) => s.kind === "callers");
+    expect(callers1).toEqual(callers2);
+    // The cap drops a deterministic tail: byte order `a,b,c` walks c first
+    // (LIFO), so `src/c/keeper.ts` is the one candidate that surfaces — in
+    // both orderings.
+    expect(callers1?.entries.join("\n")).toContain("src/c/keeper.ts");
+    expect(callers2?.entries.join("\n")).toContain("src/c/keeper.ts");
   });
 
   it("calls source.history per changed file, capping its output to maxHistoryChars", async () => {

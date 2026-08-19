@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { fingerprint } from "../../core/marker.js";
 import { deriveStatus, evidenceFingerprint, type Evidence } from "./evidence.js";
 
 function evidence(overrides: Partial<Evidence> = {}): Evidence {
@@ -42,6 +43,26 @@ describe("evidenceFingerprint", () => {
     const a = evidence({ kind: "rules", weight: 0.6, detail: "cites a repository rule" });
     const b = evidence();
     expect(evidenceFingerprint([a, b])).toBe(evidenceFingerprint([b, a]));
+  });
+
+  it("DETERMIN-02: hashes evidence rows in byte order, not host collation", () => {
+    // `localeCompare` is collation-dependent — across `LANG`/ICU versions a
+    // pair like `Foo.ts`/`foo.ts` (or `straße`/`strasse`) can swap which row
+    // is emitted first, changing the digest bytes on machines that happen to
+    // collate differently. The fingerprint sorts by plain byte order, so the
+    // digest equals the byte-sorted serialization of the same rows. Case-
+    // insensitive collation would put `foo.ts` BEFORE `Foo.ts` and tie
+    // `straße`/`strasse` — a different digest — so matching the byte-sorted
+    // serialization proves no collation is in play.
+    const rows = [
+      evidence({ provenance: { ...evidence().provenance, sourceFile: "foo.ts" } }),
+      evidence({ provenance: { ...evidence().provenance, sourceFile: "straße" } }),
+      evidence({ provenance: { ...evidence().provenance, sourceFile: "Foo.ts" } }),
+      evidence({ provenance: { ...evidence().provenance, sourceFile: "strasse" } }),
+    ];
+    const row = (sourceFile: string) => `diff\n${sourceFile}\n1\ndiff-proven line 1`;
+    const byteSorted = ["Foo.ts", "foo.ts", "strasse", "straße"].sort().map(row).join("\n");
+    expect(evidenceFingerprint(rows)).toBe(fingerprint(byteSorted, ["review-evidence"]));
   });
 
   it("differs when the detail differs", () => {
