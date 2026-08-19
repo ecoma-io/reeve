@@ -32200,7 +32200,7 @@ function readCore(options) {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
-function readShared(options = {}) {
+function readSweepNumber(options = {}) {
   const sweep = getBooleanInput("sweep");
   const configuredNumber = getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -32209,8 +32209,15 @@ function readShared(options = {}) {
     );
   }
   return {
+    sweep,
+    number: options.needsThread === false ? null : sweep ? null : threadNumber()
+  };
+}
+function readShared(options = {}) {
+  const { sweep, number } = readSweepNumber(options);
+  return {
     ...readCore(),
-    number: options.needsThread === false ? null : sweep ? null : threadNumber(),
+    number,
     sweep,
     since: parseSince(getInput("since")),
     limit: bounded("limit", getInput("limit"))

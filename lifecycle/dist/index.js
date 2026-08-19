@@ -32732,6 +32732,19 @@ function createLifecycleEffects(api, at) {
 }
 
 // src/core/inputs.ts
+function readSweepNumber(options = {}) {
+  const sweep = getBooleanInput("sweep");
+  const configuredNumber = getInput("number");
+  if (sweep && configuredNumber.length > 0) {
+    throw new Error(
+      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
+    );
+  }
+  return {
+    sweep,
+    number: options.needsThread === false ? null : sweep ? null : threadNumber()
+  };
+}
 function parseSince(raw) {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
@@ -34788,14 +34801,7 @@ var LIFECYCLE_CAPABILITIES = ["label", "comment", "close"];
 // src/duties/lifecycle/main.ts
 var MARKER2 = markerFor("lifecycle");
 function readSettings() {
-  const sweep = getBooleanInput("sweep");
-  const configuredNumber = getInput("number");
-  if (sweep && configuredNumber.length > 0) {
-    throw new Error(
-      "sweep: cannot be combined with `number` \u2014 a sweep works the whole backlog and `number` names one thread. Set one or the other."
-    );
-  }
-  const number = sweep ? null : threadNumber();
+  const { sweep, number } = readSweepNumber();
   return {
     token: getInput("github-token", { required: true }),
     number,

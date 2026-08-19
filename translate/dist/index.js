@@ -32192,7 +32192,7 @@ function readCore(options) {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
-function readShared(options = {}) {
+function readSweepNumber(options = {}) {
   const sweep = getBooleanInput("sweep");
   const configuredNumber = getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -32201,8 +32201,15 @@ function readShared(options = {}) {
     );
   }
   return {
+    sweep,
+    number: options.needsThread === false ? null : sweep ? null : threadNumber()
+  };
+}
+function readShared(options = {}) {
+  const { sweep, number } = readSweepNumber(options);
+  return {
     ...readCore(),
-    number: options.needsThread === false ? null : sweep ? null : threadNumber(),
+    number,
     sweep,
     since: parseSince(getInput("since")),
     limit: bounded("limit", getInput("limit"))
@@ -32211,7 +32218,9 @@ function readShared(options = {}) {
 function parseAttribution(raw) {
   const value = raw.trim().toLowerCase();
   if (value === "none" || value === "model" || value === "detail") return value;
-  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`);
+  throw new Error(
+    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`
+  );
 }
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();

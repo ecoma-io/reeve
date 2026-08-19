@@ -171,7 +171,20 @@ export function readCore(options?: { modelsOptional?: boolean }): Core {
  * a workflow that asked for two different runs at once, and no amount of
  * reading the rest tells anyone which one was meant.
  */
-export function readShared(options: ReadSharedOptions = {}): Shared {
+/**
+ * Reads `sweep` and `number` together, refusing their combination up front.
+ *
+ * The `sweep`/`number` conflict is checked before any other parsing: it is a
+ * workflow that asked for two different runs at once, and no amount of reading
+ * the rest tells anyone which one was meant. Extracted from {@link readShared}
+ * so a duty that reads these two without the model/provider inputs — lifecycle
+ * — answers the conflict with the same message and the same thread-number
+ * semantics.
+ */
+export function readSweepNumber(options: { needsThread?: boolean } = {}): {
+  sweep: boolean;
+  number: number | null;
+} {
   const sweep = core.getBooleanInput("sweep");
   const configuredNumber = core.getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -182,8 +195,23 @@ export function readShared(options: ReadSharedOptions = {}): Shared {
   }
 
   return {
-    ...readCore(),
+    sweep,
     number: options.needsThread === false ? null : sweep ? null : threadNumber(),
+  };
+}
+
+/**
+ * {@link readCore}, plus the three inputs only a sweeping duty declares.
+ *
+ * The `sweep`/`number` conflict is {@link readSweepNumber}'s checking; this
+ * reads the rest and spreads the pair in.
+ */
+export function readShared(options: ReadSharedOptions = {}): Shared {
+  const { sweep, number } = readSweepNumber(options);
+
+  return {
+    ...readCore(),
+    number,
     sweep,
     since: parseSince(core.getInput("since")),
     limit: bounded("limit", core.getInput("limit")),
