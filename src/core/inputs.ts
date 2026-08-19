@@ -191,6 +191,35 @@ export function readShared(options: ReadSharedOptions = {}): Shared {
 }
 
 /**
+ * The `show-attribution` axis, parsed in one place.
+ *
+ * Once duplicated verbatim in `translate/main.ts` and `duplicate/main.ts`;
+ * the parsing is pure and the two duties were identical, so it lives here as
+ * a shared pure parser. Each duty passes its own `core.getInput(...)` result
+ * into it — the getInput call stays in the duty's `main.ts` so the
+ * action-contract audit still sees it where it expects every input read to
+ * happen. A misspelling is a workflow that would otherwise publish a hundred
+ * bodies with the wrong amount of detail and say nothing, so the raw value is
+ * refused rather than guessed at.
+ */
+export type Attribution = "none" | "model" | "detail";
+
+/**
+ * Validates a raw `show-attribution` value against the three spellings.
+ *
+ * @throws Error naming the offending spelling, so a workflow typo fails on the
+ * first thread instead of publishing a hundred bodies with the wrong amount of
+ * detail.
+ */
+export function parseAttribution(raw: string): Attribution {
+  const value = raw.trim().toLowerCase();
+  if (value === "none" || value === "model" || value === "detail") return value;
+  throw new Error(
+    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`,
+  );
+}
+
+/**
  * `endpoints`: one `alias = url` per line, with an optional `timeout=` after
  * the url. Both halves are safe to quote back in an error — a maintainer
  * reads endpoint aliases and urls in this run's log the same way they read

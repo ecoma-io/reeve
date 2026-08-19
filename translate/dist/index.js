@@ -32208,6 +32208,11 @@ function readShared(options = {}) {
     limit: bounded("limit", getInput("limit"))
   };
 }
+function parseAttribution(raw) {
+  const value = raw.trim().toLowerCase();
+  if (value === "none" || value === "model" || value === "detail") return value;
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`);
+}
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
   return parseList(raw).map((entry) => {
@@ -36221,9 +36226,7 @@ function readSettings() {
   };
 }
 function readAttribution() {
-  const raw = getInput("show-attribution").trim().toLowerCase();
-  if (raw === "none" || raw === "model" || raw === "detail") return raw;
-  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
+  return parseAttribution(getInput("show-attribution"));
 }
 function notGranted(warrant) {
   return `\`${warrant.path}\`'s \`duties:\` block does not name \`translate\`; once that block exists it is the whole answer, so add \`translate: [edit-body]\` to it (or remove the block to return to defaults).`;

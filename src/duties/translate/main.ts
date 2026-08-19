@@ -51,13 +51,13 @@
  * What is left here, after `engine.ts` (the draft-and-judge loop), `text.ts`
  * (steps 2–9, per text), `budget.ts` (the max-requests budget) and
  * `inputs.ts` (the pure parsing behind `targets`/`readBody`/chunking) each
- * took their own piece, is the wiring above and the two functions reading
- * inputs directly: `readSettings` and `readAttribution` stay here rather
- * than in `inputs.ts` because `main.integration.test.ts`'s own audit of
- * every `getInput`/`getBooleanInput` call scans exactly two files — this one
- * and `core/inputs.ts` — for the call sites it expects; a function that
- * calls `core.getInput` has to live in one of those two places or that test
- * stops proving what it proves.
+ * took their own piece, is the wiring above and the one function reading
+ * inputs directly: `readSettings` — `readAttribution` is shared with
+ * `duplicate` and lives in `core/inputs.ts`. `main.integration.test.ts`'s
+ * own audit of every `getInput`/`getBooleanInput` call scans exactly two
+ * files — this one and `core/inputs.js` — for the call sites it expects; a
+ * function that calls `core.getInput` has to live in one of those two places
+ * or that test stops proving what it proves.
  *
  * **This duty's `dryRun` check lives inside `text.ts`'s `translateText`**,
  * between drafting and the `edit-body` permission check — not here at the
@@ -88,6 +88,7 @@ import { context, getOctokit } from "@actions/github";
 import { listOpenThreads, readStanding } from "../../core/forge.js";
 import {
   bounded,
+  parseAttribution,
   readShared,
   whole,
   type ApiKeySpec,
@@ -212,17 +213,12 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
 }
 
 /**
- * The `show-attribution` input, refused rather than guessed at.
- *
- * A misspelling is a workflow that would otherwise publish a hundred bodies with
- * the wrong amount of detail in them and say nothing — and the fingerprint means
- * the run that fixes the spelling will not rewrite them. Failing on the first
- * thread is the cheap end of that.
+ * `show-attribution`, read in this file and parsed by the shared
+ * `parseAttribution` in `core/inputs.ts`. The getInput call stays here so the
+ * action-contract audit keeps seeing it in one of the two files it scans.
  */
 function readAttribution(): Attribution {
-  const raw = core.getInput("show-attribution").trim().toLowerCase();
-  if (raw === "none" || raw === "model" || raw === "detail") return raw;
-  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
+  return parseAttribution(core.getInput("show-attribution"));
 }
 
 /**

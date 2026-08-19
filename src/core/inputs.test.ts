@@ -5,6 +5,7 @@ import {
   bounded,
   counted,
   fraction,
+  parseAttribution,
   parseApiKeys,
   parseEndpoints,
   parseSince,
@@ -210,6 +211,21 @@ describe("readShared", () => {
     given({ ...COMPLETE, sweep: "true", limit: "0" });
 
     expect(() => readShared()).toThrow(/limit: expected a whole number of 1 or more/);
+  });
+});
+
+describe("parseAttribution", () => {
+  it("reads the three spellings case-insensitively and trimmed", () => {
+    for (const value of ["none", "model", "detail"]) {
+      expect(parseAttribution(value)).toBe(value);
+    }
+    expect(parseAttribution("  MODEL  ")).toBe("model");
+  });
+
+  it("refuses a spelling no duty documents", () => {
+    expect(() => parseAttribution("detailed")).toThrow(
+      /expected `none`, `model` or `detail`, got `detailed`/,
+    );
   });
 });
 

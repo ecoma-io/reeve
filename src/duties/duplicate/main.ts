@@ -51,13 +51,14 @@
  * assembling the proposal — step 7's pure half), `outputs.ts` (every
  * `core.setOutput` call and both job-summary pages) and `corpus.ts` (which
  * already owned the corpus listing, and now owns `crossLanguageCorpus` too)
- * each took their own piece, is the wiring above and `readSettings`/
- * `readAttribution`, which stay here rather than move to a duty-local
- * `inputs.ts`: `main.integration.test.ts`'s own audit of every
- * `getInput`/`getBooleanInput` call scans exactly two files — this one and
+ * each took their own piece, is the wiring above and `readSettings`,
+ * which stays here rather than moving to a duty-local `inputs.ts`:
+ * `main.integration.test.ts`'s own audit of every `getInput`/
+ * `getBooleanInput` call scans exactly two files — this one and
  * `core/inputs.ts` — for the call sites it expects, so a function that calls
- * `core.getInput` directly has to live in one of those two places. Unlike
- * `translate`, nothing else in this duty's input-reading is a named,
+ * `core.getInput` directly has to live in one of those two places.
+ * `readAttribution` is shared with `translate` and lives in `core/inputs.ts`.
+ * Unlike `translate`, nothing else in this duty's input-reading is a named,
  * independently pure function — the one candidate (truncating the thread's
  * own body to `max-body-chars` in `decide`) is two lines inline, next to the
  * `core.info` call reporting the truncation, not a helper worth a module of
@@ -100,6 +101,7 @@ import {
 import {
   bounded,
   fraction,
+  parseAttribution,
   parseSince,
   readShared,
   whole,
@@ -208,15 +210,12 @@ function readSettings(): Omit<Settings, "languages"> {
 }
 
 /**
- * `show-attribution`, read the same way `translate/main.ts` reads it: a
- * duty-local parser rather than a shared one, because the axis belongs to
- * whichever duty publishes under it and there is no third consumer yet to
- * justify centralising the parsing.
+ * `show-attribution`, read in this file and parsed by the shared
+ * `parseAttribution` in `core/inputs.ts`. The getInput call stays here so the
+ * action-contract audit keeps seeing it in one of the two files it scans.
  */
 function readAttribution(): Attribution {
-  const raw = core.getInput("show-attribution").trim().toLowerCase();
-  if (raw === "none" || raw === "model" || raw === "detail") return raw;
-  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
+  return parseAttribution(core.getInput("show-attribution"));
 }
 
 /** One provider per stage, each counting its own requests. */
