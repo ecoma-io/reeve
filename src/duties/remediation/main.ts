@@ -47,7 +47,7 @@ import {
 } from "../../core/warrant.js";
 import { threadNumber } from "../../core/inputs.js";
 
-import { REMEDIATION_DEFAULTS } from "./capabilities.js";
+import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 import { readEnvelope, type CommentApi } from "./envelope.js";
 import { proposeAll, type RemediationProposal } from "./proposal.js";
 import { page, report } from "./report.js";
@@ -87,7 +87,7 @@ async function decide(
   warrant: Warrant,
   dryRun: boolean,
 ): Promise<{ proposals: readonly RemediationProposal[]; note: string }> {
-  const permitted = warrant.granted("remediation", REMEDIATION_DEFAULTS);
+  const permitted = warrant.granted("remediation", DEFAULT_CAPABILITIES);
 
   const refused = forRefusal(permitted);
   if (refused !== null) {

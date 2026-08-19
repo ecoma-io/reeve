@@ -17,7 +17,7 @@ import type { Capability } from "../../core/warrant.js";
  * warrant's `duties:` block explicitly grants `propose`, and a run denied the
  * grant still decides and reports on the job summary and its outputs.
  */
-export const REMEDIATION_DEFAULTS: readonly Capability[] = [];
+export const DEFAULT_CAPABILITIES: readonly Capability[] = [];
 
 /**
  * The full ladder this duty ever asks for — anything else a warrant names

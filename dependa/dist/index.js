@@ -27411,11 +27411,11 @@ var Summary = class {
    */
   addTable(rows) {
     const tableBody = rows.map((row) => {
-      const cells = row.map((cell) => {
-        if (typeof cell === "string") {
-          return this.wrap("td", cell);
+      const cells = row.map((cell2) => {
+        if (typeof cell2 === "string") {
+          return this.wrap("td", cell2);
         }
-        const { header, data, colspan, rowspan } = cell;
+        const { header, data, colspan, rowspan } = cell2;
         const tag = header ? "th" : "td";
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
@@ -32234,7 +32234,18 @@ function failIfProtocolExhausted(models, failures) {
 async function writeRunSummary(page, weather) {
   await writeSummary(page + authSection(weather.authFailures));
 }
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
 var COUNT = new Intl.NumberFormat("en-US");
+function cell(text2) {
+  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
 
 // src/core/warrant.ts
 import { readFile } from "node:fs/promises";
@@ -32262,41 +32273,6 @@ function matcher(script, exempt) {
 }
 function isScriptName(script) {
   return matcher(script, []) !== null;
-}
-
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code.toLowerCase() ? null : name;
 }
 
 // src/core/languages.ts
@@ -32328,6 +32304,39 @@ function derived(code) {
     );
   }
   return { code, label: language.label, scripts: language.scripts };
+}
+function deriveLanguage(code) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code);
+  return label === null ? null : { label, scripts };
+}
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code.toLowerCase() ? null : name;
 }
 function spelled(entry) {
   const fields = entry.split(":");
@@ -32386,7 +32395,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -33166,8 +33174,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
@@ -34809,9 +34817,9 @@ function parse4(manifestPath, manifestContent, lockfileContent) {
     { key: "build-dependencies", dev: false }
   ];
   for (const { key, dev } of sections) {
-    const table = extractTomlTable(manifestContent, key);
-    if (table === null) continue;
-    for (const entry of parseTomlEntries(table, key)) {
+    const table2 = extractTomlTable(manifestContent, key);
+    if (table2 === null) continue;
+    for (const entry of parseTomlEntries(table2, key)) {
       const { name, constraint } = resolveCargoConstraint(entry.key, entry.value);
       if (constraint === null) {
         dependencies.push({
@@ -36753,16 +36761,18 @@ function groupSummary(result) {
   };
 }
 function renderSummary(summary2) {
-  const rows = summary2.groups.map((g) => {
-    const prCell = g.pr !== null ? `[#${String(g.pr)}](#${String(g.pr)})` : "\u2014";
-    const securityMarker = g.security ? " \u{1F6E1}\uFE0F" : "";
-    return `| ${g.groupId}${securityMarker} | ${g.ecosystem ?? "mixed"} | ${String(g.proposalCount)} | ${g.outcome} | ${prCell} |`;
-  });
-  const header = "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|";
+  const rows = summary2.groups.map((g) => [
+    cell(`${g.groupId}${g.security ? " \u{1F6E1}\uFE0F" : ""}`),
+    cell(g.ecosystem ?? "mixed"),
+    cell(String(g.proposalCount)),
+    cell(g.outcome),
+    cell(g.pr !== null ? `[#${String(g.pr)}](#${String(g.pr)})` : "\u2014")
+  ]);
+  const headers = ["Group", "Ecosystem", "Updates", "Outcome", "PR"];
+  const rendered = rows.length === 0 ? "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|" : table(headers, rows);
   let body = `## Reeve \xB7 dependa
 
-${header}
-${rows.join("\n")}`;
+${rendered}`;
   if (summary2.starved) {
     body += "\n\n\u26A0\uFE0F All models failed on capacity this run. No proposals were made.";
   }

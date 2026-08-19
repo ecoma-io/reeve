@@ -32283,6 +32283,11 @@ ${close}`
   };
 }
 
+// src/core/list.ts
+function parseList(raw) {
+  return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
 var matchers = /* @__PURE__ */ new Map();
@@ -32308,46 +32313,6 @@ function isScriptName(script) {
 }
 function containsScript(text2, script, exempt = []) {
   return matcher(script, exempt)?.test(text2) ?? false;
-}
-
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code2) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code2).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code2);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code2) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code2], { type: "language" }).of(code2);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code2.toLowerCase() ? null : name;
-}
-
-// src/core/list.ts
-function parseList(raw) {
-  return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
 // src/core/languages.ts
@@ -32379,6 +32344,39 @@ function derived(code2) {
     );
   }
   return { code: code2, label: language.label, scripts: language.scripts };
+}
+function deriveLanguage(code2) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code2).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code2);
+  return label === null ? null : { label, scripts };
+}
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code2) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code2], { type: "language" }).of(code2);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code2.toLowerCase() ? null : name;
 }
 function spelled(entry) {
   const fields = entry.split(":");
@@ -33194,7 +33192,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -33989,8 +33986,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );

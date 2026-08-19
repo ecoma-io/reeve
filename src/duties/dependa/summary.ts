@@ -3,6 +3,7 @@
  *
  * Follows the same pattern as every other duty's summary module.
  */
+import { cell, table } from "../../core/summary.js";
 import type { GroupResult, Refusal } from "./model.js";
 import type { Weather } from "../../core/provider.js";
 import { starved } from "../../core/provider.js";
@@ -52,15 +53,23 @@ function groupSummary(result: GroupResult): GroupSummary {
  * Render the run summary as a Markdown table for the job summary.
  */
 export function renderSummary(summary: RunSummary): string {
-  const rows = summary.groups.map((g) => {
-    const prCell = g.pr !== null ? `[#${String(g.pr)}](#${String(g.pr)})` : "—";
-    const securityMarker = g.security ? " 🛡️" : "";
-    return `| ${g.groupId}${securityMarker} | ${g.ecosystem ?? "mixed"} | ${String(g.proposalCount)} | ${g.outcome} | ${prCell} |`;
-  });
+  const rows = summary.groups.map((g) => [
+    cell(`${g.groupId}${g.security ? " 🛡️" : ""}`),
+    cell(g.ecosystem ?? "mixed"),
+    cell(String(g.proposalCount)),
+    cell(g.outcome),
+    cell(g.pr !== null ? `[#${String(g.pr)}](#${String(g.pr)})` : "—"),
+  ]);
 
-  const header = "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|";
+  const headers = ["Group", "Ecosystem", "Updates", "Outcome", "PR"] as const;
+  // core table() returns "" for an empty page; the empty run still names its
+  // columns, so keep exactly what the hand-built render printed for that case.
+  const rendered =
+    rows.length === 0
+      ? "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|"
+      : table(headers, rows);
 
-  let body = `## Reeve · dependa\n\n${header}\n${rows.join("\n")}`;
+  let body = `## Reeve · dependa\n\n${rendered}`;
 
   if (summary.starved) {
     body += "\n\n⚠️ All models failed on capacity this run. No proposals were made.";

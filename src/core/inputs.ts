@@ -171,7 +171,20 @@ export function readCore(options?: { modelsOptional?: boolean }): Core {
  * a workflow that asked for two different runs at once, and no amount of
  * reading the rest tells anyone which one was meant.
  */
-export function readShared(options: ReadSharedOptions = {}): Shared {
+/**
+ * Reads `sweep` and `number` together, refusing their combination up front.
+ *
+ * The `sweep`/`number` conflict is checked before any other parsing: it is a
+ * workflow that asked for two different runs at once, and no amount of reading
+ * the rest tells anyone which one was meant. Extracted from {@link readShared}
+ * so a duty that reads these two without the model/provider inputs — lifecycle
+ * — answers the conflict with the same message and the same thread-number
+ * semantics.
+ */
+export function readSweepNumber(options: { needsThread?: boolean } = {}): {
+  sweep: boolean;
+  number: number | null;
+} {
   const sweep = core.getBooleanInput("sweep");
   const configuredNumber = core.getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -182,12 +195,56 @@ export function readShared(options: ReadSharedOptions = {}): Shared {
   }
 
   return {
-    ...readCore(),
+    sweep,
     number: options.needsThread === false ? null : sweep ? null : threadNumber(),
+  };
+}
+
+/**
+ * {@link readCore}, plus the three inputs only a sweeping duty declares.
+ *
+ * The `sweep`/`number` conflict is {@link readSweepNumber}'s checking; this
+ * reads the rest and spreads the pair in.
+ */
+export function readShared(options: ReadSharedOptions = {}): Shared {
+  const { sweep, number } = readSweepNumber(options);
+
+  return {
+    ...readCore(),
+    number,
     sweep,
     since: parseSince(core.getInput("since")),
     limit: bounded("limit", core.getInput("limit")),
   };
+}
+
+/**
+ * The `show-attribution` axis, parsed in one place.
+ *
+ * Once duplicated verbatim in `translate/main.ts` and `duplicate/main.ts`;
+ * the parsing is pure and the two duties were identical, so it lives here as
+ * a shared pure parser. Each duty passes its own `core.getInput(...)` result
+ * into it — the getInput call stays in the duty's `main.ts` so the
+ * action-contract audit still sees it where it expects every input read to
+ * happen. A misspelling is a workflow that would otherwise publish a hundred
+ * bodies with the wrong amount of detail and say nothing, so the raw value is
+ * refused rather than guessed at.
+ */
+export type Attribution = "none" | "model" | "detail";
+
+/**
+ * Validates a raw `show-attribution` value against the three spellings.
+ *
+ * @throws Error naming the offending spelling, so a workflow typo fails on the
+ * first thread instead of publishing a hundred bodies with the wrong amount of
+ * detail.
+ */
+export function parseAttribution(raw: string): Attribution {
+  const value = raw.trim().toLowerCase();
+  if (value === "none" || value === "model" || value === "detail") return value;
+  throw new Error(
+    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`,
+  );
 }
 
 /**

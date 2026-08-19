@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DUTIES, PLANNED, leafActionFor, normalise, refusal } from "./refusal.js";
+import { DUTIES, leafActionFor, normalise, refusal } from "./refusal.js";
 
 describe("normalise", () => {
   it("lowercases and trims", () => {
@@ -57,10 +57,9 @@ describe("refusal", () => {
   });
 
   it("points at the roadmap for a duty that is documented and not built", () => {
-    // `PLANNED` is empty at this ref — every documented duty has landed — so
-    // the planned-branch is exercised with an injected list rather than the
-    // real one, the same way `built` is exercised above with an injected list
-    // before any ref carries anything.
+    // The planned-branch is exercised with an injected list — `PLANNED` was
+    // removed once every documented duty landed — the same way `built` is
+    // exercised above with an injected list before any ref carries anything.
     const message = refusal("someday", [], ["someday"]);
     expect(message).toContain("documented contract but no code");
     expect(message).toContain("docs/doctrine/north-star.md#7-roadmap");
@@ -128,7 +127,9 @@ describe("leafActionFor", () => {
 
 describe("the duty lists", () => {
   it("covers every duty the documentation gives a contract to", () => {
-    expect([...DUTIES, ...PLANNED].sort()).toEqual(
+    // `PLANNED` was removed once every documented duty landed; the whole of
+    // the documented set now lives in `DUTIES`.
+    expect([...DUTIES].sort()).toEqual(
       [
         "triage",
         "translate",
@@ -151,12 +152,16 @@ describe("the duty lists", () => {
     expect(DUTIES).toContain("lifecycle");
   });
 
-  it("never lists the same duty as both built and planned", () => {
-    // Both lists reach a message, and only one of them is true of a given ref.
-    // A duty that stayed in `PLANNED` after it was built would still be
-    // answered correctly — built is checked first — but the roadmap branch
-    // would then be unreachable for it, which is a claim nothing tests.
-    expect(DUTIES.filter((duty) => PLANNED.includes(duty))).toEqual([]);
+  it("answers the roadmap branch only for a documented-not-built duty", () => {
+    // Built wins when a name is in both lists, so the roadmap branch stays
+    // reachable only for a duty no ref carries. The planned list is injected
+    // here because `PLANNED` has emptied out — every documented duty has
+    // landed — and the branch is still the contract's answer to "documented
+    // but not at this ref".
+    expect(refusal("translate", ["translate"], ["translate"])).toContain("is not this action");
+    expect(refusal("someday", ["translate"], ["someday"])).toContain(
+      "documented contract but no code",
+    );
   });
 
   it("names exactly the directories that ship their own action.yml", () => {

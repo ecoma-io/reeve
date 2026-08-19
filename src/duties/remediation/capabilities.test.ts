@@ -3,11 +3,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { REMEDIATION_CAPABILITIES, REMEDIATION_DEFAULTS } from "./capabilities.js";
+import { REMEDIATION_CAPABILITIES, DEFAULT_CAPABILITIES } from "./capabilities.js";
 
-describe("REMEDIATION_DEFAULTS", () => {
+describe("DEFAULT_CAPABILITIES", () => {
   it("is empty — remediation proposes nothing without an explicit warrant", () => {
-    expect(REMEDIATION_DEFAULTS).toEqual([]);
+    expect(DEFAULT_CAPABILITIES).toEqual([]);
   });
 });
 

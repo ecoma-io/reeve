@@ -1,45 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deriveLanguage } from "./derive.js";
 import { findLanguage, parseLanguages } from "./languages.js";
 import { isScriptName } from "./script.js";
 
 // Whether `Latin` is a real Unicode script is `script.ts`'s question, answered
 // against Unicode's own tables and tested there. What a bare code implies is
-// `derive.ts`'s, answered against CLDR and tested there. Which separators an
-// input accepts is `list.ts`'s, shared with the two model inputs and tested
-// there. What this module owes is the entry: which form it is, fields,
-// duplicates, and refusing one rather than carrying a half-understood language
-// forward.
+// answered against CLDR, here, in the same module that parses the list. Which
+// separators an input accepts is `list.ts`'s, shared with the two model inputs
+// and tested there. What this module owes is the entry: which form it is,
+// fields, duplicates, and refusing one rather than carrying a half-understood
+// language forward.
 //
 // The list stub splits on newlines only — deliberately less than the real one,
 // so a test that passes here cannot be passing because the stub reimplemented
 // the thing it stands in for.
 vi.mock("./script.js", () => ({ isScriptName: vi.fn(() => true) }));
-vi.mock("./derive.js", () => ({ deriveLanguage: vi.fn() }));
 vi.mock("./list.js", () => ({
   parseList: vi.fn((raw: string) => raw.split("\n").filter((entry) => entry.trim().length > 0)),
 }));
 
 const mockedIsScriptName = vi.mocked(isScriptName);
-const mockedDeriveLanguage = vi.mocked(deriveLanguage);
 
 beforeEach(() => {
   mockedIsScriptName.mockReset();
   mockedIsScriptName.mockReturnValue(true);
-  mockedDeriveLanguage.mockReset();
-  mockedDeriveLanguage.mockImplementation((code) => ({
-    label: `Label for ${code}`,
-    scripts: ["Derived"],
-  }));
 });
 
 describe("parseLanguages", () => {
   it("takes a bare code and derives what the long form would have stated", () => {
-    expect(parseLanguages("vi")).toEqual([
-      { code: "vi", label: "Label for vi", scripts: ["Derived"] },
-    ]);
-    expect(mockedDeriveLanguage).toHaveBeenCalledWith("vi");
+    expect(parseLanguages("vi")).toEqual([{ code: "vi", label: "Tiếng Việt", scripts: ["Latn"] }]);
   });
 
   it("parses the long form into code, label and scripts", () => {
@@ -52,23 +41,22 @@ describe("parseLanguages", () => {
 
   it("takes both forms in one list, so one awkward language does not spell out the rest", () => {
     expect(parseLanguages("en\nja:日本語:Han+Hiragana")).toEqual([
-      { code: "en", label: "Label for en", scripts: ["Derived"] },
+      { code: "en", label: "English", scripts: ["Latn"] },
       { code: "ja", label: "日本語", scripts: ["Han", "Hiragana"] },
     ]);
   });
 
   it("lets the long form state what derivation would have answered differently", () => {
     // Not an override of a default — a consumer who knows their language better
-    // than CLDR does is stating a fact this parser never asked about.
-    mockedDeriveLanguage.mockReturnValue({ label: "Chinese", scripts: ["Hani"] });
+    // than CLDR does is stating a fact this parser never asked about. CLDR
+    // would answer `zh` with `Hani` for scripts and `中文` for a label; the long
+    // form spells `Han` and says so.
     expect(parseLanguages("zh:中文:Han")).toEqual([
       { code: "zh", label: "中文", scripts: ["Han"] },
     ]);
-    expect(mockedDeriveLanguage).not.toHaveBeenCalled();
   });
 
   it("refuses a bare code the runtime knows no name or script for, naming the way out", () => {
-    mockedDeriveLanguage.mockReturnValue(null);
     expect(() => parseLanguages("xx")).toThrow(/`xx` is not a language code/);
     expect(() => parseLanguages("xx")).toThrow(/code:Label:Script/);
   });

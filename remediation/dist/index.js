@@ -31708,41 +31708,6 @@ function isScriptName(script) {
   return matcher(script, []) !== null;
 }
 
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code.toLowerCase() ? null : name;
-}
-
 // src/core/languages.ts
 function parseLanguages(raw) {
   const entries = typeof raw === "string" ? parseList(raw) : raw;
@@ -31772,6 +31737,39 @@ function derived(code) {
     );
   }
   return { code, label: language.label, scripts: language.scripts };
+}
+function deriveLanguage(code) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code);
+  return label === null ? null : { label, scripts };
+}
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code.toLowerCase() ? null : name;
 }
 function spelled(entry) {
   const fields = entry.split(":");
@@ -31819,7 +31817,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -32599,8 +32596,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );
@@ -32790,7 +32787,7 @@ function whole(name, raw) {
 }
 
 // src/duties/remediation/capabilities.ts
-var REMEDIATION_DEFAULTS = [];
+var DEFAULT_CAPABILITIES = [];
 
 // src/core/marker.ts
 import { createHash } from "node:crypto";
@@ -33005,7 +33002,7 @@ function forRefusal(permitted) {
   return FORBIDDEN.find((capability) => permitted.includes(capability)) ?? null;
 }
 async function decide(api, at, warrant, dryRun) {
-  const permitted = warrant.granted("remediation", REMEDIATION_DEFAULTS);
+  const permitted = warrant.granted("remediation", DEFAULT_CAPABILITIES);
   const refused = forRefusal(permitted);
   if (refused !== null) {
     throw new Error(

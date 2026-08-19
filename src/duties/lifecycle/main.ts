@@ -54,7 +54,7 @@ import {
   type Location,
   type Standing,
 } from "../../core/forge.js";
-import { bounded, parseSince, threadNumber } from "../../core/inputs.js";
+import { bounded, parseSince, readSweepNumber } from "../../core/inputs.js";
 import { type Language } from "../../core/languages.js";
 import { isReeveProposalPr, markerFor } from "../../core/marker.js";
 import { writeSummary } from "../../core/summary.js";
@@ -101,17 +101,7 @@ interface Settings {
 }
 
 function readSettings(): Omit<Settings, "languages"> {
-  const sweep = core.getBooleanInput("sweep");
-  const configuredNumber = core.getInput("number");
-  if (sweep && configuredNumber.length > 0) {
-    throw new Error(
-      "sweep: cannot be combined with `number` — a sweep works the whole backlog and `number` " +
-        "names one thread. Set one or the other.",
-    );
-  }
-  // `threadNumber()` is the one house helper for this — same event-carries-no-
-  // thread message every other duty gives, not a locally reinvented copy.
-  const number = sweep ? null : threadNumber();
+  const { sweep, number } = readSweepNumber();
 
   return {
     token: core.getInput("github-token", { required: true }),

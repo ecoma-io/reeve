@@ -32200,7 +32200,7 @@ function readCore(options) {
     temperature: parseTemperature(getInput("temperature"))
   };
 }
-function readShared(options = {}) {
+function readSweepNumber(options = {}) {
   const sweep = getBooleanInput("sweep");
   const configuredNumber = getInput("number");
   if (sweep && configuredNumber.length > 0) {
@@ -32209,8 +32209,15 @@ function readShared(options = {}) {
     );
   }
   return {
+    sweep,
+    number: options.needsThread === false ? null : sweep ? null : threadNumber()
+  };
+}
+function readShared(options = {}) {
+  const { sweep, number } = readSweepNumber(options);
+  return {
     ...readCore(),
-    number: options.needsThread === false ? null : sweep ? null : threadNumber(),
+    number,
     sweep,
     since: parseSince(getInput("since")),
     limit: bounded("limit", getInput("limit"))
@@ -32399,41 +32406,6 @@ function containsScript(text2, script, exempt = []) {
   return matcher(script, exempt)?.test(text2) ?? false;
 }
 
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code.toLowerCase() ? null : name;
-}
-
 // src/core/languages.ts
 function parseLanguages(raw) {
   const entries = typeof raw === "string" ? parseList(raw) : raw;
@@ -32463,6 +32435,39 @@ function derived(code) {
     );
   }
   return { code, label: language.label, scripts: language.scripts };
+}
+function deriveLanguage(code) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code);
+  return label === null ? null : { label, scripts };
+}
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code.toLowerCase() ? null : name;
 }
 function spelled(entry) {
   const fields = entry.split(":");
@@ -32649,7 +32654,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -33444,8 +33448,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );

@@ -32014,41 +32014,6 @@ function isScriptName(script) {
   return matcher(script, []) !== null;
 }
 
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code.toLowerCase() ? null : name;
-}
-
 // src/core/languages.ts
 function parseLanguages(raw) {
   const entries = typeof raw === "string" ? parseList(raw) : raw;
@@ -32078,6 +32043,39 @@ function derived(code) {
     );
   }
   return { code, label: language.label, scripts: language.scripts };
+}
+function deriveLanguage(code) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code);
+  return label === null ? null : { label, scripts };
+}
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code.toLowerCase() ? null : name;
 }
 function spelled(entry) {
   const fields = entry.split(":");
@@ -32125,7 +32123,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
 function pinned() {
   const ref = process.env.GITHUB_ACTION_REF ?? "";
@@ -32134,7 +32131,7 @@ function pinned() {
 function normalise(raw) {
   return raw.trim().toLowerCase();
 }
-function refusal(raw, built = DUTIES, planned = PLANNED) {
+function refusal(raw, built = DUTIES, planned = []) {
   const duty = normalise(raw);
   if (duty.length > 0 && built.includes(duty)) {
     return [
@@ -32976,8 +32973,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available2 = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available2 = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available2.join(", ")}${closestHint(duty, available2)}.`
       );
@@ -33252,15 +33249,15 @@ var DEFAULT_CAPABILITIES6 = [];
 var REVIEW_CAPABILITIES = ["comment"];
 
 // src/duties/remediation/capabilities.ts
-var REMEDIATION_DEFAULTS = [];
+var DEFAULT_CAPABILITIES7 = [];
 var REMEDIATION_CAPABILITIES = ["propose"];
 
 // src/duties/translate/capabilities.ts
-var DEFAULT_CAPABILITIES7 = ["edit-body"];
+var DEFAULT_CAPABILITIES8 = ["edit-body"];
 var TRANSLATE_CAPABILITIES = ["edit-body"];
 
 // src/duties/triage/capabilities.ts
-var DEFAULT_CAPABILITIES8 = ["label"];
+var DEFAULT_CAPABILITIES9 = ["label"];
 var TRIAGE_CAPABILITIES = [
   "label",
   "comment",
@@ -33339,15 +33336,15 @@ var PROFILE_CODES = /* @__PURE__ */ new Set([
 var LABELS_ENDPOINT = "GET /repos/{owner}/{repo}/labels";
 var PROBE_TURN = [{ role: "user", content: "ping" }];
 var DEFAULTS_BY_DUTY = /* @__PURE__ */ new Map([
-  ["translate", DEFAULT_CAPABILITIES7],
-  ["triage", DEFAULT_CAPABILITIES8],
+  ["translate", DEFAULT_CAPABILITIES8],
+  ["triage", DEFAULT_CAPABILITIES9],
   ["duplicate", DEFAULT_CAPABILITIES2],
   ["respond", DEFAULT_CAPABILITIES5],
   ["lifecycle", DEFAULT_CAPABILITIES4],
   ["harmonise", DEFAULT_CAPABILITIES3],
   ["dependa", DEFAULT_CAPABILITIES],
   ["review", DEFAULT_CAPABILITIES6],
-  ["remediation", REMEDIATION_DEFAULTS]
+  ["remediation", DEFAULT_CAPABILITIES7]
 ]);
 var LADDER_BY_DUTY = /* @__PURE__ */ new Map([
   ["translate", TRANSLATE_CAPABILITIES],

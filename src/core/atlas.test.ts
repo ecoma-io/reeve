@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  ATLAS_MAX_PACKAGES,
-  EMPTY_ATLAS,
-  matchAtlasEvidence,
-  readAtlas,
-  type AtlasApi,
-  type Atlas,
-  type Package,
-} from "./atlas.js";
+import { matchAtlasEvidence, readAtlas, type AtlasApi, type Atlas, type Package } from "./atlas.js";
+
+// The empty/cap constants are module-private in atlas.ts; the tests mirror the
+// values so the assertions stay exact while the surface stays internal.
+const EMPTY_ATLAS: Atlas = { packages: [], truncated: false };
+const ATLAS_MAX_PACKAGES = 200;
 
 const AT = { owner: "acme", repo: "widgets" };
 const REF = "main";

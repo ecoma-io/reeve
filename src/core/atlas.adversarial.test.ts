@@ -13,7 +13,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { EMPTY_ATLAS, readAtlas, type AtlasApi } from "./atlas.js";
+import { readAtlas, type Atlas, type AtlasApi } from "./atlas.js";
+
+// Mirrors atlas.ts's module-private EMPTY_ATLAS so the assertion stays exact
+// while the constant stays internal.
+const EMPTY_ATLAS: Atlas = { packages: [], truncated: false };
 
 const AT = { owner: "acme", repo: "widgets" };
 const REF = "main";

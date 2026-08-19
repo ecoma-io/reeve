@@ -70,7 +70,8 @@ export interface Atlas {
   readonly truncated: boolean;
 }
 
-export const EMPTY_ATLAS: Atlas = { packages: [], truncated: false };
+/** @internal Frozen contract wart: used by tests, hence module-private. */
+const EMPTY_ATLAS: Atlas = { packages: [], truncated: false };
 
 /**
  * Past this many members, atlas stops reading manifests and reports what it
@@ -79,7 +80,7 @@ export const EMPTY_ATLAS: Atlas = { packages: [], truncated: false };
  * two hundred more `getContent` calls into a triage run would cost more than
  * the evidence is worth.
  */
-export const ATLAS_MAX_PACKAGES = 200;
+const ATLAS_MAX_PACKAGES = 200;
 
 const DESCRIPTION_CAP = 200;
 

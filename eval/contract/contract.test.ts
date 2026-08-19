@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CAPABILITIES as HARMONISE_DEFAULTS } from "../../src/duties/harmonise/capabilities.ts";
-import { REMEDIATION_DEFAULTS } from "../../src/duties/remediation/capabilities.ts";
+import { DEFAULT_CAPABILITIES } from "../../src/duties/remediation/capabilities.ts";
 import { DEFAULT_CAPABILITIES as RESPOND_DEFAULTS } from "../../src/duties/respond/capabilities.ts";
 import { DEFAULT_CAPABILITIES as TRIAGE_DEFAULTS } from "../../src/duties/triage/capabilities.ts";
 import { parseWarrant } from "../../src/core/warrant.ts";
@@ -60,7 +60,7 @@ const DEFAULTS: Record<string, readonly Capability[]> = {
   triage: TRIAGE_DEFAULTS,
   respond: RESPOND_DEFAULTS,
   harmonise: HARMONISE_DEFAULTS,
-  remediation: REMEDIATION_DEFAULTS,
+  remediation: DEFAULT_CAPABILITIES,
 };
 
 describe("the post-T1 warrant contract every eval fixture stands on", () => {

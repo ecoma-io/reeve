@@ -76,7 +76,7 @@ import {
   REVIEW_CAPABILITIES,
 } from "../duties/review/capabilities.js";
 import {
-  REMEDIATION_DEFAULTS,
+  DEFAULT_CAPABILITIES,
   REMEDIATION_CAPABILITIES,
 } from "../duties/remediation/capabilities.js";
 import {
@@ -123,7 +123,7 @@ const DEFAULTS_BY_DUTY: ReadonlyMap<string, readonly Capability[]> = new Map([
   ["harmonise", HARMONISE_DEFAULTS],
   ["dependa", DEPENDA_DEFAULTS],
   ["review", REVIEW_DEFAULTS],
-  ["remediation", REMEDIATION_DEFAULTS],
+  ["remediation", DEFAULT_CAPABILITIES],
 ]);
 
 /**
