@@ -659,10 +659,10 @@ jobs:
       # The conformance row runs the comparison CLI, which imports the typescript
       # sources; only it needs the toolchain.
       - if: matrix.shape == 'conformance'
-        uses: pnpm/action-setup@0977fd99890a83b15e6c6a4bf7e1d3040f40b87c # v6.0.10
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       - if: matrix.shape == 'conformance'
-        uses: actions/setup-node@820762782a9f9c1c3883f26b28b6896b0f89d769 # v7.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -702,7 +702,7 @@ jobs:
 
       - if: matrix.shape == 'conformance'
         name: Upload conformance data
-        uses: actions/upload-artifact@043fb46d768f4889835ef676b1c6f0659a0f2b3f # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dependa-dogfood-${{ github.sha }}
           path: |

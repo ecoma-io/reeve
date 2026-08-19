@@ -69,7 +69,7 @@ jobs:
       minor: ${{ steps.release.outputs.minor }}
       digests: ${{ steps.digest.outputs.digests }}
     steps:
-      - uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5.0.0
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
           config-file: release-please-config.json
