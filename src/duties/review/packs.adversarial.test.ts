@@ -138,6 +138,25 @@ describe("a per-entry mistake is a warning and a drop, never a guess", () => {
     });
   });
 
+  it("an_empty_or_whitespace_only_generated_suffix_is_dropped_with_a_warning", () => {
+    // An empty suffix matches every path (`path.endsWith("")` is true), so a
+    // pack's `generated: [""]` would sweep the whole diff as machine-made and
+    // stamp an unread diff as clean. Empty/whitespace-only is never a
+    // legitimate suffix: drop it with a warning; the empty list falls back to
+    // `DEFAULT_GENERATED` during composition.
+    const onlyEmpty = pack("generated:\n  - ''\n");
+    expect(onlyEmpty.warnings).toEqual([`pack ${REF}: \`generated\` entry 1 is empty; dropped`]);
+    expect(onlyEmpty.fragment.generatedExtensions).toEqual([]);
+
+    const whitespace = pack("generated:\n  - ' '\n");
+    expect(whitespace.warnings).toEqual([`pack ${REF}: \`generated\` entry 1 is empty; dropped`]);
+    expect(whitespace.fragment.generatedExtensions).toEqual([]);
+
+    const mixed = pack("generated:\n  - ''\n  - .lock\n");
+    expect(mixed.warnings).toEqual([`pack ${REF}: \`generated\` entry 1 is empty; dropped`]);
+    expect(mixed.fragment.generatedExtensions).toEqual([".lock"]);
+  });
+
   it("a_non_string_entry_in_a_string_list_is_dropped_by_position", () => {
     const out = pack("generated:\n  - .min.js\n  - 7\n  - .map\n");
     expect(out.warnings).toEqual([`pack ${REF}: \`generated\` entry 2 is not a string; dropped`]);

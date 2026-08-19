@@ -36762,6 +36762,10 @@ function readPackStringList(raw, ref, key, warnings) {
       );
       return null;
     }
+    if (entry.trim().length === 0) {
+      warnings.push(`pack ${ref}: \`${key}\` entry ${String(index + 1)} is empty; dropped`);
+      return null;
+    }
     return entry;
   }).filter((entry) => entry !== null);
 }
@@ -37305,6 +37309,10 @@ function readStringList(raw, key, warnings) {
   return raw.map((entry, index) => {
     if (typeof entry !== "string") {
       warnings.push(`\`${key}\` entry ${String(index + 1)} is not a string; dropped`);
+      return null;
+    }
+    if (entry.trim().length === 0) {
+      warnings.push(`\`${key}\` entry ${String(index + 1)} is empty; dropped`);
       return null;
     }
     return entry;

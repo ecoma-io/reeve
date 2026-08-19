@@ -267,6 +267,19 @@ describe("composeRules", () => {
     expect(composed).toEqual(local);
   });
 
+  it("a pack's empty generated suffix is dropped before composition, never sweeping the diff", () => {
+    // A pack's `generated: [""]` must not leak an empty suffix into the union:
+    // `path.endsWith("")` is true for every path, so it would skip the whole
+    // diff as machine-made and stamp an unread diff as clean. The pack reader
+    // drops it with a warning, so the union stays default — the file is shown.
+    const pack = parsePack('version: 1.0\ngenerated: [""]', "go/concurrency@1.0");
+    expect(pack.warnings).toEqual([
+      "pack go/concurrency@1.0: `generated` entry 1 is empty; dropped",
+    ]);
+    const composed = composeRules(parseRules("version: 1"), [pack]);
+    expect(composed.generatedExtensions).toEqual([".min.js", ".min.css", ".map"]);
+  });
+
   it("carries local warnings and prefixes pack warnings with the pack's ref", () => {
     const local = parseRules("version: 1\nbogusKey: x\n");
     const packs: Pack[] = [

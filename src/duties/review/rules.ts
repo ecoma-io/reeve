@@ -326,6 +326,18 @@ function readStringList(raw: unknown, key: string, warnings: string[]): string[]
         warnings.push(`\`${key}\` entry ${String(index + 1)} is not a string; dropped`);
         return null;
       }
+      // An empty or whitespace-only entry is never a legitimate config value:
+      // in `generated` an empty suffix matches every path (`"src/a.ts".endsWith("")`
+      // is true), so `generated: [""]` would silently skip the whole diff as
+      // machine-made and the review would stamp an unread diff as clean. Drop
+      // it with a warning, so `generated: [""]` behaves exactly like `generated:`
+      // (falls back to `DEFAULT_GENERATED`, the empty-list path `composeRules`
+      // documents). The same hole existed in the pack reader (`readPackStringList`)
+      // and shares this guard via its own equivalent check.
+      if (entry.trim().length === 0) {
+        warnings.push(`\`${key}\` entry ${String(index + 1)} is empty; dropped`);
+        return null;
+      }
       return entry;
     })
     .filter((entry): entry is string => entry !== null);

@@ -211,6 +211,16 @@ function readPackStringList(raw: unknown, ref: string, key: string, warnings: st
         );
         return null;
       }
+      // The same guard `readStringList` applies to the local rules file: an
+      // empty or whitespace-only suffix matches every path (`path.endsWith("")`
+      // is true), so a pack's `generated: [""]` would otherwise sweep the whole
+      // diff as machine-made and stamp an unread diff as clean. Drop it with a
+      // warning; the empty list then falls back to `DEFAULT_GENERATED` during
+      // composition.
+      if (entry.trim().length === 0) {
+        warnings.push(`pack ${ref}: \`${key}\` entry ${String(index + 1)} is empty; dropped`);
+        return null;
+      }
       return entry;
     })
     .filter((entry): entry is string => entry !== null);
