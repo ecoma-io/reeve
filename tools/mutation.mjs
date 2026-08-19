@@ -8,12 +8,19 @@
  * (the working tree is never left dirty), runs the vitest cases that exercise
  * that seam, and reports whether the suite noticed:
  *
- *   - KILLED   — at least one case failed under the mutated file. The suite
- *                holds the invariant.
- *   - SURVIVED — every case passed. The invariant is not actually asserted,
- *                which is a gap the mutation table must own.
- *   - STALE    — the `from` string no longer appears exactly once in the file
- *                it names. The mutation was never applied, so it proved
+ *   - KILLED   — at least one case failed under the mutated file, and the same
+ *                cases pass against the pristine file: the failure is caused
+ *                by the mutation, not merely shared with it. The suite holds
+ *                the invariant.
+ *   - SURVIVED — every case passed with the mutation in place, or the same
+ *                failure exists without the mutation — a failure the row is
+ *                not responsible for must not be claimed as evidence. Either
+ *                way the mutation proved nothing, which is a gap the table
+ *                must own.
+ *   - STALE    — the `from` string no longer names exactly one seam in the
+ *                file it names, or is disambiguated only by a comment line
+ *                while its code exists identically elsewhere. The mutation was
+ *                never applied, or applied to a copy nobody chose, so it proved
  *                nothing. A stale row is a silently missing gate and fails the
  *                run exactly as loudly as a survivor does.
  *
@@ -559,8 +566,8 @@ export const MUTATIONS = [
   {
     name: "state branch opens a second pull request",
     file: "src/core/state-branch.ts",
-    from: "    const existingPr = existing[0];\n    if (existingPr !== undefined) {\n      // Update existing PR",
-    to: "    const existingPr = undefined;\n    if (existingPr !== undefined) {\n      // Update existing PR",
+    from: 'core.info(`state-branch: wrote ${file.path} on \\`${branchName}\\``);\n    }\n\n    // Check for an existing open PR on this branch\n    const { data: existing } = await api.rest.pulls.list({\n      owner: at.owner,\n      repo: at.repo,\n      state: "open",\n      head: `${at.owner}:${branchName}`,\n      per_page: 1,\n    });\n\n    const existingPr = existing[0];',
+    to: 'core.info(`state-branch: wrote ${file.path} on \\`${branchName}\\``);\n    }\n\n    // Check for an existing open PR on this branch\n    const { data: existing } = await api.rest.pulls.list({\n      owner: at.owner,\n      repo: at.repo,\n      state: "open",\n      head: `${at.owner}:${branchName}`,\n      per_page: 1,\n    });\n\n    const existingPr = undefined;',
     targets: ["src/core/state-branch.test.ts"],
     stage: "fast",
     owner: "TL3",
@@ -601,8 +608,8 @@ export const MUTATIONS = [
   {
     name: "write against an uncertain thread listing",
     file: "src/duties/review/threads.ts",
-    from: "  // comment plus an uncertain search → `withheld`).\n  if (uncertain) return { created: 0, updated: 0, fallback: [], uncertain };",
-    to: "  // comment plus an uncertain search → `withheld`).",
+    from: "  if (uncertain) return { created: 0, updated: 0, fallback: [], uncertain };\n  const plan = planThreads(reconciled, standing, threads);\n  const fallback: string[] = [];",
+    to: "  if (false) return { created: 0, updated: 0, fallback: [], uncertain };\n  const plan = planThreads(reconciled, standing, threads);\n  const fallback: string[] = [];",
     targets: ["src/duties/review/threads.adversarial.test.ts"],
     stage: "fast",
     owner: "TL4",
@@ -1098,6 +1105,37 @@ export function classifyRow(mutation, text) {
   if (count > 1) {
     return `\`${excerpt(mutation.from)}\` matches ${String(count)} places — the edit is ambiguous`;
   }
+  const reason = commentOnlyAnchor(mutation, text);
+  if (reason !== null) return reason;
+  return null;
+}
+
+/**
+ * Whether a `from` matches the seam it names only because a comment line says so.
+ *
+ * A seam is a run of code, not the words beside it. A `from` whose matched
+ * context includes a comment line — and where the non-comment lines of the
+ * `from` alone match more than once — is disambiguated only by that comment:
+ * the code it gates exists identically in another copy of the seam, and
+ * `String.replace` would mutate whichever copy comes first while the copy whose
+ * invariant the row claims to gate goes ungated. That is STALE in the row's
+ * own terms — a gate that stopped existing — so it fails the run exactly as
+ * loudly, and the message points at the repair: anchor the `from` on a token
+ * that belongs to the seam's code, not its commentary.
+ */
+export function commentOnlyAnchor(mutation, text) {
+  const lines = mutation.from.split("\n");
+  const comment = lines.find((line) => /^\s*(\/\/|#)/.test(line));
+  if (comment === undefined) return null;
+  const codeLines = lines.filter((line) => !/^\s*(\/\/|#)/.test(line));
+  if (codeLines.length === 0) return null;
+  if (occurrences(text, codeLines.join("\n")) > 1) {
+    return (
+      `\`${excerpt(mutation.from)}\` is anchored only on its comment line ` +
+      `(\`${excerpt(comment)}\`) — its code exists identically elsewhere, so the edit would ` +
+      `mutate a copy nobody chose. Re-anchor the \`from\` on a seam-unique non-comment token.`
+    );
+  }
   return null;
 }
 
@@ -1158,6 +1196,44 @@ async function apply(original, srcPath, mutation) {
   await writeFile(srcPath, mutated);
 }
 
+/**
+ * The exit code of one `targets` set against the pristine tree, cached.
+ *
+ * Filled by the causality check in the run loop: rows that share a target set
+ * (and several do — `threads.adversarial.test.ts` sits in five rows' targets)
+ * would otherwise re-run the same suite once per row.
+ */
+const baselineCache = new Map();
+
+async function pristineStatus(targets, cache) {
+  const key = targets.join("\n");
+  if (cache.has(key)) return cache.get(key);
+  const result = spawnSync(VITEST, ["run", "--no-coverage", ...targets], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  // A signal-killed run has `status === null`: that is not a pass and not a
+  // failure, it is an environment problem, and `undefined` says so — the loop
+  // throws on it rather than silently downgrading a KILLED row.
+  cache.set(key, result.status === null ? undefined : result.status);
+  return cache.get(key);
+}
+
+/**
+ * Whether a mutated run proves the mutation.
+ *
+ * The suite's exit codes against the mutated and the pristine file, compared:
+ * a nonzero exit under mutation is only evidence if the pristine run of the
+ * same targets passes. Several rows share `targets`, so without this an
+ * unrelated failure in a shared file would be reported KILLED for a seam the
+ * mutation never touched — a gate handed green for an invariant it never gated.
+ */
+export function verdict(mutatedStatus, pristineStatus) {
+  if (mutatedStatus === 0) return { killed: false };
+  if (pristineStatus !== 0) return { killed: false, cause: "pristine failure" };
+  return { killed: true };
+}
+
 async function run() {
   const options = parseArgs(process.argv.slice(2));
 
@@ -1216,9 +1292,41 @@ async function run() {
         cwd: ROOT,
         encoding: "utf8",
       });
-      const killed = result.status !== 0;
-      rows.push({ mutation, killed });
-      console.log(`${killed ? "KILLED  " : "SURVIVED"}  ${mutation.name}`);
+      const mutatedStatus = result.status ?? 1;
+      let outcome = verdict(mutatedStatus, 0);
+      if (!outcome.killed) {
+        // The suite passed with the mutation in place, so the mutation is the
+        // one thing that could have broken it — the verdict is unambiguous.
+        rows.push({ mutation, ...outcome });
+        console.log(`SURVIVED  ${mutation.name}`);
+        continue;
+      }
+
+      // The suite failed with the mutation in place — but several rows share
+      // `targets`, so a nonzero exit alone does not say the mutation caused
+      // it. Re-run the same targets against the PRISTINE file; only a failure
+      // that the pristine run passes counts as KILLED. A failure present in
+      // both is evidence against the mutation, not for it, and reporting it
+      // KILLED would hand the gate green for an invariant the mutation never
+      // touched. The pristine run is cached per target-set, so rows sharing a
+      // file run it once, not once each. The mutated source must be restored
+      // first: comparing the mutated run against itself would make every
+      // genuinely-killed row read as "already failing without the mutation".
+      restoreSync();
+      const pristine = await pristineStatus(mutation.targets, baselineCache);
+      if (pristine === undefined) {
+        throw new Error(
+          `${mutation.name}: the pristine run of ${mutation.file}'s targets failed to complete ` +
+            `(killed by a signal, not a test failure) — the mutated run cannot be judged against it.`,
+        );
+      }
+      outcome = verdict(mutatedStatus, pristine);
+      rows.push({ mutation, ...outcome });
+      console.log(
+        outcome.killed
+          ? `KILLED  ${mutation.name}`
+          : `SURVIVED  ${mutation.name} (baseline already failing)`,
+      );
     } finally {
       restoreSync();
     }
@@ -1244,9 +1352,13 @@ async function run() {
   }
 
   for (const row of survivors) {
+    const cause =
+      row.cause === "pristine failure"
+        ? `${row.mutation.targets.join(", ")} already fail without the mutation — ` +
+          "nothing proves the mutation was responsible, so it is not reported KILLED."
+        : `${row.mutation.targets.join(", ")} pass with ${row.mutation.file} mutated.`;
     console.error(
-      `\nSURVIVED  ${row.mutation.name} (${row.mutation.owner})\n  ${row.mutation.note}\n` +
-        `  ${row.mutation.targets.join(", ")} pass with ${row.mutation.file} mutated.`,
+      `\nSURVIVED  ${row.mutation.name} (${row.mutation.owner})\n  ${row.mutation.note}\n  ${cause}`,
     );
   }
 
