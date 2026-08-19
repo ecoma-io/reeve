@@ -258,6 +258,18 @@ invent coverage claims:
 - No provider failure is ever retried (F **[GAP] Retry** — deliberate).
 - Provider reachability accuracy is a measured register, not a test gate
   (`eval/README.md` measurement table — the 1.0 Stage-6 number).
+- **Deliberate re-scope (Round 2, adjudicated 2026-08-19):** the inlined
+  `deriveLanguage` (formerly `src/core/derive.ts`) dropped 10 of its 12
+  unit-test invariants at the module level (composite-script mapping,
+  `\p{Script=}` compile-check, sr-Latn override, case-indifference,
+  malformed/unknown/CLDR-known-but-unnameable refusals). The logic is
+  byte-identical — moved, not rewritten — and the surviving 2 assertions now
+  run at the `parseLanguages` boundary through real Intl tables (stronger than
+  the mocked module tests), plus the eval multilingual fixtures (ja/ko/zh)
+  assert the same behavior end-to-end. Recorded as an intentional re-scope of
+  coverage to the parser boundary, NOT a behavioral change; a future pass may
+  restore a derive-block in `languages.test.ts` if the boundary it guards
+  grows distinct from the parser's.
 
 ---
 
