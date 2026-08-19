@@ -1229,8 +1229,16 @@ async function pristineStatus(targets, cache) {
  * mutation never touched — a gate handed green for an invariant it never gated.
  */
 export function verdict(mutatedStatus, pristineStatus) {
+  // A missing mutated status (`null` from a signal-killed spawn, or the
+  // `undefined` sentinel) means the run never completed and proves nothing;
+  // it must never read as KILLED, let alone with the pristine run converting
+  // a crash into evidence. The run loop throws on the truly fatal case; this
+  // makes the pure function safe for any caller.
+  if (typeof mutatedStatus !== "number") return { killed: false, cause: "run did not complete" };
   if (mutatedStatus === 0) return { killed: false };
-  if (pristineStatus !== 0) return { killed: false, cause: "pristine failure" };
+  if (typeof pristineStatus !== "number" || pristineStatus !== 0) {
+    return { killed: false, cause: "pristine failure" };
+  }
   return { killed: true };
 }
 
@@ -1292,7 +1300,18 @@ async function run() {
         cwd: ROOT,
         encoding: "utf8",
       });
-      const mutatedStatus = result.status ?? 1;
+      // A signal-killed run has `status === null` — the tests never finished,
+      // so any verdict would be fabricated. `?? 1` would coerce that into a
+      // failure and — when the pristine run passes — a KILLED row for a
+      // mutation whose invariants were never exercised, which is TESTGATE-01
+      // in a new coat. Fail loudly instead, mirroring the pristine side.
+      if (result.status === null) {
+        throw new Error(
+          `${mutation.name}: the mutated run of ${mutation.file}'s targets was killed by a signal ` +
+            `(exit code null, not a test failure) — no verdict is possible.`,
+        );
+      }
+      const mutatedStatus = result.status;
       let outcome = verdict(mutatedStatus, 0);
       if (!outcome.killed) {
         // The suite passed with the mutation in place, so the mutation is the

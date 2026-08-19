@@ -156,6 +156,17 @@ describe("verdict — a red run proves the mutation only if the pristine run is 
     // over an ungated invariant.
     deepStrictEqual(verdict(1, 1), { killed: false, cause: "pristine failure" });
   });
+
+  it("never credits a mutation whose own run never completed", () => {
+    // A signal-killed run (`spawnSync` status null) is turned into a throw by
+    // the run loop — verdict must never see `null` and report KILLED off it.
+    // This pins the contract that any missing mutated status is a hard
+    // failure, not a red run the pristine pass can convert into a KILLED.
+    // `undefined` is the sentinel the loop forwards; anything other than a
+    // completed nonzero exit must not read as KILLED.
+    strictEqual(verdict(undefined, 0).killed, false);
+    strictEqual(verdict(null, 0).killed, false);
+  });
 });
 
 describe("commentOnlyAnchor — a seam is code, not the words beside it", () => {
