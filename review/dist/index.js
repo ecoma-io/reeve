@@ -35710,10 +35710,10 @@ function changedSymbols(added) {
     const name = match2[1] ?? match2[2] ?? "";
     if (name.length > 0) out.add(name);
   }
-  return [...out].sort((a, b) => a.localeCompare(b));
+  return [...out].sort();
 }
 function callerCandidates(paths, target) {
-  return paths.filter((path) => path !== target && !isSecretPath(path)).sort((a, b) => a.localeCompare(b));
+  return paths.filter((path) => path !== target && !isSecretPath(path)).sort();
 }
 function truncate(items, cap) {
   if (items.length <= cap) return { kept: items, dropped: 0 };
@@ -35779,7 +35779,7 @@ function fsSource(root) {
       if (path === null) return [];
       try {
         const names = await readdir2(path);
-        return [...names].sort((a, b) => a.localeCompare(b));
+        return [...names].sort();
       } catch {
         return [];
       }
@@ -35883,7 +35883,8 @@ var Collector = class {
     }
     if (found.size === 0) return null;
     const capped = truncate(
-      [...found].sort((a, b) => a.localeCompare(b)),
+      [...found].sort(),
+      // byte order, so no collation can flip the run
       25
     );
     return renderSection("imports", capped.kept, capped.dropped);
@@ -35910,7 +35911,8 @@ var Collector = class {
     }
     if (found.size === 0) return null;
     const capped = truncate(
-      [...found].sort((a, b) => a.localeCompare(b)),
+      [...found].sort(),
+      // byte order, so no collation can flip the run
       this.budget.maxConfigFiles
     );
     const reads = [];
@@ -36025,7 +36027,7 @@ ${excerpt2}`);
       if (rel === void 0) break;
       if (seen.has(rel)) continue;
       seen.add(rel);
-      const entries = await list(rel);
+      const entries = [...await list(rel)].sort();
       for (const entry of entries) {
         const path = `${rel}/${entry}`;
         if (seen.has(path)) continue;
@@ -36912,7 +36914,7 @@ async function discoverTests(root) {
     }
     let names;
     try {
-      names = await readdir3(join(root, rel));
+      names = (await readdir3(join(root, rel))).sort();
     } catch {
       if (rel.length === 0) return { tests: [], unavailable: true, capped: false };
       continue;
@@ -38028,7 +38030,7 @@ function rank(findings) {
     if (severity !== 0) return severity;
     const corroboration = b.corroboratedBy.length - a.corroboratedBy.length;
     if (corroboration !== 0) return corroboration;
-    const path = a.path.localeCompare(b.path);
+    const path = a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
     if (path !== 0) return path;
     return (a.line ?? 0) - (b.line ?? 0);
   });

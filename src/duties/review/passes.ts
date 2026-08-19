@@ -624,7 +624,7 @@ export function rank(findings: readonly ReviewFinding[]): ReviewFinding[] {
     if (severity !== 0) return severity;
     const corroboration = b.corroboratedBy.length - a.corroboratedBy.length;
     if (corroboration !== 0) return corroboration;
-    const path = a.path.localeCompare(b.path);
+    const path = a.path < b.path ? -1 : a.path > b.path ? 1 : 0; // byte order
     if (path !== 0) return path;
     return (a.line ?? 0) - (b.line ?? 0);
   });

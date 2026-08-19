@@ -255,6 +255,7 @@ export async function recordCorrection(
   by: string,
   changed: { readonly label: string; readonly action: "labeled" | "unlabeled" } | null,
   stateBranch?: string,
+  now: () => Date = () => new Date(),
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
 
@@ -369,7 +370,7 @@ export async function recordCorrection(
     repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     duty: "triage",
-    at: new Date().toISOString(),
+    at: now().toISOString(),
     title: standing.title,
     excerpt: body.slice(0, EXCERPT),
     language: code,
@@ -433,6 +434,7 @@ export async function recordReversal(
   by: string,
   duplicateOf: number,
   stateBranch?: string,
+  now: () => Date = () => new Date(),
 ): Promise<RecordOutcome> {
   const warrant = authority.warrant;
 
@@ -471,7 +473,7 @@ export async function recordReversal(
     repo: `${at.owner}/${at.repo}`,
     thread: at.number,
     duty: "duplicate",
-    at: new Date().toISOString(),
+    at: now().toISOString(),
     title: standing.title,
     excerpt: body.slice(0, EXCERPT),
     language: code,

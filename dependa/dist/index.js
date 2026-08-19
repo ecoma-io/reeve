@@ -36235,9 +36235,9 @@ function packageId(proposal) {
 }
 function sorted(proposals) {
   return [...proposals].sort((a, b) => {
-    const nameCmp = a.dependency.name.localeCompare(b.dependency.name);
+    const nameCmp = a.dependency.name < b.dependency.name ? -1 : a.dependency.name > b.dependency.name ? 1 : 0;
     if (nameCmp !== 0) return nameCmp;
-    return a.targetVersion.localeCompare(b.targetVersion);
+    return a.targetVersion < b.targetVersion ? -1 : a.targetVersion > b.targetVersion ? 1 : 0;
   });
 }
 

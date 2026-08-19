@@ -1065,6 +1065,102 @@ describe("recordReversal", () => {
   });
 });
 
+describe("DETERMIN-05 — the recorded `at` comes from an injectable clock", () => {
+  const FIXED = () => new Date("2026-01-02T03:04:05.000Z");
+  const OTHER = () => new Date("2026-06-07T08:09:10.000Z");
+
+  it("writes byte-identical store lines for identical inputs with the same clock", async () => {
+    const { api, writes } = apiOf();
+    await recordCorrection(
+      api,
+      AT,
+      standingOf({ labels: ["bug"] }),
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+      undefined,
+      FIXED,
+    );
+    const first = writes[0]?.content;
+
+    const { api: api2, writes: writes2 } = apiOf();
+    await recordCorrection(
+      api2,
+      AT,
+      standingOf({ labels: ["bug"] }),
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+      undefined,
+      FIXED,
+    );
+    expect(writes2[0]?.content).toBe(first);
+    expect(parseCorrection(first ?? "")?.at).toBe("2026-01-02T03:04:05.000Z");
+  });
+
+  it("records the reversal at the injected clock too", async () => {
+    const { api, writes } = apiOf();
+    await recordReversal(
+      api,
+      AT,
+      standingOf({ labels: ["bug"] }),
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      7,
+      undefined,
+      OTHER,
+    );
+    expect(writes[0]?.content ?? "").toContain('"at":"2026-06-07T08:09:10.000Z"');
+  });
+
+  it("differs only in `at` when the clock differs — everything else stays put", async () => {
+    const { api, writes } = apiOf();
+    await recordCorrection(
+      api,
+      AT,
+      standingOf({ labels: ["bug"] }),
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+      undefined,
+      FIXED,
+    );
+    await recordCorrection(
+      api,
+      AT,
+      standingOf({ labels: ["bug"] }),
+      authorityOf(),
+      settingsOf(),
+      stagesOf(),
+      WEATHER,
+      "maintainer",
+      null,
+      undefined,
+      OTHER,
+    );
+    expect(writes).toHaveLength(2);
+    const a = writes[0]?.content ?? "";
+    const b = writes[1]?.content ?? "";
+    expect(a).not.toBe(b);
+    // The only differing field is the timestamp the correction carries.
+    expect(a.replace('"at":"2026-01-02T03:04:05.000Z"', '"at":"X"')).toBe(
+      b.replace('"at":"2026-06-07T08:09:10.000Z"', '"at":"X"'),
+    );
+  });
+});
+
 describe("recordCorrection with stateBranch", () => {
   it("passes stateBranch to writeCorrection", async () => {
     const { api, writes } = apiOf();

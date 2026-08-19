@@ -209,7 +209,7 @@ export function changedSymbols(added: readonly string[]): readonly string[] {
     const name = match[1] ?? match[2] ?? "";
     if (name.length > 0) out.add(name);
   }
-  return [...out].sort((a, b) => a.localeCompare(b));
+  return [...out].sort(); // byte order, so no collation can flip the run
 }
 
 /**
@@ -218,9 +218,7 @@ export function changedSymbols(added: readonly string[]): readonly string[] {
  * for determinism.
  */
 export function callerCandidates(paths: readonly string[], target: string): readonly string[] {
-  return paths
-    .filter((path) => path !== target && !isSecretPath(path))
-    .sort((a, b) => a.localeCompare(b));
+  return paths.filter((path) => path !== target && !isSecretPath(path)).sort(); // byte order, so no collation can flip the run
 }
 
 /** Keeps the earliest `cap` items, and reports how many were dropped. */
@@ -325,7 +323,7 @@ export function fsSource(root: string): WorkspaceSource {
       if (path === null) return [];
       try {
         const names = await readdir(path);
-        return [...names].sort((a, b) => a.localeCompare(b));
+        return [...names].sort(); // byte order, so no collation can flip the run
       } catch {
         return [];
       }
@@ -467,7 +465,7 @@ class Collector {
     }
     if (found.size === 0) return null;
     const capped = truncate(
-      [...found].sort((a, b) => a.localeCompare(b)),
+      [...found].sort(), // byte order, so no collation can flip the run
       25,
     );
     return renderSection("imports", capped.kept, capped.dropped);
@@ -500,7 +498,7 @@ class Collector {
     }
     if (found.size === 0) return null;
     const capped = truncate(
-      [...found].sort((a, b) => a.localeCompare(b)),
+      [...found].sort(), // byte order, so no collation can flip the run
       this.budget.maxConfigFiles,
     );
     const reads: string[] = [];
@@ -624,7 +622,12 @@ class Collector {
       if (rel === undefined) break;
       if (seen.has(rel)) continue;
       seen.add(rel);
-      const entries = await list(rel);
+      // Byte-sort each listing before walking it: the caller-candidate cap
+      // (maxFilesScannedPerDirectory) drops whatever tail the walk reached
+      // last, so an unsorted `list` would let the filesystem's `readdir` order
+      // decide which candidates survived. Sorting makes the walk (and the cap)
+      // a deterministic function of the tree, not of the filesystem.
+      const entries = [...(await list(rel))].sort();
       for (const entry of entries) {
         const path = `${rel}/${entry}`;
         if (seen.has(path)) continue;
