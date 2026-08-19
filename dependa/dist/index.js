@@ -4075,7 +4075,7 @@ var require_util2 = __commonJS({
       }
       return "allowed";
     }
-    function isErrorLike(object) {
+    function isErrorLike2(object) {
       return object instanceof Error || (object?.constructor?.name === "Error" || object?.constructor?.name === "DOMException");
     }
     function isValidReasonPhrase(statusText) {
@@ -4857,7 +4857,7 @@ var require_util2 = __commonJS({
       createIterator,
       isValidHeaderName,
       isValidHeaderValue,
-      isErrorLike,
+      isErrorLike: isErrorLike2,
       fullyReadBody,
       bytesMatch,
       isReadableStreamLike,
@@ -5269,23 +5269,23 @@ var require_formdata_parser = __commonJS({
             break;
           }
           case "content-type": {
-            let headerValue = collectASequenceOfBytes(
+            let headerValue2 = collectASequenceOfBytes(
               (char) => char !== 10 && char !== 13,
               input,
               position
             );
-            headerValue = removeChars(headerValue, false, true, (char) => char === 9 || char === 32);
-            contentType = isomorphicDecode(headerValue);
+            headerValue2 = removeChars(headerValue2, false, true, (char) => char === 9 || char === 32);
+            contentType = isomorphicDecode(headerValue2);
             break;
           }
           case "content-transfer-encoding": {
-            let headerValue = collectASequenceOfBytes(
+            let headerValue2 = collectASequenceOfBytes(
               (char) => char !== 10 && char !== 13,
               input,
               position
             );
-            headerValue = removeChars(headerValue, false, true, (char) => char === 9 || char === 32);
-            encoding = isomorphicDecode(headerValue);
+            headerValue2 = removeChars(headerValue2, false, true, (char) => char === 9 || char === 32);
+            encoding = isomorphicDecode(headerValue2);
             break;
           }
           default: {
@@ -10557,8 +10557,8 @@ var require_mock_utils = __commonJS({
     }
     function lowerCaseEntries(headers) {
       return Object.fromEntries(
-        Object.entries(headers).map(([headerName, headerValue]) => {
-          return [headerName.toLocaleLowerCase(), headerValue];
+        Object.entries(headers).map(([headerName, headerValue2]) => {
+          return [headerName.toLocaleLowerCase(), headerValue2];
         })
       );
     }
@@ -10598,8 +10598,8 @@ var require_mock_utils = __commonJS({
         return false;
       }
       for (const [matchHeaderName, matchHeaderValue] of Object.entries(mockDispatch2.headers)) {
-        const headerValue = getHeaderByName(headers, matchHeaderName);
-        if (!matchValue(matchHeaderValue, headerValue)) {
+        const headerValue2 = getHeaderByName(headers, matchHeaderName);
+        if (!matchValue(matchHeaderValue, headerValue2)) {
           return false;
         }
       }
@@ -12257,7 +12257,7 @@ var require_response = __commonJS({
       isAborted,
       isBlobLike,
       serializeJavascriptValueToJSONString,
-      isErrorLike,
+      isErrorLike: isErrorLike2,
       isomorphicEncode,
       environmentSettingsObject: relevantRealm
     } = require_util2();
@@ -12468,7 +12468,7 @@ var require_response = __commonJS({
       };
     }
     function makeNetworkError(reason) {
-      const isError = isErrorLike(reason);
+      const isError = isErrorLike2(reason);
       return makeResponse({
         type: "error",
         status: 0,
@@ -13414,7 +13414,7 @@ var require_fetch = __commonJS({
       sameOrigin,
       isCancelled,
       isAborted,
-      isErrorLike,
+      isErrorLike: isErrorLike2,
       fullyReadBody,
       readableStreamClose,
       isomorphicEncode,
@@ -14292,7 +14292,7 @@ var require_fetch = __commonJS({
         } else {
           if (isReadable(stream)) {
             fetchParams.controller.controller.error(new TypeError("terminated", {
-              cause: isErrorLike(reason) ? reason : void 0
+              cause: isErrorLike2(reason) ? reason : void 0
             }));
           }
         }
@@ -19414,9 +19414,9 @@ var require_lib = __commonJS({
       _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys2(this.requestOptions.headers)[header];
-          if (headerValue) {
-            clientHeader = typeof headerValue === "number" ? headerValue.toString() : headerValue;
+          const headerValue2 = lowercaseKeys2(this.requestOptions.headers)[header];
+          if (headerValue2) {
+            clientHeader = typeof headerValue2 === "number" ? headerValue2.toString() : headerValue2;
           }
         }
         const additionalValue = additionalHeaders[header];
@@ -19438,14 +19438,14 @@ var require_lib = __commonJS({
       _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys2(this.requestOptions.headers)[Headers2.ContentType];
-          if (headerValue) {
-            if (typeof headerValue === "number") {
-              clientHeader = String(headerValue);
-            } else if (Array.isArray(headerValue)) {
-              clientHeader = headerValue.join(", ");
+          const headerValue2 = lowercaseKeys2(this.requestOptions.headers)[Headers2.ContentType];
+          if (headerValue2) {
+            if (typeof headerValue2 === "number") {
+              clientHeader = String(headerValue2);
+            } else if (Array.isArray(headerValue2)) {
+              clientHeader = headerValue2.join(", ");
             } else {
-              clientHeader = headerValue;
+              clientHeader = headerValue2;
             }
           }
         }
@@ -31597,20 +31597,101 @@ async function listRepositoryLabels(api, at) {
 function isMissing(error2) {
   return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
 }
+function readProperty(target, key) {
+  if (typeof target !== "object" || target === null) return void 0;
+  try {
+    return target[key];
+  } catch {
+    return void 0;
+  }
+}
+function isErrorLike(error2) {
+  try {
+    return error2 instanceof Error;
+  } catch {
+    return false;
+  }
+}
+function messageOf(error2) {
+  try {
+    if (isErrorLike(error2)) {
+      const message = readProperty(error2, "message");
+      return typeof message === "string" ? message.toLowerCase() : "";
+    }
+    return String(error2).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+function polluted(key) {
+  try {
+    return Object.prototype[key];
+  } catch {
+    return void 0;
+  }
+}
+var DELTA_SECONDS = /^\d+(?:\.\d+)?$/;
+function headerValue(headers, name) {
+  if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return void 0;
+  try {
+    const get = headers.get;
+    if (typeof get === "function" && get !== polluted("get")) {
+      const direct = get.call(headers, name);
+      if (direct !== void 0 && direct !== null) return direct;
+    }
+  } catch {
+  }
+  try {
+    const iterate = headers[Symbol.iterator];
+    if (typeof iterate === "function" && iterate !== polluted(Symbol.iterator)) {
+      for (const entry of headers) {
+        if (!Array.isArray(entry)) continue;
+        const [key, value] = entry;
+        if (typeof key === "string" && key.toLowerCase() === name) return value;
+      }
+    }
+  } catch {
+  }
+  try {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() !== name) continue;
+      try {
+        return headers[key];
+      } catch {
+        return void 0;
+      }
+    }
+  } catch {
+  }
+  return void 0;
+}
+function saysRateLimited(error2) {
+  const response = readProperty(error2, "response");
+  if (typeof response !== "object" || response === null) return false;
+  const headers = readProperty(response, "headers");
+  const retryAfter = headerValue(headers, "retry-after");
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0) return true;
+  if (typeof retryAfter === "string" && DELTA_SECONDS.test(retryAfter.trim())) return true;
+  const remaining = headerValue(headers, "x-ratelimit-remaining");
+  return remaining === 0 || typeof remaining === "string" && remaining.trim() === "0";
+}
 function isCapacityError(error2) {
-  if (typeof error2 === "object" && error2 !== null && "status" in error2) {
-    const status = error2.status;
+  const status = readProperty(error2, "status");
+  const isAuthStatus = status === 401 || status === 403;
+  if (status !== void 0) {
     if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
       return true;
+    if (status === 403 && saysRateLimited(error2)) return true;
   }
-  if (typeof error2 === "object" && error2 !== null && "code" in error2) {
-    const code = error2.code;
+  {
+    const code = readProperty(error2, "code");
     if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "UND_ERR_CONNECT_TIMEOUT")
       return true;
   }
-  if (error2 instanceof Error && error2.name === "TimeoutError") return true;
-  const message = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message.includes("timed out");
+  if (!isAuthStatus && isErrorLike(error2) && readProperty(error2, "name") === "TimeoutError")
+    return true;
+  if (isAuthStatus) return false;
+  return messageOf(error2).includes("timed out");
 }
 async function readContentsFile(api, at, path, ref) {
   let data;
@@ -32025,6 +32106,86 @@ function excerpt(text2) {
   const flat = text2.replace(/\s+/g, " ").trim();
   if (flat.length === 0) return "the body was empty";
   return flat.length <= EXCERPT_CHARS ? flat : `${flat.slice(0, EXCERPT_CHARS)}\u2026`;
+}
+
+// src/duties/dependa/cron.ts
+var CRON_MONTH_NAMES = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12
+};
+var CRON_DOW_NAMES = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6
+};
+function resolveCronAlias(token, aliases) {
+  const lower = token.toLowerCase();
+  if (lower in aliases) return String(aliases[lower]);
+  return token;
+}
+function cronFieldMatches(field, value, max, aliases = {}) {
+  const resolved = resolveCronAlias(field, aliases);
+  if (resolved === "*") return true;
+  if (resolved === String(value)) return true;
+  if (resolved.includes(",")) {
+    return resolved.split(",").some((p) => cronFieldMatches(p.trim(), value, max, aliases));
+  }
+  if (resolved.includes("/")) {
+    const slashParts = resolved.split("/");
+    const range = slashParts[0] ?? "*";
+    const stepStr = slashParts[1] ?? "1";
+    const step = Number(stepStr);
+    if (!Number.isSafeInteger(step) || step <= 0) return false;
+    let lo = 0;
+    let hi = max;
+    if (range === "*") {
+    } else if (range.includes("-")) {
+      const rangeParts = range.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
+      lo = rangeParts[0] ?? 0;
+      hi = rangeParts[1] ?? max;
+      if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
+    } else {
+      const start = Number(range);
+      if (!Number.isSafeInteger(start)) return false;
+      lo = start;
+    }
+    return value >= lo && value <= hi && (value - lo) % step === 0;
+  }
+  if (resolved.includes("-")) {
+    const rangeParts = resolved.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
+    const lo = rangeParts[0] ?? 0;
+    const hi = rangeParts[1] ?? 0;
+    return value >= lo && value <= hi;
+  }
+  return false;
+}
+function cronMatches(expression, date) {
+  const parts = expression.trim().split(/\s+/);
+  if (parts.length !== 5) return true;
+  const [minute, hour, dom, month, dow] = parts;
+  const minuteMatch = cronFieldMatches(minute, date.getMinutes(), 59);
+  const hourMatch = cronFieldMatches(hour, date.getHours(), 23);
+  const monthMatch = cronFieldMatches(month, date.getMonth() + 1, 12, CRON_MONTH_NAMES);
+  const domMatch = cronFieldMatches(dom, date.getDate(), 31);
+  const dowMatch = cronFieldMatches(dow, date.getDay(), 6, CRON_DOW_NAMES);
+  const domRestricted = dom !== "*";
+  const dowRestricted = dow !== "*";
+  const dayMatch = !domRestricted && !dowRestricted ? true : domRestricted && !dowRestricted ? domMatch : !domRestricted && dowRestricted ? dowMatch : domMatch || dowMatch;
+  return minuteMatch && hourMatch && monthMatch && dayMatch;
 }
 
 // src/core/summary.ts
@@ -33336,7 +33497,7 @@ async function resolve2(packageName) {
   const { registry, namespace, image } = parseImageName(packageName);
   if (registry !== null && !isSafeRegistry(registry)) {
     warning(
-      `dependa: Docker registry \`${registry}\` appears to be a private/internal address \u2014 skipping SSRF protection.`
+      `dependa: Docker registry \`${registry}\` appears to be a private/internal address \u2014 no request was made to it.`
     );
     return {
       status: "not-found"
@@ -33900,10 +34061,10 @@ async function resolve5(packageName) {
 }
 function parseRegistryResponse(body) {
   const versions = body.versions;
-  if (typeof versions !== "object" || versions === null) {
+  if (typeof versions !== "object" || versions === null || Array.isArray(versions)) {
     return {
       status: "malformed-metadata",
-      reason: "npm registry response has no `versions` field"
+      reason: "npm registry response has no usable `versions` map"
     };
   }
   const time = typeof body.time === "object" && body.time !== null ? body.time : {};
@@ -35632,7 +35793,7 @@ function parsePnpmLockYaml(content) {
       inPackages = false;
     }
     if (!inPackages) continue;
-    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine);
+    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine.replace(/(?:\([^)]*\))+(?=:$)/, ""));
     if (packageMatch !== null) {
       const name = packageMatch[1] ?? "";
       const version = packageMatch[2] ?? "";
@@ -36512,7 +36673,7 @@ function factsOnly(fields) {
   };
 }
 function interpretationPrompt(proposal, facts, enclosedEvidence, enclosedRule) {
-  const ruleSection = enclosedRule !== void 0 && enclosedRule.length > 0 ? [enclosedRule, ""] : [];
+  const ruleSection = enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
     `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
     "",
@@ -36969,7 +37130,7 @@ async function run() {
             },
             riskFacts.facts,
             enclosed?.block ?? "",
-            enclosed?.rule
+            enclosed?.rule ?? ""
           );
           const rotation = await rotateModels(
             settings.models,
@@ -37286,84 +37447,6 @@ async function listRepositoryFiles(api, at, paths) {
   }
   return files;
 }
-var CRON_MONTH_NAMES = {
-  jan: 1,
-  feb: 2,
-  mar: 3,
-  apr: 4,
-  may: 5,
-  jun: 6,
-  jul: 7,
-  aug: 8,
-  sep: 9,
-  oct: 10,
-  nov: 11,
-  dec: 12
-};
-var CRON_DOW_NAMES = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6
-};
-function resolveCronAlias(token, aliases) {
-  const lower = token.toLowerCase();
-  if (lower in aliases) return String(aliases[lower]);
-  return token;
-}
-function cronFieldMatches(field, value, max, aliases = {}) {
-  const resolved = resolveCronAlias(field, aliases);
-  if (resolved === "*") return true;
-  if (resolved === String(value)) return true;
-  if (resolved.includes(",")) {
-    return resolved.split(",").some((p) => cronFieldMatches(p.trim(), value, max, aliases));
-  }
-  if (resolved.includes("/")) {
-    const slashParts = resolved.split("/");
-    const range = slashParts[0] ?? "*";
-    const stepStr = slashParts[1] ?? "1";
-    const step = Number(stepStr);
-    if (!Number.isSafeInteger(step) || step <= 0) return false;
-    let lo = 0;
-    let hi = max;
-    if (range === "*") {
-    } else if (range.includes("-")) {
-      const rangeParts = range.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
-      lo = rangeParts[0] ?? 0;
-      hi = rangeParts[1] ?? max;
-      if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) return false;
-    } else {
-      const start = Number(range);
-      if (!Number.isSafeInteger(start)) return false;
-      lo = start;
-    }
-    return value >= lo && value <= hi && (value - lo) % step === 0;
-  }
-  if (resolved.includes("-")) {
-    const rangeParts = resolved.split("-").map((s) => Number(resolveCronAlias(s, aliases)));
-    const lo = rangeParts[0] ?? 0;
-    const hi = rangeParts[1] ?? 0;
-    return value >= lo && value <= hi;
-  }
-  return false;
-}
-function cronMatches(expression, date) {
-  const parts = expression.trim().split(/\s+/);
-  if (parts.length !== 5) return true;
-  const [minute, hour, dom, month, dow] = parts;
-  const minuteMatch = cronFieldMatches(minute, date.getMinutes(), 59);
-  const hourMatch = cronFieldMatches(hour, date.getHours(), 23);
-  const monthMatch = cronFieldMatches(month, date.getMonth() + 1, 12, CRON_MONTH_NAMES);
-  const domMatch = cronFieldMatches(dom, date.getDate(), 31);
-  const dowMatch = cronFieldMatches(dow, date.getDay(), 6, CRON_DOW_NAMES);
-  const domRestricted = dom !== "*";
-  const dowRestricted = dow !== "*";
-  const dayMatch = !domRestricted && !dowRestricted ? true : domRestricted && !dowRestricted ? domMatch : !domRestricted && dowRestricted ? dowMatch : domMatch || dowMatch;
-  return minuteMatch && hourMatch && monthMatch && dayMatch;
-}
 async function checkSchedule(schedule, api, at) {
   if (schedule.kind === "interval") {
     try {
@@ -37429,7 +37512,5 @@ function createDatasourceRegistry(token) {
 }
 void run();
 export {
-  cronFieldMatches,
-  cronMatches,
   run
 };

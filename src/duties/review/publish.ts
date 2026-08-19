@@ -101,16 +101,20 @@ export type Decoded =
  * Validation is strict per version:
  *
  * - **no payload / empty envelope** → `none`, a genuine cold start.
- * - **no `version`** → v1: every existing field check applies, `wasResolved` /
- *   `resolvedAtSha` map as-is, every finding gains `disposition: null`, the
- *   checksum is computed and `version: 2` is stamped → `ok`.
+ * - **no `version`** → `corrupt`, which the caller turns into a cold start it
+ *   announces. A payload with no schema version is not migrated on trust:
+ *   doing so skipped every check `version: 2` applies and then re-sealed the
+ *   result as a valid v2. It is reported rather than dropped silently because
+ *   state was found and discarded, and because the branch should never fire
+ *   in normal operation. See the routing comment in `decodeEnvelope`.
  * - **`version: 2`** → every existing field check, plus `line` must be `null`
  *   or an integer `> 0`, `severity` must be in the union, and `disposition`,
  *   when present, must be a valid shape. The checksum is recomputed over
  *   findings + SHAs; a mismatch is `corrupt`.
  *
  * Any parse failure — bad base64, not a mapping, malformed fields — is
- * `corrupt` with a reason, never a silent `none`.
+ * `corrupt` with a reason, never a silent `none`. A payload that is merely
+ * from an older schema is not a parse failure: it is `none`.
  */
 export function decodeEnvelope(payload: string | null): Decoded {
   if (payload === null) return { kind: "none" };
@@ -129,7 +133,42 @@ export function decodeEnvelope(payload: string | null): Decoded {
     return { kind: "corrupt", reason: "the envelope is not a JSON mapping" };
   }
   const map = parsed as Record<string, unknown>;
-  if (map.version === undefined) return migrateV1(map);
+  // A payload that declares no `version` is read as a COLD START, never
+  // migrated on trust.
+  //
+  // The migration this replaces COMPUTED a checksum instead of verifying one
+  // and applied a weaker per-finding check than `validateV2`, so omitting one
+  // key turned off every v2 defence: a flipped resolved flag, an appended
+  // reviewed SHA, an unknown severity, a non-positive line and a wholly
+  // invented finding were all refused as v2 and all accepted as v1. It also
+  // laundered — the migration stamped `version: 2` and sealed whatever it
+  // accepted, so the envelope the next run wrote was a validly-sealed v2
+  // carrying the tampered contents, and every run after that validated it.
+  //
+  // Discarding a genuine legacy payload costs one cold start, and the window
+  // for one is closed: v2 shipped before the 0.8.0 release, so a versionless
+  // envelope can only sit on a thread not reviewed since before 0.8.0, and the
+  // first review after that upgrade rewrites it. Cold start is an
+  // already-supported state — the run rebuilds its memory from the thread,
+  // which is what a first-ever review does.
+  //
+  // `corrupt`, not `none`, and the difference is the whole point: `none` is
+  // "there was no state", which is silent and correct for a first review.
+  // Here there WAS state and this run threw it away, which a reader has to be
+  // able to learn. Because the legacy window is closed, this branch should
+  // essentially never fire in normal operation — so if it does, that is worth
+  // saying out loud: either a thread is carrying very stale state, or
+  // something is writing envelopes this project did not write.
+  //
+  // `corrupt` costs nothing but the note: the caller rebuilds from the thread
+  // on this path exactly as it does on `none`, and the run stays green.
+  if (map.version === undefined) {
+    return {
+      kind: "corrupt",
+      reason:
+        "it declares no schema version, so there is no digest to verify it against and it was not trusted",
+    };
+  }
   return validateV2(map);
 }
 
@@ -147,46 +186,6 @@ function isFindable(entry: unknown): boolean {
     typeof f.marker === "string" &&
     typeof f.wasResolved === "boolean"
   );
-}
-
-/** The v1 field checks — line and severity were already permissive, kept for the migration. */
-function isV1Findable(entry: unknown): boolean {
-  if (!isFindable(entry)) return false;
-  const f = entry as Record<string, unknown>;
-  return f.line === null || Number.isInteger(f.line);
-}
-
-/** A payload that predates `version` — one-way migrated to v2, dispositions start null. */
-function migrateV1(map: Record<string, unknown>): Decoded {
-  if (!Array.isArray(map.findings)) {
-    return { kind: "corrupt", reason: "the envelope has no `findings` array" };
-  }
-  const findings: PreviousFinding[] = [];
-  for (const entry of map.findings) {
-    if (!isV1Findable(entry)) {
-      return { kind: "corrupt", reason: "a v1 finding holds a malformed field" };
-    }
-    const raw = entry as Record<string, unknown> & { resolvedAtSha?: unknown };
-    const resolvedAtSha =
-      typeof raw.resolvedAtSha === "string" ? ({ resolvedAtSha: raw.resolvedAtSha } as const) : {};
-    findings.push({
-      ...(entry as unknown as Omit<
-        PreviousFinding,
-        "wasResolved" | "resolvedAtSha" | "disposition"
-      >),
-      wasResolved: raw.wasResolved === true,
-      disposition: null,
-      ...resolvedAtSha,
-    });
-  }
-  const shas = Array.isArray(map.reviewedShas)
-    ? map.reviewedShas.filter((sha): sha is string => typeof sha === "string")
-    : [];
-  const previous: Previous = { findings, reviewedShas: shas };
-  return {
-    kind: "ok",
-    previous: { ...previous, version: 2, checksum: envelopeChecksum(previous) },
-  };
 }
 
 const SEVERITIES: ReadonlySet<string> = new Set(["info", "warning", "critical"]);

@@ -443,3 +443,51 @@ describe("the action contract", () => {
     expect(text).toContain("main: dist/index.js");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The `propose` gate (`main.ts:102`).
+//
+// An auditor deleted it and the whole repository stayed green: a warrant that
+// names remediation with no capability, or does not name `propose` among the
+// ones it grants, would still have had proposals derived and reported.
+//
+// The blast radius is smaller than the sibling duties' — remediation writes
+// nothing to the repository, so what escapes is a job summary and two outputs,
+// not a commit. It is still the difference between a duty that respects the
+// warrant and one that reads it and proceeds anyway, and a capability that
+// changes nothing observable is a capability nobody can trust.
+// ---------------------------------------------------------------------------
+
+describe("the `propose` capability gate", () => {
+  it("derives proposals when the warrant grants `propose`", async () => {
+    // The control: without it, the two cases below would pass against a duty
+    // that had simply stopped proposing.
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.proposed).toBe("true");
+    expect(run.outputs.proposals).toBe("1");
+  });
+
+  it("derives nothing when the warrant names the duty with no capability", async () => {
+    await writeFile(warrantPath, ["version: 1", "duties:", "  remediation: [none]"].join("\n"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.proposed).toBe("false");
+    expect(run.outputs.proposals).toBe("0");
+  });
+
+  it("says why it proposed nothing rather than reporting a clean empty run", async () => {
+    // "Nothing to propose" and "not allowed to propose" are different answers,
+    // and a maintainer who granted the wrong thing can only tell them apart if
+    // the run says which one happened.
+    await writeFile(warrantPath, ["version: 1", "duties:", "  remediation: [none]"].join("\n"));
+
+    const run = await runAction(stub);
+
+    expect(run.outputs.note).toContain("does not name");
+    expect(run.outputs.note).toContain("remediation");
+  });
+});

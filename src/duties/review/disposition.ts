@@ -22,7 +22,9 @@
  * **The grammar is strict and anchored.** A reply that does not fully match is
  * ignored entirely — no substring extraction, no guessing. A line a maintainer
  * writes as prose ("I think this is fine, please check line 12") does not
- * become a disposition by accident.
+ * become a disposition by accident. The cost of that strictness is real and is
+ * spelled out on `readDispositions`: a reply whose WHOLE body is not one
+ * disposition line yields nothing, so two triage lines in one reply lose both.
  */
 import type { Disposition, DispositionValue, PreviousFinding } from "./findings.js";
 
@@ -140,8 +142,22 @@ function replyUrl(owner: string, repo: string, number: number, replyId: number):
  * Every eligible reply is parsed strictly; every parsed disposition is matched
  * against the previous run's findings (the ones a human could have replied to);
  * every matched finding gets the disposition its line (or path+line) earned.
- * Multiple matching lines in one reply each produce a disposition for their own
- * finding's identity.
+ *
+ * **One reply carries at most one disposition, and a reply carrying two
+ * carries none.** `parseDispositionLine` is run ONCE, on the whole reply body,
+ * against a grammar anchored with `^`/`$` and no `m` flag. So a body that is
+ * exactly one disposition line matches, and a body holding two of them matches
+ * neither anchor and yields nothing — including the line that would have
+ * worked on its own. A maintainer who writes two triage lines in one reply
+ * loses both.
+ *
+ * That is silent data loss from a human's deliberate input, and it is recorded
+ * here rather than fixed: parsing untrusted reply bodies line by line widens
+ * the surface on which a disposition — the one thing on this thread that
+ * speaks for a person — can be minted, and that is not a widening this
+ * module makes on its own. Pinned by
+ * `disposition.adversarial.test.ts`'s `a_multi_line_reply_loses_every_…` case.
+ * Adjudicated 2026-08-18: code wins as behaviour, the doc was wrong.
  */
 export function readDispositions(
   replies: readonly ThreadReply[],

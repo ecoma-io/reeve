@@ -146,9 +146,13 @@ export interface Reply {
  * A thread's replies are unbounded — a year-old issue can carry four hundred —
  * and every one of them is a body a duty would read, fingerprint, and possibly
  * spend a request on. `REPLY_PAGES` is the ceiling on how many pages of the
- * thread one run will ever fetch; a thread past `REPLY_PAGE * REPLY_PAGES`
- * comments (mirrors `SWEEP_PAGES`'s reasoning) is the pathological case this
- * reports honestly (`more: true`) rather than serves completely.
+ * thread one run will ever fetch, and nothing else here would bound that walk:
+ * `max` says how many replies a caller keeps, not how deep the walk has to go
+ * to find them — a `"newest"` read has to reach the end of the thread whatever
+ * `max` is — and a comment stream carries no operator-supplied date or budget
+ * the way `since` and `limit` bound a sweep's listing. A thread past
+ * `REPLY_PAGE * REPLY_PAGES` comments is the pathological case this reports
+ * honestly (`more: true`) rather than serves completely.
  *
  * A run that hits either ceiling says so rather than trimming quietly, so the
  * consumer sees a number to raise instead of a silence to misread.
@@ -865,14 +869,204 @@ export function isMissing(error: unknown): boolean {
 }
 
 /**
+ * One property read that answers `undefined` rather than throwing.
+ *
+ * The property is read directly instead of being probed with `in` first:
+ * `in` fires a `Proxy`'s `has` trap, which is one more place an input gets
+ * to run code, and the answer is identical either way — a property that is
+ * not there reads as `undefined`, and `undefined` matches none of the values
+ * any caller here compares against.
+ */
+function readProperty(target: unknown, key: string): unknown {
+  if (typeof target !== "object" || target === null) return undefined;
+  try {
+    return (target as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/** `error instanceof Error`, without trusting a `getPrototypeOf` trap not to throw. */
+function isErrorLike(error: unknown): boolean {
+  try {
+    return error instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The error's text, lowercased, or `""` when it has none this code can read.
+ *
+ * `String(value)` runs `Symbol.toPrimitive`, `toString` and `valueOf`, any of
+ * which an input may define to throw — and a null-prototype object has none
+ * of them at all, so `String(Object.create(null))` throws on its own without
+ * anybody being hostile. Nothing readable means nothing said, which is `""`.
+ */
+function messageOf(error: unknown): string {
+  try {
+    if (isErrorLike(error)) {
+      const message = readProperty(error, "message");
+      return typeof message === "string" ? message.toLowerCase() : "";
+    }
+    return String(error).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Whatever `Object.prototype` currently carries under `key`, or `undefined`.
+ *
+ * Read fresh on every call rather than captured at module load: pollution
+ * that happens after this module is imported is the case that matters, and a
+ * captured `undefined` would compare unequal to it and let it through.
+ */
+function polluted(key: PropertyKey): unknown {
+  try {
+    return (Object.prototype as unknown as Record<PropertyKey, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * HTTP delta-seconds: digits, optionally fractional. Deliberately NOT
+ * `Number(...)` — that reads `"0x0"` as 0, `"1e3"` as 1000 and `""` as 0,
+ * and every one of those would be a junk header buying a green run.
+ */
+const DELTA_SECONDS = /^\d+(?:\.\d+)?$/;
+
+/**
+ * One response header by name, case-insensitively, from a shape nothing has
+ * typed.
+ *
+ * `GitHubApi` declares `headers` only as `{ link?: string }` for pagination,
+ * and widening it for a classifier that never calls the API would put a
+ * rate-limit concern into every port's contract. So the value arrives as
+ * `unknown` and is treated as such, and three containers are tried in turn,
+ * first hit winning: a `Headers`-like `.get`, an iterable of `[key, value]`
+ * pairs, and a plain record's own enumerable keys.
+ *
+ * **The `Headers` case is not hypothetical.** `Object.keys(new Headers(…))`
+ * is `[]` — a WHATWG `Headers` keeps its entries off the object — so a
+ * record-only lookup reads a genuine rate limit from any fetch-based client
+ * as a permission error, which is the exact failure this whole narrowing
+ * exists to prevent. It is duck-typed rather than `instanceof Headers`: the
+ * global need not exist in a given runtime, and a cross-realm instance would
+ * fail that check anyway. Arrays are excluded from every strategy, so a bare
+ * array of header names or pairs is still not a header container.
+ *
+ * **This function never throws, for any input.** Not a style preference: it
+ * runs inside `catch` blocks at twelve call sites, and a throw here would
+ * replace the failure being classified with this one and lose it. A hostile
+ * getter, a `get` that throws, an iterator that throws, a string, or a key
+ * reachable only through a polluted prototype all answer nothing instead.
+ * The guard is per strategy and per key, so one hostile header does not
+ * blind the lookup to the header beside it that answers the question.
+ *
+ * **`Object.prototype` pollution is excluded, not merely unreached.** The
+ * first two strategies have to look up the prototype chain — a real WHATWG
+ * `Headers` carries `get` on `Headers.prototype`, not as an own key — so
+ * writing `Object.prototype.get` or `Object.prototype[Symbol.iterator]`
+ * would otherwise make every plain header record answer whatever the
+ * attacker chose, and turn every 403 in the process green. Each probe
+ * therefore rejects the function it finds when that function is
+ * `Object.prototype`'s own, which leaves a genuine `Headers` working and
+ * costs one identity comparison. The third strategy reads own keys only and
+ * never had the reach.
+ */
+function headerValue(headers: unknown, name: string): unknown {
+  if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return undefined;
+
+  try {
+    const get = (headers as { get?: unknown }).get;
+    if (typeof get === "function" && get !== polluted("get")) {
+      const direct: unknown = (get as (key: string) => unknown).call(headers, name);
+      if (direct !== undefined && direct !== null) return direct;
+    }
+  } catch {
+    // Not a header container after all, or a hostile one. Try the next shape.
+  }
+
+  try {
+    const iterate = (headers as { [Symbol.iterator]?: unknown })[Symbol.iterator];
+    if (typeof iterate === "function" && iterate !== polluted(Symbol.iterator)) {
+      for (const entry of headers as Iterable<unknown>) {
+        if (!Array.isArray(entry)) continue;
+        const [key, value] = entry as readonly unknown[];
+        if (typeof key === "string" && key.toLowerCase() === name) return value;
+      }
+    }
+  } catch {
+    // Same: a container that cannot be walked has told us nothing.
+  }
+
+  try {
+    // `Object.keys` reads no values, so a hostile getter on an unrelated key
+    // cannot fire here; only the matching key is read, and only inside this
+    // guard.
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() !== name) continue;
+      try {
+        return (headers as Record<string, unknown>)[key];
+      } catch {
+        return undefined;
+      }
+    }
+  } catch {
+    // An exotic own-keys trap. Nothing was said.
+  }
+
+  return undefined;
+}
+
+/**
+ * Whether a failure's own response headers say "rate limit" — the only
+ * evidence that promotes a 403 out of configuration and into capacity.
+ *
+ * `retry-after` counts only as **delta-seconds**: a non-negative finite
+ * number, or a string that is one after trimming. RFC 9110 also permits an
+ * HTTP-date, and this deliberately does not accept it — GitHub documents and
+ * sends seconds, while `Date.parse` accepts so much (`"0"`, `"2"`, a bare
+ * month name) that admitting dates would re-open the widening this narrowing
+ * closes. So `"unknown"`, `"-5"`, `"0x0"`, `"1e3"`, `true`, `NaN`,
+ * `Infinity` and `{}` are all *not* GitHub naming a wait: a proxy, WAF or
+ * GHES gateway 403 carrying a junk `Retry-After` stays the red it should be
+ * rather than buying a green run and a rotation.
+ *
+ * `x-ratelimit-remaining` counts at exactly 0 — the number, or `"0"` after
+ * trimming — never by coercion, which would read `""`, `false` and `[]` as
+ * exhaustion and hand a green run to every response that merely omitted it.
+ * `-0` answers true through `-0 === 0`, which is the right answer (a spent
+ * quota is a spent quota) and is pinned as such rather than left to chance.
+ *
+ * **This function never throws, for any input** — same reason as
+ * `headerValue`. The `.response` and `.headers` reads that happen before the
+ * lookup go through `readProperty`, so a hostile accessor on either answers
+ * nothing rather than escaping into the `catch` block that called this.
+ */
+function saysRateLimited(error: unknown): boolean {
+  const response = readProperty(error, "response");
+  if (typeof response !== "object" || response === null) return false;
+  const headers = readProperty(response, "headers");
+
+  const retryAfter = headerValue(headers, "retry-after");
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0) return true;
+  if (typeof retryAfter === "string" && DELTA_SECONDS.test(retryAfter.trim())) return true;
+
+  const remaining = headerValue(headers, "x-ratelimit-remaining");
+  return remaining === 0 || (typeof remaining === "string" && remaining.trim() === "0");
+}
+
+/**
  * Whether a GitHub API failure is capacity, not configuration — D12's
  * "weather" side. A 429/5xx status, a Node system error (`.code`), or a
  * timeout-shaped error with no status at all, is the platform being slow or
- * briefly unavailable, not a mistake in the run's own setup; 401/403 (and
- * everything else) is not this classifier's business and stays red. Shared
- * rather than reimplemented per duty — `triage`'s `propose.ts` and
- * `lifecycle`'s sweep both need the identical answer to "is this worth
- * ending the run over."
+ * briefly unavailable, not a mistake in the run's own setup; 401 and a bare
+ * 403 are the run's own setup and stay red. Shared rather than
+ * reimplemented per duty — `triage`'s `propose.ts` and `lifecycle`'s sweep
+ * both need the identical answer to "is this worth ending the run over."
  *
  * Status codes are bounded to the 5xx range (500–599). Node system errors
  * are matched by their `.code` property — exact match, no substring — so
@@ -881,18 +1075,65 @@ export function isMissing(error: unknown): boolean {
  * which is also capacity. The only message-level fallback is "timed out"
  * (what Node and Octokit actually report); "timeout" alone is too generic
  * and matches `TypeError: timeout is not a function`.
+ *
+ * **403 is the one status this classifies by more than its number,** because
+ * GitHub does not let the number decide. docs.github.com ("Rate limits for
+ * the REST API" → *Exceeding the rate limit*) states that a secondary limit
+ * "returns a 403 or 429 response" and that exceeding a primary limit answers
+ * "403 or 429" with `x-ratelimit-remaining` at 0 — one cause, two statuses,
+ * chosen by GitHub and not by anything this run did. Reading status alone
+ * therefore made the SAME rate limit green on 429 and red on 403: a
+ * non-deterministic run colour for an identical condition. So a 403 counts
+ * as capacity only when the response headers are GitHub itself naming the
+ * limit — a non-empty `retry-after` (the duration the docs say to wait), or
+ * `x-ratelimit-remaining` at exactly 0. Everything else about 403 is
+ * unchanged: no headers, headers that do not say this, a quota with requests
+ * left, or any shape that is not a header record, stays the permission error
+ * it has always been. The narrowing is deliberately unable to turn a genuine
+ * authorisation refusal green, and `x-ratelimit-remaining` is matched at 0
+ * exactly rather than coerced, so an empty or absent header cannot pass for
+ * exhaustion. 401 is excluded outright: a bad token is a bad token whatever
+ * headers ride along with it.
+ *
+ * **This function never throws, for any input.** It is called from inside a
+ * `catch` block at every one of its twelve call sites, so a throw here would
+ * not merely misclassify: it would REPLACE the failure being classified and
+ * lose the real fault. Every read it makes — `.status`, `.code`, `.name`,
+ * `.message`, the `instanceof`, the `String()` — can run arbitrary code when
+ * the input is a `Proxy` or carries an accessor, and `String()` throws on a
+ * null-prototype object without anybody being hostile at all. Each read is
+ * therefore guarded on its own rather than the whole body being wrapped, so
+ * one hostile property does not blind the classification to the answerable
+ * property beside it: an `ECONNRESET` whose `.status` accessor throws is
+ * still capacity.
+ *
+ * **The text branches are gated on the status.** A 401/403 whose message
+ * happens to contain "timed out", or whose `name` is "TimeoutError", is
+ * still credentials or permissions — the status is direct evidence about the
+ * cause and a message substring is not, so text may not overrule it. That is
+ * the same laundering the 403 narrowing above refuses, arriving by the other
+ * door. The gate is 401/403 only: a 404 or a statusless timeout is unchanged,
+ * and `.code` is deliberately left ungated, because a Node system error is a
+ * transport-level fact rather than a phrase that happens to appear in prose.
  */
 export function isCapacityError(error: unknown): boolean {
-  // 1. HTTP status: 429 (rate limit) or 5xx (server error).
-  if (typeof error === "object" && error !== null && "status" in error) {
-    const status = (error as { status?: unknown }).status;
+  const status = readProperty(error, "status");
+
+  // Auth is decided by the status, and nothing softer may overrule it. Read
+  // once here because branches 3 and 4 below are gated on it.
+  const isAuthStatus = status === 401 || status === 403;
+
+  // 1. HTTP status: 429 (rate limit) or 5xx (server error), plus the one 403
+  //    GitHub sends for the very same rate limit it sometimes sends as 429.
+  if (status !== undefined) {
     if (status === 429 || (typeof status === "number" && status >= 500 && status < 600))
       return true;
+    if (status === 403 && saysRateLimited(error)) return true;
   }
 
   // 2. Node.js system errors: exact `.code` match, no substring guessing.
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code?: unknown }).code;
+  {
+    const code = readProperty(error, "code");
     if (
       code === "ECONNRESET" ||
       code === "ETIMEDOUT" ||
@@ -906,14 +1147,14 @@ export function isCapacityError(error: unknown): boolean {
   }
 
   // 3. AbortSignal.timeout fires a DOMException named "TimeoutError".
-  if (error instanceof Error && error.name === "TimeoutError") return true;
+  if (!isAuthStatus && isErrorLike(error) && readProperty(error, "name") === "TimeoutError")
+    return true;
 
   // 4. Fallback: message substring for "timed out" only — the phrase Node
   //    and Octokit actually use. "timeout" alone is too generic (matches
   //    "timeout is not a function", etc.).
-  const message =
-    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return message.includes("timed out");
+  if (isAuthStatus) return false;
+  return messageOf(error).includes("timed out");
 }
 
 /**

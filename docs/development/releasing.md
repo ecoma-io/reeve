@@ -115,7 +115,10 @@ no build step on their side.
 
 So the bundle is committed, and **two separate jobs prove it matches its source**:
 
-- CI on every pull request rebuilds and fails on `git diff --exit-code -- dist`.
+- CI on every pull request rebuilds and fails if `git status --porcelain` reports
+  anything afterwards — deliberately not a `dist` pathspec, which would answer for
+  the listing's bundle, say nothing about a duty's, and miss a bundle nobody
+  committed at all.
 - The release job rebuilds again at the release commit and refuses to continue.
 
 The second is not redundant. The artifact being released _is_ the committed

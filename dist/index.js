@@ -4075,7 +4075,7 @@ var require_util2 = __commonJS({
       }
       return "allowed";
     }
-    function isErrorLike(object) {
+    function isErrorLike2(object) {
       return object instanceof Error || (object?.constructor?.name === "Error" || object?.constructor?.name === "DOMException");
     }
     function isValidReasonPhrase(statusText) {
@@ -4857,7 +4857,7 @@ var require_util2 = __commonJS({
       createIterator,
       isValidHeaderName,
       isValidHeaderValue,
-      isErrorLike,
+      isErrorLike: isErrorLike2,
       fullyReadBody,
       bytesMatch,
       isReadableStreamLike,
@@ -5269,23 +5269,23 @@ var require_formdata_parser = __commonJS({
             break;
           }
           case "content-type": {
-            let headerValue = collectASequenceOfBytes(
+            let headerValue2 = collectASequenceOfBytes(
               (char) => char !== 10 && char !== 13,
               input,
               position
             );
-            headerValue = removeChars(headerValue, false, true, (char) => char === 9 || char === 32);
-            contentType = isomorphicDecode(headerValue);
+            headerValue2 = removeChars(headerValue2, false, true, (char) => char === 9 || char === 32);
+            contentType = isomorphicDecode(headerValue2);
             break;
           }
           case "content-transfer-encoding": {
-            let headerValue = collectASequenceOfBytes(
+            let headerValue2 = collectASequenceOfBytes(
               (char) => char !== 10 && char !== 13,
               input,
               position
             );
-            headerValue = removeChars(headerValue, false, true, (char) => char === 9 || char === 32);
-            encoding = isomorphicDecode(headerValue);
+            headerValue2 = removeChars(headerValue2, false, true, (char) => char === 9 || char === 32);
+            encoding = isomorphicDecode(headerValue2);
             break;
           }
           default: {
@@ -10557,8 +10557,8 @@ var require_mock_utils = __commonJS({
     }
     function lowerCaseEntries(headers) {
       return Object.fromEntries(
-        Object.entries(headers).map(([headerName, headerValue]) => {
-          return [headerName.toLocaleLowerCase(), headerValue];
+        Object.entries(headers).map(([headerName, headerValue2]) => {
+          return [headerName.toLocaleLowerCase(), headerValue2];
         })
       );
     }
@@ -10598,8 +10598,8 @@ var require_mock_utils = __commonJS({
         return false;
       }
       for (const [matchHeaderName, matchHeaderValue] of Object.entries(mockDispatch2.headers)) {
-        const headerValue = getHeaderByName(headers, matchHeaderName);
-        if (!matchValue(matchHeaderValue, headerValue)) {
+        const headerValue2 = getHeaderByName(headers, matchHeaderName);
+        if (!matchValue(matchHeaderValue, headerValue2)) {
           return false;
         }
       }
@@ -12257,7 +12257,7 @@ var require_response = __commonJS({
       isAborted,
       isBlobLike,
       serializeJavascriptValueToJSONString,
-      isErrorLike,
+      isErrorLike: isErrorLike2,
       isomorphicEncode,
       environmentSettingsObject: relevantRealm
     } = require_util2();
@@ -12468,7 +12468,7 @@ var require_response = __commonJS({
       };
     }
     function makeNetworkError(reason) {
-      const isError = isErrorLike(reason);
+      const isError = isErrorLike2(reason);
       return makeResponse({
         type: "error",
         status: 0,
@@ -13414,7 +13414,7 @@ var require_fetch = __commonJS({
       sameOrigin,
       isCancelled,
       isAborted,
-      isErrorLike,
+      isErrorLike: isErrorLike2,
       fullyReadBody,
       readableStreamClose,
       isomorphicEncode,
@@ -14292,7 +14292,7 @@ var require_fetch = __commonJS({
         } else {
           if (isReadable(stream)) {
             fetchParams.controller.controller.error(new TypeError("terminated", {
-              cause: isErrorLike(reason) ? reason : void 0
+              cause: isErrorLike2(reason) ? reason : void 0
             }));
           }
         }
@@ -19414,9 +19414,9 @@ var require_lib = __commonJS({
       _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys2(this.requestOptions.headers)[header];
-          if (headerValue) {
-            clientHeader = typeof headerValue === "number" ? headerValue.toString() : headerValue;
+          const headerValue2 = lowercaseKeys2(this.requestOptions.headers)[header];
+          if (headerValue2) {
+            clientHeader = typeof headerValue2 === "number" ? headerValue2.toString() : headerValue2;
           }
         }
         const additionalValue = additionalHeaders[header];
@@ -19438,14 +19438,14 @@ var require_lib = __commonJS({
       _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
         let clientHeader;
         if (this.requestOptions && this.requestOptions.headers) {
-          const headerValue = lowercaseKeys2(this.requestOptions.headers)[Headers2.ContentType];
-          if (headerValue) {
-            if (typeof headerValue === "number") {
-              clientHeader = String(headerValue);
-            } else if (Array.isArray(headerValue)) {
-              clientHeader = headerValue.join(", ");
+          const headerValue2 = lowercaseKeys2(this.requestOptions.headers)[Headers2.ContentType];
+          if (headerValue2) {
+            if (typeof headerValue2 === "number") {
+              clientHeader = String(headerValue2);
+            } else if (Array.isArray(headerValue2)) {
+              clientHeader = headerValue2.join(", ");
             } else {
-              clientHeader = headerValue;
+              clientHeader = headerValue2;
             }
           }
         }
@@ -31893,20 +31893,101 @@ async function listRepositoryLabels(api, at) {
   }
   return labels;
 }
+function readProperty(target, key) {
+  if (typeof target !== "object" || target === null) return void 0;
+  try {
+    return target[key];
+  } catch {
+    return void 0;
+  }
+}
+function isErrorLike(error2) {
+  try {
+    return error2 instanceof Error;
+  } catch {
+    return false;
+  }
+}
+function messageOf(error2) {
+  try {
+    if (isErrorLike(error2)) {
+      const message2 = readProperty(error2, "message");
+      return typeof message2 === "string" ? message2.toLowerCase() : "";
+    }
+    return String(error2).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+function polluted(key) {
+  try {
+    return Object.prototype[key];
+  } catch {
+    return void 0;
+  }
+}
+var DELTA_SECONDS = /^\d+(?:\.\d+)?$/;
+function headerValue(headers, name) {
+  if (typeof headers !== "object" || headers === null || Array.isArray(headers)) return void 0;
+  try {
+    const get = headers.get;
+    if (typeof get === "function" && get !== polluted("get")) {
+      const direct = get.call(headers, name);
+      if (direct !== void 0 && direct !== null) return direct;
+    }
+  } catch {
+  }
+  try {
+    const iterate = headers[Symbol.iterator];
+    if (typeof iterate === "function" && iterate !== polluted(Symbol.iterator)) {
+      for (const entry of headers) {
+        if (!Array.isArray(entry)) continue;
+        const [key, value] = entry;
+        if (typeof key === "string" && key.toLowerCase() === name) return value;
+      }
+    }
+  } catch {
+  }
+  try {
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() !== name) continue;
+      try {
+        return headers[key];
+      } catch {
+        return void 0;
+      }
+    }
+  } catch {
+  }
+  return void 0;
+}
+function saysRateLimited(error2) {
+  const response = readProperty(error2, "response");
+  if (typeof response !== "object" || response === null) return false;
+  const headers = readProperty(response, "headers");
+  const retryAfter = headerValue(headers, "retry-after");
+  if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0) return true;
+  if (typeof retryAfter === "string" && DELTA_SECONDS.test(retryAfter.trim())) return true;
+  const remaining = headerValue(headers, "x-ratelimit-remaining");
+  return remaining === 0 || typeof remaining === "string" && remaining.trim() === "0";
+}
 function isCapacityError(error2) {
-  if (typeof error2 === "object" && error2 !== null && "status" in error2) {
-    const status = error2.status;
+  const status = readProperty(error2, "status");
+  const isAuthStatus = status === 401 || status === 403;
+  if (status !== void 0) {
     if (status === 429 || typeof status === "number" && status >= 500 && status < 600)
       return true;
+    if (status === 403 && saysRateLimited(error2)) return true;
   }
-  if (typeof error2 === "object" && error2 !== null && "code" in error2) {
-    const code = error2.code;
+  {
+    const code = readProperty(error2, "code");
     if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "ENETUNREACH" || code === "EAI_AGAIN" || code === "UND_ERR_CONNECT_TIMEOUT")
       return true;
   }
-  if (error2 instanceof Error && error2.name === "TimeoutError") return true;
-  const message2 = error2 instanceof Error ? error2.message.toLowerCase() : String(error2).toLowerCase();
-  return message2.includes("timed out");
+  if (!isAuthStatus && isErrorLike(error2) && readProperty(error2, "name") === "TimeoutError")
+    return true;
+  if (isAuthStatus) return false;
+  return messageOf(error2).includes("timed out");
 }
 
 // src/core/script.ts

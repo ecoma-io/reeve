@@ -584,3 +584,40 @@ describe("readStore", () => {
     expect(unreadable[0]).toMatch(/2026-01\.ndjson:1 is not a correction/);
   });
 });
+
+describe("the store under conditions a maintainer's own edits produce", () => {
+  it("recalls nothing across queries from an empty store, without ranking anything", () => {
+    // The cold start again, on the multi-query path the language layer uses.
+    // `recall` and `recallAcrossQueries` have to agree that an empty store
+    // answers nothing rather than one of them dividing by a corpus of zero.
+    const memory = createMemory([]);
+
+    expect(
+      memory.recallAcrossQueries(
+        [
+          { text: "the export is empty", against: "own" },
+          { text: "xuất khẩu trống", against: { pivot: "en" } },
+        ],
+        3,
+      ),
+    ).toEqual([]);
+    expect(memory.size).toBe(0);
+  });
+
+  it("reports a shard it could not read, and still reads every other shard", async () => {
+    // A `.ndjson` name that is a directory is what a stray `mkdir` or a
+    // partially-restored checkout leaves behind. Losing one shard is not worth
+    // losing the run, and losing it silently is not worth anything.
+    const root = await mkdtemp(join(tmpdir(), "reeve-memory-"));
+    const path = join(root, "corrections");
+    await mkdir(path);
+    await mkdir(join(path, "broken.ndjson"));
+    await writeFile(join(path, "good.ndjson"), `${formatCorrection(correction({ thread: 7 }))}\n`);
+
+    const { corrections, unreadable } = await readStore(path);
+
+    expect(corrections.map((entry) => entry.thread)).toEqual([7]);
+    expect(unreadable).toHaveLength(1);
+    expect(unreadable[0]).toContain("broken.ndjson");
+  });
+});

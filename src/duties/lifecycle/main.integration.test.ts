@@ -773,3 +773,239 @@ describe("the sweep", () => {
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// Two guards that nothing observed, both confirmed by mutation to be
+// unobserved: the whole-step capability check, and the recursion guard.
+// ---------------------------------------------------------------------------
+
+/** A body carrying `propose`'s marker — what Reeve's own proposal PR looks like. */
+function proposalBody(): string {
+  return `A proposal.\n\n${markerFor("propose").render(fingerprint("proposal", ["lifecycle"]))}`;
+}
+
+describe("the whole-step capability gate", () => {
+  /**
+   * `checkRequired` (`main.ts:308`) is the only thing standing between a
+   * warrant that grants nothing and a track that labels, comments and closes.
+   * An auditor forced it to report no missing capability and the entire
+   * repository stayed green — every lifecycle step was ungated and nothing
+   * anywhere noticed. Each case below asserts by what reached the stub, so a
+   * gate turned into a constant has to fail one of them.
+   */
+  const WITHOUT = (granted: string): string =>
+    WARRANT.replace("  lifecycle: [label, comment, close]", `  lifecycle: ${granted}`);
+
+  it("applies no label when `label` is not granted", async () => {
+    await writeFile(warrantPath, WITHOUT("[comment, close]"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([]);
+  });
+
+  it("closes nothing when `close` is not granted", async () => {
+    // The second step of the fixture's track closes. A run that reached it
+    // without the capability would end somebody's thread on a grant nobody
+    // wrote.
+    stub.threads.set(42, thread({ labels: ["stale"], createdAt: daysAgo(90).toISOString() }));
+    await writeFile(warrantPath, WITHOUT("[label, comment]"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.closed).toEqual([]);
+  });
+
+  it("writes nothing at all when the warrant grants the duty nothing", async () => {
+    await writeFile(warrantPath, WITHOUT("[none]"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([]);
+    expect(stub.effects.comments).toEqual([]);
+    expect(stub.effects.closed).toEqual([]);
+  });
+
+  it("says which capability is missing rather than failing silently", async () => {
+    // A step that cannot run is a configuration problem a maintainer has to
+    // be able to find. Silence would read as "nothing was due".
+    await writeFile(warrantPath, WITHOUT("[comment, close]"));
+
+    const run = await runAction(stub);
+
+    expect(run.log + run.summary).toContain("label");
+  });
+});
+
+describe("the Reeve-proposal recursion guard", () => {
+  /**
+   * Reeve acting on its own proposal pull request is the infinite-loop failure
+   * mode: a run labels its own PR, which is a change, which wakes the next
+   * run. `isReeveProposalPr` is the guard, and an auditor replaced it with
+   * `false` in three duties at once with the whole suite still green.
+   */
+  it("touches nothing on Reeve's own proposal pull request", async () => {
+    // `threads: prs`, deliberately. Under the default warrant a pull request
+    // is skipped because it is a pull request, so these cases would pass
+    // whatever the guard did — the last case in this block is what proves
+    // this fixture actually reaches a PR at all.
+    await writeFile(warrantPath, PRS_ONLY_WARRANT);
+    stub.threads.set(
+      42,
+      thread({ isPullRequest: true, body: proposalBody(), createdAt: daysAgo(90).toISOString() }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([]);
+    expect(stub.effects.comments).toEqual([]);
+    expect(stub.effects.closed).toEqual([]);
+  });
+
+  it("names the reason rather than reporting an ordinary skip", async () => {
+    await writeFile(warrantPath, PRS_ONLY_WARRANT);
+    stub.threads.set(
+      42,
+      thread({ isPullRequest: true, body: proposalBody(), createdAt: daysAgo(90).toISOString() }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.log + run.summary).toContain("own proposal pull request");
+  });
+
+  it("still acts on an ordinary pull request that carries no proposal marker", async () => {
+    // The other half, and the control for the two above: the guard must
+    // recognise its OWN pull request, not stand down on every one. Without
+    // this, a guard that always refused — or a fixture that never reached a
+    // pull request at all — would pass both cases above.
+    await writeFile(warrantPath, PRS_ONLY_WARRANT);
+    stub.threads.set(
+      42,
+      thread({
+        isPullRequest: true,
+        body: "An ordinary PR.",
+        createdAt: daysAgo(90).toISOString(),
+      }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([{ number: 42, label: "stale" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `label` gate on the un-staling path (`main.ts:370`).
+//
+// Every existing case in this file asserts `unstaled === "0"` — none has ever
+// observed a removal actually happening. So the gate around it was
+// unobservable rather than unasserted: an auditor forced it open and the whole
+// repository stayed green, because no fixture ever reached the loop it guards.
+//
+// The clock-hand exception is the narrowest write this duty has — the one
+// place Reeve removes a label at all — and D3 makes it narrow on purpose: only
+// a label this run's own actor applied, only in the direction of un-staling.
+// A removal performed without the `label` grant would be a write outside the
+// warrant on the single path where a write is hardest to justify.
+// ---------------------------------------------------------------------------
+
+describe("the `label` gate on un-staling", () => {
+  /**
+   * A track whose `when:` label is absent, so it has no anchor to run from —
+   * `trackStart` returns null (`clock.ts:109`) and the whole track's labels are
+   * collected for un-staling. That is the un-stale path with the fewest moving
+   * parts: the step never fires, and the leftover label is ours to clean up.
+   */
+  const WHEN_WARRANT = [
+    "version: 1",
+    "labels:",
+    "  - name: bug",
+    "    description: A defect.",
+    "lifecycle:",
+    "  tracks:",
+    "    - name: stale",
+    "      when: needs-attention",
+    "      steps:",
+    "        - label: stale",
+    "          after: 14d",
+    "duties:",
+    "  lifecycle: [label, comment, close]",
+  ].join("\n");
+
+  /** A thread carrying a `stale` this run's own actor applied, on a track with no anchor. */
+  async function ownStaleWithoutAnchor(): Promise<void> {
+    await writeFile(warrantPath, WHEN_WARRANT);
+    stub.threads.set(
+      42,
+      thread({
+        // No `needs-attention`, so the track never started; `stale` is a
+        // leftover from a run when it had.
+        labels: ["stale"],
+        events: [
+          {
+            event: "labeled",
+            label: "stale",
+            login: stub.ownLogin,
+            bot: true,
+            createdAt: daysAgo(30).toISOString(),
+          },
+        ],
+      }),
+    );
+  }
+
+  it("removes the label this run's own actor left behind, when `label` is granted", async () => {
+    // The case that makes the gate observable at all. Without it every
+    // assertion below passes against a duty that simply never removes
+    // anything — which is exactly the state this file was in.
+    await ownStaleWithoutAnchor();
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([{ number: 42, label: "stale" }]);
+    expect(run.outputs.unstaled).toBe("1");
+  });
+
+  it("removes nothing when `label` is withheld", async () => {
+    await ownStaleWithoutAnchor();
+    await writeFile(
+      warrantPath,
+      WHEN_WARRANT.replace("lifecycle: [label, comment, close]", "lifecycle: [comment, close]"),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([]);
+    expect(run.outputs.unstaled).toBe("0");
+  });
+
+  it("says how many labels it left standing rather than removing them silently", async () => {
+    await ownStaleWithoutAnchor();
+    await writeFile(
+      warrantPath,
+      WHEN_WARRANT.replace("lifecycle: [label, comment, close]", "lifecycle: [comment, close]"),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.log + run.summary).toContain("`label` is withheld");
+  });
+
+  it("removes nothing on a dry run, but still reports what it would have removed", async () => {
+    await ownStaleWithoutAnchor();
+
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([]);
+    expect(run.outputs.unstaled).toBe("1");
+  });
+});

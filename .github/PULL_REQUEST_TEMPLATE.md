@@ -16,8 +16,10 @@ Closes #
 
 ## Consumer impact
 
-<!-- Consumers pin a floating major tag, so whatever lands here reaches them on
-their next run with no version bump they chose. `action.yml` is the breaking
+<!-- Consumers pin a floating tag — `v0.<minor>` below 1.0.0, where a minor may
+break them and so there is deliberately no `v0`; `v<major>` from 1.0.0 on — so
+whatever lands here reaches them on their next run with no version bump they
+chose. `action.yml` is the breaking
 surface: an input renamed, a default changed, an accepted value narrowed, an
 output whose meaning moved. Say what a consumer sees. Write "none" if nothing
 changes for them, and say so explicitly rather than leaving it out. -->
@@ -68,14 +70,15 @@ it. And the core belongs to every duty — see docs/doctrine/north-star.md. -->
 ## AI-assisted development
 
 - [ ] This pull request is AI-assisted (drafted or substantially written by an AI coding agent)
-- [ ] Each such commit carries its disclosure trailer: `Assisted-by: <tool>`, or `Generated-by: <tool>` where the tool produced substantially the whole commit
+- [ ] The disclosure trailer is on the last commit: `Assisted-by: <tool>`, or `Generated-by: <tool>` where the tool produced substantially the whole commit
 
 <!-- Name the tool and model, e.g. "Claude Code, opus". A description can be
 edited later and no clone carries it — the commit trailer travels with the code. -->
 
 ## Checklist
 
-- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` and `pnpm format:check` all pass locally
+- [ ] Every gate passes locally: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:contract`, `pnpm eval all`, `pnpm test:tools`, `pnpm check-docs-links`, `pnpm build`
+- [ ] `pnpm test:mutation:fast` passes — CI's `Mutation` job runs the whole table, `full` rows included
 - [ ] I have self-reviewed this diff
 - [ ] Documentation is updated in the same pass as the behaviour it describes
 - [ ] No unrelated changes are included

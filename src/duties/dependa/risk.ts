@@ -118,10 +118,20 @@ export function interpretationPrompt(
   proposal: UpdateProposal,
   facts: RiskFacts,
   enclosedEvidence: string,
-  enclosedRule?: string,
+  /**
+   * The sentence that tells the model what the evidence boundary MEANS.
+   *
+   * REQUIRED, deliberately. It used to be optional, and a caller dropping the
+   * argument at `main.ts:379` left third-party advisory text fenced in a tag
+   * with nothing anywhere explaining it — with tsc, eslint, the whole suite,
+   * coverage, the mutation table and `eval all` all green. An optional
+   * parameter carrying a security guarantee is a footgun the type system was
+   * already able to disarm; `""` is still accepted, for the genuine case where
+   * there is no evidence to fence, but now it has to be written down.
+   */
+  enclosedRule: string,
 ): string {
-  const ruleSection =
-    enclosedRule !== undefined && enclosedRule.length > 0 ? [enclosedRule, ""] : [];
+  const ruleSection = enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
     `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` ` +
       `from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,

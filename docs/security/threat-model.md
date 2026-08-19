@@ -69,6 +69,37 @@ effect, visible in the outputs, every time — the two are never allowed to
 look like the same kind of problem, because a reviewer investigating one
 should never have to rule out the other first.
 
+## Stored state is authored, never merely checksummed
+
+Some duties carry memory between runs in the thread itself — most visibly the
+review's owned comment, which holds the previous run's findings so a claim
+that comes back can be told from a claim that never left. That memory is a
+public HTML comment on a public pull request, which makes one distinction
+load-bearing: **the digest on it is an integrity check against corruption, not
+an authenticity check against an attacker.** The digest is a keyless hash over
+public data, so anybody who can write the comment can compute a valid one. It
+catches a payload that was damaged or edited and never re-sealed. It cannot
+catch a payload that was written wholesale by someone else, and it was never
+able to.
+
+What actually bounds that state is therefore not the digest but **who is
+allowed to author a comment the run will adopt as its own**. That is the
+boundary, not a layer of defence in front of one, and it is the reason a
+schema version with no digest to verify is read as a cold start rather than
+migrated on trust: rebuilding memory from the thread costs one run, while
+accepting an unauthenticated payload once lets it be re-sealed and believed
+for ever after.
+
+The adoption check today asks whether an author is a bot, which is a wider
+question than whether an author is _this_ run — `github-actions[bot]` is the
+identity every workflow in a repository posts under. Narrowing it needs the
+run's own login, which a workflow using the default token cannot ask GitHub
+for, so the honest statement of the posture is that stored state is trusted
+to the width of "any bot in this repository" and that anything derived from
+it is re-derived from the thread wherever it can be — a maintainer's
+disposition, for instance, is read back from the live replies on every run
+rather than believed from the stored copy.
+
 ## Where the detail lives
 
 - **The mechanism** — trust boundaries, what each pipeline stage buys, prompt

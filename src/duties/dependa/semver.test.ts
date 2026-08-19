@@ -646,3 +646,45 @@ describe("isSha (extended)", () => {
     expect(isSha("ghijklmnop")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// What an EMPTY current version costs — the downstream half of the pnpm
+// lockfile defect.
+//
+// `parse` returns null for `""`, so `classify` returns null before it reaches
+// either the security check or the semver comparison. `main.ts:328` reads that
+// null as "could not classify", logs it at `core.info` — not a warning, so it
+// reaches neither the run summary nor a workflow annotation — and `continue`s
+// past the candidate.
+//
+// The consequence is therefore not "an update measured from the wrong base".
+// It is that the dependency is dropped from maintenance ENTIRELY AND SILENTLY,
+// security updates included. That is what made the lockfile defect worth
+// fixing rather than pinning, and this block is what keeps the cost visible
+// if a future reader wonders why an empty `currentVersion` matters.
+// ---------------------------------------------------------------------------
+
+describe("an empty current version cannot be classified", () => {
+  it("classifies nothing when the current version is empty", () => {
+    expect(classify("", "4.17.22", false)).toBeNull();
+  });
+
+  it("classifies nothing even when the update is a security update", () => {
+    // The `isSecurity` override sits BELOW the parse guard, so an unknown
+    // current version loses a security update exactly as it loses a patch.
+    expect(classify("", "4.17.22", true)).toBeNull();
+  });
+
+  it("classifies normally the moment the current version is known", () => {
+    // The same pair, with the version the lockfile should have resolved.
+    expect(classify("4.17.21", "4.17.22", false)).toBe("patch");
+  });
+
+  it("does not read an empty version as a digest, which would route it to `pin`", () => {
+    // `main.ts:314` treats two SHAs as a digest update and `main.ts:320`
+    // treats an empty current version under a floating constraint as a pin.
+    // An empty string is neither, so a dependency with a real constraint gets
+    // neither branch — it falls through to `classify` and is dropped.
+    expect(isSha("")).toBe(false);
+  });
+});

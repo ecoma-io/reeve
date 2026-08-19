@@ -333,8 +333,14 @@ export function publishRoutes(contents: ContentMap): readonly Route[] {
       }
 
       // Pull request list / create / update.
+      // A list endpoint answers with a bare JSON array, which Octokit hands
+      // back as `response.data`. Answering `{ data: [] }` here wrapped the
+      // array one level too deep, so a caller destructuring `{ data }` got an
+      // object: `data[0]` was silently `undefined` (read as "no pull request")
+      // and `data.find(...)` threw. Both bugs were invisible until a caller
+      // used `find`.
       if (method === "GET" && /^\/repos\/[^/]+\/[^/]+\/pulls$/.exec(url) !== null) {
-        send(response, 200, { data: [] });
+        send(response, 200, []);
         return true;
       }
       if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/pulls$/.exec(url) !== null) {

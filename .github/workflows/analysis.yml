@@ -26,10 +26,11 @@ name: Analysis
 on:
   push:
     branches: [main]
-  # Unfiltered, for the same reason `ci.yml` is: `analysis-gate` is a required
-  # status check, and a `branches: [main]` filter here would skip this workflow
-  # entirely on a stacked pull request — leaving that check pending forever
-  # rather than failing, which is a block with nothing to fix.
+  # Unfiltered, unlike `ci.yml`'s `pull_request: branches: [main]`:
+  # `analysis-gate` is a required status check, and a `branches: [main]` filter
+  # here would skip this workflow entirely on a stacked pull request — leaving
+  # that check pending forever rather than failing, which is a block with
+  # nothing to fix.
   pull_request:
   # And present on `merge_group` for the same reason `ci-gate` is: the queue
   # waits for every required check to report against the queued ref, so a
@@ -180,8 +181,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # `needs` alone would let a skipped or cancelled job pass as green, since
-      # only `failure` blocks a dependent job by default.
+      # This asserted every dependency reached `success` by enumerating the ways
+      # one can fail — `contains(needs.*.result, 'failure') || … 'cancelled' ||
+      # … 'skipped'` on a step running `exit 1`. `ci-gate` carried the identical
+      # guard and it went green over a red pipeline: on run 31118985640 attempt
+      # 1, during a GitHub Actions outage, its dependency failed at `Set up job`
+      # and `needs` reached the gate carrying no result the guard recognised, so
+      # every disjunct was false, so the step that would have failed the build
+      # was skipped. `ci-gate` was inverted after that; this gate mirrored its
+      # `needs` list but not its fix, which is the only reason the same hole
+      # survived here.
+      #
+      # A deny-list fails open on any state it does not know, and
+      # `needs.*.result` is not a value this repository controls. So name the
+      # one state that means "safe" and let everything else fail, and run the
+      # step unconditionally — a step that decides whether to run is a step that
+      # can decline to.
       - name: Fail unless every job succeeded
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
-        run: exit 1
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needs results: ${RESULTS:-<empty>}"
+          if [ -z "$RESULTS" ]; then
+            echo "::error::analysis-gate got no result from its dependencies. Refusing to pass."
+            exit 1
+          fi
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job reported '$result' rather than success."
+              exit 1
+            fi
+          done
+          echo "Every required job succeeded."

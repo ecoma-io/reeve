@@ -590,3 +590,99 @@ describe("readCore", () => {
     expect(() => readCore()).toThrow("api-keys: `fast` is not declared in `endpoints`.");
   });
 });
+
+/**
+ * The input classes a workflow file actually produces that no other block
+ * here reaches — a half-typed `alias = url`, a key line with the `=` missing,
+ * and a date that is a date-shaped string without being a date.
+ *
+ * Grouped rather than scattered because they share one property: each is a
+ * mistake that is cheap to make in YAML and expensive to notice at runtime,
+ * so each has to fail with a sentence naming the input it came from.
+ */
+describe("input classes a workflow file produces by accident", () => {
+  it("names the whole entry when an endpoints line gave no alias at all", () => {
+    // `= https://…` is what a half-finished edit leaves behind, and quoting
+    // back an empty alias would be a message pointing at nothing.
+    expect(() => parseEndpoints("= https://api.example.com/v1")).toThrow(
+      "endpoints: `= https://api.example.com/v1` is not a valid alias — letters, digits, `-` and `_` only.",
+    );
+  });
+
+  it("masks an api-keys line that has no `=` before refusing it", () => {
+    // The masking pass runs over every entry ahead of any parsing, so a line
+    // that is about to be refused has already had its value registered — the
+    // refusal quotes no key, but a gateway echo later in the run cannot leak
+    // one either.
+    vi.mocked(core.setSecret).mockClear();
+
+    expect(() => parseApiKeys("sk-loose-secret")).toThrow(
+      "api-keys: expected `alias = key`, got an entry with no `=`.",
+    );
+    expect(vi.mocked(core.setSecret)).toHaveBeenCalledWith("sk-loose-secret");
+  });
+
+  it("does not register an empty api-keys value as a secret", () => {
+    // `core.setSecret("")` would mask the empty string, and masking the empty
+    // string masks every log line this run writes. An alias written with no key
+    // yet is a half-finished edit, not a secret.
+    vi.mocked(core.setSecret).mockClear();
+
+    expect(parseApiKeys("openrouter =")).toEqual([{ alias: "openrouter", key: "" }]);
+    expect(vi.mocked(core.setSecret)).not.toHaveBeenCalled();
+  });
+
+  it("refuses an api-keys entry that named a key but no alias", () => {
+    expect(() => parseApiKeys("= sk-secret")).toThrow("api-keys: an entry named no alias.");
+  });
+
+  it("refuses a date-shaped `since` the calendar has no such field for", () => {
+    // Month 13 and day 0 pass the shape test and are still not dates. Reading
+    // either as `Invalid Date` would leave a sweep with a lower bound of `NaN`,
+    // which every thread is newer than — a backfill over the whole backlog
+    // dressed up as a bounded one.
+    const written = ["2026-13-01", "2026-00-01", "2026-01-32", "2026-01-00"];
+    const messages = written.map((entry) => {
+      try {
+        parseSince(entry);
+        return `${entry}: accepted`;
+      } catch (error) {
+        return `${entry}: ${(error as Error).message}`;
+      }
+    });
+
+    expect(messages).toEqual(
+      written.map((entry) => `${entry}: since: \`${entry}\` is not a real date.`),
+    );
+  });
+
+  it("refuses a date-shaped `since` the calendar overflows", () => {
+    // REGRESSION. `2026-02-30` is not a day that exists, and `Date` answers
+    // with 2 March rather than `Invalid Date` — so the input used to be
+    // accepted and silently meant a date two days later than the one written.
+    // The line above already refuses `2026-01-32` and `2026-13-01` as "not a
+    // real date"; 30 February is exactly as impossible, and a bound that
+    // quietly moves is a bound nobody can reason about. The failure direction
+    // was safe (a sweep narrowed rather than widened) — the inconsistency was
+    // the bug.
+    const written = ["2026-02-30", "2026-02-31", "2025-02-29", "2026-04-31", "2026-06-31"];
+    const messages = written.map((entry) => {
+      try {
+        parseSince(entry);
+        return `${entry}: accepted`;
+      } catch (error) {
+        return `${entry}: ${(error as Error).message}`;
+      }
+    });
+
+    expect(messages).toEqual(
+      written.map((entry) => `${entry}: since: \`${entry}\` is not a real date.`),
+    );
+  });
+
+  it("still reads a real leap day, which is the boundary the overflow check must not eat", () => {
+    expect(parseSince("2024-02-29")?.toISOString()).toBe("2024-02-29T00:00:00.000Z");
+    expect(parseSince("2026-12-31")?.toISOString()).toBe("2026-12-31T00:00:00.000Z");
+    expect(parseSince("2026-01-01")?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  });
+});

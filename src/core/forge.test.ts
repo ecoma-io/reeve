@@ -1045,6 +1045,184 @@ describe("isCapacityError", () => {
   });
 });
 
+/**
+ * The 403/429 ambiguity, which is GitHub's and not this codebase's.
+ *
+ * docs.github.com ("Rate limits for the REST API" → *Exceeding the rate
+ * limit*, and "Troubleshooting the REST API" → *Rate limit errors*) says a
+ * secondary limit "returns a 403 or 429 response", and that exceeding a
+ * primary limit likewise answers "403 or 429" with `x-ratelimit-remaining`
+ * at 0. One cause, two statuses, GitHub's choice. Classifying by status
+ * alone therefore coloured an identical rate limit green on 429 and red on
+ * 403 — a non-deterministic run outcome. These cases pin the header-proven
+ * narrowing, and — the reason the narrowing was authorised at all — that a
+ * bare 403 is still a permission error and still goes red.
+ */
+describe("isCapacityError — GitHub's 403/429 rate-limit ambiguity", () => {
+  /**
+   * An Octokit `RequestError` as it actually reaches the classifier: the
+   * status on the error, the headers on `.response`. Every call site
+   * re-throws the raw error, so this is the shape, not a convenience.
+   */
+  const requestError = (status: number, headers?: unknown): Error =>
+    Object.assign(new Error(`HTTP ${String(status)}`), {
+      status,
+      response: { status, url: "https://api.github.com/repos/o/r/issues", headers },
+    });
+
+  it("a_secondary_rate_limit_403_is_capacity_not_configuration", () => {
+    // "If a retry-after header is present, wait for the specified duration
+    // before retrying" — that header is GitHub naming this as its own
+    // capacity, on the status it chose to send it with.
+    expect(isCapacityError(requestError(403, { "retry-after": "60" }))).toBe(true);
+  });
+
+  it("a_primary_rate_limit_403_with_remaining_zero_is_capacity", () => {
+    expect(isCapacityError(requestError(403, { "x-ratelimit-remaining": "0" }))).toBe(true);
+  });
+
+  it("a_403_whose_remaining_header_is_the_number_zero_is_capacity", () => {
+    // Header values are strings over the wire, but a hand-built client or a
+    // JSON round trip hands this a number. Both are quota exhaustion.
+    expect(isCapacityError(requestError(403, { "x-ratelimit-remaining": 0 }))).toBe(true);
+  });
+
+  it("a_403_on_a_healthy_quota_is_a_permission_error_and_stays_red", () => {
+    // 4999 of 5000 left is not a rate limit. This is the property the
+    // narrowing exists to preserve: quota headers alone cannot launder an
+    // authorisation refusal into weather.
+    expect(isCapacityError(requestError(403, { "x-ratelimit-remaining": "4999" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "x-ratelimit-limit": "5000" }))).toBe(false);
+  });
+
+  it("a_403_without_rate_limit_headers_stays_red", () => {
+    expect(isCapacityError(requestError(403, {}))).toBe(false);
+    expect(isCapacityError({ status: 403 })).toBe(false);
+  });
+
+  it("a_403_whose_response_carries_no_headers_stays_red_without_throwing", () => {
+    expect(() => isCapacityError(requestError(403, undefined))).not.toThrow();
+    expect(isCapacityError(requestError(403, undefined))).toBe(false);
+    expect(isCapacityError(requestError(403, null))).toBe(false);
+    expect(
+      isCapacityError(Object.assign(new Error("HTTP 403"), { status: 403, response: null })),
+    ).toBe(false);
+  });
+
+  it("a_401_with_retry_after_is_still_credentials", () => {
+    // 401 is a bad or missing token. No header GitHub can send makes that
+    // the platform's weather rather than the run's own setup.
+    expect(isCapacityError(requestError(401, { "retry-after": "60" }))).toBe(false);
+    expect(isCapacityError(requestError(401, { "x-ratelimit-remaining": "0" }))).toBe(false);
+  });
+
+  it("no_status_other_than_403_gains_a_header_driven_path", () => {
+    // The narrowing is 403-only, by construction. A 404 or a 422 carrying
+    // the same headers is the same red it was before.
+    expect(isCapacityError(requestError(404, { "retry-after": "60" }))).toBe(false);
+    expect(isCapacityError(requestError(422, { "x-ratelimit-remaining": "0" }))).toBe(false);
+    expect(isCapacityError(requestError(409, { "retry-after": "1" }))).toBe(false);
+  });
+
+  it("a_429_is_capacity_with_or_without_headers_exactly_as_before", () => {
+    expect(isCapacityError({ status: 429 })).toBe(true);
+    expect(isCapacityError(requestError(429, { "retry-after": "60" }))).toBe(true);
+    expect(isCapacityError(requestError(429, {}))).toBe(true);
+    expect(isCapacityError(requestError(429, undefined))).toBe(true);
+  });
+
+  it("a_rate_limit_403_from_a_fetch_based_client_is_capacity", () => {
+    // `Object.keys(new Headers(...))` is empty: a WHATWG `Headers` keeps its
+    // entries off the object. A classifier that only walked own keys read a
+    // genuine rate limit from any fetch-based client as a permission error —
+    // the exact case this narrowing exists to fix, silently not fixed.
+    const headers = new Headers({ "retry-after": "60" });
+    expect(Object.keys(headers)).toEqual([]);
+    expect(isCapacityError(requestError(403, headers))).toBe(true);
+    expect(isCapacityError(requestError(403, new Headers({ "x-ratelimit-remaining": "0" })))).toBe(
+      true,
+    );
+  });
+
+  it("a_whatwg_headers_instance_without_rate_limit_headers_still_stays_red", () => {
+    expect(
+      isCapacityError(requestError(403, new Headers({ "x-ratelimit-remaining": "4999" }))),
+    ).toBe(false);
+    expect(isCapacityError(requestError(403, new Headers()))).toBe(false);
+  });
+
+  it("a_headers_like_object_with_only_a_get_method_is_read", () => {
+    // Duck-typed, never `instanceof Headers`: the global may not exist in a
+    // given runtime, and a cross-realm instance would fail that check anyway.
+    const headers = { get: (name: string) => (name === "retry-after" ? "60" : null) };
+    expect(isCapacityError(requestError(403, headers))).toBe(true);
+    expect(isCapacityError(requestError(403, { get: () => null }))).toBe(false);
+  });
+
+  it("an_iterable_of_header_pairs_is_read", () => {
+    const headers = {
+      *[Symbol.iterator]() {
+        yield ["x-ratelimit-limit", "5000"];
+        yield ["x-ratelimit-remaining", "0"];
+      },
+    };
+    expect(isCapacityError(requestError(403, headers))).toBe(true);
+  });
+
+  it("a_map_of_headers_is_read_by_both_get_and_iteration", () => {
+    expect(isCapacityError(requestError(403, new Map([["retry-after", "60"]])))).toBe(true);
+    // Not lowercased by a `Map`, so the case-insensitive iteration is what
+    // answers here rather than `Map.get`, which is exact-match.
+    expect(isCapacityError(requestError(403, new Map([["Retry-After", "60"]])))).toBe(true);
+    expect(isCapacityError(requestError(403, new Map([["x-ratelimit-remaining", "4999"]])))).toBe(
+      false,
+    );
+  });
+
+  it("a_retry_after_that_is_not_a_duration_is_not_proof_of_a_rate_limit", () => {
+    // RFC 9110 also permits an HTTP-date, but GitHub documents and sends
+    // delta-seconds, and `Date.parse` accepts so much ("0", "2", bare month
+    // names) that admitting dates would re-open the widening this narrowing
+    // closes. Delta-seconds only, and a junk value proves nothing.
+    expect(isCapacityError(requestError(403, { "retry-after": "unknown" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": "-5" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": -5 }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": "0x0" }))).toBe(false);
+    expect(isCapacityError(requestError(403, { "retry-after": "1e3" }))).toBe(false);
+    expect(
+      isCapacityError(requestError(403, { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" })),
+    ).toBe(false);
+  });
+
+  it("a_retry_after_of_zero_or_a_fractional_delay_is_still_a_rate_limit", () => {
+    expect(isCapacityError(requestError(403, { "retry-after": "0" }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "retry-after": " 60 " }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "retry-after": "0.5" }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "retry-after": 60 }))).toBe(true);
+  });
+
+  it("the_header_lookup_is_case_insensitive_because_no_client_promises_a_case", () => {
+    // Octokit lowercases in practice; the port type does not declare these
+    // headers at all, so nothing in this repo can promise it stays that way.
+    expect(isCapacityError(requestError(403, { "Retry-After": "60" }))).toBe(true);
+    expect(isCapacityError(requestError(403, { "X-RateLimit-Remaining": "0" }))).toBe(true);
+  });
+
+  it("the_existing_capacity_signals_are_unchanged_by_the_403_narrowing", () => {
+    // Regression guard: 5xx, Node `.code` and timeout shapes answer exactly
+    // what they answered before, headers or no headers.
+    expect(isCapacityError(requestError(500, {}))).toBe(true);
+    expect(isCapacityError(requestError(503, undefined))).toBe(true);
+    expect(isCapacityError(Object.assign(new Error("connect"), { code: "ECONNRESET" }))).toBe(true);
+    const aborted = new Error("The operation was aborted");
+    aborted.name = "TimeoutError";
+    expect(isCapacityError(aborted)).toBe(true);
+    expect(isCapacityError(new Error("request timed out after 5000ms"))).toBe(true);
+    expect(isCapacityError({ status: 401 })).toBe(false);
+    expect(isCapacityError({ status: 404 })).toBe(false);
+  });
+});
+
 describe("listCorrectionFiles", () => {
   it("lists only the `.ndjson` shards, ignoring anything else the directory holds", async () => {
     const getContent = vi.fn(() =>

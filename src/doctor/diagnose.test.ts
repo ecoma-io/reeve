@@ -294,6 +294,38 @@ describe("diagnose", () => {
     expect(result.findings[0]?.text).toContain("not performed");
   });
 
+  it("a_rate_limit_403_is_reported_green_as_weather_not_red_as_a_token_refusal", async () => {
+    // `classify` reads 401/403 as "refused this run's token" — correct for a
+    // permission refusal, wrong for the 403 GitHub sends for the very rate
+    // limit it sometimes sends as 429. A call-site pin on the green side of
+    // `isCapacityError`'s 403 narrowing: delete that branch and doctor turns
+    // a rate-limited run red.
+    const error = Object.assign(new Error("You have exceeded a secondary rate limit"), {
+      status: 403,
+      response: { status: 403, headers: { "retry-after": "60" } },
+    });
+    const result = await report(TAXONOMY, failingApi(error));
+
+    expect(problems(result)).toBe(0);
+    expect(result.findings[0]?.severity).toBe("green");
+    expect(result.findings[0]?.text).toContain("not performed");
+    expect(result.findings[0]?.text).toContain("GET /repos/{owner}/{repo}/labels");
+  });
+
+  it("a_403_on_a_healthy_quota_is_still_reported_red_as_a_token_refusal", async () => {
+    // The other half: quota headers that do not say the limit is spent leave
+    // a permission refusal exactly as red as before, naming the status.
+    const error = Object.assign(new Error("Resource not accessible by integration"), {
+      status: 403,
+      response: { status: 403, headers: { "x-ratelimit-remaining": "4999" } },
+    });
+    const result = await report(TAXONOMY, failingApi(error));
+
+    expect(problems(result)).toBe(1);
+    expect(result.findings[0]?.severity).toBe("red");
+    expect(result.findings[0]?.text).toContain("HTTP 403");
+  });
+
   it("is red when the labels endpoint refuses this run's token", async () => {
     const error = Object.assign(new Error("Bad credentials"), { status: 401 });
     const result = await report(TAXONOMY, failingApi(error));

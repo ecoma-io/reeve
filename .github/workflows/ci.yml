@@ -1,8 +1,15 @@
 name: CI
 
 on:
+  # Deliberately unfiltered, for the reason `analysis.yml` gives for the same
+  # choice: `ci-gate` is a required status check, and a `branches: [main]`
+  # filter here means a pull request based on another branch never triggers
+  # this workflow at all — so nothing runs, and the one required check sits
+  # pending forever while `Analysis` reports green beside it. Nothing reaches
+  # `main` untested either way (`merge_group` and `push` below cover that), so
+  # the filter was never protecting anything; it only let a stacked pull
+  # request look reviewed.
   pull_request:
-    branches: [main]
   # The merge queue re-runs these checks against `main + every pull request
   # ahead in the queue + this one`, which is the only place a semantic conflict
   # between two independently-green pull requests can surface. GitHub reports
@@ -140,6 +147,104 @@ jobs:
             exit 1
           fi
 
+  # Mutation testing, in its own job on its own runner rather than a step in
+  # `Verify`. Three reasons, in order of how much they cost to get wrong:
+  #
+  # 1. The harness *renames source files* while it runs (tools/mutation.mjs
+  #    moves a file aside, writes a mutated copy, runs vitest, puts it back).
+  #    Anything else reading `src/` in the same checkout at the same moment
+  #    reads a file that is briefly not there. A separate runner is the only
+  #    isolation that is actually isolation.
+  # 2. It runs in parallel with `Verify`. That is what made it free, and it is
+  #    no longer quite free: at 9m39s the table is now within sight of
+  #    `Verify`'s own wall clock rather than comfortably under it. Read the
+  #    flip condition below as live rather than hypothetical.
+  # 3. It gets its own check name. "a mutation survived" and "a test failed"
+  #    are different findings with different owners, and a reviewer should not
+  #    have to open a log to tell which one happened.
+  #
+  # The full table still runs on every event, including pull requests, and
+  # that is now a closer call than it was. Measured on a four-core box: the
+  # whole table is 70 mutations in 9m39s; `tools/mutation.mjs --stage fast`
+  # is 47 rows in 1m09s. Nearly all of the difference is eleven entry-point
+  # rows that each rebuild a duty bundle with esbuild and spawn a child, at
+  # roughly forty-five seconds apiece.
+  #
+  # It stays unsplit deliberately, and the reason is what those eleven rows
+  # are. They are every capability gate an entry point carries — the last
+  # check between a run and a repository mutation — and they exist because an
+  # audit found all eleven reporting green while their branches were simply
+  # unreachable from any fixture. Deferring them to the merge queue means a
+  # pull request that opens one goes green on the pull request, which is the
+  # exact failure they were added to catch.
+  #
+  # So the naive fast/full split documented below defers precisely the wrong
+  # rows, and if this job does start deciding when the pipeline finishes, the
+  # first thing to try is NOT that split but a second parallel job carrying
+  # the entry-point rows (`--only` accepts a substring, and every one of them
+  # names a duty). Both jobs then go in `ci-gate`'s `needs`, nothing is
+  # deferred, and the wall clock roughly halves.
+  # The condition to flip on is not a fixed number of seconds but a comparison
+  # CI already reports: flip when this job's wall clock approaches `Verify`'s,
+  # so that it starts deciding when the pipeline finishes. A constant would
+  # fire before the thing it stands for is true. The edit then is to split this
+  # job's run step — `pnpm test:mutation:fast` under
+  # `if: github.event_name == 'pull_request'`, the full table under the
+  # negation — which keeps `merge_group` and `push: main`, the two events that
+  # actually gate `main`, on the whole table. A gate that only runs nightly is
+  # a gate whose regression merges.
+  #
+  # The job also runs `pnpm test:tools`, which is what checks that the gate
+  # below can still fail. An adversarial review emptied the mutation table and
+  # watched the harness report `KILLED 0 · SURVIVED 0 · STALE 0` and exit 0, so
+  # the harness now refuses a table smaller than a recorded floor — and that
+  # refusal, along with the stale- and ambiguous-`from` detection, is code that
+  # only ever runs when something has already gone wrong, which is precisely
+  # the code that rots unwatched. It runs first, and takes under a second.
+  mutation:
+    name: Mutation
+    runs-on: ubuntu-latest
+    # Raised from 15 when the table reached seventy rows. The full table
+    # measures 9m39s on a four-core box, and eleven of its rows each rebuild a
+    # duty bundle with esbuild and then spawn a child process to run it — so
+    # the cost scales with runner speed in a way the other jobs do not. Fifteen
+    # minutes left roughly a third of headroom, which is not enough margin for
+    # a gate whose timeout reads as a red `ci-gate` rather than as a slow one.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The gates that check the gates: the mutation harness's own refusal
+      # paths, and the pins on `vitest.config.ts`'s coverage exclusions and
+      # thresholds. Both of those config rules were prose until this ran —
+      # adding one glob to `exclude` raises every coverage percentage and turns
+      # nothing red.
+      - run: pnpm test:tools
+
+      # Fails on a SURVIVED row (the suite does not assert what the mutation
+      # breaks), on a STALE row (the mutation's `from` string no longer matches
+      # its file exactly once, so the mutation silently never ran), and on a
+      # table that has shrunk below `TABLE_FLOOR`. Staleness is the failure
+      # worth naming here: a gate that stopped applying reports nothing, and
+      # reported nothing for as long as nobody looked. It has already caught
+      # one for real: a row pinning the dry-run withholding in
+      # `src/duties/review/threads.ts` matched four consecutive lines, and two
+      # unrelated, entirely legitimate edits moved that seam without touching
+      # dry-run at all. The row was re-pointed at what the seam *is* rather
+      # than at the order of the statements around it.
+      - run: pnpm test:mutation
+
   ci-gate:
     name: ci-gate
     # The single check name a branch ruleset requires, on pull requests and in
@@ -147,7 +252,7 @@ jobs:
     # while the job list is not: add a job to `needs` and the gate tightens
     # without anyone editing repository settings — and forgetting to add it is
     # the only way to widen what green means, which is visible in this file.
-    needs: [verify]
+    needs: [verify, mutation]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

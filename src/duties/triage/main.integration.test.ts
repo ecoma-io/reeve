@@ -125,7 +125,25 @@ interface State {
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
   /** Everything the run did to the thread, in the order it did it. */
-  readonly effects: { applied: string[]; comments: string[]; assigned: string[]; closed: boolean };
+  /**
+   * The repository tree `readAtlas` walks. Entries carry their own `type`,
+   * because `atlas.ts:124` builds its directory list from the `tree` entries
+   * ALONE — a fixture of blobs only yields no directories, so no workspace
+   * glob expands and the whole propose round finds nothing to do. Empty by
+   * default, so every case that is not about `propose` sees no workspace.
+   */
+  tree: { path: string; type: "blob" | "tree" }[];
+  /** Proposal pull requests the run opened, and the branches it created for them. */
+  readonly proposals: { title: string; head: string }[];
+  readonly proposalRefs: string[];
+  readonly effects: {
+    applied: string[];
+    comments: string[];
+    assigned: string[];
+    closed: boolean;
+    /** Repository labels the run CREATED — the `create: true` path. */
+    created: string[];
+  };
   /**
    * The repository's committed files, as `record` sees them through the
    * Contents API — keyed by repo-relative path, with a sha the stub mints
@@ -136,7 +154,13 @@ interface State {
    */
   readonly contentsFiles: Map<string, { content: string; sha: string; oversized?: boolean }>;
   /** Every commit `record` made, in order — what a maintainer would see in the log. */
-  readonly contentsWrites: { path: string; message: string; content: string }[];
+  readonly contentsWrites: {
+    path: string;
+    message: string;
+    content: string;
+    /** The branch the write was aimed at, or undefined for the default branch. */
+    branch: string | undefined;
+  }[];
   /**
    * When true, every `createOrUpdateFileContents` call answers 403 — the read-
    * only token this duty's own docs describe, simulated without a real one.
@@ -229,7 +253,10 @@ async function startStub(): Promise<Stub> {
     issues: [],
     answer: triaging(verdict()),
     asked: [],
-    effects: { applied: [], comments: [], assigned: [], closed: false },
+    effects: { applied: [], comments: [], assigned: [], closed: false, created: [] },
+    tree: [],
+    proposals: [],
+    proposalRefs: [],
     contentsFiles: new Map(),
     contentsWrites: [],
     contentsForbidden: false,
@@ -404,6 +431,17 @@ async function route(
     return;
   }
 
+  // Creating a repository label — the `create: true` path, gated on the
+  // `label` capability at `main.ts:1109`.
+  if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/labels$/.test(path)) {
+    const payload = parsed(raw) as { name?: string };
+    const name = payload.name ?? "";
+    stub.effects.created.push(name);
+    stub.repositoryLabels.push(name);
+    send(response, 201, { name });
+    return;
+  }
+
   if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/labels$/.test(path)) {
     const payload = parsed(raw) as { labels?: string[] };
     stub.effects.applied.push(...(payload.labels ?? []));
@@ -443,6 +481,46 @@ async function route(
   // path arrives percent-encoded (Octokit encodes every `/` in it), which is
   // what `%2F` below is undoing.
   const contents = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(path);
+  // The repository itself, and the tree `readAtlas` walks to find a workspace.
+  if (method === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(path)) {
+    send(response, 200, { default_branch: "main" });
+    return;
+  }
+  if (method === "GET" && path.includes("/git/trees/")) {
+    send(response, 200, {
+      truncated: false,
+      tree: stub.tree,
+    });
+    return;
+  }
+  const gitRef = /^\/repos\/[^/]+\/[^/]+\/git\/ref\/(.+)$/.exec(path);
+  if (method === "GET" && gitRef) {
+    // Only the default branch exists; a proposal branch is created, not found.
+    if (decodeURIComponent(gitRef[1] ?? "") !== "heads/main") {
+      send(response, 404, { message: "Not Found" });
+      return;
+    }
+    send(response, 200, { object: { sha: "base-sha" } });
+    return;
+  }
+  if (method === "POST" && path.endsWith("/git/refs")) {
+    stub.proposalRefs.push((parsed(raw) as { ref: string }).ref);
+    send(response, 201, {});
+    return;
+  }
+  if (/^\/repos\/[^/]+\/[^/]+\/pulls$/.test(path)) {
+    if (method === "GET") {
+      send(response, 200, []);
+      return;
+    }
+    if (method === "POST") {
+      const payload = parsed(raw) as { title?: string; head?: string };
+      stub.proposals.push({ title: payload.title ?? "", head: payload.head ?? "" });
+      send(response, 201, { number: 909 });
+      return;
+    }
+  }
+
   if (method === "GET" && contents) {
     const at = decodeURIComponent(contents[1] ?? "");
     const file = stub.contentsFiles.get(at);
@@ -456,7 +534,7 @@ async function route(
               name: at.split("/").pop(),
               path: at,
               sha: file.sha,
-              content: Buffer.from(file.content, "utf8").toString("base64"),
+              content: encodedFor(file.content),
               encoding: "base64",
             },
       );
@@ -497,11 +575,21 @@ async function route(
     }
 
     const at = decodeURIComponent(contents[1] ?? "");
-    const payload = parsed(raw) as { message?: string; content?: string; sha?: string };
+    const payload = parsed(raw) as {
+      message?: string;
+      content?: string;
+      sha?: string;
+      branch?: string;
+    };
     const text = Buffer.from(payload.content ?? "", "base64").toString("utf8");
     const sha = `sha-${String(stub.contentsWrites.length + 1)}`;
     stub.contentsFiles.set(at, { content: text, sha });
-    stub.contentsWrites.push({ path: at, message: payload.message ?? "", content: text });
+    stub.contentsWrites.push({
+      path: at,
+      message: payload.message ?? "",
+      content: text,
+      branch: payload.branch,
+    });
     send(response, 200, { content: { name: at.split("/").pop(), path: at, sha } });
     return;
   }
@@ -527,6 +615,29 @@ async function readAll(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk as Buffer));
   return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * The base64 of a file's content, computed once per distinct body.
+ *
+ * The shard-cap case seeds five hundred shards with the SAME 900 KB string and
+ * the duty reads every one of them, so without this the stub re-encodes an
+ * identical 900 KB buffer five hundred times — measured at 428 ms of pure
+ * repetition, on top of the transport the case actually exists to exercise.
+ * Keyed on the content itself, so two files that genuinely differ still get
+ * their own encoding and nothing about what the duty receives changes.
+ *
+ * A `Map` rather than a WeakMap: the keys are strings, and the cache lives
+ * exactly as long as the module does.
+ */
+const encodedContent = new Map<string, string>();
+
+function encodedFor(content: string): string {
+  const cached = encodedContent.get(content);
+  if (cached !== undefined) return cached;
+  const encoded = Buffer.from(content, "utf8").toString("base64");
+  encodedContent.set(content, encoded);
+  return encoded;
 }
 
 function send(response: ServerResponse, status: number, payload: unknown): void {
@@ -576,6 +687,10 @@ function baseInputs(stub: Stub, warrant: string, corrections: string): Record<st
     since: "",
     limit: "50",
     "sweep-state": "open",
+    // Present and empty by DEFAULT, not absent: every branch-write path in
+    // this duty is gated on it, and an input no case can set is a gate no
+    // case can reach.
+    "state-branch": "",
     endpoints: "",
     "api-keys": "",
     "request-timeout": "120s",
@@ -1792,34 +1907,75 @@ describe("record", () => {
     expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.2.ndjson`)).toBeUndefined();
   });
 
-  it("fails red, naming the limit, once every numbered sibling up to the cap is already full", async () => {
-    await writeFile(warrantPath, RECORDING_WARRANT);
-    const full = "x".repeat(900_001);
-    // Seed this month's shard and every numbered sibling through the cap
-    // (`MAX_SHARD_ATTEMPTS`, 500) already full — there is nowhere left to
-    // roll forward to, so a 501st shard must never be tried.
-    stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-1" });
-    for (let n = 2; n <= 500; n += 1) {
-      stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.${String(n)}.ndjson`, {
-        content: full,
-        sha: `sha-${String(n)}`,
-      });
-    }
-    stub.labels = ["bug"];
-    const event = await labelEvent();
+  /**
+   * This case's own budget, deliberately larger than the file's 30s.
+   *
+   * Measured, not guessed. The case seeds five hundred shards — the production
+   * cap, `MAX_SHARD_ATTEMPTS` — each one 900,001 bytes, because
+   * `nextWritableShard` decides a shard is full by measuring
+   * `Buffer.byteLength(existing.text)` and so must actually receive that many
+   * bytes. It then reads all five hundred, in order, because that is what the
+   * production loop does. The cost is therefore 500 sequential HTTP
+   * round-trips carrying 1.14 MB of base64 each — 0.56 GB in total — plus the
+   * base64 decode and byte count the duty performs on every one. That is real
+   * work the case exists to exercise, not incidental setup: shrinking the
+   * fixture would stop proving the cap holds.
+   *
+   * Observed wall time for this case, on this machine:
+   *
+   *   standalone (file alone)            13,997 ms
+   *   default workers (whole area)       ~23,000 ms
+   *   `--maxWorkers=3` (whole area)      20,905 ms passing, >30,101 ms failing
+   *
+   * Against the file's 30s that is 1.15x headroom at DEFAULT workers and
+   * intermittently negative under contention — which is how this went red for
+   * three separate agents on a change that had nothing to do with it. A test
+   * whose result depends on what else is running is not a test, so the budget
+   * here is 90s: 6.4x the standalone measurement and 3.4x the slowest run ever
+   * observed. Only a genuine hang or a real complexity regression reaches it.
+   *
+   * The file's own 30s at the top stays exactly where it is. It is the canary
+   * for the other hundred cases in here, none of which comes close to it, and
+   * this is the one case with a reason to be slow.
+   *
+   * Note that ~1.7s was removed from this before the budget was raised: the
+   * stub was re-encoding the same 900 KB body to base64 once per shard (see
+   * `encodedFor`). What is left is transport the duty genuinely performs.
+   */
+  const SHARD_CAP_BUDGET_MS = 90_000;
 
-    const run = await runAction(
-      stub,
-      { "corrections-dir": CORRECTIONS },
-      { GITHUB_EVENT_PATH: event },
-    );
+  it(
+    "fails red, naming the limit, once every numbered sibling up to the cap is already full",
+    async () => {
+      await writeFile(warrantPath, RECORDING_WARRANT);
+      const full = "x".repeat(900_001);
+      // Seed this month's shard and every numbered sibling through the cap
+      // (`MAX_SHARD_ATTEMPTS`, 500) already full — there is nowhere left to
+      // roll forward to, so a 501st shard must never be tried.
+      stub.contentsFiles.set(shardPath(), { content: full, sha: "sha-1" });
+      for (let n = 2; n <= 500; n += 1) {
+        stub.contentsFiles.set(`${CORRECTIONS}/${currentShard()}.${String(n)}.ndjson`, {
+          content: full,
+          sha: `sha-${String(n)}`,
+        });
+      }
+      stub.labels = ["bug"];
+      const event = await labelEvent();
 
-    expect(run.code).not.toBe(0);
-    expect(run.log).toContain("500 shards");
-    expect(run.log).toContain("shard 501");
-    // No 501st shard was ever written.
-    expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.501.ndjson`)).toBeUndefined();
-  });
+      const run = await runAction(
+        stub,
+        { "corrections-dir": CORRECTIONS },
+        { GITHUB_EVENT_PATH: event },
+      );
+
+      expect(run.code).not.toBe(0);
+      expect(run.log).toContain("500 shards");
+      expect(run.log).toContain("shard 501");
+      // No 501st shard was ever written.
+      expect(stub.contentsFiles.get(`${CORRECTIONS}/${currentShard()}.501.ndjson`)).toBeUndefined();
+    },
+    SHARD_CAP_BUDGET_MS,
+  );
 
   it("finds and replaces an existing entry sitting in a numbered sibling shard, not only the first", async () => {
     await writeFile(warrantPath, RECORDING_WARRANT);
@@ -2900,5 +3056,397 @@ describe("the sweep", () => {
       // The ordinary sweep labels the backlog instead of importing it.
       expect(stub.contentsFiles.get(shardPath())).toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `create: true` — the one path where triage adds something to the REPOSITORY
+// rather than to a thread, gated on the `label` capability at `main.ts:1109`.
+//
+// An auditor forced that gate open and the whole repository stayed green: a
+// warrant granting triage nothing could still mint repository labels. The
+// gate is a plain `if (!permitted.includes("label"))` and nothing observed it.
+// ---------------------------------------------------------------------------
+
+/** A taxonomy whose second label does not exist yet and asks to be created. */
+const CREATING_WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: Something that used to work and does not.",
+  "  - name: needs-triage",
+  "    description: Nobody has looked at this yet.",
+  "    create: true",
+  "duties:",
+  "  triage: [label]",
+].join("\n");
+
+describe("creating a label the repository does not have", () => {
+  it("creates it when the warrant grants `label`", async () => {
+    // The case that proves the gate is a GATE. Without it the two below would
+    // pass against a duty that had simply stopped creating labels at all.
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT);
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual(["needs-triage"]);
+  });
+
+  it("creates nothing when `label` is not granted, and says so", async () => {
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT.replace("triage: [label]", "triage: [comment]"));
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual([]);
+    // Named rather than silent: a label that never appears is otherwise
+    // indistinguishable from a taxonomy nobody used.
+    expect(run.log).toContain("needs-triage");
+    expect(run.log).toContain("not permitted");
+  });
+
+  it("creates nothing on a dry run, and says what it would have created", async () => {
+    stub.repositoryLabels = ["bug"];
+    await writeFile(warrantPath, CREATING_WARRANT);
+
+    const run = await runAction(stub, { "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.created).toEqual([]);
+    expect(run.log).toContain("Would create");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A6 — which roster pays for language detection (`main.ts:911`).
+//
+// `settings.screenModels.length > 0 ? settings.screenModels : settings.models`
+// survived all 4868 vitest tests. Its only defence was one eval fixture. The
+// reason no unit or integration case reached it: every case in this file runs
+// with the default `languages`, whose codes the bundled `eld` profile covers,
+// so detection is decided locally and the picker is never consulted at all.
+// A fixture that makes a branch unreachable is a fixture that makes the branch
+// unobservable, whatever the coverage number says.
+//
+// `pt-BR` is the lever. `detectByProfile` (`core/detect.ts:231`) declines the
+// whole step when ANY candidate is outside the bundled sixty — a regional tag
+// is not its base language to `eld` — so the model picker is reached, and
+// which roster it was built from becomes observable.
+// ---------------------------------------------------------------------------
+
+/** A warrant whose `languages:` forces detection past the local profile. */
+const REGIONAL_WARRANT = `${WARRANT}\nlanguages:\n  - en\n  - pt-BR\n`;
+
+/** The detection ask, told from the verdict ask by what its system message says. */
+function detectionAsks(): Ask[] {
+  // Matched on the detection prompt's own opening sentence (core/detect.ts:172)
+  // rather than on the word "language": triage's verdict prompt names the
+  // thread's language too, so a looser filter counts the verdict ask as a
+  // detection ask and the assertion stops discriminating.
+  return stub.asked.filter((ask) => ask.system.startsWith("You identify which language the body"));
+}
+
+describe("the roster language detection is bought from", () => {
+  it("pays the cheap screen roster when one is configured", async () => {
+    await writeFile(warrantPath, REGIONAL_WARRANT);
+
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    const asked = detectionAsks().map((ask) => ask.model);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).toContain("cheap-model");
+    expect(asked).not.toContain("stub-model");
+  });
+
+  it("falls back to the main roster when no cheap roster is configured", async () => {
+    // The documented default rather than a degraded mode: an unset
+    // `screen-models` means "use the one roster there is", not "skip
+    // detection". This is the arm the eval fixture was alone in defending.
+    await writeFile(warrantPath, REGIONAL_WARRANT);
+
+    const run = await runAction(stub, { "screen-models": "" });
+
+    expect(run.code).toBe(0);
+    const asked = detectionAsks().map((ask) => ask.model);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked).toContain("stub-model");
+  });
+
+  it("asks nothing for language at all when the profile can decide locally", async () => {
+    // The control: with the default warrant every candidate is inside the
+    // bundled profile, so the picker is never reached — which is exactly why
+    // every other case in this file leaves `main.ts:911` unobserved.
+    const run = await runAction(stub, { "screen-models": "cheap-model" });
+
+    expect(run.code).toBe(0);
+    expect(detectionAsks()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `propose` — the sharpest capability this duty has, and the one nothing
+// observed.
+//
+// A `propose` round reads the workspace atlas, finds packages the taxonomy has
+// no label for, and calls `writeProposal` — which creates a branch, commits an
+// edited `.github/reeve.yml` and opens or updates a pull request. The file it
+// edits is THE AUTHORITY FILE. A duty able to propose changes to its own
+// warrant without the grant is the sharpest version of the boundary this whole
+// round exists to defend, and `main.ts:434` — `if (!permitted.includes("propose"))
+// return null;` — could be deleted with the entire suite green.
+//
+// It was unobservable rather than merely unasserted: `runProposeSweep` is only
+// reached under `sweep: true`, and it needs a workspace atlas, which needs a
+// repository tree. The stub answered none of that, so no case could have seen
+// the gate whatever it asserted. The fixture is fixed here (a `tree`, a
+// workspace manifest, and the git/pulls routes) and then the gate is asserted.
+// ---------------------------------------------------------------------------
+
+/**
+ * A pnpm workspace with one package the taxonomy below has no label for, plus
+ * the open issues that package needs as evidence.
+ *
+ * `gateByEvidence` (`propose.ts:311`) requires `cfg.evidence` open issues
+ * inside `cfg.window` whose text mentions the package's own path before a
+ * candidate becomes a proposal — the default is three. They are seeded already
+ * labelled so the sweep skips them as decided, keeping these cases about the
+ * capability gate rather than about triaging three extra threads.
+ */
+function seedWorkspace(): void {
+  stub.tree = [
+    { path: "pnpm-workspace.yaml", type: "blob" },
+    { path: "packages", type: "tree" },
+    { path: "packages/parser", type: "tree" },
+    { path: "packages/parser/package.json", type: "blob" },
+  ];
+  stub.contentsFiles.set("pnpm-workspace.yaml", {
+    content: "packages:\n  - packages/*\n",
+    sha: "sha-workspace",
+  });
+  stub.contentsFiles.set("packages/parser/package.json", {
+    content: JSON.stringify({ name: "@acme/parser", description: "Parses the thing." }),
+    sha: "sha-parser",
+  });
+  // `writeProposal` re-reads the warrant through the CONTENTS API in order to
+  // edit it — the local file the `warrant` input names is what the run parses,
+  // and the repository copy at the same path is what it proposes a change to.
+  // Both have to exist, under the same path.
+  stub.contentsFiles.set(warrantPath, { content: PROPOSE_WARRANT, sha: "sha-warrant" });
+  const recent = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  stub.issues = [1, 2, 3].map((number) => ({
+    number,
+    title: `Crash in packages/parser`,
+    body: `The stack trace points at packages/parser and nothing else.`,
+    labels: ["bug"],
+    createdAt: recent,
+  }));
+}
+
+/** The warrant a propose round runs against: a taxonomy with no package label. */
+const PROPOSE_WARRANT = [
+  "version: 1",
+  "labels:",
+  "  - name: bug",
+  "    description: Something that used to work and does not.",
+  "duties:",
+  "  triage: [label, propose]",
+].join("\n");
+
+describe("the `propose` capability gate", () => {
+  it("opens a proposal pull request against the warrant when `propose` is granted", async () => {
+    // The case that proves the gate is a GATE. Without it, every "proposes
+    // nothing" assertion below would pass against a duty that had simply
+    // stopped proposing — which is exactly how this hole stayed open.
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT);
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toHaveLength(1);
+    expect(stub.proposalRefs[0]).toMatch(/^refs\/heads\//);
+    // The file it edited is the AUTHORITY FILE itself — the whole reason this
+    // gate is the sharpest one this duty has.
+    expect(stub.contentsWrites.map((write) => write.path)).toContain(warrantPath);
+  });
+
+  it("proposes nothing when the warrant does not grant `propose`", async () => {
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT.replace("[label, propose]", "[label]"));
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toEqual([]);
+    expect(stub.proposalRefs).toEqual([]);
+    expect(stub.contentsWrites.map((write) => write.path)).not.toContain(warrantPath);
+  });
+
+  it("proposes nothing when the warrant grants the duty nothing at all", async () => {
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT.replace("[label, propose]", "[none]"));
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toEqual([]);
+    expect(stub.contentsWrites.map((write) => write.path)).not.toContain(warrantPath);
+  });
+
+  it("writes no proposal on a dry run, even with `propose` granted", async () => {
+    seedWorkspace();
+    await writeFile(warrantPath, PROPOSE_WARRANT);
+
+    const run = await runAction(stub, { sweep: "true", number: "", "dry-run": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.proposals).toEqual([]);
+    expect(stub.contentsWrites.map((write) => write.path)).not.toContain(warrantPath);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `state-branch` — the branch-write path, and the `open-pr` it needs.
+//
+// `main.ts:303` reads `canRecordToBranch = recording && permitted.includes("open-pr")`,
+// and dropping the `open-pr` half left every test in this repository green.
+// The reason is a fixture, not a missing assertion: `state-branch` was not in
+// `baseInputs` at all, so no case could set it, so `main.ts:302-311` — the
+// whole branch-write decision — was unreachable from this tier. The input is
+// now present and empty by default, which is what makes these cases possible.
+//
+// A correction written to a branch instead of the default branch is a
+// correction that lands behind a pull request a human reviews. Writing it to
+// the default branch when the run was told to use a branch is a silent
+// downgrade of exactly that review step.
+// ---------------------------------------------------------------------------
+
+describe("recording corrections to a state branch", () => {
+  const BRANCH = "reeve/state";
+  // Repo-relative, because `record` refuses an absolute path — the Contents
+  // API only understands a path inside the repository.
+  const CORRECTIONS_DIR = ".reeve/corrections";
+  const RECORD_WARRANT = WARRANT.replace("triage: [label]", "triage: [label, record, open-pr]");
+
+  /** The corrections write this run performed, if any. */
+  function correctionWrite(): { path: string; branch: string | undefined } | undefined {
+    return stub.contentsWrites.find((write) => write.path.includes("corrections"));
+  }
+
+  it("writes the correction to the branch when `record` and `open-pr` are both granted", async () => {
+    // The case that proves the gate is a GATE rather than a constant.
+    await writeFile(warrantPath, RECORD_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { "state-branch": BRANCH, "corrections-dir": CORRECTIONS_DIR },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(correctionWrite()).toBeDefined();
+    expect(correctionWrite()?.branch).toBe(BRANCH);
+  });
+
+  it("falls back to the default branch when `open-pr` is withheld, and says so", async () => {
+    // Not a refusal: the correction is still recorded, because losing a
+    // maintainer's decision would be worse than recording it in the ordinary
+    // place. What must not happen silently is the downgrade.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, record]"));
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { "state-branch": BRANCH, "corrections-dir": CORRECTIONS_DIR },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(correctionWrite()).toBeDefined();
+    expect(correctionWrite()?.branch).toBeUndefined();
+    expect(run.log).toContain("`state-branch` is set but `open-pr` is not granted");
+  });
+
+  it("writes a SWEEP's corrections to the branch when `open-pr` is granted", async () => {
+    // A second, independent copy of the same decision lives at `main.ts:303`
+    // for the sweep path. Both have to be driven: the single-thread cases
+    // above cannot see the sweep's copy, and an auditor mutating the sweep's
+    // copy found the whole repository green.
+    await writeFile(warrantPath, RECORD_WARRANT);
+    stub.issues = [
+      {
+        number: 7,
+        title: "Dark mode setting is lost between sessions",
+        body: "It resets every time I close the app, which is annoying for daily use.",
+        labels: ["bug"],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      {
+        sweep: "true",
+        number: "",
+        // `recording` composes with `sweep` only for a listing scoped past the
+        // open backlog (`main.ts:292`) — the default `open` turns it off by
+        // design, which is itself why no case had ever reached this path.
+        "sweep-state": "all",
+        "state-branch": BRANCH,
+        "corrections-dir": CORRECTIONS_DIR,
+      },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    // The sweep's state-branch decision is observable through the branch it
+    // created, which only happens on the `canRecordToBranch` path.
+    expect(run.log).toContain(`state-branch: created \`${BRANCH}\``);
+  });
+
+  it("creates no state branch for a SWEEP when `open-pr` is withheld, and says so", async () => {
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, record]"));
+    stub.issues = [];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      {
+        sweep: "true",
+        number: "",
+        "sweep-state": "all",
+        "state-branch": BRANCH,
+        "corrections-dir": CORRECTIONS_DIR,
+      },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(run.log).not.toContain("state-branch: created");
+    expect(run.log).toContain("`state-branch` is set but `open-pr` is not granted");
+  });
+
+  it("passes no branch at all when no state branch was configured", async () => {
+    await writeFile(warrantPath, RECORD_WARRANT);
+    stub.labels = ["bug"];
+    const event = await labelEvent();
+
+    const run = await runAction(
+      stub,
+      { "corrections-dir": CORRECTIONS_DIR },
+      { GITHUB_EVENT_PATH: event },
+    );
+
+    expect(run.code).toBe(0);
+    expect(correctionWrite()).toBeDefined();
+    expect(correctionWrite()?.branch).toBeUndefined();
   });
 });
