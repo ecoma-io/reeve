@@ -26,9 +26,10 @@
  * `include` glob, and the repository already runs `scripts/**` this way.
  */
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { MUTATIONS, checkTable, classifyRow } from "./mutation.mjs";
+import { MUTATIONS, checkTable, classifyRow, commentOnlyAnchor, verdict } from "./mutation.mjs";
 
 /** A structurally valid row. Only the fields under test carry meaning. */
 function row(over = {}) {
@@ -100,6 +101,31 @@ describe("classifyRow — a `from` that stopped applying is a gate that stopped 
     strictEqual(classifyRow(row({ from: "if (dryRun) {" }), "before\nif (dryRun) {\nafter"), null);
   });
 
+  it("reports a `from` disambiguated only by its comment line", () => {
+    // Two copies of the seam, distinguished only by a comment. The code lines
+    // alone match twice, so `String.replace` mutates whichever copy comes
+    // first while the copy whose invariant the row claims to gate goes
+    // ungated — STALE, exactly as if the `from` matched nothing.
+    const text =
+      "  // copy A\n  if (dryRun) {\n  return null;\n  }\n  // copy B\n  if (dryRun) {\n  return null;\n  }";
+    const why = classifyRow(row({ from: "  // copy B\n  if (dryRun) {" }), text);
+    notStrictEqual(why, null);
+    match(why, /comment/);
+    match(why, /Re-anchor/);
+  });
+
+  it("passes a comment-carrying `from` whose code is the unique seam", () => {
+    // The comment is incidental: strip it and the code still matches exactly
+    // once, so the row gates real code and no comment disambiguation is going on.
+    strictEqual(
+      classifyRow(
+        row({ from: "  // the seam\n  if (dryRun) {" }),
+        "  // the seam\n  if (dryRun) {\n  return null;\n  }\n",
+      ),
+      null,
+    );
+  });
+
   it("counts overlapping occurrences rather than stepping past them", () => {
     // `aa` occurs twice in `aaa`, overlapping. A counter that advanced by the
     // needle's length would call that one and pass an ambiguous row.
@@ -110,6 +136,67 @@ describe("classifyRow — a `from` that stopped applying is a gate that stopped 
     const why = classifyRow(row({ from: `${"x".repeat(200)}\n${"y".repeat(200)}` }), "nothing");
     ok(why.length < 120, `message should be abbreviated, got ${String(why.length)} chars`);
     match(why, /…/);
+  });
+});
+
+describe("verdict — a red run proves the mutation only if the pristine run is green", () => {
+  it("reports a failure that the pristine run passes as KILLED", () => {
+    deepStrictEqual(verdict(1, 0), { killed: true });
+  });
+
+  it("reports a pass under mutation as SURVIVED, whatever the pristine did", () => {
+    deepStrictEqual(verdict(0, 1), { killed: false });
+    deepStrictEqual(verdict(0, 0), { killed: false });
+  });
+
+  it("refuses to credit a mutation for a failure the pristine run already has", () => {
+    // The defect TESTGATE-01 exists to stop: several rows share `targets`, so
+    // without this a pre-existing failure in a shared file would report a
+    // seam KILLED that the mutation never touched, handing the gate green
+    // over an ungated invariant.
+    deepStrictEqual(verdict(1, 1), { killed: false, cause: "pristine failure" });
+  });
+
+  it("never credits a mutation whose own run never completed", () => {
+    // A signal-killed run (`spawnSync` status null) is turned into a throw by
+    // the run loop — verdict must never see `null` and report KILLED off it.
+    // This pins the contract that any missing mutated status is a hard
+    // failure, not a red run the pristine pass can convert into a KILLED.
+    // `undefined` is the sentinel the loop forwards; anything other than a
+    // completed nonzero exit must not read as KILLED.
+    strictEqual(verdict(undefined, 0).killed, false);
+    strictEqual(verdict(null, 0).killed, false);
+  });
+});
+
+describe("commentOnlyAnchor — a seam is code, not the words beside it", () => {
+  it("returns null for a `from` with no comment line", () => {
+    strictEqual(commentOnlyAnchor(row({ from: "if (dryRun) {" }), "if (dryRun) {"), null);
+  });
+
+  it("returns null when the code lines alone still name one seam", () => {
+    strictEqual(
+      commentOnlyAnchor(
+        row({ from: "  // the seam\n  if (dryRun) {" }),
+        "  // the seam\n  if (dryRun) {\n  return null;\n  }\n",
+      ),
+      null,
+    );
+  });
+
+  it("reports a `from` whose code exists identically elsewhere", () => {
+    const text =
+      "  // copy A\n  if (dryRun) {\n  return null;\n  }\n  // copy B\n  if (dryRun) {\n  return null;\n  }";
+    const why = commentOnlyAnchor(row({ from: "  // copy B\n  if (dryRun) {" }), text);
+    notStrictEqual(why, null);
+    match(why, /code exists identically elsewhere/);
+  });
+
+  it("does not choke on a `from` that is only a comment", () => {
+    strictEqual(
+      commentOnlyAnchor(row({ from: "  // comment" }), "  // comment\n  // comment"),
+      null,
+    );
   });
 });
 
@@ -170,5 +257,21 @@ describe("the shipped table is structurally sound", () => {
       names.filter((n, i) => names.indexOf(n) !== i),
       [],
     );
+  });
+
+  it("no row's `from` is disambiguated only by a comment line", () => {
+    // The regression this guard exists to catch: two copies of a seam differ
+    // only by a comment, and a `from` that leaned on the comment would mutate
+    // whichever copy came first while the invariant the row claims to gate
+    // went ungated. The re-anchored state-branch and threads rows were the
+    // live examples; this keeps the whole table honest against the check.
+    for (const mutation of MUTATIONS) {
+      const text = readFileSync(mutation.file, "utf8");
+      strictEqual(
+        commentOnlyAnchor(mutation, text),
+        null,
+        `${mutation.name} is anchored only on a comment line; re-anchor its \`from\` on a seam-unique non-comment token`,
+      );
+    }
   });
 });
