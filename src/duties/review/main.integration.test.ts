@@ -1333,6 +1333,82 @@ describe("the action", () => {
     expect(run.summary).toContain("Posted | nothing to post");
   });
 
+  it("fails red when the diff was shown but every pass was exhausted by protocol errors", async () => {
+    // A 400 is a protocol failure — not auth (401/403), not the rate limit
+    // (429), not a 5xx: the model id or the body was refused. A shown diff
+    // whose every pass comes back this way is a review that could not be
+    // done — the contract's all-protocol red (D5), not capacity weather. The
+    // unreadable case above stays green because a pass that answered and did
+    // not parse carries no protocol failure at all.
+    stub.answer = stageAnswer({
+      review: () => ({
+        status: 400,
+        payload: { error: { message: "the model does not accept this prompt" } },
+      }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+    expect(stub.comments).toHaveLength(0);
+    expect(run.outputs.commented).toBe("false");
+    expect(run.outputs.findings).toBe("0");
+    expect(run.log).toContain("every model on the roster failed with a protocol error");
+    expect(run.log).toContain("the model does not accept this prompt");
+  });
+
+  it("stays green when every pass failed on capacity — starvation is weather, not a configuration error", async () => {
+    // All models 429: the roster is starved, which is weather. The run warns
+    // about the starved roster and withholds the all-clear, but must not fail
+    // red — only an all-protocol roster does that.
+    stub.answer = stageAnswer({
+      review: () => ({ status: 429, payload: { error: { message: "out of quota" } } }),
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(0);
+    expect(run.outputs.starved).toBe("true");
+    expect(run.outputs.commented).toBe("false");
+    expect(run.outputs.findings).toBe("0");
+    expect(run.log).not.toContain("failed with a protocol error");
+  });
+
+  it("stays green when at least one pass read the diff, even if another was protocol-exhausted", async () => {
+    // A high-risk diff costs three passes. Two are protocol-exhausted and one
+    // reads readably — the roster was NOT wholly exhausted by protocol
+    // errors, so the run stays green; the unreadable adversarial pass merely
+    // withholds the all-clear.
+    stub.pull.files = [
+      {
+        filename: "src/auth/token.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const tokenTtl = 3600;",
+      },
+    ];
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        if (reviewAsks === 1) {
+          return saying(JSON.stringify({ findings: [], confidence: 0.9 }));
+        }
+        return { status: 400, payload: { error: { message: "unknown model" } } };
+      },
+    });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(reviewAsks).toBe(3);
+    expect(run.outputs.commented).toBe("false");
+    expect(run.outputs.findings).toBe("0");
+    expect(run.log).not.toContain("failed with a protocol error");
+  });
+
   it("rotates past a model that is out of capacity and reports it as weather, not a red failure", async () => {
     stub.answer = stageAnswer({
       review: (ask) =>

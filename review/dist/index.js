@@ -32840,6 +32840,9 @@ function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
 function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
+function protocolExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+}
 function weatherFailure(model) {
   return {
     ok: false,
@@ -33060,6 +33063,16 @@ async function writeSummary(markdown) {
       `The run summary could not be written \u2014 ${error2 instanceof Error ? error2.message : String(error2)}. The run itself was unaffected.`
     );
   }
+}
+function failIfProtocolExhausted(models, failures) {
+  const exhausted = protocolExhausted(models, failures);
+  if (exhausted) {
+    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    setFailed(
+      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+    );
+  }
+  return exhausted;
 }
 async function writeRunSummary(page2, weather) {
   await writeSummary(page2 + authSection(weather.authFailures));
@@ -38711,6 +38724,12 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const belowFloor = verdictMeasured && confidence < settings.confidence;
   const silentNoVerdict = bounded2.shown.length > 0 && !allClearEarned && final.length === 0;
   const allShownIgnored = bounded2.shown.length === 0 && bounded2.skipped.length > 0 && bounded2.skipped.every((entry) => entry.reason === "ignored");
+  if (bounded2.shown.length > 0 && readablePassCount === 0) {
+    failIfProtocolExhausted(
+      settings.models,
+      passResults.flatMap((result) => result.failures)
+    );
+  }
   if (!permitted.includes("comment")) {
     warning(
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`
