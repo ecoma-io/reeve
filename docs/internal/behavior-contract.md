@@ -1,6 +1,6 @@
 # Reeve behavioral contract — frozen at Round 2
 
-**Landed on main 2026-08-19 (final adversarial freeze). Baseline: main @ `1a4fd29`. Round-2 refactor branches unmerged; any "removed in Round 2" claims elsewhere are reclassified to INTERNAL-BUT-EXPORTED until they land.**
+**Landed on main 2026-08-19 (final adversarial freeze). Baseline: main @ `1a4fd29`. Reconciled to post-#99 tree 2026-08-19 (final freeze audit): PR #99 `fa2709f` merged the round-2 deadcode refactor onto main, so the round-2 removal claims below that this header previously reclassified to INTERNAL-BUT-EXPORTED are now DONE as built. §10 carries the corrected register rows; the API inventory records which removals landed.**
 
 _The behavior freeze for the pre-1.0 sequence. Round 2 may simplify the
 implementation but must not change anything frozen here. This document is the
@@ -28,12 +28,12 @@ unit/integration test · **F** failure-matrix row · **H** `tools/mutation.mjs` 
 The root action (`action.yml` → `src/main.ts`) and the nine leaf actions
 declare separate surfaces. Freezing the _semantics_, not the option count.
 
-| Surface         | Inputs                                                                                                       | Frozen semantics                                                                                                                                                                                                                                                                           | Evidence                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| Root action     | `duty`, `doctor`, `github-token`, `warrant`                                                                  | `doctor: false` (default) = explain page + `leaf-action` output, then **always red**. `doctor: true` = reads-only warrant check; never writes; capacity stays green; `problems` output = refusing-finding count. `duty` only names the corrected `uses:` line; the root never runs a duty. | `src/main.ts`, `refusal.ts`, `doctor/run.ts`, `main.integration.test.ts`, F,B5 |
-| Every leaf      | `warrant` (default `.github/reeve.yml`)                                                                      | Same file, same reader, everywhere. Missing at the default path = implicit warrant (narrowest authority, from repo label descriptions). Missing at a chosen path = red configuration error. Unparseable = red.                                                                             | `warrant.ts:367-389,672-693`, C `contract.test.ts`, D2, B1                     |
-| Provider inputs | `base-url`, `api-key`, `models`, `screen-models`, `judge-models`, `endpoints`, `api-keys`, `request-timeout` | Orthogonal to authority. A provider is weather: it can fail a run's capability to act, never widen what a run may do. `screen-models` = cheap detect roster with documented fallback to `models` when empty; `judge-models` = panel roster.                                                | A1-A7, G6, H `roster` rows                                                     |
-| Duty-specific   | per-duty (`number`, `sweep`, `limit`, `drafts`, `paths`, `source-language`, `rules-path`, …)                 | Read in the duty's own `main.ts`/`inputs.ts`; `sweep`+`number` together is refused (D4); duty defaults are constants in `capabilities.ts`, never invented per run (D5).                                                                                                                    | D4, D5, per-duty `inputs.test.ts`                                              |
+| Surface         | Inputs                                                                                                       | Frozen semantics                                                                                                                                                                                                                                                                                                                                                                              | Evidence                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Root action     | `duty`, `doctor`, `github-token`, `warrant`                                                                  | `doctor: false` (default) = explain page + `leaf-action` output, then **always red**. `doctor: true` = reads-only warrant check; never writes; capacity stays green; `problems` output = refusing-finding count. `duty` only names the corrected `uses:` line; the root never runs a duty.                                                                                                    | `src/main.ts`, `refusal.ts`, `doctor/run.ts`, `main.integration.test.ts`, F,B5                                   |
+| Every leaf      | `warrant` (default `.github/reeve.yml`)                                                                      | Same file, same reader, everywhere. Missing at the default path = implicit warrant (narrowest authority, from repo label descriptions). Missing at a chosen path = red configuration error. Unparseable = red.                                                                                                                                                                                | `warrant.ts:367-389,672-693`, C `contract.test.ts`, D2, B1                                                       |
+| Provider inputs | `base-url`, `api-key`, `models`, `screen-models`, `judge-models`, `endpoints`, `api-keys`, `request-timeout` | Orthogonal to authority. A provider is weather: it can fail a run's capability to act, never widen what a run may do. `screen-models` = cheap detect roster with documented fallback to `models` when empty; `judge-models` = panel roster.                                                                                                                                                   | A1-A7, G6, H `roster` rows                                                                                       |
+| Duty-specific   | per-duty (`number`, `sweep`, `limit`, `drafts`, `paths`, `source-language`, `rules-path`, …)                 | Read in the duty's own `main.ts`/`inputs.ts`; `sweep`+`number` together is refused (D4); duty defaults are constants in `capabilities.ts`, never invented per run (D5). `about` (triage/respond) and `ignore` (harmonise) are leaf inputs with frozen semantics: the warrant's `about:` key beats the `about` input (§2); `ignore` preserves `<!-- reeve:ignore-* -->`-marked sections as-is. | D4, D5, per-duty `inputs.test.ts`, `harmonise/action.yml:190`, `triage/action.yml:173`, `respond/action.yml:153` |
 
 **Intentionally unsupported:** a root action that runs a duty (Agent Mode is
 the 2.x line, not 1.0); any `apply:`-style input (refused by name, D1).
@@ -256,17 +256,24 @@ line is written unescaped`, `an empty blocked phrase matches everything`.
 Rows that are deliberately un-frozen / known-uncovered, so a refactor does not
 invent coverage claims:
 
-- `screen-models` empty-roster fallback at a duty boundary has no
-  integration-level test (documented in M GAPS 1 — flagged, not free to
-  silently change).
-- `failIfProtocolExhausted` from a real duty call (M GAPS 2) — **partially
-  covered**: `src/core/summary.contract.test.ts` drives the all-protocol red
-  vs all-capacity decision at the duty boundary (`setFailed` fires / does not
-  fire), and six of the nine duty call sites already invoke it after a
-  rotation (dependa, duplicate, harmonise, respond, translate, triage). The
-  remaining gap — the review and lifecycle boundaries, where the call is not
-  yet wired — lands with the separate review/lifecycle P1 fix units; it is NOT
-  fixed here.
+- `screen-models` empty-roster fallback at a duty boundary — **covered**: the
+  documented `main.ts:911` fallback (three-way: cheap when configured, else
+  `models`) is pinned at the duty boundary by A6 in
+  `src/duties/triage/roster.contract.test.ts:83-112`: the cheap roster is
+  paid when configured, and nothing is asked (detection resolves to "none",
+  the caller falls back) when the cheap list is empty. Moved out of the gap
+  register's uncovered half.
+- `failIfProtocolExhausted` from a real duty call (M GAPS 2) — **effectively
+  closed**: `src/core/summary.contract.test.ts` drives the all-protocol red vs
+  all-capacity decision at the duty boundary (`setFailed` fires / does not
+  fire), seven of the nine duty call sites invoke it after a rotation (dependa
+  `main.ts:394`, duplicate `main.ts:629`, harmonise `main.ts:669`, respond
+  `main.ts:471`, review `main.ts:659`, translate `main.ts:362,464`, triage
+  `main.ts:1009`), and the review boundary was wired by PR #103 `79adbb2`
+  (`src/duties/review/main.ts:658-663`). Lifecycle and remediation never call
+  a model at all (lifecycle `main.ts:13` "No model call, anywhere in this
+  duty"; remediation `main.ts:8` "No model, no meter, no provider"), so there
+  is no protocol to exhaust at those two boundaries.
 - `propose`-marked PR recursion guard lacks lifecycle-main coverage (M GAPS 3)
   — **covered** by `src/duties/lifecycle/main.integration.test.ts` "the
   Reeve-proposal recursion guard" describe block; moved out of the gap
@@ -274,18 +281,22 @@ invent coverage claims:
 - No provider failure is ever retried (F **[GAP] Retry** — deliberate).
 - Provider reachability accuracy is a measured register, not a test gate
   (`eval/README.md` measurement table — the 1.0 Stage-6 number).
-- **Derive re-scope — corrected on main @ `1a4fd29`:** the earlier
-  "dropped 10 of its 12 unit-test invariants" claim is FALSE as built.
-  `src/core/derive.ts` (`deriveLanguage`/`Derived`) still exists on main and
-  `src/core/derive.test.ts` carries all 12 real-Intl unit tests (composite
-  script mapping, `\p{Script=}` compile-check, sr-Latn override,
-  case-indifference, malformed/unknown/CLDR-known-but-unnameable refusals).
-  The `parseLanguages` boundary tests in `languages.test.ts` run against a
-  MOCK of `./derive.js` (line 19), so the module-level protection is real and
-  the register's rationale — boundary tests as the "stronger" real-Intl seat
-  — was backwards. The eval multilingual fixtures (ja/ko/zh) assert the same
-  behavior end-to-end. A future pass may add a non-mocked derive-block at the
-  `languages.ts` boundary if that boundary grows distinct from derive's own.
+- **Derive re-scope — DONE via PR #99 `fa2709f` (2026-08-19):** the round-2
+  refactor deleted `src/core/derive.ts` and inlined `deriveLanguage` into
+  `src/core/languages.ts` (module-private, `languages.ts:118`), and deleted
+  `src/core/derive.test.ts`. The `parseLanguages` boundary tests no longer
+  mock a derive module — `languages.test.ts` exercises the real CLDR
+  derivation (bare-code → `Tiếng Việt`/`Latn`), the refusal of an unnameable
+  code naming the way out, and the long-form-wins rule; the `\p{Script=}`
+  compile guarantee moved to Unicode/CLDR tables the script step now owns
+  (`script.ts`, `script.test.ts`). The former 12 derive-specific invariant
+  tests (the composite `Jpan`/`Kore`/`Hans`/`Hant` mapping, the `sr-Latn`
+  override, regression case-indifference, and the `aaa`/`mul`/`zxx` refusal
+  classes) were not carried over verbatim — the surface is now `parseLanguages`
+  at a single seam, so a future pass may add a non-mocked derive-block at the
+  `languages.ts` boundary if that boundary grows distinct from the parser's
+  own. The eval multilingual fixtures (ja/ko/zh across triage/respond/
+  harmonise) assert the same derivation end-to-end.
 
 ---
 
