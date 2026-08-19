@@ -32275,41 +32275,6 @@ function isScriptName(script) {
   return matcher(script, []) !== null;
 }
 
-// src/core/derive.ts
-var COMPOSITE_SCRIPTS = {
-  Hans: ["Hani"],
-  Hant: ["Hani"],
-  Jpan: ["Hani", "Hiragana", "Katakana"],
-  Kore: ["Hani", "Hangul"]
-};
-function deriveLanguage(code) {
-  let locale;
-  try {
-    locale = new Intl.Locale(code).maximize();
-  } catch {
-    return null;
-  }
-  const scripts = scriptsOf(locale.script);
-  if (scripts === null) return null;
-  const label = labelOf(code);
-  return label === null ? null : { label, scripts };
-}
-function scriptsOf(script) {
-  if (script === void 0) return null;
-  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
-  return scripts.every((name) => isScriptName(name)) ? scripts : null;
-}
-function labelOf(code) {
-  let name;
-  try {
-    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
-  } catch {
-    return null;
-  }
-  if (name === void 0 || name.length === 0) return null;
-  return name.toLowerCase() === code.toLowerCase() ? null : name;
-}
-
 // src/core/languages.ts
 function parseLanguages(raw) {
   const entries = typeof raw === "string" ? parseList(raw) : raw;
@@ -32339,6 +32304,39 @@ function derived(code) {
     );
   }
   return { code, label: language.label, scripts: language.scripts };
+}
+function deriveLanguage(code) {
+  let locale;
+  try {
+    locale = new Intl.Locale(code).maximize();
+  } catch {
+    return null;
+  }
+  const scripts = scriptsOf(locale.script);
+  if (scripts === null) return null;
+  const label = labelOf(code);
+  return label === null ? null : { label, scripts };
+}
+var COMPOSITE_SCRIPTS = {
+  Hans: ["Hani"],
+  Hant: ["Hani"],
+  Jpan: ["Hani", "Hiragana", "Katakana"],
+  Kore: ["Hani", "Hangul"]
+};
+function scriptsOf(script) {
+  if (script === void 0) return null;
+  const scripts = COMPOSITE_SCRIPTS[script] ?? [script];
+  return scripts.every((name) => isScriptName(name)) ? scripts : null;
+}
+function labelOf(code) {
+  let name;
+  try {
+    name = new Intl.DisplayNames([code], { type: "language" }).of(code);
+  } catch {
+    return null;
+  }
+  if (name === void 0 || name.length === 0) return null;
+  return name.toLowerCase() === code.toLowerCase() ? null : name;
 }
 function spelled(entry) {
   const fields = entry.split(":");
