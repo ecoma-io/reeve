@@ -27411,11 +27411,11 @@ var Summary = class {
    */
   addTable(rows) {
     const tableBody = rows.map((row) => {
-      const cells = row.map((cell) => {
-        if (typeof cell === "string") {
-          return this.wrap("td", cell);
+      const cells = row.map((cell2) => {
+        if (typeof cell2 === "string") {
+          return this.wrap("td", cell2);
         }
-        const { header, data, colspan, rowspan } = cell;
+        const { header, data, colspan, rowspan } = cell2;
         const tag = header ? "th" : "td";
         const attrs = Object.assign(Object.assign({}, colspan && { colspan }), rowspan && { rowspan });
         return this.wrap(tag, data, attrs);
@@ -32234,7 +32234,18 @@ function failIfProtocolExhausted(models, failures) {
 async function writeRunSummary(page, weather) {
   await writeSummary(page + authSection(weather.authFailures));
 }
+function table(headers, rows) {
+  if (rows.length === 0) return "";
+  return [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
 var COUNT = new Intl.NumberFormat("en-US");
+function cell(text2) {
+  return text2.replace(/[\\|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
 
 // src/core/warrant.ts
 import { readFile } from "node:fs/promises";
@@ -34809,9 +34820,9 @@ function parse4(manifestPath, manifestContent, lockfileContent) {
     { key: "build-dependencies", dev: false }
   ];
   for (const { key, dev } of sections) {
-    const table = extractTomlTable(manifestContent, key);
-    if (table === null) continue;
-    for (const entry of parseTomlEntries(table, key)) {
+    const table2 = extractTomlTable(manifestContent, key);
+    if (table2 === null) continue;
+    for (const entry of parseTomlEntries(table2, key)) {
       const { name, constraint } = resolveCargoConstraint(entry.key, entry.value);
       if (constraint === null) {
         dependencies.push({
@@ -36753,16 +36764,18 @@ function groupSummary(result) {
   };
 }
 function renderSummary(summary2) {
-  const rows = summary2.groups.map((g) => {
-    const prCell = g.pr !== null ? `[#${String(g.pr)}](#${String(g.pr)})` : "\u2014";
-    const securityMarker = g.security ? " \u{1F6E1}\uFE0F" : "";
-    return `| ${g.groupId}${securityMarker} | ${g.ecosystem ?? "mixed"} | ${String(g.proposalCount)} | ${g.outcome} | ${prCell} |`;
-  });
-  const header = "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|";
+  const rows = summary2.groups.map((g) => [
+    cell(`${g.groupId}${g.security ? " \u{1F6E1}\uFE0F" : ""}`),
+    cell(g.ecosystem ?? "mixed"),
+    cell(String(g.proposalCount)),
+    cell(g.outcome),
+    cell(g.pr !== null ? `[#${String(g.pr)}](#${String(g.pr)})` : "\u2014")
+  ]);
+  const headers = ["Group", "Ecosystem", "Updates", "Outcome", "PR"];
+  const rendered = rows.length === 0 ? "| Group | Ecosystem | Updates | Outcome | PR |\n|---|---|---|---|---|" : table(headers, rows);
   let body = `## Reeve \xB7 dependa
 
-${header}
-${rows.join("\n")}`;
+${rendered}`;
   if (summary2.starved) {
     body += "\n\n\u26A0\uFE0F All models failed on capacity this run. No proposals were made.";
   }
