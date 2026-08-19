@@ -32395,7 +32395,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 
 // src/core/warrant.ts
 var CAPABILITIES = [
@@ -33175,8 +33174,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available.join(", ")}${closestHint(duty, available)}.`
       );

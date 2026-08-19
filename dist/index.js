@@ -32123,7 +32123,6 @@ var DUTIES = [
   "review",
   "remediation"
 ];
-var PLANNED = [];
 var ROADMAP = "https://github.com/ecoma-io/reeve/blob/main/docs/doctrine/north-star.md#7-roadmap";
 function pinned() {
   const ref = process.env.GITHUB_ACTION_REF ?? "";
@@ -32132,7 +32131,7 @@ function pinned() {
 function normalise(raw) {
   return raw.trim().toLowerCase();
 }
-function refusal(raw, built = DUTIES, planned = PLANNED) {
+function refusal(raw, built = DUTIES, planned = []) {
   const duty = normalise(raw);
   if (duty.length > 0 && built.includes(duty)) {
     return [
@@ -32974,8 +32973,8 @@ function readDuties(path, raw) {
   }
   for (const [duty, value] of Object.entries(raw)) {
     const at = `\`${path}\` duties for \`${duty}\``;
-    if (!DUTIES.includes(duty) && !PLANNED.includes(duty)) {
-      const available2 = [...DUTIES, ...PLANNED];
+    if (!DUTIES.includes(duty)) {
+      const available2 = DUTIES;
       throw new Error(
         `warrant: \`${path}\` duties names \`${duty}\`, which is not a known duty. Expected any of ${available2.join(", ")}${closestHint(duty, available2)}.`
       );
