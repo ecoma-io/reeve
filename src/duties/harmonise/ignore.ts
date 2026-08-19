@@ -177,18 +177,6 @@ export function reinsert(draft: string, spans: readonly IgnoreSpan[]): string {
   return result;
 }
 
-/**
- * The placeholder comment, exported for testing.
- * @internal
- */
-export const _PLACEHOLDER = PLACEHOLDER;
-
-/**
- * The sanitized placeholder regex, exported for testing.
- * @internal
- */
-export const _SANITIZED_PLACEHOLDER = SANITIZED_PLACEHOLDER;
-
 /** Split into lines that still carry their terminator, so joining is exact. */
 function splitLines(text: string): string[] {
   const raw = text.split("\n");

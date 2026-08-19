@@ -5,7 +5,13 @@ import { describe, expect, it } from "vitest";
 
 import { sanitize } from "../../core/sanitize.js";
 
-import { extract, reinsert, _PLACEHOLDER, _SANITIZED_PLACEHOLDER } from "./ignore.js";
+import { extract, reinsert } from "./ignore.js";
+
+// Mirrors ignore.ts's module-private constants: the extracted spans are
+// asserted against the same placeholder the module uses, so a change to
+// the placeholder would fail `PLACEHOLDER has the expected format` below.
+const _PLACEHOLDER = "<!-- reeve-keep-section -->";
+const _SANITIZED_PLACEHOLDER = /<!-- ------------------ -->\n?/g;
 
 describe("extract", () => {
   describe("ignore-next-line", () => {
