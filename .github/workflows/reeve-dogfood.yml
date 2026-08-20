@@ -598,9 +598,6 @@ jobs:
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
           max-diff-chars: "600000"
           max-context-chars: "300000"
-          # The warrant grants review nothing; dry-run keeps the findings on the
-          # job summary even if a maintainer later adds the grant.
-          dry-run: true
 
       - name: Write dogfood summary
         if: always()
