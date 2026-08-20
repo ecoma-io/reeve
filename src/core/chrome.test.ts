@@ -4,7 +4,6 @@ import {
   CHROME_LANGUAGES,
   chrome,
   chromeFallbackNote,
-  chromeLines,
   chromeSupports,
 } from "./chrome.js";
 
@@ -141,34 +140,5 @@ describe("chromeFallbackNote", () => {
     expect(note).toContain(
       "Chrome covers: en, ar, cs, de, es, fr, hi, id, it, ja, ko, nl, pl, pt, ru, sv, th, tr, uk, vi, zh.",
     );
-  });
-});
-
-describe("chromeLines", () => {
-  it("renders English first when multiple languages are present, deduplicated", () => {
-    const lines = chromeLines("translateBoundary", ["vi", "en", "vi", "en"]);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe(chrome("translateBoundary", "en"));
-    expect(lines[1]).toBe(chrome("translateBoundary", "vi"));
-  });
-
-  it("renders a single line when only one language is present", () => {
-    const lines = chromeLines("translateBoundary", ["vi"]);
-    expect(lines).toEqual([chrome("translateBoundary", "vi")]);
-  });
-
-  it("collapses unsupported languages into a single English line, not one per unsupported code", () => {
-    const lines = chromeLines("translateBoundary", ["la", "eo", "eu"]);
-    expect(lines).toEqual([chrome("translateBoundary", "en")]);
-  });
-
-  it("falls back to a single English line for an empty language list", () => {
-    const lines = chromeLines("translateBoundary", []);
-    expect(lines).toEqual([chrome("translateBoundary", "en")]);
-  });
-
-  it("passes params through to every rendered line", () => {
-    const lines = chromeLines("translateFooterFrom", ["en", "vi"], { label: "Deutsch" });
-    expect(lines).toEqual(["Translated from Deutsch.", "Được dịch từ Deutsch."]);
   });
 });

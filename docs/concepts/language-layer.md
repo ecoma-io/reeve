@@ -135,14 +135,14 @@ forever — the same posture this project takes toward every cost that can be
 paid once in review instead of repeatedly at runtime.
 
 **Chrome follows the language of the block it wraps, at the moment that
-block is published.** A block that already belongs to one language
+block is published.** Every published block belongs to one language
 throughout — a lifecycle comment resolved to the thread's own language, a
-first reply, a duplicate proposal — gets its chrome in that same language. A
-block that introduces several language sections at once — `translate`'s
-boundary note above every translated section, and its footer below all of
-them — is shared by every language the thread actually got translated into,
-so it renders once per language present, English line first. Neither rule
-picks one language to speak _about_ the others in. Chrome is not part of a
+first reply, a duplicate proposal, and each of `translate`'s collapsible
+sections, which carries its own boundary note and footer inside it, in that
+section's language. Nothing multilingual piles up outside the sections — a
+thread translated into ten languages shows ten collapsed summary lines, not
+ten copies of the same two sentences stacked above and below them — and no
+rule picks one language to speak _about_ the others in. Chrome is not part of a
 block's fingerprint: a block published before this table carried a language,
 or before this version existed at all, keeps the chrome it was published
 with — stale chrome is a smaller, quieter cost than re-editing every comment

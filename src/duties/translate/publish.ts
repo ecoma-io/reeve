@@ -4,9 +4,10 @@
  * The publishing itself is the core's — reading the thread, splitting at the
  * marker, keeping the author's half byte-for-byte, recognising a run that
  * changed nothing. This module decides only what goes *in* the block, which is
- * the part no other duty could reuse: a boundary line about translation, one
- * collapsible section per language, and a footer naming what this run did not
- * manage.
+ * the part no other duty could reuse: a horizontal rule marking where the
+ * machine's half begins, then one collapsible section per language — each
+ * carrying its own boundary note, the translation, and a footer naming what
+ * this run did not manage, all in that section's language.
  *
  * **Appended, never rewritten.** The author's text stays where they put it and
  * the translation goes underneath it, behind the marker. That is what keeps
@@ -31,7 +32,7 @@
  * enforces that by refusing to publish an empty section list, so it is enough
  * for this module to render no sections.
  */
-import { chromeLines } from "../../core/chrome.js";
+import { chrome } from "../../core/chrome.js";
 import type { Language } from "../../core/languages.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
 import type { Publication } from "../../core/publish.js";
@@ -167,59 +168,58 @@ export function translationFingerprint(translated: string, languages: readonly L
  * source contained unbalanced HTML renders unbalanced here too — the damage is
  * confined to how the block looks, and the source it came from was already
  * broken Markdown.
+ *
+ * Everything Reeve has to say about a translation lives *inside* the section it
+ * is about. A section is single-language throughout, so its boundary note and
+ * its footer render in that one language — and what sits outside the sections
+ * never grows with the language count: the rule, and one `<summary>` line per
+ * language. Ten configured languages are ten collapsed lines, not ten copies of
+ * the same two sentences stacked above and below them.
  */
 export function publication(translated: Translated): Publication {
   if (translated.posted.length === 0) return { fingerprint: translated.fingerprint, sections: [] };
 
-  const sections = translated.posted.map((entry) =>
-    section(entry, translated.posted.length === 1, translated.attribution),
-  );
-
   return {
     fingerprint: translated.fingerprint,
-    sections: [boundary(translated.posted), ...sections, footer(translated)],
+    sections: [
+      "---",
+      ...translated.posted.map((entry) =>
+        section(entry, translated, translated.posted.length === 1),
+      ),
+    ],
   };
-}
-
-/** Every language a set of postings actually carries, for the shared-boundary chrome case. */
-function codesOf(posted: readonly Posted[]): readonly string[] {
-  return posted.map((entry) => entry.to.code);
 }
 
 /**
  * The line that says which half of the body is which.
  *
- * A reader arriving at a translated thread has to know, before reading a word of
- * it, whether they are reading a person or a model — and which one the project
- * is answerable for. Stated once at the boundary rather than repeated per
- * section: the rule is about the horizontal rule above it, and a reader who
- * scrolled past it is already inside the machine's half.
- *
- * The note itself is chrome that sits above every posted language's section at
- * once, so it renders once per distinct language actually posted this run —
- * English first — rather than picking one of them to address the others in.
+ * A reader has to know, before reading a word of a translation, whether they
+ * are reading a person or a model — and which one the project is answerable
+ * for. Stated at the top of each section, in that section's own language,
+ * because that is the one place a reader cannot reach the translation without
+ * passing it: a collapsed section shows nothing, and an unfolded one shows this
+ * first.
  */
-function boundary(posted: readonly Posted[]): string {
-  return [
-    "---",
-    "",
-    "> [!NOTE]",
-    ...chromeLines("translateBoundary", codesOf(posted)).map((line) => `> ${line}`),
-  ].join("\n");
+function boundary(entry: Posted): string {
+  return `> ${chrome("translateBoundary", entry.to.code)}`;
 }
 
-function section(entry: Posted, alone: boolean, attribution: Attribution): string {
+function section(entry: Posted, translated: Translated, alone: boolean): string {
   return [
     `<details${alone ? " open" : ""}>`,
-    `<summary>${summary(entry, attribution)}</summary>`,
+    `<summary>${summary(entry, translated.attribution)}</summary>`,
     // GitHub only renders Markdown inside a block-level HTML element when a
     // blank line separates them, so these are load-bearing rather than tidy:
     // without them a fenced code block in the translation posts as one line of
     // backticks.
     "",
+    boundary(entry),
+    "",
     entry.text,
     "",
-    ...(attribution === "detail" ? [provenance(entry), ""] : []),
+    ...(translated.attribution === "detail" ? [provenance(entry), ""] : []),
+    footer(entry, translated),
+    "",
     "</details>",
   ].join("\n");
 }
@@ -266,30 +266,31 @@ function provenance(entry: Posted): string {
 /**
  * What the run did, for a reader who did not run it.
  *
- * This footer sits below every posted language's section at once, the same as
- * `boundary()` above them, so each fixed note in it renders once per distinct
- * language actually posted this run — English first — rather than picking one
- * of the configured languages as the real audience.
+ * One footer per section, below that section's translation and in its
+ * language — the same notes in every section, because "what this run skipped"
+ * is true of the run, not of one language's part in it. Repeating them costs
+ * nothing a reader sees: each copy is inside its section's `<details>`, read
+ * only by the reader who unfolded that language.
  */
-function footer(translated: Translated): string {
-  const { from, skipped, truncated, posted } = translated;
-  const codes = codesOf(posted);
+function footer(entry: Posted, translated: Translated): string {
+  const { from, skipped, truncated } = translated;
+  const code = entry.to.code;
 
   const notes: string[] = [];
   if (from !== null) {
-    notes.push(...chromeLines("translateFooterFrom", codes, { label: from.label }));
+    notes.push(chrome("translateFooterFrom", code, { label: from.label }));
   }
   if (truncated) {
-    notes.push(...chromeLines("translateFooterTruncated", codes));
+    notes.push(chrome("translateFooterTruncated", code));
   }
   if (skipped.length > 0) {
     notes.push(
-      ...chromeLines("translateFooterSkipped", codes, {
+      chrome("translateFooterSkipped", code, {
         list: skipped.map((language) => language.label).join(", "),
       }),
     );
   }
-  notes.push(...chromeLines("translateFooterEditable", codes));
+  notes.push(chrome("translateFooterEditable", code));
 
   return `<sub>${escapeHtml(notes.join(" "))}</sub>`;
 }

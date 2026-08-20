@@ -34080,8 +34080,8 @@ var CHROME_LANGUAGES = [
   "zh"
 ];
 var CHROME = {
-  // translate/publish.ts — boundary() and footer() wrap every language
-  // section in the thread at once, so both render through `chromeLines`.
+  // translate/publish.ts — each language's collapsible section carries its
+  // own boundary note and footer inside it, in that section's language.
   translateBoundary: {
     en: "**The text above is the original, and it is the version this project answers for.** Everything below is a machine translation by [Reeve](https://github.com/ecoma-io/reeve). Where the two disagree, the text above is the one that counts.",
     ar: "**\u0627\u0644\u0646\u0635 \u0623\u0639\u0644\u0627\u0647 \u0647\u0648 \u0627\u0644\u0646\u0635 \u0627\u0644\u0623\u0635\u0644\u064A\u060C \u0648\u0647\u0648 \u0627\u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u062A\u064A \u064A\u0633\u062A\u0646\u062F \u0625\u0644\u064A\u0647\u0627 \u0647\u0630\u0627 \u0627\u0644\u0645\u0634\u0631\u0648\u0639.** \u0643\u0644 \u0645\u0627 \u0623\u062F\u0646\u0627\u0647 \u0647\u0648 \u062A\u0631\u062C\u0645\u0629 \u0622\u0644\u064A\u0629 \u0628\u0648\u0627\u0633\u0637\u0629 [Reeve](https://github.com/ecoma-io/reeve). \u0641\u064A \u062D\u0627\u0644 \u0627\u062E\u062A\u0644\u0627\u0641 \u0627\u0644\u0646\u0635\u064A\u0646\u060C \u064A\u0643\u0648\u0646 \u0627\u0644\u0646\u0635 \u0623\u0639\u0644\u0627\u0647 \u0647\u0648 \u0627\u0644\u0645\u0639\u062A\u0645\u062F.",
@@ -34198,9 +34198,8 @@ var CHROME = {
     zh: "\u7F16\u8F91\u4E0A\u9762\u7684\u6587\u672C\u4F1A\u91CD\u65B0\u53D1\u5E03\u6B64\u7FFB\u8BD1\uFF1B\u5220\u9664\u6B64\u533A\u5757\u4F1A\u91CD\u65B0\u751F\u6210\u5B83\u3002"
   },
   // lifecycle/message.ts's footer() — every line below already sits under a
-  // comment `renderSay`/`renderClose` already resolved to one language, so
-  // this renders through `chrome`, not `chromeLines`. The zh row keeps the
-  // same register as `lifecycle/message.ts`'s own `BUILTIN_REMINDER`/
+  // comment `renderSay`/`renderClose` already resolved to one language. The
+  // zh row keeps the same register as `lifecycle/message.ts`'s own `BUILTIN_REMINDER`/
   // `BUILTIN_CLOSE` — "重新开始计时" for "restarts the clock" — so a lifecycle
   // comment reads as one voice, not two translators.
   lifecycleFooterResetsAuthor: {

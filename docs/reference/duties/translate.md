@@ -69,9 +69,10 @@ jobs:
 ```
 
 That writes one block into the issue body carrying every configured language
-except the one the issue was written in, below the author's own text and
-below a line saying which half is which — keep `dry-run: true` until you want
-a run to edit anything. Edit the issue and it replaces that
+except the one the issue was written in, below the author's own text and a
+horizontal rule — one collapsible section per language, each opening with a
+note in its own language saying which half is which — keep `dry-run: true`
+until you want a run to edit anything. Edit the issue and it replaces that
 block rather than adding a second one; edit nothing and the next run
 recognises its own output and stops before it spends a single request.
 

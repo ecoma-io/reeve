@@ -167,8 +167,10 @@ describe("publishing what a real run produced", () => {
 
     expect(outcome.action).toBe("published");
     // The blank line after `</summary>` is what makes GitHub render the block
-    // as code rather than as a row of backticks inside raw HTML.
-    expect(thread.body()).toContain("</summary>\n\nAfter the upgrade");
+    // as code rather than as a row of backticks inside raw HTML — the section's
+    // own boundary note sits between the summary and the translation.
+    expect(thread.body()).toContain("</summary>\n\n> ");
+    expect(thread.body()).toContain("counts.\n\nAfter the upgrade");
     expect(thread.body()).toContain("```sh\npnpm build --filter @ecoma-io/reeve\n```");
     // And what reaches the reader is the sanitized text, so the references in
     // it cannot notify anyone a second time.
