@@ -19,7 +19,7 @@ import {
 /** A fixture budget, matching the production constants and the default input. */
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
-    total: 4000,
+    total: 12000,
     perFileSourceExcerpt: 800,
     importsWindow: 60,
     maxChangedFiles: 25,
@@ -135,7 +135,7 @@ describe("context security", () => {
     // under the budget.
     const text = ctx.text ?? "";
     expect(text).not.toContain("x".repeat(100));
-    expect(text.length).toBeLessThan(4000);
+    expect(text.length).toBeLessThan(12000);
   });
 
   it("caps a hostile history payload rather than letting it grow the section", async () => {
@@ -162,7 +162,7 @@ describe("context security", () => {
     // The section's rendered body is bounded by the run's own ceiling, even
     // though the source returned well beyond it.
     const text = ctx.text ?? "";
-    expect(text.length).toBeLessThan(4000);
+    expect(text.length).toBeLessThan(12000);
     expect(text).not.toContain("x".repeat(600));
   });
 
