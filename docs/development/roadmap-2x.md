@@ -87,7 +87,7 @@ the page is anchored to something checkable rather than to an idea of 1.x.
 [`review`](../reference/duties/review.md) and
 [`remediation`](../reference/duties/remediation.md). Seven of the nine are dogfooded
 on this repository — every duty but `remediation`, through the single
-`.github/workflows/reeve-dogfood.yml`
+`.github/workflows/reeve.yml`
 — which is the same discipline Phase 3 below borrows. `review` dogfoods in
 report-only mode, granted nothing until a warrant names it, and is additionally
 driven end to end by its own integration suite against a stub API. Its claimed

@@ -41,7 +41,7 @@ rules:
       include:
         - "/.github/workflows/**"
       exclude:
-        - "/.github/workflows/reeve-dogfood.yml"
+        - "/.github/workflows/reeve.yml"
     message: >-
       This `uses:` is not pinned to a full commit SHA. A tag or branch is a
       pointer the upstream owner can repoint at any commit, including one that
@@ -78,7 +78,7 @@ rules:
       # secrets, so the credential-boundary rules below deliberately do not
       # bind it.
       exclude:
-        - "/.github/workflows/reeve-dogfood.yml"
+        - "/.github/workflows/reeve.yml"
     message: >-
       A `${{ github.event.* }}` or `${{ github.head_ref }}` expression is
       interpolated directly into a `run:` step. GitHub substitutes the raw string
@@ -109,7 +109,7 @@ rules:
       # secrets, so the credential-boundary rules below deliberately do not
       # bind it.
       exclude:
-        - "/.github/workflows/reeve-dogfood.yml"
+        - "/.github/workflows/reeve.yml"
     message: >-
       `pull_request_target` runs with the base repository's secrets and write
       access against a fork's code — the trigger CodeQL's `actions` query treats
