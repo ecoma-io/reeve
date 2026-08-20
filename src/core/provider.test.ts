@@ -131,7 +131,7 @@ describe("parseModels", () => {
   it("refuses a seat separator rather than running the ids it groups together", () => {
     // Left alone, `a|b` is one id no provider has, and the only symptom is
     // every model failing for a reason that names an id nobody configured.
-    expect(() => parseModels("a|b,c")).toThrow(/`models` is already a single rotation chain/);
+    expect(() => parseModels("a|b,c")).toThrow(/`models` is a single fallback chain/);
   });
 
   it("takes the name after `=` and leaves the id without it", () => {
@@ -162,32 +162,38 @@ describe("parseModels", () => {
 });
 
 describe("parseSeats", () => {
-  it("reads an input with no seat separator as one seat per id, as it always meant", () => {
-    expect(parseSeats("a,b,c").seats).toEqual([["a"], ["b"], ["c"]]);
+  it("reads `|` as one more voter, so three segments are three votes", () => {
+    expect(parseSeats("a|b|c").seats).toEqual([["a"], ["b"], ["c"]]);
   });
 
-  it("groups the models of one seat into one chain", () => {
-    expect(parseSeats("a|a2,b").seats).toEqual([["a", "a2"], ["b"]]);
+  it("reads `,` as the fallback chain inside one seat, the same thing it means in `models`", () => {
+    expect(parseSeats("a,a2|b").seats).toEqual([["a", "a2"], ["b"]]);
+  });
+
+  it("reads an input with no seat separator as one seat — a `models` list pasted here casts one vote", () => {
+    // The cheap direction of the copy-paste mistake: a fallback chain read as
+    // a panel would silently triple the spend; a panel read as a chain casts
+    // one vote and the summary shows it.
+    expect(parseSeats("a,b,c").seats).toEqual([["a", "b", "c"]]);
   });
 
   it("trims around the seat separator, which is written with spaces far more often than not", () => {
-    expect(parseSeats("a | a2 | a3").seats).toEqual([["a", "a2", "a3"]]);
+    expect(parseSeats("a | a2 | a3").seats).toEqual([["a"], ["a2"], ["a3"]]);
   });
 
   it("drops an exact repeat inside a seat, which could only ever be one wasted request", () => {
-    expect(parseSeats("a|b|a").seats).toEqual([["a", "b"]]);
+    expect(parseSeats("a,b,a|c").seats).toEqual([["a", "b"], ["c"]]);
   });
 
   it("keeps a repeat across seats, because only the run knows whether it costs a vote", () => {
     // Two seats naming the same model is a configuration the panel resolves at
-    // the point it knows which models are still unspent — `a|b` and `b|c` are
+    // the point it knows which models are still unspent — `a,b` and `b,c` are
     // two votes on a good morning and this is the same shape.
-    expect(parseSeats("a,a").seats).toEqual([["a"], ["a"]]);
+    expect(parseSeats("a|a").seats).toEqual([["a"], ["a"]]);
   });
 
   it("drops a seat with nothing in it rather than seating a judge with no model", () => {
-    mockedParseList.mockReturnValue(["a", "|", "b"]);
-    expect(parseSeats("a,|,b").seats).toEqual([["a"], ["b"]]);
+    expect(parseSeats("a| , |b").seats).toEqual([["a"], ["b"]]);
   });
 
   it("returns nothing for the empty input, which is the default rather than an error", () => {
@@ -198,21 +204,27 @@ describe("parseSeats", () => {
   it("gives a seat's name to every model that may fill it", () => {
     // The name is the voter's, and the voter is the seat: whichever of the two
     // answers, the panel heard from `Careful` once.
-    const panel = parseSeats("a | b = Careful, c = Quick");
+    const panel = parseSeats("a, b = Careful | c = Quick");
     expect(panel.seats).toEqual([["a", "b"], ["c"]]);
     expect(shown(panel.names, "a")).toBe("Careful");
     expect(shown(panel.names, "b")).toBe("Careful");
     expect(shown(panel.names, "c")).toBe("Quick");
   });
 
+  it("keeps the seat's first name when two models in the chain both carry one", () => {
+    const panel = parseSeats("a = First, b = Second");
+    expect(shown(panel.names, "a")).toBe("First");
+    expect(shown(panel.names, "b")).toBe("First");
+  });
+
   it("leaves an unnamed seat's models showing their ids", () => {
-    expect(shown(parseSeats("a|b").names, "b")).toBe("b");
+    expect(shown(parseSeats("a,b").names, "b")).toBe("b");
   });
 
   it("keeps the first seat's name for a model two seats name", () => {
     // One id, one thing to call it. The first seat that named it is the one a
     // reader met first.
-    expect(shown(parseSeats("a = First,a = Second").names, "a")).toBe("First");
+    expect(shown(parseSeats("a = First|a = Second").names, "a")).toBe("First");
   });
 });
 

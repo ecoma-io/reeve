@@ -55,7 +55,12 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
+import {
+  warnIfStarved,
+  warnIfPanelIdle,
+  failIfProtocolExhausted,
+  writeRunSummary,
+} from "../../core/summary.js";
 import { newAccumulator, remainingOf, reportNoSweep } from "../../core/sweep.js";
 import {
   dutyLanguages,
@@ -167,6 +172,7 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    warnIfPanelIdle(base.judges, base.drafts);
     const client = assembleClient(base, meter, ["classify", "draft", "judge"] as const, [
       base.judges.flat(),
     ]);
@@ -666,7 +672,7 @@ async function processGroup(
     }
 
     if (result.attempts.length === 0) {
-      failIfProtocolExhausted(settings.models, result.failures);
+      failIfProtocolExhausted(settings.models, result.failures, settings.modelNames);
       core.warning(
         `harmonise: no admissible draft produced for ${locale} translation of ${group.id}`,
       );

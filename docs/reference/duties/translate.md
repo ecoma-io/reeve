@@ -113,30 +113,30 @@ a supported configuration), but almost every real provider needs one — see
 
 Every input `translate/action.yml` declares.
 
-| Input               | Required | Default                     | What it does                                                                                                                                                                                        |
-| ------------------- | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`      | no       | `${{ github.token }}`       | Token used to read and write the thread. Also what gives recursion prevention on `GITHUB_TOKEN`.                                                                                                    |
-| `number`            | no       | _(empty)_                   | The issue or pull request to translate. Defaults to the thread that triggered the workflow.                                                                                                         |
-| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                  |
-| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                     |
-| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                               |
-| `warrant`           | no       | `.github/reeve.yml`         | Where the permissions live. `edit-body` is granted here, under `duties:`; the warrant's `languages:` key optionally supplies what to translate into. Missing at this default path is not a failure. |
-| `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money.                                                                          |
-| `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. Seats, not a fallback list — see below.                                                                                                                       |
-| `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                                            |
-| `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                                              |
-| `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                                                    |
-| `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                                                   |
-| `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                                                  |
-| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                         |
-| `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                          |
-| `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                                             |
-| `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                                                     |
-| `max-requests`      | no       | `none`                      | How many provider requests — detection, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                  |
-| `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                     |
-| `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                          |
-| `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                    |
-| `temperature`       | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                        |
+| Input               | Required | Default                     | What it does                                                                                                                                                                                                                                                   |
+| ------------------- | -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`      | no       | `${{ github.token }}`       | Token used to read and write the thread. Also what gives recursion prevention on `GITHUB_TOKEN`.                                                                                                                                                               |
+| `number`            | no       | _(empty)_                   | The issue or pull request to translate. Defaults to the thread that triggered the workflow.                                                                                                                                                                    |
+| `base-url`          | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint.                                                                                                                                                                                                             |
+| `api-key`           | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                                                                                                |
+| `models`            | **yes**  | —                           | Model ids, comma or newline separated, in preference order. `id = Name` gives a model a display name.                                                                                                                                                          |
+| `warrant`           | no       | `.github/reeve.yml`         | Where the permissions live. `edit-body` is granted here, under `duties:`; the warrant's `languages:` key optionally supplies what to translate into. Missing at this default path is not a failure.                                                            |
+| `drafts`            | no       | `1`                         | Attempts per language, each scored deterministically, best published. The quality lever that costs calls instead of money. Spread across the roster: draft `n` starts at the `n`th model, so three drafts ask three different models when the roster has them. |
+| `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. `\|` adds a seat (one more vote); `,` is a fallback inside one, as in `models` — see below.                                                                                                                              |
+| `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                                                                                                       |
+| `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                                                                                                         |
+| `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                                                                                                               |
+| `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                                                                                                              |
+| `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                                                                                                             |
+| `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                    |
+| `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                                                                                     |
+| `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                                                                                                        |
+| `limit`             | no       | `50`                        | The most threads one sweep will actually process, or `none` for no cap — paging follows real demand either way.                                                                                                                                                |
+| `max-requests`      | no       | `none`                      | How many provider requests — detection, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                                                                             |
+| `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                |
+| `api-keys`          | no       | _(empty)_                   | One `alias = key` per line for each `endpoints` alias that needs one. Each key — everything after its first `=` — is registered as a secret before any entry is validated.                                                                                     |
+| `request-timeout`   | no       | `120s`                      | How long one request may run before it counts as weather — whole seconds or minutes; a bare number names no unit and is refused.                                                                                                                               |
+| `temperature`       | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request — some providers reject it outright.                                                                                                                                                   |
 
 **`max-body-chars`** bounds what is read from the thread, not what the model
 answers. When the body is longer, the tail is left behind and the published
@@ -173,31 +173,51 @@ same four provider inputs every duty takes — the full grammar, the
 auth failures are all in
 [Providers and the runtime](../../guides/providers.md#more-than-one-endpoint).
 
-**`judge-models` has two levels, and they mean opposite things.** `models`
-is one rotation chain: the first model that answers is used and the rest are
-spare. `judge-models` is not that — comma or newline separates **seats**,
-and every seat is asked:
+**`judge-models` has two levels, and the separators mean the same thing they
+mean everywhere else.** `,` is a fallback, exactly as in `models`: the first
+model that answers is used and the rest are spare. `|` is what `models` does
+not have — another **seat**, another vote, another request — and every seat
+is asked:
 
 ```yaml
-judge-models: |
-  fast-model | fast-model-backup
-  careful-model
-  third-model | third-backup | third-last-resort
+judge-models: >-
+  fast-model, fast-model-backup |
+  careful-model |
+  third-model, third-backup, third-last-resort
 ```
 
-`|` separates the models **inside** one seat, and they are that seat's
-availability rather than more votes: the second is asked only when the first
-could not deliver the seat's vote, and the seat casts one ballot however far
-down it had to go. Two rules keep a plurality honest: a model that has
-already voted, or already failed, is skipped by every later seat — so `a | b`
-and `b | c` do not both land on `b` the morning `a` is rate limited — and a
-seat that cannot be filled casts nothing and says so in the log.
+That is a three-vote panel. The `,`-separated models inside one seat are that
+seat's availability rather than more votes: the second is asked only when the
+first could not deliver the seat's vote, and the seat casts one ballot
+however far down it had to go. Because the separators keep their meaning, a
+`models` list pasted here reads as **one** seat and casts one vote — quieter
+and cheaper than a panel you did not mean to convene. Two rules keep a
+plurality honest: a model that has already voted, or already failed, is
+skipped by every later seat — so `a, b` and `b, c` do not both land on `b`
+the morning `a` is rate limited — and a seat that cannot be filled casts
+nothing and says so in the log.
+
+Prefer an odd number of seats: an even panel that splits hands the decision
+back to the deterministic score, so the second seat of a pair only ever
+matters when it agrees with the first. And the panel is only asked when there
+is a choice to make — with `drafts: 1` there is one draft per chunk and
+nothing to choose between, so a configured panel is never spent. Raise
+`drafts` alongside `judge-models` or the seats sit idle.
 
 **Naming a model with `=`** keeps an id private: `models: openai/gpt-5-mini
 = House model` shows "House model" everywhere a person reads instead of the
 id. The name is cut at the first `=`, since an id is never an assignment and
-a name may well contain one. This is presentation, not masking — put ids in
-secrets if they are secret.
+a name may well contain one. This is presentation, not masking — put the
+roster in an Actions variable if the ids are secret, and see
+[Hiding model ids](../../guides/providers.md#hiding-model-ids) for the full
+pattern and its limits.
+
+**There is deliberately no `confidence` input here.** Duties that decide
+whether to act at all (`triage`, `respond`, `duplicate`) gate on a floor;
+this duty always publishes the best draft that survived deterministic
+scoring, because "translate nothing" is not a better answer than the best
+admissible translation. The quality levers are `drafts` and `judge-models`,
+not a threshold.
 
 **`translate-replies` and `max-replies` bound a real ceiling, not a
 formality.** Off by default: every reply, times every language it is

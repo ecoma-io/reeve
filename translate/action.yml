@@ -85,23 +85,28 @@ inputs:
     description: >-
       How many translations to ask for per language. Every answer is scored
       deterministically and the best is published. The quality lever that costs
-      calls instead of money.
+      calls instead of money. Attempts are spread across the roster: draft `n` starts at the `n`th model in `models`, so `a, b, c` with `drafts: 3` asks three different models rather than the first one three times — fallback still applies within each draft, and a model that failed is skipped for every remaining one.
     required: false
     default: "1"
 
   judge-models:
     description: >-
-      A panel of models asked which draft reads best. Comma or newline
-      separates seats and every seat is asked — this is a panel, not a fallback
-      list — and the deterministic score breaks every tie. Within one seat, `|`
-      names models to fall back through: `a | b, c` is two votes, and `b` is
-      asked only when `a` could not deliver the first seat's vote. A model that
-      has already voted or already failed is skipped by every later seat, so one
-      model never counts twice. Empty means no panel, which is the default and a
-      perfectly good setting.
+      A panel of models asked which draft reads best. `|` separates seats and
+      every seat is asked — one more `|`, one more vote, one more request —
+      and the deterministic score breaks every tie. Within one seat, `,` names
+      models to fall back through, the same thing `,` means in `models`:
+      `a, b | c` is two votes, and `b` is asked only when `a` could not
+      deliver the first seat's vote. A model that has already voted or already
+      failed is skipped by every later seat, so one model never counts twice.
+      Odd panels settle more — an even panel that splits hands the tie back to
+      the score. Empty means no panel, which is the default and a perfectly
+      good setting.
 
-      `a | b = Careful` names the seat rather than a model: it is one voter
-      called `Careful` whichever of the two delivered its vote.
+      Only asked when there is a choice to make: with `drafts: 1` a single
+      draft is already the answer, and the panel is never spent on it.
+
+      `a, b = Careful | c` names the first seat rather than a model: it is one
+      voter called `Careful` whichever of the two delivered its vote.
     required: false
     default: ""
 

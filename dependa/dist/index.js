@@ -31787,6 +31787,9 @@ function parseList(raw) {
 // src/core/provider.ts
 var DEFAULT_TIMEOUT_MS = 12e4;
 var EXCERPT_CHARS = 200;
+function shown(names, id) {
+  return names.get(id) ?? id;
+}
 function parseModels(raw) {
   const models = [];
   const names = /* @__PURE__ */ new Map();
@@ -31794,7 +31797,7 @@ function parseModels(raw) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -31889,7 +31892,10 @@ function createRoutedProvider(endpoints) {
           usage: null,
           kind: "protocol",
           endpoint: alias,
-          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+          // The failure's own `model` field carries the id, and the caller
+          // decides how that is shown — a reason that repeated it verbatim
+          // would put the raw id in a log the display name was masking.
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for this model.`
         };
       }
       const completion = await provider.complete(id, messages, options);
@@ -32221,10 +32227,10 @@ function warnIfStarved(models, weather, sweep) {
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
 }
-function failIfProtocolExhausted(models, failures) {
+function failIfProtocolExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
   const exhausted = protocolExhausted(models, failures);
   if (exhausted) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     setFailed(
       `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
     );
@@ -34737,13 +34743,6 @@ function parseTemperature(raw) {
   }
   return value;
 }
-function counted(name, raw) {
-  const value = Number(raw);
-  if (raw.trim().length === 0 || !Number.isInteger(value) || value < 0) {
-    throw new Error(`${name}: expected a whole number of 0 or more, got \`${raw}\`.`);
-  }
-  return value;
-}
 function bounded(name, raw) {
   const trimmed = raw.trim();
   if (trimmed.toLowerCase() === "none") return null;
@@ -34763,7 +34762,7 @@ function readSettings() {
     ...coreInputs,
     warrant: getInput("warrant", { required: true }),
     ecosystems: parseEcosystems(getInput("ecosystems")),
-    drafts: counted("drafts", getInput("drafts")),
+    riskInterpretation: getBooleanInput("risk-interpretation"),
     dryRun: getBooleanInput("dry-run"),
     maxRequests: bounded("max-requests", getInput("max-requests")),
     paths: parsePaths(getInput("paths"))
@@ -37123,7 +37122,7 @@ async function run() {
           isDev: dep.dev
         });
         let risk = riskFacts;
-        if (settings.drafts > 0 && settings.models.length > 0) {
+        if (settings.riskInterpretation && settings.models.length > 0) {
           const enclosed = encloseEvidence(evidence);
           const prompt = interpretationPrompt(
             {
@@ -37153,7 +37152,7 @@ async function run() {
               risk = { facts: riskFacts.facts, interpretation };
             }
           } else {
-            failIfProtocolExhausted(settings.models, rotation.failures);
+            failIfProtocolExhausted(settings.models, rotation.failures, settings.modelNames);
           }
         }
         const edits = [];

@@ -16,7 +16,7 @@ const mockInputs: Record<string, string> = {
   "github-token": "mock-token",
   warrant: ".github/reeve.yml",
   ecosystems: "",
-  drafts: "0",
+  "risk-interpretation": "false",
   "dry-run": "false",
   "max-requests": "none",
   paths: "",
@@ -47,7 +47,7 @@ beforeEach(() => {
     "github-token": "mock-token",
     warrant: ".github/reeve.yml",
     ecosystems: "",
-    drafts: "0",
+    "risk-interpretation": "false",
     "dry-run": "false",
     "max-requests": "none",
     paths: "",
@@ -156,23 +156,15 @@ describe("readSettings — paths", () => {
   });
 });
 
-describe("readSettings — drafts", () => {
-  it("parses drafts as 0 by default (no model risk interpretation)", () => {
-    mockInputs.drafts = "0";
+describe("readSettings — risk-interpretation", () => {
+  it("is off by default, so the default run makes no model call", () => {
     const settings = readSettings();
-    expect(settings.drafts).toBe(0);
+    expect(settings.riskInterpretation).toBe(false);
   });
 
-  it("parses a positive drafts count", () => {
-    mockInputs.drafts = "3";
+  it("reads true as opting in", () => {
+    mockInputs["risk-interpretation"] = "true";
     const settings = readSettings();
-    expect(settings.drafts).toBe(3);
-  });
-
-  it("uses counted (not whole) to allow zero drafts", () => {
-    // The fix: drafts uses counted() which allows 0 (meaning no model risk
-    // interpretation), rather than whole() which requires >= 1.
-    mockInputs.drafts = "0";
-    expect(() => readSettings()).not.toThrow();
+    expect(settings.riskInterpretation).toBe(true);
   });
 });

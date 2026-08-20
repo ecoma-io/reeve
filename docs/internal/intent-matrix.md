@@ -141,18 +141,19 @@ could not read`).
   (carries on when the cheap roster failed); `triage/main.integration.test.ts`
   1026, 1037, 1051.
 
-### A7 — Judge panels parse `|` as an availability chain inside a seat
+### A7 — The separators keep one meaning: `,` is a fallback, `|` is a seat
 
-- **Intent:** `models` refuses `|` (it is one rotation); `judge-models`
-  (`parseSeats`) treats `|` as the fallback chain within one seat, so a seat is
-  answered by the first available model.
-- **Invariant:** `parseModels("a|b,c")` throws
-  (`src/core/provider.test.ts:134`); `parseSeats("a|a2,b")` → `[["a","a2"],["b"]]`
-  (`provider.ts:271-289`).
+- **Intent:** `,` means fallback in `models` and in `judge-models` alike;
+  `|` means one more seat (one more vote) and only `judge-models` has seats,
+  so `models` refuses it. A `models` list pasted into `judge-models` reads as
+  one seat and casts one vote — the cheap direction of the mistake.
+- **Invariant:** `parseModels("a|b,c")` throws;
+  `parseSeats("a,a2|b")` → `[["a","a2"],["b"]]` (`provider.ts` `parseSeats`).
 - **Scope:** provider roster parsing; judge panels in translate/respond/harmonise.
-- **Required:** a `|` in `models` is refused loudly; a `|` in `judge-models` is
+- **Required:** a `|` in `models` is refused loudly; a `,` in `judge-models` is
   a seat fallback chain.
-- **Forbidden:** silently treating the two grammars as the same value.
+- **Forbidden:** silently treating the two grammars as the same value; a
+  separator whose meaning flips between two inputs.
 - **Tests:** `provider.test.ts` `parseModels` (105-160) and `parseSeats`
   (164-210); `translate/judge.test.ts`, `respond/judge.test.ts` panel tests.
 

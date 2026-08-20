@@ -6,13 +6,7 @@
  */
 import * as core from "@actions/core";
 
-import {
-  bounded,
-  counted,
-  readCore,
-  type ApiKeySpec,
-  type EndpointSpec,
-} from "../../core/inputs.js";
+import { bounded, readCore, type ApiKeySpec, type EndpointSpec } from "../../core/inputs.js";
 import type { Capability } from "../../core/warrant.js";
 import type { Names } from "../../core/provider.js";
 import type { Ecosystem } from "./model.js";
@@ -24,7 +18,13 @@ export interface Settings {
   readonly modelNames: Names;
   readonly warrant: string;
   readonly ecosystems: readonly Ecosystem[];
-  readonly drafts: number;
+  /**
+   * Whether a model reads the evidence and writes an advisory risk summary.
+   * A flag rather than a count: the interpretation is one request per
+   * proposal, taken or not taken — there is no draft-and-score pass behind
+   * it, and a number here would promise one.
+   */
+  readonly riskInterpretation: boolean;
   readonly dryRun: boolean;
   readonly maxRequests: number | null;
   readonly paths: readonly string[];
@@ -48,7 +48,7 @@ export function readSettings(): Omit<Settings, "permitted"> {
     ...coreInputs,
     warrant: core.getInput("warrant", { required: true }),
     ecosystems: parseEcosystems(core.getInput("ecosystems")),
-    drafts: counted("drafts", core.getInput("drafts")),
+    riskInterpretation: core.getBooleanInput("risk-interpretation"),
     dryRun: core.getBooleanInput("dry-run"),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     paths: parsePaths(core.getInput("paths")),

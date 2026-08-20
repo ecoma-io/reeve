@@ -626,7 +626,7 @@ async function decide(
   // configurations with the same outcome, and reporting neither would read
   // as a judge that simply agreed with nothing.
   if (judged.model === null) {
-    failIfProtocolExhausted(settings.models, judged.failures);
+    failIfProtocolExhausted(settings.models, judged.failures, settings.modelNames);
   }
   const note =
     judged.unreadable !== null

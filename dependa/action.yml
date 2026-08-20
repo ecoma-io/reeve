@@ -114,14 +114,16 @@ inputs:
     required: false
     default: ""
 
-  drafts:
+  risk-interpretation:
     description: >-
-      How many risk interpretations to ask for per proposal. Every answer is
-      scored deterministically and the best is kept. The quality lever that
-      costs calls instead of money. `0` means no model-assisted risk
-      interpretation at all — the deterministic facts alone are used.
+      `true` asks a model to read the evidence behind each proposal —
+      changelogs, advisories, release notes — and write an advisory risk
+      summary beside the deterministic facts. One request per proposal,
+      through the `models` rotation, and never the sole basis for anything:
+      the facts stand with or without it. `false`, the default, makes no
+      model call at all. Requires `models` to be set to have any effect.
     required: false
-    default: "0"
+    default: "false"
 
   dry-run:
     description: >-

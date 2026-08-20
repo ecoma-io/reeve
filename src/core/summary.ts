@@ -23,7 +23,14 @@
 import * as core from "@actions/core";
 
 import { STAGE, total, type Spend } from "./meter.js";
-import { starved, protocolExhausted, type Failure, type Weather } from "./provider.js";
+import {
+  starved,
+  protocolExhausted,
+  shown,
+  type Failure,
+  type Names,
+  type Weather,
+} from "./provider.js";
 
 /**
  * The endpoints whose keys were refused, named on the page — the half of the
@@ -116,6 +123,30 @@ export function warnIfStarved(
 }
 
 /**
+ * A configured panel that can never be asked, said once at the start of the
+ * run instead of discovered from a bill.
+ *
+ * The judge only runs when there are at least two candidates to choose
+ * between, and `drafts: 1` guarantees there never are — so `judge-models`
+ * beside the default `drafts` is a quality lever wired to nothing. The
+ * misconfiguration is quiet by design everywhere else (the judge correctly
+ * declines to spend a request on a foregone conclusion), which is exactly why
+ * it has to be loud here: nothing downstream will ever mention the panel
+ * again.
+ */
+export function warnIfPanelIdle(seats: readonly (readonly string[])[], drafts: number): boolean {
+  const idle = seats.length > 0 && drafts <= 1;
+  if (idle) {
+    core.warning(
+      "judge-models is configured but drafts is 1 — with a single draft there is " +
+        "nothing to choose between, so the panel is never asked. Raise drafts to " +
+        "put the seats to work.",
+    );
+  }
+  return idle;
+}
+
+/**
  * When every model on the roster failed with a protocol error — a model id
  * that does not exist, a body the provider rejected, a field it does not
  * accept — the roster was not starved by capacity; it was exhausted by a
@@ -125,14 +156,21 @@ export function warnIfStarved(
  * Call this after a rotation returns no usable answer, alongside
  * {@link warnIfStarved} for the capacity case. Returns `true` and sets the
  * job failed; returns `false` when the condition does not apply.
+ *
+ * `names` is the same display map every other reader-facing line consults: a
+ * model id is routinely a maintainer's secret, the log of a public repository
+ * is public, and the red run is exactly the one whose log gets pasted into an
+ * issue asking for help. A caller with no names simply omits it and the ids
+ * show, which is the ordinary setting.
  */
 export function failIfProtocolExhausted(
   models: readonly string[],
   failures: readonly Failure[],
+  names: Names = new Map(),
 ): boolean {
   const exhausted = protocolExhausted(models, failures);
   if (exhausted) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     core.setFailed(
       `every model on the roster failed with a protocol error — this is a configuration problem, not capacity weather. ${reasons}`,
     );

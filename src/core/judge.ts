@@ -12,14 +12,15 @@
  * arrived in rank order, and that a judge answers with a number.
  *
  * **A seat is a voter; the models inside it are that voter's availability.**
- * `judge-models` is a panel — `a, b, c` is three votes and every one of them is
- * asked, where `models` would have stopped at the first answer. Rotating the
+ * `judge-models` is a panel — `a | b | c` is three votes and every one of them
+ * is asked, where `models` would have stopped at the first answer. Rotating the
  * panel instead would make the second judge a stand-in for the first, and a
  * panel of stand-ins is one judge with extra names.
  *
- * A seat may still name more than one model, written `a | b`. That is not a
- * second vote and never becomes one: `b` is asked only when `a` could not
- * deliver the seat's vote at all, and the seat casts one ballot either way. The
+ * A seat may still name more than one model, written `a, b` — the same `,`
+ * that means fallback in `models` means fallback here. That is not a second
+ * vote and never becomes one: `b` is asked only when `a` could not deliver the
+ * seat's vote at all, and the seat casts one ballot either way. The
  * distinction is worth the syntax because the two things fail differently — a
  * panel is about disagreement, and a chain is about a free tier being out of
  * quota at nine in the morning.
@@ -34,7 +35,7 @@
  *
  * **One model casts one vote, whatever the seats say.** A model that has
  * already voted, and a model that has already failed, are both skipped by every
- * later seat. Without that, `a | b, b | c` is two seats that both resolve to
+ * later seat. Without that, `a, b | b, c` is two seats that both resolve to
  * `b` on the morning `a` is rate-limited, and a plurality counted over one
  * model answering twice is not a plurality. A seat whose every model is spoken
  * for casts nothing and says so.

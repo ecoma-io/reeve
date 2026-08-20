@@ -32596,7 +32596,7 @@ function parseModels(raw) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -32691,7 +32691,10 @@ function createRoutedProvider(endpoints) {
           usage: null,
           kind: "protocol",
           endpoint: alias,
-          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+          // The failure's own `model` field carries the id, and the caller
+          // decides how that is shown — a reason that repeated it verbatim
+          // would put the raw id in a log the display name was masking.
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for this model.`
         };
       }
       const completion = await provider.complete(id, messages, options);
@@ -33469,10 +33472,10 @@ function warnIfStarved(models, weather, sweep) {
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
 }
-function failIfProtocolExhausted(models, failures) {
+function failIfProtocolExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
   const exhausted = protocolExhausted(models, failures);
   if (exhausted) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     setFailed(
       `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
     );
@@ -35934,7 +35937,7 @@ ${pivot.draft.body}`);
     );
   }
   if (judged.model === null) {
-    failIfProtocolExhausted(settings.models, judged.failures);
+    failIfProtocolExhausted(settings.models, judged.failures, settings.modelNames);
   }
   const note = judged.unreadable !== null ? "the verdict did not parse" : judged.model === null ? "every model failed" : null;
   const verdict2 = judged.verdict;

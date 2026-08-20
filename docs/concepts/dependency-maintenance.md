@@ -43,7 +43,7 @@ the model said. The model may interpret evidence; it never grants permission.
 
 This is [D4](../doctrine/north-star.md#d4--the-work-is-priced-before-it-is-done)
 expressed as control flow: the expensive step runs last, and only when asked
-for. `drafts: 0` (the default) means zero model calls for the entire run.
+for. `risk-interpretation: false` (the default) means zero model calls for the entire run.
 
 ## Managers — dependency discovery
 
@@ -169,8 +169,8 @@ A policy can safely gate on any of these without trusting anything the model
 said. `"auto-approve: minor"` means "minor and patch PRs are ready" — a
 deterministic fact, not a model's judgment.
 
-**Risk interpretation** is optional and advisory-only. When `drafts` is above
-zero, the model reads the evidence and produces:
+**Risk interpretation** is optional and advisory-only. When
+`risk-interpretation` is `true`, the model reads the evidence and produces:
 
 - A risk level (`low`, `moderate`, `high`)
 - A one-sentence summary

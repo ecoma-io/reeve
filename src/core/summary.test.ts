@@ -16,6 +16,7 @@ import {
   failIfProtocolExhausted,
   starvedWarning,
   table,
+  warnIfPanelIdle,
   warnIfStarved,
   writeRunSummary,
   writeSummary,
@@ -325,6 +326,41 @@ describe("failIfProtocolExhausted", () => {
   it("does not fail the run for an empty roster", () => {
     expect(failIfProtocolExhausted([], [])).toBe(false);
     expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  it("shows a model's display name instead of its id, because a red log is the one that gets pasted", () => {
+    const failures: Failure[] = [
+      {
+        ok: false,
+        model: "gh/deepseek-v4-flash-free",
+        reason: "model not found",
+        kind: "protocol",
+      },
+    ];
+    const names = new Map([["gh/deepseek-v4-flash-free", "deepseek-v4-flash"]]);
+
+    expect(failIfProtocolExhausted(["gh/deepseek-v4-flash-free"], failures, names)).toBe(true);
+    const message = String(vi.mocked(core.setFailed).mock.calls[0]?.[0]);
+    expect(message).toContain("deepseek-v4-flash: model not found");
+    expect(message).not.toContain("gh/deepseek-v4-flash-free");
+  });
+});
+
+describe("warnIfPanelIdle", () => {
+  it("warns when a panel is configured beside the default single draft", () => {
+    expect(warnIfPanelIdle([["a"], ["b"]], 1)).toBe(true);
+    expect(vi.mocked(core.warning)).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(core.warning).mock.calls[0]?.[0])).toContain("never asked");
+  });
+
+  it("stays quiet when the drafts give the panel something to choose between", () => {
+    expect(warnIfPanelIdle([["a"], ["b"]], 2)).toBe(false);
+    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when no panel is configured, which is the default", () => {
+    expect(warnIfPanelIdle([], 1)).toBe(false);
+    expect(vi.mocked(core.warning)).not.toHaveBeenCalled();
   });
 });
 

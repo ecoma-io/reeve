@@ -1006,7 +1006,7 @@ async function decide(
         : null;
 
   if (triaged.verdict.labels.length === 0) {
-    failIfProtocolExhausted(settings.models, triaged.failures);
+    failIfProtocolExhausted(settings.models, triaged.failures, settings.modelNames);
   }
 
   const verdict = triaged.verdict;

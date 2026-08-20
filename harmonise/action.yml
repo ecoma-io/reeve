@@ -83,18 +83,21 @@ inputs:
     description: >-
       How many sync translations to ask for per stale locale. Every answer is
       scored deterministically and the best is published. The quality lever
-      that costs calls instead of money.
+      that costs calls instead of money. Attempts are spread across the roster: draft `n` starts at the `n`th model in `models`, so `a, b, c` with `drafts: 3` asks three different models rather than the first one three times — fallback still applies within each draft, and a model that failed is skipped for every remaining one.
     required: false
     default: "1"
 
   judge-models:
     description: >-
-      A panel of models asked which draft reads best. Comma or newline
-      separates seats and every seat is asked — this is a panel, not a fallback
-      list — and the deterministic score breaks every tie. Within one seat, `|`
-      names models to fall back through: `a | b, c` is two votes, and `b` is
-      asked only when `a` could not deliver the first seat's vote. Empty means
-      no panel, which is the default and a perfectly good setting.
+      A panel of models asked which draft reads best. `|` separates seats and
+      every seat is asked — one more `|`, one more vote, one more request —
+      and the deterministic score breaks every tie. Within one seat, `,` names
+      models to fall back through, the same thing `,` means in `models`:
+      `a, b | c` is two votes, and `b` is asked only when `a` could not
+      deliver the first seat's vote. Odd panels settle more — an even panel
+      that splits hands the tie back to the score. Empty means no panel, which
+      is the default and a perfectly good setting. Only asked when there is a
+      choice to make: with `drafts: 1` the panel is never spent.
     required: false
     default: ""
 
