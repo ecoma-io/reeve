@@ -43,6 +43,20 @@ name: Reeve dogfood
 # or permission scope they carry. Granting `dependa: [edit-file, open-pr]` in
 # the warrant would be the act that transitions it from observer to actor.
 #
+# ONE MODEL, EXPLICITLY. Every duty runs on a single model — `ECOMA_REEVE_MODEL`
+# is one id and every job below reads the same secret. That one id is both the
+# `models` chain and, when a duty grades its own drafts, the judge: with
+# `judge-models` unset the judge falls back to `models`, so `translate` and
+# `harmonise` below set `drafts: 1` — one draft is the answer, no panel is ever
+# spent, and no roster is ever split. `screen-models` is likewise deliberately
+# absent: the cheap spam screen is off, and the free screens + language
+# detection still run on `models`. The cost of a single model is the fallback
+# that a roster would provide — capacity weather (429/timeout) now starves the
+# run — which is the price of a deterministic, budgeted dogfood. To re-arm any
+# of these levers later (a screen roster, a judge panel, a `drafts: 2` spread
+# across two models), set the secret and wire the `with:` key back in below;
+# `action.yml` still documents all three inputs.
+#
 # Target repositories. Dogfooding runs the leaf action against THIS repository's
 # own threads — the warrant at `.github/reeve.yml` is a consumer file, and
 # running a duty against the repository that owns the warrant is the whole point.
@@ -143,7 +157,7 @@ jobs:
       group: reeve-dogfood-triage-${{ github.event.issue.number || inputs.number || 'dispatch' }}
       cancel-in-progress: true
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -165,10 +179,8 @@ jobs:
           github.event.action == 'unlabeled' ||
           github.event.action == 'reopened'
         name: Keep the provider out of the log
-        env:
-          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
         run: |
-          printf '%s,%s\n' "$MODELS" "$SCREEN_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
             id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
@@ -187,8 +199,7 @@ jobs:
           number: ${{ github.event.issue.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
           about: >-
             Reeve is a GitHub Action that reads issues and pull requests with a
             language model and acts on them under a warrant committed to the
@@ -240,7 +251,7 @@ jobs:
       group: reeve-dogfood-translate-${{ github.event.issue.number || github.event.pull_request.number || inputs.number || 'dispatch' }}
       cancel-in-progress: true
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -251,10 +262,8 @@ jobs:
 
       - if: env.MODELS != ''
         name: Keep the provider out of the log
-        env:
-          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
             id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
@@ -266,9 +275,8 @@ jobs:
           number: ${{ github.event.issue.number || github.event.pull_request.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
-          drafts: "2"
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          drafts: "1"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - name: Write dogfood summary
@@ -307,7 +315,7 @@ jobs:
       group: reeve-dogfood-duplicate-${{ github.event.issue.number || inputs.number || 'dispatch' }}
       cancel-in-progress: true
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -331,7 +339,7 @@ jobs:
           number: ${{ github.event.issue.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
           # Report-only until this backlog says what the false-positive rate
           # actually is.
           dry-run: true
@@ -372,7 +380,7 @@ jobs:
       group: reeve-dogfood-respond-${{ github.event.issue.number || inputs.number || 'dispatch' }}
       cancel-in-progress: true
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -383,10 +391,8 @@ jobs:
 
       - if: env.MODELS != ''
         name: Keep the provider out of the log
-        env:
-          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
         run: |
-          printf '%s,%s\n' "$MODELS" "$SCREEN_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
             id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
@@ -398,8 +404,7 @@ jobs:
           number: ${{ github.event.issue.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
           about: >-
             Reeve is a GitHub Action that reads issues and pull requests with a
             language model and acts on them under a warrant committed to the
@@ -495,7 +500,7 @@ jobs:
       group: reeve-dogfood-harmonise-${{ github.sha }}
       cancel-in-progress: false
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -506,10 +511,8 @@ jobs:
 
       - if: env.MODELS != ''
         name: Keep the provider out of the log
-        env:
-          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          printf '%s,%s\n' "$MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
             id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
@@ -520,9 +523,8 @@ jobs:
         with:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
-          drafts: "2"
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          drafts: "1"
           source-language: en
           paths: "README.md"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
@@ -564,7 +566,7 @@ jobs:
       group: reeve-dogfood-review-${{ github.event.pull_request.number || inputs.number || 'dispatch' }}
       cancel-in-progress: true
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       # The rules file is part of the job's own pinned checkout, so a pull
       # request cannot replace it before the review reads it. `ref:` names the
@@ -593,7 +595,7 @@ jobs:
           number: ${{ github.event.pull_request.number || inputs.number }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
           # The warrant grants review nothing; dry-run keeps the findings on the
           # job summary even if a maintainer later adds the grant.
           dry-run: true
@@ -642,15 +644,13 @@ jobs:
         include:
           - shape: drafting
             cron: "17 3 * * 3"
-            drafts: "2"
           - shape: conformance
             cron: "17 3 * * 4"
-            drafts: "0"
     concurrency:
       group: reeve-dogfood-dependa-${{ matrix.shape }}
       cancel-in-progress: false
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -688,10 +688,9 @@ jobs:
         uses: ecoma-io/reeve/dependa@main
         with:
           ecosystems: "npm, github-actions"
-          drafts: ${{ matrix.drafts }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
 
       # Run the conformance comparison CLI: extracts the Renovate baseline,
       # extracts dependa's shadow findings, and produces a conformance report
@@ -759,7 +758,7 @@ jobs:
       group: reeve-dogfood-sweep
       cancel-in-progress: false
     env:
-      MODELS: ${{ secrets.ECOMA_REEVE_MODELS }}
+      MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -770,11 +769,8 @@ jobs:
 
       - if: env.MODELS != ''
         name: Keep the provider out of the log
-        env:
-          SCREEN_MODELS: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
-          JUDGE_MODELS: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
         run: |
-          printf '%s,%s,%s\n' "$MODELS" "$SCREEN_MODELS" "$JUDGE_MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
+          printf '%s\n' "$MODELS" | tr ',|' '\n\n' | while IFS= read -r entry; do
             id=$(printf '%s' "${entry%%=*}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
@@ -787,8 +783,7 @@ jobs:
           limit: "20"
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          screen-models: ${{ secrets.ECOMA_REEVE_SCREEN_MODELS }}
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
           about: >-
             Reeve is a GitHub Action that reads issues and pull requests with a
             language model and acts on them under a warrant committed to the
@@ -804,9 +799,8 @@ jobs:
           limit: "20"
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
-          drafts: "2"
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          drafts: "1"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - if: env.MODELS != '' && matrix.duty == 'harmonise'
@@ -817,9 +811,8 @@ jobs:
           limit: "20"
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
-          models: ${{ secrets.ECOMA_REEVE_MODELS }}
-          judge-models: ${{ secrets.ECOMA_REEVE_JUDGE_MODELS }}
-          drafts: "2"
+          models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          drafts: "1"
           source-language: en
           paths: "README.md"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
