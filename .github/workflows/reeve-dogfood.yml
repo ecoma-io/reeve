@@ -57,6 +57,27 @@ name: Reeve dogfood
 # across two models), set the secret and wire the `with:` key back in below;
 # `action.yml` still documents all three inputs.
 #
+# SIZE — every size input below is derived from one number: the provider's
+# context window, 600k tokens. Tokens are estimated at a conservative 2.5
+# characters per token (code and Vietnamese both run token-dense), so the raw
+# window is ~1.5M characters. A quarter of the window is reserved for prompt
+# scaffolding and the answer where the output is short (triage, respond,
+# duplicate, review), half where the output is as long as the input
+# (translate and harmonise draft whole translations back). From that:
+#
+#   review     — 1.125M chars of input, split 2:1 across diff and context.
+#   triage,    — 1M chars of body; the verdict itself is a handful of tokens.
+#   respond
+#   duplicate  — 100k chars PER BODY, deliberately a fraction of the others:
+#                the cap applies to the checked thread and to every corpus
+#                candidate alike, and the judge reads several bodies at once.
+#   translate  — the whole body (`none`), because chunking bounds the actual
+#                request: 200k-char chunks are ~80k tokens in and ~80k out.
+#   harmonise  — 200k-char chunks for the same reason; the default (0) sends
+#                the whole document in one request, which is exactly the
+#                failure mode a 600k window makes rare but chunking removes.
+#   dependa    — nothing to tune: its evidence is capped at 4k chars by design.
+#
 # Target repositories. Dogfooding runs the leaf action against THIS repository's
 # own threads — the warrant at `.github/reeve.yml` is a consumer file, and
 # running a duty against the repository that owns the warrant is the whole point.
@@ -205,6 +226,7 @@ jobs:
             language model and acts on them under a warrant committed to the
             repository — translating threads and applying labels from a taxonomy
             the maintainers wrote.
+          max-body-chars: "1000000"
           # A real issue event acts (the warrant says label, record); a manual
           # dispatch observes unless a maintainer says otherwise.
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
@@ -277,6 +299,8 @@ jobs:
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
           drafts: "1"
+          max-body-chars: "none"
+          chunk-chars: "200000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - name: Write dogfood summary
@@ -340,6 +364,7 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          max-body-chars: "100000"
           # Report-only until this backlog says what the false-positive rate
           # actually is.
           dry-run: true
@@ -410,6 +435,7 @@ jobs:
             language model and acts on them under a warrant committed to the
             repository — translating threads and applying labels from a taxonomy
             the maintainers wrote.
+          max-body-chars: "1000000"
           # Report-only; the draft lives in the job summary.
           dry-run: true
 
@@ -527,6 +553,7 @@ jobs:
           drafts: "1"
           source-language: en
           paths: "README.md"
+          chunk-chars: "200000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - name: Write dogfood summary
@@ -596,8 +623,8 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
-          max-diff-chars: "600000"
-          max-context-chars: "300000"
+          max-diff-chars: "750000"
+          max-context-chars: "375000"
 
       - name: Write dogfood summary
         if: always()
@@ -788,6 +815,7 @@ jobs:
             language model and acts on them under a warrant committed to the
             repository — translating threads and applying labels from a taxonomy
             the maintainers wrote.
+          max-body-chars: "1000000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - if: env.MODELS != '' && matrix.duty == 'translate'
@@ -800,6 +828,8 @@ jobs:
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
           drafts: "1"
+          max-body-chars: "none"
+          chunk-chars: "200000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - if: env.MODELS != '' && matrix.duty == 'harmonise'
@@ -814,6 +844,7 @@ jobs:
           drafts: "1"
           source-language: en
           paths: "README.md"
+          chunk-chars: "200000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
 
       - name: Write dogfood summary
