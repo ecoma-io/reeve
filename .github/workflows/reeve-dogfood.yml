@@ -596,6 +596,8 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          max-diff-chars: "600000"
+          max-context-chars: "300000"
           # The warrant grants review nothing; dry-run keeps the findings on the
           # job summary even if a maintainer later adds the grant.
           dry-run: true

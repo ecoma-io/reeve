@@ -31,7 +31,7 @@ import {
 
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
-    total: 4000,
+    total: 12000,
     perFileSourceExcerpt: 800,
     importsWindow: 60,
     maxChangedFiles: 25,

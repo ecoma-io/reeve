@@ -22,7 +22,7 @@ import {
 /** A fixture budget, matching the production constants and the default input. */
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
-    total: 4000,
+    total: 12000,
     perFileSourceExcerpt: 800,
     importsWindow: 60,
     maxChangedFiles: 25,

@@ -152,7 +152,7 @@ inputs:
       the prompt, and it stops at a boundary the review reports rather than
       hiding. `0` is refused — write `none` for that meaning instead.
     required: false
-    default: "4000"
+    default: "12000"
 
   max-context-chars:
     description: >-
@@ -166,7 +166,7 @@ inputs:
       The diff itself is already bounded by `max-diff-chars`. `0` is refused —
       write `none` for that meaning instead.
     required: false
-    default: "4000"
+    default: "12000"
 
   confidence:
     description: >-
