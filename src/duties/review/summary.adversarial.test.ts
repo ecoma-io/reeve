@@ -1,6 +1,6 @@
 /**
  * The job summary is where a green run that quietly did less becomes visible
- * (`docs/internal/failure-matrix.md`, "How to read a row"). Every case here
+ * (`docs/development/failure-matrix.md`, "How to read a row"). Every case here
  * asserts that one such quietness reaches the page: a corrupt memory, a pass
  * that did not answer, an uncertain thread listing, an unverified finding, a
  * file the review never saw, a head SHA GitHub never gave.

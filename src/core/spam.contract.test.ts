@@ -9,7 +9,7 @@
  * The asymmetry is the point of the last block. `sift` fails OPEN — a cheap
  * roster that could not answer carries the thread on to the expensive stage —
  * while the deterministic screen fails CLOSED. That is intended
- * (`docs/internal/intent-matrix.md` disagreement 5, adjudicated 2026-08-18),
+ * (`docs/development/intent-matrix.md` disagreement 5, adjudicated 2026-08-18),
  * and it is asserted here so a reader who finds it surprising does not "fix"
  * it into a thread silently dropped on a read error.
  */

@@ -15,6 +15,8 @@ is allowed to exist at all, and it wins any disagreement.
 | Document                                           | The question it answers                                                                                                |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | [`architecture.md`](architecture.md)               | The pipeline stage by stage, what each stage is forbidden from doing, and where the line between core and duty runs.   |
+| [`failure-matrix.md`](failure-matrix.md)           | What each failure mode does, grounded in code — retry, fallback, skip, rollback, fail, and what a runner would see.    |
+| [`intent-matrix.md`](intent-matrix.md)             | The engineering contract rows the code already keeps, each with its invariant, scope and pinned tests.                 |
 | [`duties.md`](duties.md)                           | The mechanics of adding a duty: earning it, evaluating it, wiring it in.                                               |
 | [`language.md`](language.md)                       | Evaluating a duty's language handling, and what is still unresolved about the language layer.                          |
 | [`evaluation.md`](evaluation.md)                   | How a duty proves it works — the fixture set, the harness, and why the headline number is the worst language.          |

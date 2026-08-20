@@ -16,7 +16,7 @@
  * authority").
  *
  * **Every channel is a real channel.** The named channels below are the surfaces
- * `docs/internal/intent-matrix.md` row G enumerates — thread title and body,
+ * `docs/development/intent-matrix.md` row G enumerates — thread title and body,
  * comments, source code, README, commit messages, branch names, filenames, rule
  * files, rule packs, and the model's own answer. None of them is a place a
  * capability is read from, and this file is the executable statement of that.
