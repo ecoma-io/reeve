@@ -13,7 +13,7 @@
  * absorbed into a default nobody chose.
  *
  * Nothing here is retried anywhere in this module — that is the boundary's
- * actual, documented posture (`docs/internal/failure-matrix.md`'s "[GAP]
+ * actual, documented posture (`docs/development/failure-matrix.md`'s "[GAP]
  * GitHub retry"), and the cases below make it executable rather than assumed.
  */
 import { describe, expect, it, vi } from "vitest";

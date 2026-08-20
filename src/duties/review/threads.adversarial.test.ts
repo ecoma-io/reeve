@@ -382,7 +382,7 @@ describe("syncThreads — GitHub failure semantics", () => {
   });
 
   it("a_non_422_failure_aborts_the_remaining_creates_rather_than_continuing", async () => {
-    // No rollback anywhere is the documented posture (`failure-matrix.md`), so
+    // No rollback anywhere is the documented posture (`docs/development/failure-matrix.md`), so
     // what has to be pinned is that the loop does not carry on writing after a
     // failure it did not classify.
     const stub = stubOf([]);

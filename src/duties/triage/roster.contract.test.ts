@@ -2,7 +2,7 @@
  * Intent-contract tests — the intent matrix's category-A rows that no existing
  * suite pinned end-to-end.
  *
- * The matrix (`docs/internal/intent-matrix.md`) cites the unit suites that pin
+ * The matrix (`docs/development/intent-matrix.md`) cites the unit suites that pin
  * the core's predicates (`provider.test.ts`, `spam.test.ts`, `detect.test.ts`,
  * `summary.test.ts`). What this file adds is the DUTY-BOUNDARY wiring those
  * suites deliberately leave to the caller: triage's decide() builds its own
