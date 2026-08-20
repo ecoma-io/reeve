@@ -154,8 +154,8 @@ Every input `review/action.yml` declares.
 | `packs-path`        | no       | `.github/reeve-packs`       | Where the rule packs this rules file references live — `<namespace>/<name>.yml` under it. A `packs:` reference resolves here; a missing or non-matching pack fails red. See [Rule packs](../rule-packs.md).                                                                                                                                            |
 | `risk-path`         | no       | `.github/reeve-risk.yml`    | The repository's own risk profile — deterministic signal weights and path globs that price review depth. Missing is the default profile, not an error. It prices depth only and cannot grant a capability — the warrant alone does that.                                                                                                               |
 | `trigger`           | no       | `pr`                        | `pr` — the default — waits for ready-for-review and skips a draft green, with the reason in the job summary. `prod` also reviews drafts.                                                                                                                                                                                                               |
-| `max-diff-chars`    | no       | `4000`                      | The whole-run budget of diff text one review may carry to the model, in characters — cumulative across files, walked in listing order, with the first file that does not fit and everything after it skipped as capped. `none` removes the bound. `0` is refused.                                                                                      |
-| `max-context-chars` | no       | `4000`                      | The whole-run budget of the repository context the review engine assembles (changed symbols, imports, related tests, configuration, surrounding base-branch source, callers, change history) that one review may carry to the model, in characters. Sections drop whole past the budget with a visible mark. `none` removes the bound. `0` is refused. |
+| `max-diff-chars`    | no       | `12000`                     | The whole-run budget of diff text one review may carry to the model, in characters — cumulative across files, walked in listing order, with the first file that does not fit and everything after it skipped as capped. `none` removes the bound. `0` is refused.                                                                                      |
+| `max-context-chars` | no       | `12000`                     | The whole-run budget of the repository context the review engine assembles (changed symbols, imports, related tests, configuration, surrounding base-branch source, callers, change history) that one review may carry to the model, in characters. Sections drop whole past the budget with a visible mark. `none` removes the bound. `0` is refused. |
 | `confidence`        | no       | `0.6`                       | The floor for the whole review's reported confidence, between 0 and 1 — one number for the whole answer, not a per-finding bar. Below it, findings are still reconciled and shown in the job summary, but the comment is withheld.                                                                                                                     |
 | `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, post nothing. The review comment that would have been posted is printed to the log, and the job summary still shows the full verdict.                                                                                                                                                                      |
 | `endpoints`         | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                                                                                                        |
@@ -441,7 +441,7 @@ counted, every section has a fixed cap, and hostiled-looking history is
 truncated at the budget. Two runs over the same checkout and diff produce
 byte-identical text.
 
-**`max-context-chars` (default `4000`) budgets these sections only, not the
+**`max-context-chars` (default `12000`) budgets these sections only, not the
 diff** — the diff already has `max-diff-chars`, and a section that does not
 fit the whole-run context budget drops whole, never half-shows, with a
 visible `… (context truncated: context sections cut)` mark. `none` removes
@@ -583,12 +583,12 @@ exactly as loud as D5 asks. Every admitted model finding is then verified
 against deterministic evidence before it is reported (see
 [Verification](#verification-model-findings-against-deterministic-evidence)).
 
-`max-diff-chars` (default `4000` for the whole run, `none` for no bound) is the
+`max-diff-chars` (default `12000` for the whole run, `none` for no bound) is the
 lever that bounds the total diff text a review may carry, and `endpoints`
 spreads a roster across providers so a capacity failure demotes only the
 `model@alias` that hit it. The context engine costs no provider requests — its
 reads hit the checkout's disk only — but its assembled text enters the same
-single prompt, so `max-context-chars` (default `4000`) is the second lever on
+single prompt, so `max-context-chars` (default `12000`) is the second lever on
 total prompt size. Risk prices the passes; the warrant prices the capabilities.
 See [Cost](../../guides/cost.md) for the full arithmetic.
 
