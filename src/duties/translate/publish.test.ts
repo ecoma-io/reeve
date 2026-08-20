@@ -102,10 +102,24 @@ describe("publication", () => {
     expect(body()).toContain("machine translation");
   });
 
-  it("states the original/translation boundary once rather than per language", () => {
-    expect(body({ posted: [posted(english), posted(chinese)] }).split("answers for")).toHaveLength(
-      2,
-    );
+  it("keeps each section's boundary note inside that section's own <details>", () => {
+    // The whole point of the layout: what sits outside the sections never grows
+    // with the language count, so ten languages are ten collapsed lines rather
+    // than ten copies of the same two sentences stacked above and below them.
+    const rendered = body({ posted: [posted(english), posted(chinese)] });
+    const englishSummary = rendered.indexOf("<b>English</b>");
+    const chineseSummary = rendered.indexOf("<b>中文</b>");
+    const englishNote = rendered.indexOf("The text above is the original");
+    const chineseNote = rendered.indexOf("上面的文本是原文");
+    expect(englishNote).toBeGreaterThan(englishSummary);
+    expect(englishNote).toBeLessThan(chineseSummary);
+    expect(chineseNote).toBeGreaterThan(chineseSummary);
+  });
+
+  it("puts nothing between sections and nothing after the last, so the visible block stays compact", () => {
+    const rendered = body({ posted: [posted(english), posted(chinese)] });
+    expect(rendered).toContain("</details>\n\n<details>");
+    expect(rendered.endsWith("</details>")).toBe(true);
   });
 
   it("opens the only translation, so a reader is not made to click for it", () => {
@@ -183,8 +197,8 @@ describe("publication", () => {
     // Without them a fenced code block in the translation renders as one line
     // of backticks.
     const rendered = body({ posted: [posted(english, "```\ncode\n```")] });
-    expect(rendered).toContain("<summary><b>English</b></summary>\n\n```");
-    expect(rendered).toContain("```\n\n</details>");
+    expect(rendered).toContain("counts.\n\n```\ncode\n```\n\n<sub>");
+    expect(rendered).toContain("</summary>\n\n> ");
   });
 
   it("escapes a label, which arrives from a workflow file", () => {
@@ -270,20 +284,19 @@ describe("chrome — follows the languages actually posted", () => {
     expect(rendered).not.toContain("The text above is the original");
   });
 
-  it("renders the boundary once per distinct posted language, English first, when several are posted", () => {
+  it("renders each posted language's boundary in its own section, in posted order", () => {
     const rendered = body({ posted: [posted(vietnamese), posted(english)] });
-    const englishAt = rendered.indexOf("The text above is the original");
     const vietnameseAt = rendered.indexOf("Văn bản phía trên là bản gốc");
-    expect(englishAt).toBeGreaterThan(-1);
+    const englishAt = rendered.indexOf("The text above is the original");
     expect(vietnameseAt).toBeGreaterThan(-1);
-    expect(englishAt).toBeLessThan(vietnameseAt);
+    expect(englishAt).toBeGreaterThan(vietnameseAt);
   });
 
-  it("does not repeat a language's boundary line for a second posting in the same language", () => {
-    // Two English postings (e.g. a language posted alongside a fallback) still
-    // share one English boundary line, not two.
+  it("gives a second posting in the same language its own section chrome", () => {
+    // Chrome lives inside the section it describes, so it repeats with the
+    // section — each copy hidden in its own <details>, never stacked visibly.
     const rendered = body({ posted: [posted(english), posted(english, "Another.", "model-b")] });
-    expect(rendered.split("The text above is the original")).toHaveLength(2);
+    expect(rendered.split("The text above is the original")).toHaveLength(3);
   });
 
   it("renders the footer's fixed notes in Vietnamese when only Vietnamese was posted", () => {
