@@ -31844,7 +31844,7 @@ function parseModels(raw) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -31857,17 +31857,20 @@ function parseModels(raw) {
 function parseSeats(raw) {
   const seats = [];
   const names = /* @__PURE__ */ new Map();
-  for (const entry of parseList(raw)) {
-    const { ids, name } = split(entry);
-    const chain = [
-      ...new Set(
-        ids.split("|").map((id) => id.trim()).filter((id) => id.length > 0)
-      )
-    ];
+  for (const seatRaw of raw.split("|")) {
+    const chain = [];
+    let seatName = null;
+    for (const entry of parseList(seatRaw)) {
+      const { ids, name } = split(entry);
+      const id = ids.trim();
+      if (id.length === 0) continue;
+      if (!chain.includes(id)) chain.push(id);
+      if (seatName === null && name !== null) seatName = name;
+    }
     if (chain.length === 0) continue;
     seats.push(chain);
-    if (name === null) continue;
-    for (const id of chain) if (!names.has(id)) names.set(id, name);
+    if (seatName === null) continue;
+    for (const id of chain) if (!names.has(id)) names.set(id, seatName);
   }
   return { seats, names };
 }
@@ -31956,7 +31959,10 @@ function createRoutedProvider(endpoints) {
           usage: null,
           kind: "protocol",
           endpoint: alias,
-          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+          // The failure's own `model` field carries the id, and the caller
+          // decides how that is shown — a reason that repeated it verbatim
+          // would put the raw id in a log the display name was masking.
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for this model.`
         };
       }
       const completion = await provider.complete(id, messages, options);
@@ -32524,10 +32530,19 @@ function warnIfStarved(models, weather, sweep) {
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
 }
-function failIfProtocolExhausted(models, failures) {
+function warnIfPanelIdle(seats, drafts) {
+  const idle = seats.length > 0 && drafts <= 1;
+  if (idle) {
+    warning(
+      "judge-models is configured but drafts is 1 \u2014 with a single draft there is nothing to choose between, so the panel is never asked. Raise drafts to put the seats to work."
+    );
+  }
+  return idle;
+}
+function failIfProtocolExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
   const exhausted2 = protocolExhausted(models, failures);
   if (exhausted2) {
-    const reasons = failures.map((f) => `${f.model}: ${f.reason}`).join("; ");
+    const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     setFailed(
       `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
     );
@@ -35238,6 +35253,7 @@ async function run() {
   let statePr = null;
   try {
     const base = readSettings();
+    warnIfPanelIdle(base.judges, base.drafts);
     const client = assembleClient(base, meter, ["classify", "draft", "judge"], [
       base.judges.flat()
     ]);
@@ -35603,7 +35619,7 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       );
     }
     if (result.attempts.length === 0) {
-      failIfProtocolExhausted(settings.models, result.failures);
+      failIfProtocolExhausted(settings.models, result.failures, settings.modelNames);
       warning(
         `harmonise: no admissible draft produced for ${locale} translation of ${group.id}`
       );

@@ -101,7 +101,7 @@ import {
 import { assemble } from "../../core/publish.js";
 import { recallCorrections } from "../../core/recall.js";
 import { sift } from "../../core/spam.js";
-import { failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
+import { failIfProtocolExhausted, warnIfPanelIdle, writeRunSummary } from "../../core/summary.js";
 import {
   dutyLanguages,
   openAuthority,
@@ -468,7 +468,7 @@ async function decide(
   }
 
   if (drafted.attempts.length === 0) {
-    failIfProtocolExhausted(settings.models, drafted.failures);
+    failIfProtocolExhausted(settings.models, drafted.failures, settings.modelNames);
     core.warning(`#${String(at.number)}: no draft survived this run.`);
     return settled({ language: language?.label ?? null });
   }
@@ -587,6 +587,7 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    warnIfPanelIdle(base.judges, base.drafts);
     const client = assembleClient(
       base,
       meter,

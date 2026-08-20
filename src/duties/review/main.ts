@@ -659,6 +659,7 @@ async function decide(
     failIfProtocolExhausted(
       settings.models,
       passResults.flatMap((result) => result.failures),
+      settings.modelNames,
     );
   }
 

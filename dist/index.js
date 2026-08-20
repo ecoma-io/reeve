@@ -31587,7 +31587,7 @@ function parseModels(raw) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` groups fallbacks into one judge seat and means nothing here \u2014 \`models\` is already a single rotation chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -31682,7 +31682,10 @@ function createRoutedProvider(endpoints) {
           usage: null,
           kind: "protocol",
           endpoint: alias,
-          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`
+          // The failure's own `model` field carries the id, and the caller
+          // decides how that is shown — a reason that repeated it verbatim
+          // would put the raw id in a log the display name was masking.
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for this model.`
         };
       }
       const completion = await provider.complete(id, messages, options);

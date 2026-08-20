@@ -357,9 +357,9 @@ export async function run(): Promise<void> {
           isDev: dep.dev,
         });
 
-        // 7. MODEL RISK INTERPRETATION — when drafts > 0 and models available
+        // 7. MODEL RISK INTERPRETATION — opt-in, and only with a roster to ask
         let risk = riskFacts;
-        if (settings.drafts > 0 && settings.models.length > 0) {
+        if (settings.riskInterpretation && settings.models.length > 0) {
           const enclosed = encloseEvidence(evidence);
           const prompt = interpretationPrompt(
             {
@@ -391,7 +391,7 @@ export async function run(): Promise<void> {
               risk = { facts: riskFacts.facts, interpretation };
             }
           } else {
-            failIfProtocolExhausted(settings.models, rotation.failures);
+            failIfProtocolExhausted(settings.models, rotation.failures, settings.modelNames);
           }
         }
 

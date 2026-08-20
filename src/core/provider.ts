@@ -212,10 +212,11 @@ export interface Panel {
  * knows whether an empty list is a problem: `readShared` refuses one for
  * `models`, and `parseSeats` returns one for a `judge-models` nobody set.
  *
- * `|` is refused rather than tolerated. It is the seat separator, and a
- * `models` written with it is somebody expecting groups here — which is a
- * misunderstanding worth stopping on the first run rather than one whose only
- * symptom is that the ids all ran together into one that no provider has.
+ * `|` is refused rather than tolerated. It is `judge-models`' seat separator —
+ * another voter, another request — and a `models` written with it is somebody
+ * expecting a panel here, which is a misunderstanding worth stopping on the
+ * first run rather than one whose only symptom is that the ids all ran
+ * together into one that no provider has.
  */
 export function parseModels(raw: string): Roster {
   const models: string[] = [];
@@ -225,9 +226,9 @@ export function parseModels(raw: string): Roster {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        "models: `|` groups fallbacks into one judge seat and means nothing here — " +
-          "`models` is already a single rotation chain, so separate its ids with `,`. " +
-          `Got \`${ids.trim()}\`.`,
+        "models: `|` separates judge seats — one more voter, one more request — and " +
+          "means nothing here. `models` is a single fallback chain, so separate its " +
+          `ids with \`,\`. Got \`${ids.trim()}\`.`,
       );
     }
 
@@ -248,9 +249,16 @@ export function parseModels(raw: string): Roster {
  * Splits a `judge-models` input into seats, each its own chain to rotate
  * through.
  *
- * `,` and a newline separate seats; `|` separates the models inside one. So
- * `a | b, c` is two votes, and the second model of the first seat is only ever
+ * `|` separates seats; `,` and a newline separate the models inside one. So
+ * `a, b | c` is two votes, and the second model of the first seat is only ever
  * asked because the first one could not deliver a vote.
+ *
+ * The separators carry the same meaning they carry everywhere else, which is
+ * the point of the assignment: a `,` in `models` is a fallback, so a `,` here
+ * is a fallback too, and a list copied from one input into the other keeps the
+ * spend it had. The failure mode of getting this wrong is asymmetric — a
+ * `models` list pasted here reads as one seat and casts one vote, quieter and
+ * cheaper than the three votes the old reading would have silently paid for.
  *
  * The two levels exist because a panel and a rotation want opposite things from
  * a list, and both are legitimate. A seat is a voter, so more seats mean more
@@ -258,35 +266,34 @@ export function parseModels(raw: string): Roster {
  * a model being out of quota. Writing them on one axis makes you choose, and a
  * maintainer configuring free models needs both.
  *
- * An input with no `|` in it parses to one seat per id, which is what it always
- * meant — this widens the syntax rather than changing it.
- *
  * **A name belongs to the seat, not to the model that happens to fill it.**
- * `a | b = Careful` is one voter called `Careful` whichever of the two answers,
- * which is the honest reading: a reader of the thread is being told which
- * opinion this was, and "the seat's fallback was in today" is not a distinction
- * they can do anything with. So the name is recorded against every model in the
- * seat, and the first seat to claim a model is the one that names it.
+ * `a, b = Careful | c` is one voter called `Careful` whichever of the two
+ * answers, which is the honest reading: a reader of the thread is being told
+ * which opinion this was, and "the seat's fallback was in today" is not a
+ * distinction they can do anything with. A name written against any model in
+ * the chain names the whole seat, the seat's first name wins, and the first
+ * seat to claim a model is the one that names it.
  */
 export function parseSeats(raw: string): Panel {
   const seats: string[][] = [];
   const names = new Map<string, string>();
 
-  for (const entry of parseList(raw)) {
-    const { ids, name } = split(entry);
-    const chain = [
-      ...new Set(
-        ids
-          .split("|")
-          .map((id) => id.trim())
-          .filter((id) => id.length > 0),
-      ),
-    ];
+  for (const seatRaw of raw.split("|")) {
+    const chain: string[] = [];
+    let seatName: string | null = null;
+
+    for (const entry of parseList(seatRaw)) {
+      const { ids, name } = split(entry);
+      const id = ids.trim();
+      if (id.length === 0) continue;
+      if (!chain.includes(id)) chain.push(id);
+      if (seatName === null && name !== null) seatName = name;
+    }
     if (chain.length === 0) continue;
 
     seats.push(chain);
-    if (name === null) continue;
-    for (const id of chain) if (!names.has(id)) names.set(id, name);
+    if (seatName === null) continue;
+    for (const id of chain) if (!names.has(id)) names.set(id, seatName);
   }
 
   return { seats, names };
@@ -457,7 +464,10 @@ export function createRoutedProvider(endpoints: readonly RoutedEndpoint[]): Prov
           usage: null,
           kind: "protocol",
           endpoint: alias,
-          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for \`${model}\`.`,
+          // The failure's own `model` field carries the id, and the caller
+          // decides how that is shown — a reason that repeated it verbatim
+          // would put the raw id in a log the display name was masking.
+          reason: `endpoints: no endpoint named \`${alias ?? ""}\` is configured for this model.`,
         };
       }
 

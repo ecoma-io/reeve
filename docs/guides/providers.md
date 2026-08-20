@@ -121,6 +121,43 @@ full reasoning.
 Once more than one endpoint has carried any spend, every duty's job summary
 gains an Endpoint column, naming which one answered each row.
 
+## Hiding model ids
+
+A model id is a provider's identifier and routinely a maintainer's secret —
+which provider an organisation happens to have access to is nobody else's
+business, and a router's ids (`gh/deepseek-v4-flash-free`) say even more than
+a vendor's. Two mechanisms, layered:
+
+**`id = Name` controls what readers see.** Every `models`, `screen-models`
+and `judge-models` input accepts it, and everything a person reads — the job
+summary, every warning, every posted attribution — shows the name instead of
+the id:
+
+```yaml
+models: gh/deepseek-v4-flash-free = deepseek-v4-flash
+```
+
+**An Actions variable controls what the repository shows.** In a public
+repository the workflow file is public too, so an id written inline is
+already published whatever the comments show. Keep the whole roster — ids
+and names together — in a repository or organisation variable, and every
+duty's workflow reads one source:
+
+```yaml
+models: ${{ vars.REEVE_MODELS }}
+```
+
+One variable also gives you the thing a shared default would: change the
+roster once, and every duty in every workflow follows.
+
+**The honest limits.** Naming is presentation, not a security boundary: the
+id still travels to the endpoint you configured (which already knows it), and
+nothing can stop a model's own prose from announcing what it is — a draft
+that opens "As DeepSeek, ..." was written that way by the model, not leaked
+by the runtime. Treat `id = Name` as hygiene for logs, summaries and posted
+threads; treat the variable as the place ids live; and treat neither as
+making a public endpoint private.
+
 ## Who the runtime belongs to
 
 The provider inputs are runtime, not authority. They live on the duty's leaf

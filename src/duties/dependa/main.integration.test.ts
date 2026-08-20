@@ -347,7 +347,7 @@ function baseInputs(): Record<string, string> {
     models: "",
     warrant: warrantPath,
     ecosystems: "npm",
-    drafts: "0",
+    "risk-interpretation": "false",
     "dry-run": "false",
     "max-requests": "none",
     paths: "",
@@ -497,7 +497,7 @@ describe("the model roster", () => {
     // contract test of its own.
     stub.answer = () => ({ status: 500, payload: { error: { message: "no room" } } });
 
-    const run = await runAction({ drafts: "1", models: "first, second" });
+    const run = await runAction({ "risk-interpretation": "true", models: "first, second" });
 
     expect(run.code).toBe(0);
     expect(stub.asked.map((ask) => ask.model)).toEqual(["first", "second"]);
@@ -508,7 +508,7 @@ describe("the model roster", () => {
     // rather than rotating past it — and nothing is published on the way out.
     stub.answer = () => ({ status: 401, payload: { error: { message: "invalid api key" } } });
 
-    const run = await runAction({ drafts: "1", models: "first, second" });
+    const run = await runAction({ "risk-interpretation": "true", models: "first, second" });
 
     expect(run.code).not.toBe(0);
     expect(stub.asked.map((ask) => ask.model)).toEqual(["first"]);
@@ -517,7 +517,7 @@ describe("the model roster", () => {
   });
 
   it("asks no model at all when no roster is configured", async () => {
-    const run = await runAction({ drafts: "1", models: "" });
+    const run = await runAction({ "risk-interpretation": "true", models: "" });
 
     expect(run.code).toBe(0);
     expect(stub.asked).toEqual([]);
@@ -575,7 +575,7 @@ describe("the injection fence around third-party evidence", () => {
   it("sends the fence rule with the fenced evidence, in the same request", async () => {
     seedEvidence();
 
-    const run = await runAction({ drafts: "1", models: "stub-model" });
+    const run = await runAction({ "risk-interpretation": "true", models: "stub-model" });
 
     expect(run.code).toBe(0);
     const ask = riskAsk();
@@ -593,7 +593,7 @@ describe("the injection fence around third-party evidence", () => {
     // model would be told about a boundary that is not the one present.
     seedEvidence();
 
-    await runAction({ drafts: "1", models: "stub-model" });
+    await runAction({ "risk-interpretation": "true", models: "stub-model" });
 
     const user = riskAsk()?.user ?? "";
     const opened = /<dependa-evidence id="([a-f0-9]+)">/.exec(user)?.[1];
@@ -613,7 +613,7 @@ describe("the injection fence around third-party evidence", () => {
       },
     ];
 
-    await runAction({ drafts: "1", models: "stub-model" });
+    await runAction({ "risk-interpretation": "true", models: "stub-model" });
 
     const user = riskAsk()?.user ?? "";
     const at = user.indexOf("IGNORE ALL PREVIOUS INSTRUCTIONS");
@@ -627,7 +627,7 @@ describe("the injection fence around third-party evidence", () => {
   it("still states the deterministic facts, which are the trusted half", async () => {
     seedEvidence();
 
-    await runAction({ drafts: "1", models: "stub-model" });
+    await runAction({ "risk-interpretation": "true", models: "stub-model" });
 
     expect(riskAsk()?.user).toContain("Risk facts (deterministic, from version metadata)");
   });

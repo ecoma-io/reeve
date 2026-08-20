@@ -131,8 +131,8 @@ grant it `edit-file` and `open-pr`.
 
 `models` is the only input this action requires for risk interpretation —
 model ids, comma or newline separated, in preference order. When `models` is
-empty and `drafts` is `0`, the duty runs without any model calls at all;
-deterministic risk facts alone are used. `api-key` is not required by the
+empty and `risk-interpretation` is `false`, the duty runs without any model
+calls at all; deterministic risk facts alone are used. `api-key` is not required by the
 schema (a keyless endpoint is a supported configuration), but almost every
 real provider needs one — see
 [Cost](../../guides/cost.md#running-it-with-no-key-at-all).
@@ -141,31 +141,32 @@ real provider needs one — see
 
 Every input `dependa/action.yml` declares.
 
-| Input             | Required | Default                     | What it does                                                                                                                                                                 |
-| ----------------- | -------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`    | no       | `${{ github.token }}`       | Token used to read and write repository files and pull requests.                                                                                                             |
-| `base-url`        | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint. Used only for optional risk interpretation — the core pipeline is deterministic.                                          |
-| `api-key`         | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                              |
-| `models`          | no       | _(empty)_                   | Model ids for risk interpretation, comma or newline separated, in preference order. `id = Name` gives a model a display name. Empty + `drafts: 0` = fully deterministic run. |
-| `warrant`         | no       | `.github/reeve.yml`         | Where the permissions live. `edit-file` and `open-pr` are granted here, under `duties:`, and are not granted by default. Missing at this default path is not a failure.      |
-| `ecosystems`      | no       | _(empty)_                   | Which ecosystems to scan: `npm`, `github-actions`, `cargo`, `go`, `docker` — comma or newline separated. Empty = all known. Narrows the warrant's own list; cannot widen it. |
-| `drafts`          | no       | `0`                         | Risk interpretations per proposal, scored deterministically. `0` = no model call at all; deterministic facts alone. The quality lever that costs calls instead of money.     |
-| `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                  |
-| `max-requests`    | no       | `none`                      | How many provider requests one run may spend, or `none` for no bound. Checked at each clean-cut boundary — before each dependency, before each group.                        |
-| `paths`           | no       | _(empty)_                   | Manifest paths to scan, comma or newline separated. Empty scans the whole repository. Use this to limit dependa to a subdirectory in a monorepo.                             |
-| `request-timeout` | no       | `120s`                      | How long one request may run before it counts as weather. Whole seconds or minutes; a bare number is refused.                                                                |
-| `temperature`     | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request.                                                                                                     |
+| Input                 | Required | Default                     | What it does                                                                                                                                                                                  |
+| --------------------- | -------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `github-token`        | no       | `${{ github.token }}`       | Token used to read and write repository files and pull requests.                                                                                                                              |
+| `base-url`            | no       | `https://api.openai.com/v1` | An OpenAI-compatible `/chat/completions` endpoint. Used only for optional risk interpretation — the core pipeline is deterministic.                                                           |
+| `api-key`             | no       | _(empty)_                   | The provider's key. Empty is a supported keyless configuration.                                                                                                                               |
+| `models`              | no       | _(empty)_                   | Model ids for risk interpretation, comma or newline separated, in preference order. `id = Name` gives a model a display name. Empty + `risk-interpretation: false` = fully deterministic run. |
+| `warrant`             | no       | `.github/reeve.yml`         | Where the permissions live. `edit-file` and `open-pr` are granted here, under `duties:`, and are not granted by default. Missing at this default path is not a failure.                       |
+| `ecosystems`          | no       | _(empty)_                   | Which ecosystems to scan: `npm`, `github-actions`, `cargo`, `go`, `docker` — comma or newline separated. Empty = all known. Narrows the warrant's own list; cannot widen it.                  |
+| `risk-interpretation` | no       | `false`                     | `true` asks a model to read each proposal's evidence and write an advisory risk summary — one request per proposal, never the sole basis for anything. `false` = no model call at all.        |
+| `dry-run`             | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                   |
+| `max-requests`        | no       | `none`                      | How many provider requests one run may spend, or `none` for no bound. Checked at each clean-cut boundary — before each dependency, before each group.                                         |
+| `paths`               | no       | _(empty)_                   | Manifest paths to scan, comma or newline separated. Empty scans the whole repository. Use this to limit dependa to a subdirectory in a monorepo.                                              |
+| `request-timeout`     | no       | `120s`                      | How long one request may run before it counts as weather. Whole seconds or minutes; a bare number is refused.                                                                                 |
+| `temperature`         | no       | _(empty)_                   | Sampling temperature, `0`–`2`. Empty omits the field from every request.                                                                                                                      |
 
 **`ecosystems` narrows, never widens.** The warrant's own `ecosystems:` list
 sets the ceiling; the `ecosystems` input can only remove ecosystems from that
 list, never add ones the warrant did not name.
 
-**`drafts` controls model use for risk interpretation.** When `0` (the
+**`risk-interpretation` is the one model switch.** When `false` (the
 default), no model is called for risk assessment — the deterministic risk
-facts alone are used. When above zero, the model reads the evidence (changelogs,
-release notes, advisory text) and produces an advisory risk level and summary.
-That summary is enclosed and marked as model output; it is never the sole
-basis for a policy decision.
+facts alone are used. When `true`, the model reads the evidence (changelogs,
+release notes, advisory text) and produces an advisory risk level and summary
+— one request per proposal, through the `models` rotation. That summary is
+enclosed and marked as model output; it is never the sole basis for a policy
+decision.
 
 **`paths` scopes the scan for monorepos.** When empty, the entire repository
 tree is walked. When set, only files under the named paths are considered —
@@ -302,8 +303,8 @@ metadata alone, no model call:
 | `hasChangelog`        | Whether the target version has published release notes |
 | `isDev`               | Whether this is a development dependency               |
 
-**Risk interpretation** is optional and model-assisted. When `drafts` is above
-zero, the model reads the evidence and produces an advisory risk level
+**Risk interpretation** is optional and model-assisted. When
+`risk-interpretation` is `true`, the model reads the evidence and produces an advisory risk level
 (`low`, `moderate`, or `high`), a one-sentence summary, and a flag for
 breaking changes. This interpretation is enclosed and marked as model output;
 it supplements the facts, but it never overrides them. A policy that gates on
@@ -394,11 +395,11 @@ in Reeve shares.
 No proposal, no cost. A dependency whose current version is already the latest
 costs one datasource query and nothing else. Classification and grouping are
 free — they are deterministic code. Risk interpretation costs one model call
-per proposal per draft, and `drafts` defaults to `0`, so the default run
-spends zero model requests.
+per proposal, and `risk-interpretation` defaults to `false`, so the default
+run spends zero model requests.
 
-The cost levers: `drafts` (more interpretations per proposal for better risk
-assessment), and the model tier you pick. A cheap model for risk interpretation
+The cost levers: `risk-interpretation` (an advisory summary beside the facts),
+and the model tier you pick. A cheap model for risk interpretation
 costs very little; an expensive one costs more. The core pipeline — discovery,
 classification, grouping, policy enforcement — never calls a model at all.
 

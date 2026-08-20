@@ -105,7 +105,12 @@ import {
   type Weather,
 } from "../../core/provider.js";
 import { createMeter, type Meter } from "../../core/meter.js";
-import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
+import {
+  warnIfStarved,
+  warnIfPanelIdle,
+  failIfProtocolExhausted,
+  writeRunSummary,
+} from "../../core/summary.js";
 import {
   newAccumulator,
   remainingOf,
@@ -388,6 +393,7 @@ export async function run(): Promise<void> {
 
   try {
     const base = readSettings();
+    warnIfPanelIdle(base.judges, base.drafts);
     const client = assembleClient(base, meter, ["detect", "draft", "judge"] as const, [
       base.judges.flat(),
     ]);
