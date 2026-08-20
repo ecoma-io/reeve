@@ -156,7 +156,7 @@ endpoint and holds no key. Two things are worth knowing before the first run:
   already exported in your shell is the one that will be used.
 
 This repository also runs its own duties on its own issues and pull requests —
-`.github/workflows/reeve-dogfood.yml`, one job per duty, each naming the real
+`.github/workflows/reeve.yml`, one job per duty, each naming the real
 public leaf with `uses: ecoma-io/reeve/<duty>@main`. `@main` rather than a tag
 because dogfooding is how an un-released change gets exercised: what runs is the
 committed bundle on `main`, the one CI proved matches `src/`, so a change is
@@ -179,7 +179,7 @@ screen roster is deliberately not wired — the `judge-models` and `screen-model
 `action.yml` inputs exist for a consumer who wants them, but the workflow
 itself reads a single model. Re-arming either lever (a panel, a cheap screen
 roster) means setting the extra secret and wiring the `with:` key back into
-`.github/workflows/reeve-dogfood.yml`.
+`.github/workflows/reeve.yml`.
 
 The id carries the name it is to be called by:
 

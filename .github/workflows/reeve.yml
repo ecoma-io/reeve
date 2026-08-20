@@ -1,4 +1,4 @@
-name: Reeve dogfood
+name: Reeve
 
 # The one workflow that dogfoods every duty. This file is the consolidation of
 # the per-duty dogfood workflows it replaces (reeve-triage-issue, reeve-translate-issue,

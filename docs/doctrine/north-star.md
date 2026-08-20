@@ -497,7 +497,7 @@ run-wide across every thread it processes, so a `Weather` object exhausted on
 thread one stops thread two from spending a call rather than retrying the
 same dead end; `since` bounds by creation date, never by update, so a sweep's
 own labelling or translating cannot push its own bound forward under it; and
-`.github/workflows/reeve-dogfood.yml` runs both duties on a weekly schedule
+`.github/workflows/reeve.yml` runs both duties on a weekly schedule
 against this repository's own backlog, the same dogfooding the per-thread
 jobs in the same file already do.
 
