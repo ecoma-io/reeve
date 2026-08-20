@@ -13,16 +13,13 @@
  * different question from whether a *duty* can translate a thread's content
  * into that language.
  *
- * **Chrome follows the language of the block it wraps.** A block that
- * already belongs to one language — a lifecycle comment resolved to the
- * thread's own language, a first reply, a duplicate proposal, each written in
- * one language throughout — gets its chrome in that same language, via
- * {@link chrome}. A block that introduces several language sections at
- * once — `translate`'s boundary note above every section and its footer
- * below all of them — is shared by every language a thread got translated
- * into, so it renders once per language present, English line first, via
- * {@link chromeLines}. Neither picks a single language to speak *about* the
- * others in.
+ * **Chrome follows the language of the block it wraps.** Every block a duty
+ * publishes belongs to one language throughout — a lifecycle comment resolved
+ * to the thread's own language, a first reply, a duplicate proposal, and each
+ * of `translate`'s collapsible sections, whose boundary note and footer sit
+ * inside the section they describe — so its chrome renders in that same
+ * language, via {@link chrome}, and never picks a single language to speak
+ * *about* another in.
  *
  * **Adding a language is one pull request, touching only this file.** A new
  * entry in {@link CHROME_LANGUAGES}, a full row of translations for it added
@@ -55,7 +52,7 @@ export type ChromeLanguage =
   | "vi"
   | "zh";
 
-/** Every language {@link CHROME} has a row for, English first — the order {@link chromeLines} renders in. */
+/** Every language {@link CHROME} has a row for, English first. */
 export const CHROME_LANGUAGES: readonly ChromeLanguage[] = [
   "en",
   "ar",
@@ -84,13 +81,13 @@ type Row = Readonly<Record<ChromeLanguage, string>>;
 
 /**
  * The whole committed table, one row per chrome string, one column per
- * language. `{name}` inside a value is a placeholder {@link chrome} and
- * {@link chromeLines} substitute from their `params` argument — see either
- * one's doc comment for what happens when a placeholder is left unfilled.
+ * language. `{name}` inside a value is a placeholder {@link chrome}
+ * substitutes from its `params` argument — see its doc comment for what
+ * happens when a placeholder is left unfilled.
  */
 const CHROME = {
-  // translate/publish.ts — boundary() and footer() wrap every language
-  // section in the thread at once, so both render through `chromeLines`.
+  // translate/publish.ts — each language's collapsible section carries its
+  // own boundary note and footer inside it, in that section's language.
   translateBoundary: {
     en: "**The text above is the original, and it is the version this project answers for.** Everything below is a machine translation by [Reeve](https://github.com/ecoma-io/reeve). Where the two disagree, the text above is the one that counts.",
     ar: "**النص أعلاه هو النص الأصلي، وهو النسخة التي يستند إليها هذا المشروع.** كل ما أدناه هو ترجمة آلية بواسطة [Reeve](https://github.com/ecoma-io/reeve). في حال اختلاف النصين، يكون النص أعلاه هو المعتمد.",
@@ -208,9 +205,8 @@ const CHROME = {
   },
 
   // lifecycle/message.ts's footer() — every line below already sits under a
-  // comment `renderSay`/`renderClose` already resolved to one language, so
-  // this renders through `chrome`, not `chromeLines`. The zh row keeps the
-  // same register as `lifecycle/message.ts`'s own `BUILTIN_REMINDER`/
+  // comment `renderSay`/`renderClose` already resolved to one language. The
+  // zh row keeps the same register as `lifecycle/message.ts`'s own `BUILTIN_REMINDER`/
   // `BUILTIN_CLOSE` — "重新开始计时" for "restarts the clock" — so a lifecycle
   // comment reads as one voice, not two translators.
   lifecycleFooterResetsAuthor: {
@@ -642,29 +638,6 @@ export function chrome(
   params: Readonly<Record<string, string>> = {},
 ): string {
   return fill(CHROME[key][resolve(code)], params);
-}
-
-/**
- * `key` rendered once per distinct language `codes` resolves to, English
- * first, in {@link CHROME_LANGUAGES} order — the shared case: `codes` names
- * every language a multi-language block actually carries, not necessarily
- * every language a caller supports elsewhere.
- *
- * Two codes that both fall outside this table's languages — or one that does
- * and English itself — collapse to a single English line rather than
- * printing "the same sentence" twice; that is `resolve`'s fallback doing
- * exactly what it does for a single call, applied before the dedupe.
- */
-export function chromeLines(
-  key: ChromeKey,
-  codes: readonly (string | null)[],
-  params: Readonly<Record<string, string>> = {},
-): readonly string[] {
-  const present = new Set<ChromeLanguage>(codes.map((code) => resolve(code)));
-  if (present.size === 0) present.add("en");
-  return CHROME_LANGUAGES.filter((language) => present.has(language)).map((language) =>
-    fill(CHROME[key][language], params),
-  );
 }
 
 /**
