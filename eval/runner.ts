@@ -796,7 +796,7 @@ const DEPENDA_INPUTS: Record<string, string> = {
   models: "",
   warrant: "",
   ecosystems: "",
-  drafts: "0",
+  "risk-interpretation": "false",
   "dry-run": "false",
   "max-requests": "none",
   paths: "",
