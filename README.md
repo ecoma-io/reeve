@@ -9,6 +9,12 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-7C3AED.svg" alt="Pull requests welcome" /></a>
 </p>
 
+<!-- reeve:ignore-start -->
+<p align="center">
+  <sub><strong>English</strong> · <a href="README.vi.md">Tiếng Việt</a> · <a href="README.zh.md">中文</a></sub>
+</p>
+<!-- reeve:ignore-end -->
+
 <p align="center">
   <img src=".github/assets/banner.png" alt="Reeve — repository upkeep, in every contributor's language" width="100%" />
 </p>
@@ -202,8 +208,9 @@ pins `v0.$MINOR` —
 ---
 
 <p align="center">
-  <img src=".github/assets/logo.png" alt="" width="56" /><br />
   <sub>
-    Reeve is developed at <a href="https://github.com/ecoma-io/reeve">github.com/ecoma-io/reeve</a>.
+    Maintained by <a href="https://ecoma.io">Ecoma</a> ·
+    <a href="https://ecoma.io">Website</a> ·
+    <a href="https://github.com/ecoma-io">Github</a>
   </sub>
 </p>
