@@ -70,9 +70,9 @@ jobs:
 
 That writes one block into the issue body carrying every configured language
 except the one the issue was written in, below the author's own text and a
-horizontal rule — one collapsible section per language, each opening with a
-note in its own language saying which half is which — keep `dry-run: true`
-until you want a run to edit anything. Edit the issue and it replaces that
+horizontal rule — one small line naming Reeve, then one collapsible section
+per language, each opening with a note in its own language saying which half
+is which — keep `dry-run: true` until you want a run to edit anything. Edit the issue and it replaces that
 block rather than adding a second one; edit nothing and the next run
 recognises its own output and stops before it spends a single request.
 
@@ -129,6 +129,7 @@ Every input `translate/action.yml` declares.
 | `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                                                                                                               |
 | `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                                                                                                              |
 | `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                                                                                                             |
+| `show-branding`     | no       | `true`                      | Whether the published block carries one small line naming Reeve, with its mark, linking to the project. A thread's body only — never a reply.                                                                                                                  |
 | `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                    |
 | `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                                                                                     |
 | `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                                                                                                        |
@@ -247,6 +248,20 @@ partway through a language, so a language already being translated always
 finishes atomically: what already published stands, and only the work not
 yet started is left for a later run (or, under `sweep`, counted into
 `remaining`). `none`, the default, never trips it.
+
+**`show-branding` is one fixed line, not one per language.** Between the rule
+and the first collapsible section the block carries a single small line — the
+Reeve mark, the name, and _"autonomous repository operations"_ — linking to
+the project. It sits outside the sections on purpose: the boundary note inside
+each section already names Reeve, but a collapsed `<details>` shows none of
+it, and a reader who has never seen this before deserves to know what put a
+block in their issue without unfolding anything to find out. Ten configured
+languages are ten collapsed lines plus this one, never eleven copies of it.
+**A reply never carries it**, whatever this is set to — a logo under every
+comment on an active thread is decoration rather than attribution. The mark is
+served from a release tag rather than a branch, because the block outlives the
+run that wrote it. Turning it off is not part of the fingerprint: it applies
+to the next block published and retranslates nothing already carrying one.
 
 **The run report** is written to the job's own summary, not the thread: what
 was translated (model, score, votes), what was not and why, and cost —

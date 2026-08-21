@@ -446,6 +446,12 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "translate-replies": "false",
     "max-replies": "100",
     "show-attribution": "none",
+    // Off in the shared fixture, as `show-attribution` is: most cases here
+    // assert on the bytes of a translated body, and a fixed line of chrome in
+    // every one of them is noise between the case and what it is checking. The
+    // cases about the line set it themselves; what a consumer who sets nothing
+    // gets is `action.yml`'s default, checked in "the action contract" below.
+    "show-branding": "false",
     "dry-run": "false",
     sweep: "false",
     since: "",
@@ -1610,6 +1616,59 @@ describe("zero config", () => {
   });
 });
 
+describe("the branding line", () => {
+  /** The whole line, exactly as a reader's body receives it. */
+  const LINE =
+    '<sub>[<img src="https://raw.githubusercontent.com/ecoma-io/reeve/v0.8.0/.github/assets/logo.png" ' +
+    'height="14" alt=""> **Reeve**](https://github.com/ecoma-io/reeve) — autonomous repository operations</sub>';
+
+  it("names Reeve above the translations, where nothing has to be unfolded to see it", async () => {
+    const run = await runAction(stub, { "show-branding": "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain(LINE);
+    // Between the rule and the first section, which is the whole point of it.
+    expect(stub.body).toContain(`---\n\n${LINE}\n\n<details`);
+  });
+
+  it("keeps the line off every reply, whatever the body got", async () => {
+    // A logo under each of forty comments is decoration, not attribution.
+    stub.replies.set(991, "Tôi cũng gặp phải lỗi này trên máy của tôi, và nó xảy ra mỗi lần.");
+
+    const run = await runAction(stub, { "show-branding": "true", "translate-replies": "true" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs["replies-translated"]).toBe("1");
+    expect(stub.body).toContain(LINE);
+    expect(stub.replies.get(991)).toContain(ENGLISH);
+    expect(stub.replies.get(991)).not.toContain("<img");
+    expect(stub.replies.get(991)).not.toContain("autonomous repository operations");
+  });
+
+  it("publishes no line at all when the workflow turned it off", async () => {
+    const run = await runAction(stub, { "show-branding": "false" });
+
+    expect(run.code).toBe(0);
+    expect(stub.body).toContain(ENGLISH);
+    expect(stub.body).not.toContain("<img");
+    expect(stub.body).not.toContain("autonomous repository operations");
+  });
+
+  it("does not retranslate a thread whose only difference is the branding", async () => {
+    // The `show-attribution` precedent, end to end: the line is outside the
+    // fingerprint, so turning it on is a decision about the next thread rather
+    // than a mandate to re-spend a provider's budget on every old one.
+    await runAction(stub, { "show-branding": "false" });
+    const published = stub.body;
+
+    const run = await runAction(stub, { "show-branding": "true" });
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("already carries the translation");
+    expect(stub.body).toBe(published);
+  });
+});
+
 describe("the action contract", () => {
   /**
    * Every input `action.yml` declares, read straight out of it.
@@ -1668,6 +1727,17 @@ describe("the action contract", () => {
     for (const input of await declaredInputs()) {
       expect(documented).toContain(input.replace(/-/g, "_").toUpperCase());
     }
+  });
+
+  it("leaves the branding line on for a consumer who sets nothing", async () => {
+    // The one default no case above can observe: this suite supplies every
+    // input, so `action.yml` is the only place the answer for a real workflow
+    // lives. On by default because the block is machine output appearing in
+    // somebody's issue, and a reader deserves to see what put it there.
+    const text = await readFile(join(DUTY, "action.yml"), "utf8");
+    const declared = /\n {2}show-branding:\n([\s\S]*?)\n {2}[a-z]/.exec(text)?.[1] ?? "";
+
+    expect(declared).toContain('default: "true"');
   });
 
   it("declares the entry point this suite drives", async () => {

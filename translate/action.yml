@@ -178,6 +178,25 @@ inputs:
     required: false
     default: none
 
+  show-branding:
+    description: >-
+      Whether the published block carries one small line naming Reeve, with its
+      mark, linking to the project. Immediately under the rule and above the
+      translations, so it is visible without unfolding anything — one fixed
+      line, never one per language.
+
+      On by default: the block is machine output appearing in somebody's issue,
+      and a reader who has never heard of Reeve deserves to see what put it
+      there without opening a collapsed section to find out. It is a thread's
+      body only — a reply never carries it, whatever this is set to, because a
+      logo under every comment is decoration rather than attribution.
+
+      Turning it off is not part of the fingerprint, so it applies to the next
+      block published and does not retranslate a single thread already carrying
+      one.
+    required: false
+    default: "true"
+
   dry-run:
     description: >-
       Run the whole pipeline, write every output, and change nothing. The block

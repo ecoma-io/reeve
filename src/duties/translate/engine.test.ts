@@ -44,6 +44,7 @@ const settings: Settings = {
   chunkChars: 40,
   maxRequests: null,
   attribution: "detail",
+  branding: true,
   dryRun: false,
   baseUrl: "https://example.invalid",
   apiKey: "",

@@ -578,6 +578,10 @@ const TRANSLATE_INPUTS: Record<string, string> = {
   "chunk-chars": "6000",
   "max-requests": "none",
   "show-attribution": "none",
+  // Off here, unlike `action.yml`'s own default: a fixture's expectations are
+  // about what was translated, and a branding line in every published body is
+  // one more thing between the evaluator and the answer it is checking.
+  "show-branding": "false",
   "dry-run": "false",
   sweep: "false",
   since: "",

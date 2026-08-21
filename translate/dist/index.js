@@ -35824,12 +35824,16 @@ function publication(translated) {
     fingerprint: translated.fingerprint,
     sections: [
       "---",
+      ...translated.branding ? [BRANDING] : [],
       ...translated.posted.map(
         (entry) => section(entry, translated, translated.posted.length === 1)
       )
     ]
   };
 }
+var LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/v0.8.0/.github/assets/logo.png";
+var HOME = "https://github.com/ecoma-io/reeve";
+var BRANDING = `<sub>[<img src="${LOGO}" height="14" alt=""> **Reeve**](${HOME}) \u2014 autonomous repository operations</sub>`;
 function boundary(entry) {
   return `> ${chrome("translateBoundary", entry.to.code)}`;
 }
@@ -36090,7 +36094,7 @@ async function publish(thread, marker2, publication2) {
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
-async function translateText(what, body, thread, settings, stages, weather, meter, budget, onProtocolExhausted) {
+async function translateText(what, body, thread, branding, settings, stages, weather, meter, budget, onProtocolExhausted) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -36162,7 +36166,8 @@ async function translateText(what, body, thread, settings, stages, weather, mete
     skipped,
     truncated,
     fingerprint: achieved,
-    attribution: settings.attribution
+    attribution: settings.attribution,
+    branding
   };
   if (settings.dryRun) {
     const would = publication(translated);
@@ -36246,6 +36251,11 @@ async function translateReplies(api, at, settings, stages, looked, weather, mete
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
       createReply(api, at, reply),
+      // Never on a reply, whatever `show-branding` says. The setting decides
+      // whether a thread carries the line at all; this decides that "a thread"
+      // means its body — a logo repeated under every comment on an active
+      // thread is not a signature, it is noise the reader cannot collapse.
+      false,
       settings,
       stages,
       weather,
@@ -36264,6 +36274,9 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
     `#${String(at.number)}`,
     body,
     thread,
+    // The body is the one text in the thread that gets the branding line, so
+    // this is the only place the workflow's own answer is consulted.
+    settings.branding,
     settings,
     stages,
     weather,
@@ -36305,7 +36318,12 @@ function readSettings() {
     maxReplies: bounded("max-replies", getInput("max-replies")),
     chunkChars: parseChunkChars(getInput("chunk-chars")),
     maxRequests: bounded("max-requests", getInput("max-requests")),
-    attribution: readAttribution()
+    attribution: readAttribution(),
+    // Read here rather than anywhere deeper for the reason this file's own
+    // header gives: the action-contract audit scans exactly two files for
+    // `getInput` call sites, and a third would leave it proving less than it
+    // claims to.
+    branding: getBooleanInput("show-branding")
   };
 }
 function readAttribution() {

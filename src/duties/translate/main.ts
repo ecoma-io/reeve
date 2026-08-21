@@ -173,6 +173,12 @@ export interface Settings {
    */
   readonly maxRequests: number | null;
   readonly attribution: Attribution;
+  /**
+   * Whether the published block carries the line naming what wrote it. Applies
+   * to a thread's body only — `translateReplies` refuses it for a reply
+   * whatever this says, so a chatty thread never collects one logo per comment.
+   */
+  readonly branding: boolean;
   readonly dryRun: boolean;
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -214,6 +220,11 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
     chunkChars: parseChunkChars(core.getInput("chunk-chars")),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     attribution: readAttribution(),
+    // Read here rather than anywhere deeper for the reason this file's own
+    // header gives: the action-contract audit scans exactly two files for
+    // `getInput` call sites, and a third would leave it proving less than it
+    // claims to.
+    branding: core.getBooleanInput("show-branding"),
   };
 }
 

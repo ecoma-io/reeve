@@ -24,6 +24,7 @@ function settingsWith(maxRequests: number | null): Settings {
     chunkChars: 4000,
     maxRequests,
     attribution: "none",
+    branding: true,
     dryRun: false,
     baseUrl: "https://example.invalid",
     apiKey: "",
