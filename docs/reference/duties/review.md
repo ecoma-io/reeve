@@ -519,14 +519,15 @@ summary still says what happened.
 
 Every output `review/action.yml` declares.
 
-| Output      | Value                                                                                                                                                                                                                                                                                                     |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `commented` | `true` when the single owned summary comment was posted or replaced this run. `false` on every other path — including one that reconciled findings but the warrant, the confidence floor, or `dry-run` withheld the write. Never unset; there is no update-in-place beyond this duty's own owned comment. |
-| `note`      | Why this run stopped before a verdict, when it did — merged, closed, a draft under `trigger: pr`, or a Reeve proposal pull request. Empty when the run reached a verdict.                                                                                                                                 |
-| `head-sha`  | The pull request's head SHA at review time. Empty when the run stopped before reading the pull request.                                                                                                                                                                                                   |
-| `starved`   | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                                                                                      |
-| `findings`  | How many findings this run's reconciliation produced — created, persisted, changed, resolved and reopened combined. The summary comment, when one was posted, carries the same count.                                                                                                                     |
-| `risk`      | `low`, `medium`, or `high` — the tier this diff was assessed at, and how many model passes it got. Empty when the run stopped before assessment.                                                                                                                                                          |
+| Output       | Value                                                                                                                                                                                                                                                                                                     |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commented`  | `true` when the single owned summary comment was posted or replaced this run. `false` on every other path — including one that reconciled findings but the warrant, the confidence floor, or `dry-run` withheld the write. Never unset; there is no update-in-place beyond this duty's own owned comment. |
+| `note`       | Why this run stopped before a verdict, when it did — merged, closed, a draft under `trigger: pr`, or a Reeve proposal pull request. Empty when the run reached a verdict.                                                                                                                                 |
+| `head-sha`   | The pull request's head SHA at review time. Empty when the run stopped before reading the pull request.                                                                                                                                                                                                   |
+| `starved`    | `true` when every model in `models` failed on capacity this run. Weather, never a failure by itself.                                                                                                                                                                                                      |
+| `findings`   | How many findings this run's reconciliation produced — created, persisted, changed, resolved and reopened combined. The summary comment, when one was posted, carries the same count.                                                                                                                     |
+| `risk`       | `low`, `medium`, or `high` — the tier this diff was assessed at, and how many model passes it got. Empty when the run stopped before assessment.                                                                                                                                                          |
+| `sarif-path` | Where this run wrote its SARIF 2.1.0 rendering of the standing findings, or empty when the write was withheld. Rides the comment's own admission — see [SARIF for code scanning](#sarif-for-code-scanning).                                                                                               |
 
 Inline threads are not an output — they are a write, like the comment itself.
 The summary's `### Verdict` table carries a `Threads` row naming what the
@@ -539,6 +540,50 @@ them at the current commit.
 or not the floor or the warrant let the comment reach the pull request — so a
 workflow can post the count to a review queue instead of the thread while you
 watch how it does.
+
+## SARIF for code scanning
+
+Every run whose comment was admitted also renders its standing findings as a
+SARIF 2.1.0 file and names the path in `sarif-path`. Rendering a file is not
+a forge write — the warrant's `comment` stays the only capability this duty
+has — so reaching code scanning is a step your workflow adds, under a
+permission your workflow grants there:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write # only the upload step below needs this
+
+steps:
+  - id: review
+    uses: ecoma-io/reeve/review@v0.8
+    with: # … the inputs you already use
+  - if: steps.review.outputs.sarif-path != ''
+    uses: github/codeql-action/upload-sarif@v4
+    with:
+      sarif_file: ${{ steps.review.outputs.sarif-path }}
+      category: reeve-review
+```
+
+Three properties keep the two surfaces telling one story:
+
+- **One admission.** The confidence floor, the silent-no-verdict guard and
+  the ignore-swept guard withhold the file and the comment together — a
+  finding the floor kept off the pull request cannot reach code scanning by a
+  side door. A dry run still writes the file, because rendering is what a
+  rehearsal is for.
+- **One identity.** Each result's `partialFingerprints` carries the
+  finding's own id (rule + file, no line), the same identity the owned
+  comment's memory tracks — so an alert survives line movement and force
+  pushes exactly as the thread does.
+- **One lifecycle.** A `resolved` finding is absent from the newest file,
+  and code scanning closes an alert missing from the newest upload — absence
+  _is_ the resolved rung, with no second state machine to drift.
+
+The model's prose passes the same sanitiser the comment pipeline uses before
+it lands in a SARIF message, because the code-scanning UI is one more render
+surface an injected diff would love to reach unescorted.
 
 ## Failure behavior
 

@@ -31576,7 +31576,7 @@ function getOctokit(token, options, ...additionalPlugins) {
 }
 
 // src/duties/review/main.ts
-import { join as join3, resolve as resolve3 } from "node:path";
+import { join as join4, resolve as resolve3 } from "node:path";
 
 // node_modules/.pnpm/eld@2.0.3/node_modules/eld/src/avgScore.js
 var avgScore = {
@@ -37689,6 +37689,82 @@ function blockedNote(blocked) {
   return `The diff contains the blocked text "${blocked.phrase}"${note}`;
 }
 
+// src/duties/review/sarif.ts
+import { writeFile as writeFile2 } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as join3 } from "node:path";
+var MAX_MESSAGE_CHARS = 1e3;
+var LEVELS = {
+  info: "note",
+  warning: "warning",
+  critical: "error"
+};
+function buildSarif(reconciled, headSha) {
+  const standing = reconciled.filter((entry) => entry.status !== "resolved").slice().sort((a, b) => a.finding.id < b.finding.id ? -1 : a.finding.id > b.finding.id ? 1 : 0);
+  const ruleIds = [...new Set(standing.map((entry) => entry.finding.ruleId))].sort();
+  const rules = ruleIds.map((id) => {
+    const carrier = standing.find((entry) => entry.finding.ruleId === id);
+    const name = carrier?.finding.ruleName ?? id;
+    return {
+      id,
+      name,
+      shortDescription: { text: sanitize(name.length > 0 ? name : id) }
+    };
+  });
+  const results = standing.map((entry) => {
+    const { finding } = entry;
+    const prose = sanitize(finding.body).trim();
+    const text2 = (prose.length > 0 ? prose : finding.ruleName || finding.ruleId).slice(
+      0,
+      MAX_MESSAGE_CHARS
+    );
+    return {
+      ruleId: finding.ruleId,
+      ruleIndex: ruleIds.indexOf(finding.ruleId),
+      level: LEVELS[finding.severity],
+      message: { text: text2 },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: finding.path, uriBaseId: "%SRCROOT%" },
+            ...finding.line === null ? {} : { region: { startLine: finding.line } }
+          }
+        }
+      ],
+      // The intention key, not `finding.id`: the id carries the line, and a
+      // fingerprint that moved with the line would close and reopen the alert
+      // on every drift the lifecycle deliberately reads as `changed`.
+      partialFingerprints: { "reeveFinding/v1": `${finding.ruleId}|${finding.path}` }
+    };
+  });
+  return JSON.stringify(
+    {
+      $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+      version: "2.1.0",
+      runs: [
+        {
+          tool: {
+            driver: {
+              name: "reeve-review",
+              informationUri: "https://github.com/ecoma-io/reeve",
+              rules
+            }
+          },
+          results,
+          properties: { headSha }
+        }
+      ]
+    },
+    null,
+    2
+  );
+}
+async function emitSarif(reconciled, headSha) {
+  const path = join3(process.env.RUNNER_TEMP ?? tmpdir(), "reeve-review.sarif");
+  await writeFile2(path, buildSarif(reconciled, headSha), "utf8");
+  return path;
+}
+
 // src/duties/review/verdict.ts
 function parseVerdict(answer2, files) {
   let parsed;
@@ -38517,16 +38593,16 @@ function resolveRulesPath(settings) {
 }
 function resolvePacksPath(settings) {
   const workspace = process.env.GITHUB_WORKSPACE ?? "";
-  if (settings.packsPath.length === 0) return join3(workspace, ".github", "reeve-packs");
-  return join3(workspace, settings.packsPath);
+  if (settings.packsPath.length === 0) return join4(workspace, ".github", "reeve-packs");
+  return join4(workspace, settings.packsPath);
 }
 function rulesLabel(settings) {
   return settings.rulesPath.length === 0 ? ".github/reeve-rules.yml" : settings.rulesPath;
 }
 function resolveRiskPath(settings) {
   const workspace = process.env.GITHUB_WORKSPACE ?? "";
-  if (settings.riskPath.length === 0) return join3(workspace, ".github", "reeve-risk.yml");
-  return join3(workspace, settings.riskPath);
+  if (settings.riskPath.length === 0) return join4(workspace, ".github", "reeve-risk.yml");
+  return join4(workspace, settings.riskPath);
 }
 function riskLabel(settings) {
   return settings.riskPath.length === 0 ? ".github/reeve-risk.yml" : settings.riskPath;
@@ -38571,6 +38647,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     risk: null,
     contextReadFiles: 0,
     threads: null,
+    sarifPath: null,
     readTests: null,
     previous: null,
     memoryNote: null,
@@ -38849,6 +38926,8 @@ async function decide(api, at, warrant, settings, stages, weather) {
     next,
     headSha: pr.headSha
   };
+  const sarifPath = await emitSarif(final, pr.headSha);
+  info(`#${String(at.number)}: SARIF rendering written to ${sarifPath}.`);
   if (settings.dryRun) {
     const would = await rehearse(api, at, publication);
     info(`Dry run \u2014 #${String(at.number)} would have received:
@@ -38868,6 +38947,7 @@ ${would}`);
       // disposition stays in the log.
       posted: null,
       threads: rehearsal,
+      sarifPath,
       risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
@@ -38897,6 +38977,7 @@ ${would}`);
     confidence,
     posted,
     threads,
+    sarifPath,
     risk,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
@@ -39042,6 +39123,7 @@ function report(outcome, rosterStarved) {
   setOutput("starved", String(rosterStarved));
   setOutput("findings", String(outcome?.findings.length ?? 0));
   setOutput("risk", outcome?.risk?.tier ?? "");
+  setOutput("sarif-path", outcome?.sarifPath ?? "");
 }
 function page(settings, authority2, outcome, ungranted, spent) {
   const previousSha = outcome?.previous?.reviewedShas.at(-1) ?? "";

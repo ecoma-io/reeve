@@ -99,6 +99,7 @@ import {
   type RiskTier,
 } from "./risk.js";
 import { DEFAULT_GENERATED, preflight, readPackedRules } from "./rules.js";
+import { emitSarif } from "./sarif.js";
 import {
   adversarialPass,
   correctnessPass,
@@ -191,6 +192,8 @@ interface Outcome {
   readonly contextReadFiles: number;
   /** What the inline-thread sync did — for the page's "Threads" row. */
   readonly threads: ThreadSync | null;
+  /** Where this run's SARIF rendering landed, or null when the write was withheld. */
+  readonly sarifPath: string | null;
   /** A short summary line for the page: test file count and gap findings, or null when the section is off/unavailable. */
   readonly readTests: string | null;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
@@ -220,6 +223,7 @@ type Settled = Partial<
     | "risk"
     | "contextReadFiles"
     | "threads"
+    | "sarifPath"
     | "readTests"
     | "previous"
     | "memoryNote"
@@ -326,6 +330,7 @@ async function decide(
     risk: null,
     contextReadFiles: 0,
     threads: null,
+    sarifPath: null,
     readTests: null,
     previous: null,
     memoryNote: null,
@@ -749,6 +754,17 @@ async function decide(
     headSha: pr.headSha,
   };
 
+  // The SARIF rendering, on exactly the paths where the comment itself was
+  // admitted: the gates above (warrant, confidence floor, silent-no-verdict,
+  // ignore-swept) have all passed by this line, so the file and the comment
+  // are withheld together or not at all. A dry run still renders it —
+  // rendering is what a rehearsal is for — and the emission is a runner-temp
+  // file plus an output path, never a forge write: uploading it to code
+  // scanning is a workflow step the consumer adds, under a permission the
+  // consumer grants there. See `sarif.ts`.
+  const sarifPath = await emitSarif(final, pr.headSha);
+  core.info(`#${String(at.number)}: SARIF rendering written to ${sarifPath}.`);
+
   if (settings.dryRun) {
     const would = await rehearse(api, at, publication);
     core.info(`Dry run — #${String(at.number)} would have received:\n${would}`);
@@ -767,6 +783,7 @@ async function decide(
       // disposition stays in the log.
       posted: null,
       threads: rehearsal,
+      sarifPath,
       risk,
       malformedAnswers: unreadableCount,
       rulesPath: rulesLabel(settings),
@@ -807,6 +824,7 @@ async function decide(
     confidence,
     posted,
     threads,
+    sarifPath,
     risk,
     malformedAnswers: unreadableCount,
     rulesPath: rulesLabel(settings),
@@ -1016,6 +1034,7 @@ function report(outcome: Outcome | null, rosterStarved: boolean): void {
   core.setOutput("starved", String(rosterStarved));
   core.setOutput("findings", String(outcome?.findings.length ?? 0));
   core.setOutput("risk", outcome?.risk?.tier ?? "");
+  core.setOutput("sarif-path", outcome?.sarifPath ?? "");
 }
 
 function page(

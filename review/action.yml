@@ -277,6 +277,18 @@ outputs:
       `low`, `medium`, or `high` — the tier this diff was assessed at and how
       many model passes it got. Empty when the run stopped before assessment.
 
+  sarif-path:
+    description: >-
+      Where this run wrote its SARIF 2.1.0 rendering of the standing findings,
+      or empty when the write was withheld. The file rides the comment's own
+      admission: the warrant, the confidence floor and the no-verdict guards
+      withhold both or neither, and a dry run still writes it. Emitting a file
+      is not a forge write — to reach code scanning, add an
+      `github/codeql-action/upload-sarif` step reading this path, under the
+      `security-events: write` permission your workflow grants there. Alerts
+      close themselves when a later upload no longer carries a finding, which
+      is exactly this duty's `resolved` rung.
+
 runs:
   using: node24
   main: dist/index.js
