@@ -565,6 +565,24 @@ describe("the action", () => {
     expect(run.outputs.findings).toBe("1");
     expect(run.summary).toContain("### Verdict");
     expect(run.summary).toContain("This repeats the constant above.");
+
+    // The SARIF rendering rides the same admission: the output names a real
+    // file, its one result carries the finding's id as the fingerprint code
+    // scanning tracks, and the level follows the severity map.
+    const sarifPath = run.outputs["sarif-path"] ?? "";
+    expect(sarifPath.endsWith("reeve-review.sarif")).toBe(true);
+    const sarif = JSON.parse(await readFile(sarifPath, "utf8")) as {
+      runs: {
+        results: { level: string; partialFingerprints: Record<string, string> }[];
+        properties: { headSha: string };
+      }[];
+    };
+    expect(sarif.runs[0]?.results).toHaveLength(1);
+    expect(sarif.runs[0]?.results[0]?.level).toBe("warning");
+    expect(sarif.runs[0]?.results[0]?.partialFingerprints["reeveFinding/v1"]).toBe(
+      "dedup|src/a.ts",
+    );
+    expect(sarif.runs[0]?.properties.headSha).toBe("abc123");
   });
 
   it("announces a versionless envelope, cold-starts from the thread, and stays green", async () => {
@@ -1388,6 +1406,10 @@ describe("the action", () => {
     expect(run.log).toContain("below the");
     expect(run.summary).toContain("Posted | nothing to post");
     expect(run.summary).toContain("This repeats the constant above.");
+    // The floor withholds the SARIF rendering with the comment: a finding the
+    // floor kept off the pull request must not reach code scanning by a side
+    // door.
+    expect(run.outputs["sarif-path"]).toBe("");
   });
 
   it("refuses to stamp an all-clear when the diff was reviewed but the verdict never arrived", async () => {
@@ -1592,7 +1614,12 @@ describe("the action", () => {
     expect(run.summary).toContain("| Risk | low — low — no risk signals fired |");
   });
 
-  it("prices a dependency change medium with two passes", async () => {
+  it("prices a lockfile change medium while the generated defaults keep it out of the prompt", async () => {
+    // Both halves of the lockfile default in one run: the model is never
+    // shown eight thousand lines of hashes (the lockfile is generated-skipped,
+    // and a generated-only PR posts the empty chrome as a real answer), while
+    // the dependency signal still prices the change medium — skipping a
+    // lockfile from the prompt must not also silence the risk it carries.
     stub.pull.files = [
       {
         filename: "package-lock.json",
@@ -1606,23 +1633,6 @@ describe("the action", () => {
     stub.answer = stageAnswer({
       review: () => {
         reviewAsks += 1;
-        if (reviewAsks === 1) {
-          return saying(
-            JSON.stringify({
-              findings: [
-                {
-                  rule: "dedup",
-                  severity: "info",
-                  path: "package-lock.json",
-                  line: 1,
-                  snippet: '"version": "1.2.3",',
-                  body: "A named constant is worth considering.",
-                },
-              ],
-              confidence: 0.8,
-            }),
-          );
-        }
         return saying(JSON.stringify({ findings: [], confidence: 0.7 }));
       },
     });
@@ -1631,9 +1641,11 @@ describe("the action", () => {
 
     expect(run.code).toBe(0);
     expect(run.outputs.risk).toBe("medium");
-    expect(reviewAsks).toBe(2);
-    expect(run.outputs.findings).toBe("1");
-    expect(stub.comments[0]?.body).toContain("New findings (1)");
+    expect(reviewAsks).toBe(0);
+    expect(run.outputs.findings).toBe("0");
+    expect(stub.comments[0]?.body).toContain("No issues to report");
+    expect(run.summary).toContain("generated");
+    expect(run.summary).toContain("package-lock.json");
   });
 
   it("withholds a high-risk all-clear when its adversarial pass fails", async () => {

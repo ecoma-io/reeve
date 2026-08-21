@@ -132,6 +132,23 @@ describe("assessRisk", () => {
     expect(assessment.score).toBe(3);
   });
 
+  it("keeps the dependency signal on a lockfile the generated defaults skip from the prompt", () => {
+    // The default rules mark every lockfile generated, which excludes it from
+    // the volume signals — but the dependency signal reads `allFiles`, because
+    // skipping a lockfile from the prompt must not also silence the risk its
+    // change prices. Both halves of that sentence are pinned here.
+    const assessment = assessRisk(
+      [file({ path: "pnpm-lock.yaml", additions: 8000, deletions: 8000 })],
+      rules(),
+      DEFAULT,
+    );
+    expect(assessment.signals.some((s) => s.signal === "dependency_changes")).toBe(true);
+    expect(assessment.signals.some((s) => s.signal === "changed_lines")).toBe(false);
+    expect(assessment.signals.find((s) => s.signal === "generated_code")?.evidence[0]).toContain(
+      "generated file(s) excluded",
+    );
+  });
+
   it("keeps a massive docs-only diff low by Rule B", () => {
     const files = Array.from({ length: 50 }, (_, i) =>
       file({ path: `docs/guide-${String(i)}.md`, additions: 100, deletions: 0 }),

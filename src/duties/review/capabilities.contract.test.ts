@@ -162,12 +162,34 @@ describe("the write surface review actually holds", () => {
     // Matched as CALLS, not as words: `testmap.ts` legitimately carries
     // "writeFile" as one of the danger words it looks for in a diff, the same
     // way it carries "child_process".
+    //
+    // One scoped exemption: `sarif.ts` holds the duty's single `writeFile` —
+    // the SARIF rendering, into the runner's temp directory, never the
+    // checkout. The exemption is by module and by verb, and the companion
+    // test below pins that module's target so the carve-out cannot quietly
+    // widen into what this guard exists to refuse.
     const verbs = ["writeFile", "appendFile", "unlink", "rmdir", "mkdir", "rename", "rm"];
     const banned = verbs.map((verb): [string, RegExp] => [
       `${verb}()`,
       new RegExp(`\\b${verb}\\s*\\(`),
     ]);
-    expect(await offenders(banned)).toEqual([]);
+    const held = (await offenders(banned)).filter(
+      (offence) => offence !== "sarif.ts reaches writeFile()",
+    );
+    expect(held).toEqual([]);
+  });
+
+  it("the_sarif_emission_targets_runner_temp_and_never_names_the_workspace", async () => {
+    // The companion to the exemption above: the one module allowed a
+    // `writeFile` derives its target from `RUNNER_TEMP` (with the OS temp
+    // directory as the only fallback) and never mentions the checkout at all
+    // — a SARIF rendering that landed in `GITHUB_WORKSPACE` would be exactly
+    // the workspace mutation the guard exists to refuse.
+    const text = await source("sarif.ts");
+    expect(text).toContain("RUNNER_TEMP");
+    expect(text).not.toContain("GITHUB_WORKSPACE");
+    // The single write call, and it writes the module's own rendering.
+    expect([...text.matchAll(/\bwriteFile\s*\(/g)]).toHaveLength(1);
   });
 
   it("the_review_thread_port_declares_only_the_three_review_comment_methods", async () => {

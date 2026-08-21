@@ -707,6 +707,16 @@ parsed file, extended to a loop that may propose several effects per run
 instead of one. A better model produces a better plan; it never produces a
 wider warrant.
 
+**The same principle reaches inside a duty.** A duty's evidence gathering may
+become a bounded tool loop — the model pulling reads through the duty's
+existing gates instead of receiving one assembled block — without any of this
+touching authority: the tools are reads, the capability surface does not
+move, and a model that cannot call tools keeps the assembled path, which is
+preserved as the floor forever (D7). The design lives in
+[the agent runtime](../development/agent-runtime.md#bounded-tool-loops-inside-a-duty);
+what is doctrine here is only this sentence: the loop may choose what to
+read, never what it is allowed to touch.
+
 **[Settled question §9.1](#91--does-reeve-modify-repository-state-only-within-explicit-authority) stands in both
 modes, unconditionally.** The authority-bounded invariant — Reeve modifies
 repository state only through explicit capabilities granted in the warrant —

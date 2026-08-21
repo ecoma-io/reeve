@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { MAX_PACK_CHARS, UnreadablePacks, parsePack, type Pack } from "./packs.js";
-import { composeRules, parseRules, readPackRefs, type PackRef } from "./rules.js";
+import {
+  DEFAULT_GENERATED,
+  composeRules,
+  parseRules,
+  readPackRefs,
+  type PackRef,
+} from "./rules.js";
 
 /** Builds a pack with a `fragment` of the given shape. */
 function packFor(fragment: Partial<Pack["fragment"]> = {}): Pack {
@@ -277,7 +283,7 @@ describe("composeRules", () => {
       "pack go/concurrency@1.0: `generated` entry 1 is empty; dropped",
     ]);
     const composed = composeRules(parseRules("version: 1"), [pack]);
-    expect(composed.generatedExtensions).toEqual([".min.js", ".min.css", ".map"]);
+    expect(composed.generatedExtensions).toEqual([...DEFAULT_GENERATED]);
   });
 
   it("carries local warnings and prefixes pack warnings with the pack's ref", () => {

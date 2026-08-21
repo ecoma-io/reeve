@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseRules, preflight, UnreadableRules, type Rules } from "./rules.js";
+import { DEFAULT_GENERATED, parseRules, preflight, UnreadableRules, type Rules } from "./rules.js";
 
 describe("parseRules", () => {
   it("parses a complete rules file", () => {
@@ -51,6 +51,24 @@ describe("parseRules", () => {
     expect(rules.ignoreFiles).toEqual([]);
   });
 
+  it("skips lockfiles and build-output directories by default, and a written list replaces all of it", () => {
+    // The unconfigured repository is the one the defaults exist for: a
+    // lockfile or a committed bundle must not eat the diff budget before the
+    // first human-written file is shown.
+    const rules = parseRules("version: 1");
+    expect(rules.generatedExtensions).toContain("pnpm-lock.yaml");
+    expect(rules.generatedExtensions).toContain("Cargo.lock");
+    expect(rules.generatedExtensions).toContain("dist/**");
+    expect(rules.generatedExtensions).toContain(".snap");
+    // Human-edited manifests are reviewable text and never default-skipped.
+    expect(rules.generatedExtensions).not.toContain("package.json");
+    expect(rules.generatedExtensions).not.toContain("Cargo.toml");
+    // A written `generated:` list is the override the format already has:
+    // it replaces the whole default set, lockfiles and directories included.
+    const overridden = parseRules("version: 1\ngenerated: ['.pb.go']\n");
+    expect(overridden.generatedExtensions).toEqual([".pb.go"]);
+  });
+
   it("drops empty and whitespace-only generated suffixes with a warning, keeping the valid ones", () => {
     // An empty suffix matches every path (`"src/a.ts".endsWith("")` is true), so
     // `generated: [""]` would silently skip the whole diff as machine-made and
@@ -58,11 +76,11 @@ describe("parseRules", () => {
     // legitimate suffix: it is dropped at the parse boundary, so `[""]` behaves
     // exactly like `generated:` (falls back to `DEFAULT_GENERATED`).
     const onlyEmpty = parseRules("version: 1\ngenerated: ['']\n");
-    expect(onlyEmpty.generatedExtensions).toEqual([".min.js", ".min.css", ".map"]);
+    expect(onlyEmpty.generatedExtensions).toEqual([...DEFAULT_GENERATED]);
     expect(onlyEmpty.warnings).toEqual(["`generated` entry 1 is empty; dropped"]);
 
     const whitespace = parseRules("version: 1\ngenerated: [' ']\n");
-    expect(whitespace.generatedExtensions).toEqual([".min.js", ".min.css", ".map"]);
+    expect(whitespace.generatedExtensions).toEqual([...DEFAULT_GENERATED]);
     expect(whitespace.warnings).toEqual(["`generated` entry 1 is empty; dropped"]);
 
     const mixed = parseRules("version: 1\ngenerated: ['', '.lock']\n");
