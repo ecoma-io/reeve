@@ -192,6 +192,45 @@ way no `duties:` entry today can make `duplicate` skip its double gate:
 - Running with no verify step, or continuing the loop past a step that
   failed to verify.
 
+## Bounded tool loops inside a duty
+
+The loop above sequences duties. A second, smaller loop is part of the same
+direction: a duty's own evidence gathering may become a bounded tool loop,
+where the model asks for the evidence it needs — a page of the diff, a file
+excerpt, a directory listing — instead of receiving one assembled context
+block cut to a character budget. The review duty is the motivating case: its
+`max-diff-chars` cap is a symptom of push-shaped evidence, and a pull loop
+retires the cap by letting the model spend the same budget on the files that
+matter to _this_ diff.
+
+What governs the small loop is the sentence that governs the big one:
+**autonomy is not authority.** Concretely:
+
+- **Read-only, through the duty's existing gates.** Every tool is a read the
+  duty already performs — the same workspace containment, the same secret
+  denylist, the same per-read caps. No tool produces an effect, so the
+  capability surface does not move (`review` stays comment-only) and there is
+  nothing new for a kernel to be asked for.
+- **Steering is conceded; consequences are not.** In a pull loop, untrusted
+  diff content can influence _which_ evidence the model reads — that is the
+  trade, made with eyes open. What it cannot influence: what the tools can
+  reach (the gates), what a finding needs to be admitted (the diff-proven
+  gate), and what the duty may write (the warrant). The blast radius of a
+  steered read is a worse review, never a wider write.
+- **Budgets replace the character caps; they do not remove them.** A cap on
+  rounds per pass, a per-read cap, and a whole-run pull budget bound the
+  loop. A pass that dies mid-loop is a failed pass — D5 holds, and a
+  half-read diff is never stamped all-clear.
+- **The assembled path is the floor, forever.** D7 stands: every duty keeps
+  working on an endpoint with no tool calling at all. The assembled,
+  deterministic context engine is not a legacy path — it is what every loop
+  degrades to, and the only path a model without tool support ever sees.
+- **Determinism narrows; the lifecycle does not.** Two runs may read
+  different evidence. What stays deterministic is everything the run
+  concludes with — admission, fingerprints, enforcement — because the finding
+  lifecycle keys on intention, not on what was read. Every tool call is
+  traced in the job summary, so a run can always answer what it looked at.
+
 ## GitHub Actions is the sandbox
 
 Agent Mode does not introduce a new place for code to run. It runs as a
