@@ -16,7 +16,8 @@ import type { Ecosystem, ResolutionResult } from "../model.js";
  * The stable identifier for a datasource. Part of the closed set — a name
  * not registered here is refused.
  */
-export type DatasourceId = "npm" | "github-tags" | "crates" | "go-proxy" | "docker-registry";
+export type DatasourceId =
+  "npm" | "github-tags" | "crates" | "go-proxy" | "docker-registry" | "node-version";
 
 /**
  * The abstraction for version resolution.

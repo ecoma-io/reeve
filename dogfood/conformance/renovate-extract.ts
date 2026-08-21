@@ -105,6 +105,10 @@ export function extractRenovateBaseline(options: ExtractOptions): RenovateFindin
   const actionsFindings = extractActionsFindings(repoRoot, config);
   findings.push(...actionsFindings);
 
+  // 3b. Extract the Node runtime pin (Renovate's nodenv/nvm managers)
+  const nodenvFindings = extractNodenvFindings(repoRoot);
+  findings.push(...nodenvFindings);
+
   // 4. Lock file maintenance (Renovate feature dependa does not have)
   if (config.lockFileMaintenance?.enabled) {
     findings.push({
@@ -229,6 +233,112 @@ function extractNpmFindings(repoRoot: string, config: RenovateConfig): RenovateF
     for (const [name, constraint] of Object.entries(pkg.devDependencies)) {
       findings.push(makeNpmFinding(name, constraint, true, repoRoot, config));
     }
+  }
+
+  // The `packageManager` pin — Renovate's npm manager proposes updates to it
+  // (the dashboard's `pnpm 11.20.0 → 11.22.0` row). The corepack integrity
+  // hash after `+` belongs to the pinned version, not the constraint.
+  const rawPkg = readRawPackageJson(packageJsonPath);
+  const pmRaw = rawPkg?.packageManager;
+  if (typeof pmRaw === "string") {
+    const atIdx = pmRaw.lastIndexOf("@");
+    const pmName = atIdx > 0 ? pmRaw.slice(0, atIdx) : null;
+    const pmVersion = atIdx > 0 ? (pmRaw.slice(atIdx + 1).split("+")[0] ?? "") : "";
+    if (pmName !== null && /^\d+\.\d+\.\d+/.test(pmVersion)) {
+      findings.push({
+        ecosystem: "npm",
+        name: pmName,
+        constraint: pmVersion,
+        currentVersion: pmVersion,
+        targetVersion: null,
+        updateType: "pin",
+        group: null,
+        files: ["package.json"],
+        security: false,
+        manager: "npm",
+        datasource: "npm",
+        wouldPr: true,
+      });
+    }
+  }
+
+  // `engines` — Renovate detects these as dependencies of the manifest.
+  // `node` is the runtime itself and keys under the `node-version` ecosystem,
+  // matching how dependa (and Renovate's `node` datasource) treat it.
+  const engines = rawPkg?.engines;
+  if (typeof engines === "object" && engines !== null && !Array.isArray(engines)) {
+    for (const [name, constraint] of Object.entries(engines as Record<string, unknown>)) {
+      if (typeof constraint !== "string" || constraint.trim().length === 0) continue;
+      findings.push({
+        ecosystem: name === "node" ? "node-version" : "npm",
+        name,
+        constraint: constraint.trim(),
+        currentVersion: null,
+        targetVersion: null,
+        updateType: inferNpmUpdateType(constraint),
+        group: null,
+        files: ["package.json"],
+        security: false,
+        manager: "npm",
+        datasource: name === "node" ? "node-version" : "npm",
+        wouldPr: false, // Renovate detects engine ranges but rarely proposes
+      });
+    }
+  }
+
+  return findings;
+}
+
+/** Read package.json without the typed PackageJson narrowing — raw fields. */
+function readRawPackageJson(fullPath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(fullPath, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+// ─── nodenv extraction ──────────────────────────────────────────────────────
+
+/**
+ * Extract the Node runtime pin from `.node-version` / `.nvmrc` — Renovate's
+ * `nodenv` and `nvm` managers (the dashboard's `nodenv` section).
+ */
+function extractNodenvFindings(repoRoot: string): RenovateFinding[] {
+  const findings: RenovateFinding[] = [];
+
+  for (const file of [".node-version", ".nvmrc"]) {
+    const fullPath = path.join(repoRoot, file);
+    if (!fs.existsSync(fullPath)) continue;
+
+    let content: string;
+    try {
+      content = fs.readFileSync(fullPath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const reference = content
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0 && !line.startsWith("#"));
+    if (reference === undefined) continue;
+
+    const bare = reference.startsWith("v") ? reference.slice(1) : reference;
+    findings.push({
+      ecosystem: "node-version",
+      name: "node",
+      constraint: bare,
+      currentVersion: /^\d+\.\d+\.\d+$/.test(bare) ? bare : null,
+      targetVersion: null,
+      updateType: "minor",
+      group: null,
+      files: [file],
+      security: false,
+      manager: "nodenv",
+      datasource: "node-version",
+      wouldPr: true,
+    });
   }
 
   return findings;
@@ -409,6 +519,53 @@ function extractActionsFindings(repoRoot: string, config: RenovateConfig): Renov
         security: false,
         manager: "github-actions",
         datasource: "github-tags",
+        wouldPr: true,
+      });
+    }
+
+    // Extract `container:`/`image:` docker references — Renovate's
+    // github-actions manager also updates job container and service images
+    // (the dashboard's `semgrep/semgrep` docker tag row).
+    const imageRegex = /^\s*(?:-\s*)?(?:image|container):\s*(['"]?)(\S+?)\1\s*$/gm;
+    while ((match = imageRegex.exec(content)) !== null) {
+      const ref = match[2]?.trim();
+      if (!ref || ref.includes("${{")) continue;
+      // A bare word with no tag, digest, or registry path is not a reference
+      if (!ref.includes(":") && !ref.includes("/")) continue;
+
+      // Split off the digest, then the tag
+      let remaining = ref;
+      let digest: string | null = null;
+      const atIdx = remaining.lastIndexOf("@");
+      if (atIdx !== -1 && remaining.slice(atIdx + 1).startsWith("sha256:")) {
+        digest = remaining.slice(atIdx + 1);
+        remaining = remaining.slice(0, atIdx);
+      }
+      let tag: string | null = null;
+      const lastSlash = remaining.lastIndexOf("/");
+      const colonIdx = remaining.lastIndexOf(":");
+      if (colonIdx !== -1 && colonIdx > lastSlash) {
+        tag = remaining.slice(colonIdx + 1);
+        remaining = remaining.slice(0, colonIdx);
+      }
+      if (remaining.length === 0) continue;
+
+      const key = `image ${remaining}:${tag ?? "latest"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      findings.push({
+        ecosystem: "docker",
+        name: remaining,
+        constraint: tag ?? (digest !== null ? null : "latest"),
+        currentVersion: digest ?? tag ?? "latest",
+        targetVersion: null,
+        updateType: digest !== null ? "digest" : "minor",
+        group: null,
+        files: [relPath],
+        security: false,
+        manager: "github-actions",
+        datasource: "docker",
         wouldPr: true,
       });
     }

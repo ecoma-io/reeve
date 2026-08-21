@@ -33677,7 +33677,14 @@ import { readFile } from "node:fs/promises";
 var import_yaml = __toESM(require_dist2(), 1);
 
 // src/duties/dependa/model.ts
-var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
+var ECOSYSTEMS = [
+  "npm",
+  "github-actions",
+  "cargo",
+  "go",
+  "docker",
+  "node-version"
+];
 var UPDATE_TYPES = [
   "major",
   "minor",

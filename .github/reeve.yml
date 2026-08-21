@@ -51,10 +51,13 @@ duties:
   lifecycle: [label, comment]
   harmonise: [edit-file, open-pr]
   review: [comment]
-  # dependa is deliberately omitted: it runs in shadow/dry-run mode alongside
-  # Renovate, observing what it would propose but creating no PRs. Granting
-  # dependa: [edit-file, open-pr] would be the act that transitions dependa
-  # from observer to actor. See dogfood/README.md for details.
+  # The grant that transitioned dependa from observer to actor: it commits
+  # manifest updates to `reeve/dependa/*` branches and opens draft PRs on this
+  # repository — the dogfood a dependency maintainer has to eat. Renovate
+  # stays authoritative until the Thursday conformance runs (which still
+  # observe, by their own `dry-run: true`) show parity; every dependa PR is a
+  # draft a maintainer promotes or closes. See dogfood/README.md.
+  dependa: [edit-file, open-pr]
 
 labels:
   - name: bug

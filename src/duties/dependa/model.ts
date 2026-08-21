@@ -22,9 +22,16 @@
  */
 
 /** What ecosystem a dependency belongs to. The closed set; a name not here is refused. */
-export type Ecosystem = "npm" | "github-actions" | "cargo" | "go" | "docker";
+export type Ecosystem = "npm" | "github-actions" | "cargo" | "go" | "docker" | "node-version";
 
-export const ECOSYSTEMS: readonly Ecosystem[] = ["npm", "github-actions", "cargo", "go", "docker"];
+export const ECOSYSTEMS: readonly Ecosystem[] = [
+  "npm",
+  "github-actions",
+  "cargo",
+  "go",
+  "docker",
+  "node-version",
+];
 
 /**
  * One dependency a manager found in a manifest file.

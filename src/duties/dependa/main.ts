@@ -43,6 +43,7 @@ import { createCratesDatasource } from "./datasources/crates.js";
 import { createDockerRegistryDatasource } from "./datasources/docker-registry.js";
 import { createGithubTagsDatasource } from "./datasources/github-tags.js";
 import { createGoProxyDatasource } from "./datasources/go-proxy.js";
+import { createNodeVersionDatasource } from "./datasources/node-version.js";
 import { createNpmDatasource } from "./datasources/npm.js";
 import { DatasourceRegistry } from "./datasources/registry.js";
 import { queryAdvisories } from "./datasources/security-advisory.js";
@@ -64,6 +65,7 @@ import { createCargoManager } from "./managers/cargo.js";
 import { createDockerManager } from "./managers/docker.js";
 import { createGithubActionsManager } from "./managers/github-actions.js";
 import { createGoManager } from "./managers/go.js";
+import { createNodeVersionManager } from "./managers/node-version.js";
 import { createNpmManager } from "./managers/npm.js";
 import { discoverAll, ManagerRegistry } from "./managers/registry.js";
 import type { Manager, ManagerId } from "./managers/types.js";
@@ -950,6 +952,7 @@ function createManagerRegistry(): ManagerRegistry {
     createGoManager(),
     createDockerManager(),
     createGithubActionsManager(),
+    createNodeVersionManager(),
   ];
   return new ManagerRegistry(managers);
 }
@@ -964,6 +967,7 @@ function createDatasourceRegistry(token: string): DatasourceRegistry {
     createGoProxyDatasource(),
     createDockerRegistryDatasource(),
     createGithubTagsDatasource(token),
+    createNodeVersionDatasource(),
   ];
   return new DatasourceRegistry(datasources);
 }

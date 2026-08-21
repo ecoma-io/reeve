@@ -413,3 +413,184 @@ jobs:
     expect(result).not.toContain("@v1");
   });
 });
+
+// ── parse: container images ──────────────────────────────────────────────
+
+describe("github-actions parse: container images", () => {
+  it("discovers a container image with tag and digest", () => {
+    const content = `
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b
+`;
+
+    const result = manager.parse(".github/workflows/analysis.yml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    const dep = result.dependencies[0];
+    expect(dep?.ecosystem).toBe("docker");
+    expect(dep?.name).toBe("semgrep/semgrep");
+    expect(dep?.constraint).toBe("1.172.0");
+    expect(dep?.currentVersion).toBe(
+      "sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b",
+    );
+    expect(dep?.manager).toBe("github-actions");
+  });
+
+  it("discovers the container short form", () => {
+    const content = `
+jobs:
+  test:
+    container: node:24-alpine
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.ecosystem).toBe("docker");
+    expect(result.dependencies[0]?.name).toBe("node");
+    expect(result.dependencies[0]?.constraint).toBe("24-alpine");
+  });
+
+  it("discovers service images", () => {
+    const content = `
+jobs:
+  test:
+    services:
+      db:
+        image: postgres:16
+      cache:
+        image: redis:7.2
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies.map((d) => d.name)).toEqual(["postgres", "redis"]);
+    expect(result.dependencies.every((d) => d.ecosystem === "docker")).toBe(true);
+  });
+
+  it("skips expressions and bare words", () => {
+    const content = `
+jobs:
+  test:
+    container:
+      image: \${{ matrix.image }}
+  other:
+    container: node
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(0);
+  });
+
+  it("discovers actions and images from the same file", () => {
+    const content = `
+jobs:
+  test:
+    container: postgres:16
+    steps:
+      - uses: actions/checkout@v4
+`;
+
+    const result = manager.parse(".github/workflows/ci.yml", content, null);
+    expect(result.dependencies).toHaveLength(2);
+    expect(result.dependencies.map((d) => d.ecosystem).sort()).toEqual([
+      "docker",
+      "github-actions",
+    ]);
+  });
+});
+
+// ── applyUpdate: container images ────────────────────────────────────────
+
+describe("github-actions applyUpdate: container images", () => {
+  const imageProposal = (
+    name: string,
+    constraint: string | null,
+    currentVersion: string,
+    targetVersion: string,
+  ) => ({
+    dependency: {
+      ecosystem: "docker" as const,
+      name,
+      constraint,
+      currentVersion,
+      manifestPath: ".github/workflows/ci.yml",
+      dev: false,
+      manager: "github-actions",
+    },
+    currentVersion,
+    targetVersion,
+    updateType: "minor" as const,
+    releases: [],
+    securityAdvisory: null,
+    risk: {
+      facts: {
+        updateType: "minor" as const,
+        majorDistance: 0,
+        minorDistance: 1,
+        patchDistance: 0,
+        daysBetweenReleases: null,
+        currentVersionStale: null,
+        isSecurity: false,
+        hasChangelog: false,
+        isDev: false,
+      },
+      interpretation: null,
+    },
+    evidence: [],
+    edits: [],
+    groupName: null,
+  });
+
+  it("rewrites a tagged image", () => {
+    const content = `
+jobs:
+  test:
+    services:
+      db:
+        image: postgres:16
+`;
+
+    const result = manager.applyUpdate(content, imageProposal("postgres", "16", "16", "17"));
+    expect(result).not.toBeNull();
+    expect(result).toContain("image: postgres:17");
+  });
+
+  it("does not match a tag inside a longer tag", () => {
+    const content = `
+jobs:
+  test:
+    container: node:24-alpine
+`;
+
+    expect(manager.applyUpdate(content, imageProposal("node", "24", "24", "25"))).toBeNull();
+  });
+
+  it("rewrites a digest while keeping the tag", () => {
+    const content = `
+jobs:
+  scan:
+    container:
+      image: semgrep/semgrep:1.172.0@sha256:aaaa
+`;
+
+    const result = manager.applyUpdate(
+      content,
+      imageProposal("semgrep/semgrep", "1.172.0", "sha256:aaaa", "sha256:bbbb"),
+    );
+    expect(result).toContain("image: semgrep/semgrep:1.172.0@sha256:bbbb");
+  });
+
+  it("never touches uses: lines", () => {
+    const content = `
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@v4
+`;
+
+    expect(manager.applyUpdate(content, imageProposal("actions/checkout", "v4", "v4", "v5"))).toBe(
+      null,
+    );
+  });
+});

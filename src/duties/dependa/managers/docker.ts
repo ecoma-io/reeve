@@ -160,8 +160,11 @@ function parseFromLine(
  * - `node@sha256:abc123` → { image: "node", tag: null, digest: "sha256:abc123" }
  * - `node:20@sha256:abc123` → { image: "node", tag: "20", digest: "sha256:abc123" }
  * - `ghcr.io/owner/image:tag` → { image: "ghcr.io/owner/image", tag: "tag", digest: null }
+ *
+ * Exported for the GitHub Actions manager, whose workflow `container:` and
+ * `services:` images use exactly this grammar.
  */
-function parseImageRef(
+export function parseImageRef(
   ref: string,
 ): { image: string; tag: string | null; digest: string | null } | null {
   if (ref.length === 0) return null;
@@ -225,71 +228,76 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
   let replaced = false;
 
   for (const line of lines) {
-    const trimmed = line.trim();
-
     // Only modify FROM lines
-    if (!/^FROM\s/i.test(trimmed)) {
+    if (!/^FROM\s/i.test(line.trim())) {
       newLines.push(line);
       continue;
     }
 
-    // Check if this FROM line references our image
-    if (!line.includes(imageName)) {
+    const rewritten = rewriteImageVersion(line, imageName, oldVersion, newVersion);
+    if (rewritten !== null) {
+      newLines.push(rewritten);
+      replaced = true;
+    } else {
       newLines.push(line);
-      continue;
     }
-
-    // Try to replace the version reference
-    let modifiedLine = line;
-
-    // Tag reference: image:old-tag
-    // Use a tag-boundary-aware regex to avoid substring matching:
-    // "node:20" should NOT match "node:20-slim" or "node:20.5".
-    // A tag ends at: whitespace, @ (digest), AS (alias), or end-of-line.
-    if (!oldVersion.startsWith("sha256:") && !newVersion.startsWith("sha256:")) {
-      const tagBoundaryPattern = new RegExp(
-        `${escapeRegex(imageName)}:${escapeRegex(oldVersion)}(?=[\\s@]|$|[Aa][Ss]\\s)`,
-      );
-      const newRef = `${imageName}:${newVersion}`;
-      if (tagBoundaryPattern.test(modifiedLine)) {
-        modifiedLine = modifiedLine.replace(tagBoundaryPattern, newRef);
-        replaced = true;
-      }
-    }
-
-    // Digest reference: image@sha256:old-hash
-    if (oldVersion.startsWith("sha256:") && newVersion.startsWith("sha256:")) {
-      const oldRef = `${imageName}@${oldVersion}`;
-      const newRef = `${imageName}@${newVersion}`;
-      if (modifiedLine.includes(oldRef)) {
-        modifiedLine = modifiedLine.replace(oldRef, newRef);
-        replaced = true;
-      }
-    }
-
-    // Tag+digest: image:tag@sha256:hash
-    if (modifiedLine.includes(imageName)) {
-      // Try tag@digest replacement
-      const tagDigestMatch = new RegExp(`${escapeRegex(imageName)}:[^@\\s]+@sha256:[a-f0-9]+`).exec(
-        modifiedLine,
-      );
-      if (tagDigestMatch !== null && oldVersion.startsWith("sha256:")) {
-        // Replace just the digest portion
-        const oldDigest = `@${oldVersion}`;
-        const newDigest = `@${newVersion}`;
-        if (modifiedLine.includes(oldDigest)) {
-          modifiedLine = modifiedLine.replace(oldDigest, newDigest);
-          replaced = true;
-        }
-      }
-    }
-
-    newLines.push(modifiedLine);
   }
 
   if (!replaced) return null;
 
   return newLines.join("\n");
+}
+
+/**
+ * Rewrite one line's reference to an image from one version to another.
+ *
+ * The single home of the rewrite grammar, shared with the GitHub Actions
+ * manager — a workflow's `container:`/`services:` image lines carry exactly
+ * a Dockerfile `FROM` line's reference grammar.
+ *
+ * Tag references (`image:old-tag` → `image:new-tag`) use a boundary-aware
+ * regex so `node:20` never matches inside `node:20-slim` or `node:20.5` —
+ * a tag ends at whitespace, `@` (digest), a quote (YAML), `AS` (Dockerfile
+ * alias), or end-of-line. Digest references replace `@sha256:old` with
+ * `@sha256:new`, in both the digest-only (`image@sha256:…`) and tag+digest
+ * (`image:tag@sha256:…`) forms, and only when the digest belongs to this
+ * image. A mixed tag/digest pair cannot be rewritten.
+ *
+ * Returns the rewritten line, or null when the line does not carry the old
+ * reference.
+ */
+export function rewriteImageVersion(
+  line: string,
+  imageName: string,
+  oldVersion: string,
+  newVersion: string,
+): string | null {
+  if (!line.includes(imageName)) return null;
+
+  const oldIsDigest = oldVersion.startsWith("sha256:");
+  const newIsDigest = newVersion.startsWith("sha256:");
+
+  // Tag reference: image:old-tag → image:new-tag
+  if (!oldIsDigest && !newIsDigest) {
+    const tagBoundaryPattern = new RegExp(
+      `${escapeRegex(imageName)}:${escapeRegex(oldVersion)}(?=[\\s@"']|$|[Aa][Ss]\\s)`,
+    );
+    if (!tagBoundaryPattern.test(line)) return null;
+    return line.replace(tagBoundaryPattern, `${imageName}:${newVersion}`);
+  }
+
+  // Digest reference: @sha256:old → @sha256:new
+  if (oldIsDigest && newIsDigest) {
+    const oldDigest = `@${oldVersion}`;
+    if (!line.includes(oldDigest)) return null;
+    const digestBelongsToImage =
+      line.includes(`${imageName}${oldDigest}`) ||
+      new RegExp(`${escapeRegex(imageName)}:[^@\\s]+${escapeRegex(oldDigest)}`).test(line);
+    if (!digestBelongsToImage) return null;
+    return line.replace(oldDigest, `@${newVersion}`);
+  }
+
+  return null;
 }
 
 /** Escape special regex characters in a string. */

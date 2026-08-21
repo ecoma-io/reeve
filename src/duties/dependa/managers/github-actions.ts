@@ -19,6 +19,7 @@
  */
 import type { Dependency, UpdateProposal } from "../model.js";
 import { isSha } from "../semver.js";
+import { parseImageRef, rewriteImageVersion } from "./docker.js";
 import type { Manager, ManagerId, ManagerResult } from "./types.js";
 
 /** The GitHub Actions manager identifier. */
@@ -77,28 +78,98 @@ function parse(
   const lines = manifestContent.split("\n");
   for (const line of lines) {
     const match = parseUsesLine(line);
-    if (match === null) continue;
+    if (match !== null) {
+      // Deduplicate — same action@ref in the same file counts once
+      const key = `${match.owner}/${match.repo}@${match.ref}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
 
-    // Deduplicate — same action@ref in the same file counts once
-    const key = `${match.owner}/${match.repo}@${match.ref}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+      const fullName = `${match.owner}/${match.repo}`;
+      const isDigest = isSha(match.ref);
 
-    const fullName = `${match.owner}/${match.repo}`;
-    const isDigest = isSha(match.ref);
+      dependencies.push({
+        ecosystem: "github-actions",
+        name: fullName,
+        constraint: isDigest ? null : match.ref,
+        currentVersion: match.ref,
+        manifestPath,
+        dev: false,
+        manager: ID,
+      });
+      continue;
+    }
 
-    dependencies.push({
-      ecosystem: "github-actions",
-      name: fullName,
-      constraint: isDigest ? null : match.ref,
-      currentVersion: match.ref,
-      manifestPath,
-      dev: false,
-      manager: ID,
-    });
+    // Workflow jobs also run on Docker images — `container: image:tag` and
+    // the `image:` key inside `container:`/`services:` blocks. Those are
+    // dependencies of the `docker` ecosystem discovered from a workflow file;
+    // the docker registry answers for their versions, and this manager's
+    // `applyUpdate` rewrites the image line in place.
+    const image = parseImageLine(line);
+    if (image !== null) {
+      const key = `image ${image.image}:${image.tag ?? "latest"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const isDigest = image.digest !== null;
+      dependencies.push({
+        ecosystem: "docker",
+        name: image.image,
+        // Same constraint shape as the docker manager's FROM handling: an
+        // explicit tag is the constraint; an untagged, undigested image is
+        // implicitly `latest`; a digest-only reference has no constraint.
+        constraint: image.tag ?? (isDigest ? null : "latest"),
+        currentVersion: isDigest ? (image.digest ?? "") : (image.tag ?? "latest"),
+        manifestPath,
+        dev: false,
+        manager: ID,
+      });
+    }
   }
 
   return { manifestPath, dependencies, partial: false };
+}
+
+/**
+ * Parse a workflow line that names a Docker image.
+ *
+ * Matches:
+ * - `container: semgrep/semgrep:1.172.0@sha256:…` (short form)
+ * - `image: postgres:16` (inside a `container:`/`services:` block)
+ *
+ * Values carrying workflow expressions (`${{ … }}`) are skipped — they are
+ * not a fixed reference this manager can reason about. A bare word with no
+ * tag, digest, or registry path (e.g. `image: node`) is also skipped: at this
+ * line-based altitude it is indistinguishable from unrelated YAML keys named
+ * `image`, and an unpinned image is not something dependa proposes edits for.
+ */
+function parseImageLine(
+  line: string,
+): { image: string; tag: string | null; digest: string | null } | null {
+  const trimmed = line.trim().replace(/^-\s+/, "");
+
+  let value: string | null = null;
+  if (trimmed.startsWith("image:")) {
+    value = trimmed.slice("image:".length).trim();
+  } else if (trimmed.startsWith("container:")) {
+    value = trimmed.slice("container:".length).trim();
+  }
+  if (value === null || value.length === 0) return null;
+
+  // Strip surrounding quotes
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1);
+  }
+
+  // Expressions and empty block openers are not fixed references
+  if (value.length === 0 || value.includes("${{")) return null;
+
+  // Require a tag, digest, or registry path — a bare word is too ambiguous
+  if (!value.includes(":") && !value.includes("/")) return null;
+
+  return parseImageRef(value);
 }
 
 /**
@@ -178,6 +249,12 @@ function parseUsesLine(line: string): { owner: string; repo: string; ref: string
  * Returns null when the old reference is not found in the file.
  */
 function applyUpdate(manifestContent: string, proposal: UpdateProposal): string | null {
+  // A docker-ecosystem dependency discovered from a workflow file is an
+  // `image:`/`container:` line, not a `uses:` line — rewrite it in place.
+  if (proposal.dependency.ecosystem === "docker") {
+    return applyImageUpdate(manifestContent, proposal);
+  }
+
   const fullName = proposal.dependency.name;
   const oldRef = proposal.dependency.currentVersion;
   const newRef = proposal.targetVersion;
@@ -202,6 +279,45 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
       }
     }
     newLines.push(line);
+  }
+
+  if (!replaced) return null;
+
+  return newLines.join("\n");
+}
+
+/**
+ * Apply an update to a workflow's `image:`/`container:` line.
+ *
+ * The rewrite grammar (boundary-aware tags, digest-only and tag+digest
+ * forms) lives in `docker.ts`'s `rewriteImageVersion` — one home for the
+ * reference grammar, whichever manifest carries it. This function only
+ * decides which lines are image lines.
+ *
+ * Returns null when the old reference is not found on any image line.
+ */
+function applyImageUpdate(manifestContent: string, proposal: UpdateProposal): string | null {
+  const imageName = proposal.dependency.name;
+  const oldVersion = proposal.currentVersion;
+  const newVersion = proposal.targetVersion;
+
+  const lines = manifestContent.split("\n");
+  const newLines: string[] = [];
+  let replaced = false;
+
+  for (const line of lines) {
+    if (parseImageLine(line) === null) {
+      newLines.push(line);
+      continue;
+    }
+
+    const rewritten = rewriteImageVersion(line, imageName, oldVersion, newVersion);
+    if (rewritten !== null) {
+      newLines.push(rewritten);
+      replaced = true;
+    } else {
+      newLines.push(line);
+    }
   }
 
   if (!replaced) return null;
