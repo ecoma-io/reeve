@@ -131,6 +131,8 @@ interface State {
   readonly asked: Ask[];
   /** Everything the run wrote to the thread, in the order it wrote it. */
   readonly effects: { created: string[]; updated: { id: number; body: string }[] };
+  /** A status posting the comment fails with, instead of the comment landing. */
+  postStatus: number | null;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -195,6 +197,7 @@ async function startStub(): Promise<Stub> {
     answer: judging(verdict()),
     asked: [],
     effects: { created: [], updated: [] },
+    postStatus: null,
   };
 
   const server = createServer((request, response) => {
@@ -284,6 +287,10 @@ async function route(
   }
 
   if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(path)) {
+    if (stub.postStatus !== null) {
+      send(response, stub.postStatus, { message: "the comment was refused" });
+      return;
+    }
     const payload = parsed(raw) as { body?: string };
     const body = payload.body ?? "";
     const id = stub.nextCommentId;
@@ -735,6 +742,47 @@ describe("the action", () => {
     expect(run.outputs.commented).toBe("false");
     expect(run.log).toContain("The verdict could not be read, so nothing was proposed");
     expect(run.summary).toContain("No verdict — the verdict did not parse.");
+  });
+});
+
+describe("GitHub refusing the comment", () => {
+  it("writes no comment at all when the write is refused", async () => {
+    stub.postStatus = 422;
+
+    const run = await runAction(stub);
+
+    expect(stub.effects.created).toEqual([]);
+    expect(run.outputs.commented).not.toBe("true");
+  });
+
+  // The verdict is the finding; the comment is one way of delivering it. A
+  // refused write costs the run BOTH — `single` is assigned only after `act`
+  // returns (`main.ts:421`), so a throw inside `postOrReplace` leaves the
+  // `finally` at `:431` with nothing to report: no `duplicate-of`, no `score`,
+  // no summary page, for a duplicate this run had already identified. dependa
+  // states the opposite rule for itself in a comment at `dependa/main.ts:659`
+  // — "every exit path must produce valid JSON" — because a consumer parses
+  // these outputs. Repro, verified red: the case above with
+  // `expect(run.outputs["duplicate-of"]).toBe("7")`, which is `undefined`.
+  // Left as a todo rather than pinned, because pinning the loss would bless it.
+  it.todo("still reports the duplicate it found when only the comment was refused");
+
+  it("goes red rather than green-and-silent when the comment is refused", async () => {
+    stub.postStatus = 422;
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+  });
+
+  it("leaves nothing half-written when the write hits a rate limit", async () => {
+    stub.postStatus = 429;
+
+    await runAction(stub);
+
+    expect(stub.effects.created).toEqual([]);
+    expect(stub.effects.updated).toEqual([]);
+    expect(stub.comments).toEqual([]);
   });
 });
 

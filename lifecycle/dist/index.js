@@ -33956,7 +33956,7 @@ function evaluateTrack(track, facts, overrideRes, now) {
     let firedAt = null;
     if (talks) {
       const marker = facts.comments.find(
-        (comment) => comment.login === facts.ownLogin && MARKER.split(comment.body).fingerprint === fp
+        (comment) => isOwnActor(comment.login, facts.ownLogin) && MARKER.split(comment.body).fingerprint === fp
       );
       firedAt = marker?.createdAt ?? null;
     } else if (step.label !== null) {
@@ -33991,18 +33991,22 @@ function collectStaleLabels(steps, facts) {
   }
   return stale;
 }
+function isOwnActor(login, ownLogin) {
+  return ownLogin.length > 0 && login === ownLogin;
+}
 function isOwnApplied(events, label, ownLogin) {
   let latest = null;
   for (const event of events) {
     if (event.event !== "labeled" || event.label !== label) continue;
     if (latest === null || event.createdAt > latest.createdAt) latest = event;
   }
-  return latest !== null && latest.login === ownLogin;
+  return latest !== null && isOwnActor(latest.login, ownLogin);
 }
 function latestOwnLabelEvent(events, label, ownLogin) {
   let latest = null;
   for (const event of events) {
-    if (event.event !== "labeled" || event.label !== label || event.login !== ownLogin) continue;
+    if (event.event !== "labeled" || event.label !== label) continue;
+    if (!isOwnActor(event.login, ownLogin)) continue;
     if (latest === null || event.createdAt > latest) latest = event.createdAt;
   }
   return latest;

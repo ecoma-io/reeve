@@ -264,7 +264,7 @@ async function route(
   }
 
   // ---- the npm registry, redirected here by the preload -------------------
-  if (method === "GET" && path === "/lodash") {
+  if (method === "GET" && (path === "/lodash" || path.startsWith("/@"))) {
     const answer = stub.registry(stub);
     send(response, answer.status, answer.payload);
     return;
@@ -1256,4 +1256,103 @@ describe("the release history the risk facts are computed from", () => {
     expect(user).toContain("Days between releases: 395");
     expect(user).toContain("Current version is stale (>1 year): true");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-close, and the group id that does not survive its own branch name.
+// ---------------------------------------------------------------------------
+
+describe("auto-close", () => {
+  /** A repository whose only dependency is a scoped npm package. */
+  function scopedPackage(): void {
+    stub.files.set("package.json", JSON.stringify({ dependencies: { "@types/node": "^20.0.0" } }));
+    stub.files.set(
+      "package-lock.json",
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: { "node_modules/@types/node": { version: "20.0.0" } },
+      }),
+    );
+    stub.registry = () => ({
+      status: 200,
+      payload: {
+        name: "@types/node",
+        versions: { "20.0.0": {}, "20.0.1": {} },
+        time: { "20.0.0": "2024-01-01T00:00:00Z", "20.0.1": "2024-02-01T00:00:00Z" },
+      },
+    });
+  }
+
+  /** A warrant that groups per package and closes what is no longer proposed. */
+  async function perPackageAutoClose(): Promise<void> {
+    await writeFile(
+      warrantPath,
+      [
+        "version: 1",
+        "duties:",
+        "  dependa: [edit-file, open-pr]",
+        "dependa:",
+        "  grouping: by-package",
+        "  auto-close: true",
+      ].join("\n"),
+    );
+  }
+
+  it("leaves the pull request it just opened alone, for a package whose name needs no sanitising", async () => {
+    await perPackageAutoClose();
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(stub.pulls).toHaveLength(1);
+    expect(run.log).not.toContain("closed superseded PR");
+  });
+
+  // For a SCOPED package the same run opens the pull request and then closes
+  // it, in that order, and the next run refuses to reopen it (D3, "closed
+  // without merge — refusing to recreate"). The dependency becomes permanently
+  // un-updatable.
+  //
+  // Why: `packageId` (`policy.ts:400-405`) rewrites `/` but keeps `@`, so the
+  // group id is `npm-@types-node-20.0.1`. `sanitizeBranchSegment`
+  // (`publish.ts:138-141`) then strips the `@`, so the branch is
+  // `reeve/dependa/npm--types-node-20.0.1`. `closeSupersededPRs`
+  // (`publish.ts:684`) recovers the group id by slicing the branch name and
+  // compares that against the ACTIVE set, which holds the unsanitised id — so
+  // no active group ever matches and every such pull request reads as
+  // superseded.
+  //
+  // Repro, verified red against the current source: the case above with
+  // `scopedPackage()` called first. Observed log:
+  //   "dependa: closed superseded PR #101 (group `npm--types-node-20.0.1` is
+  //    no longer proposed)."
+  // Left as a todo rather than pinned, because pinning the self-close would
+  // bless it. `scopedPackage` is kept beside it so the case is one line away.
+  it.todo("leaves the pull request it just opened alone for a scoped package too");
+
+  it("closes a pull request whose group really is no longer proposed", async () => {
+    // The other half: auto-close is a gate, not a constant. A dependa pull
+    // request for a group this run did not produce is closed.
+    await perPackageAutoClose();
+    // A first run, for a body carrying this duty's real marker — the thing
+    // `closeSupersededPRs` identifies its own work by. Forging one here would
+    // be pinning the test's idea of the marker rather than the duty's.
+    await runAction();
+    stub.pulls.push({
+      number: 77,
+      title: "dependa: update leftpad 1.0.0 → 1.0.1",
+      head: "reeve/dependa/npm-leftpad-1.0.1",
+      draft: false,
+      body: stub.pulls[0]?.body ?? "",
+      createdAt: new Date().toISOString(),
+    });
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("no longer proposed");
+    expect(stub.updatedPulls).toContain(77);
+  });
+
+  void scopedPackage;
 });

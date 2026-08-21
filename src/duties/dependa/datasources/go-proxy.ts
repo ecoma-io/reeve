@@ -14,7 +14,7 @@
  * **External metadata is evidence, never authority.**
  */
 import type { Release, ResolutionResult } from "../model.js";
-import type { Datasource, DatasourceId } from "./types.js";
+import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
 
 /** The Go proxy datasource identifier. */
 const ID: DatasourceId = "go-proxy";
@@ -144,10 +144,8 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
     }
   }
 
-  // Sort newest-first
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, undefined, { numeric: true });
-  });
+  // Newest first — see `byVersionDescending` for why the locale is named.
+  releases.sort(byVersionDescending);
 
   return { status: "available", releases };
 }

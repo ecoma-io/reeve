@@ -5,12 +5,12 @@
  * the release list and take the first entry that fits, and their doc comment
  * says so outright: "Releases are assumed to be in newest-first order from the
  * datasource." So the version dependa proposes to a consumer's repository is
- * decided by one line in each datasource, and there are six copies of it:
- *
- *   npm.ts:161, crates.ts:150, go-proxy.ts:149, github-tags.ts:191,
- *   docker-registry.ts:238 and :269
- *
- * all spelling `b.version.localeCompare(a.version, undefined, { numeric: true })`.
+ * decided by the comparator each datasource sorts with. There used to be six
+ * copies of that line — npm, crates, go-proxy, github-tags and docker-registry
+ * twice — all spelling
+ * `b.version.localeCompare(a.version, undefined, { numeric: true })`. They now
+ * share `byVersionDescending` from `types.ts`, which is where the two findings
+ * below were fixed and where the reasoning lives.
  *
  * The claim being pinned here is the one that makes that safe: **the same set
  * of versions produces the same newest-first order, whatever order the registry
@@ -21,14 +21,20 @@
  * whose answer moved with that order would open a different pull request on
  * Tuesday than it did on Monday for a package nobody touched.
  *
- * Two halves, and both are here:
+ * Three things are pinned here:
  *
- *  - the half that holds — permuting the registry's listing, and reordering the
- *    keys of npm's `versions` object, never moves the order out;
- *  - the half that does not — two entries the collator cannot tell apart, and
- *    the ambient locale, both reach the answer. Those are pinned as found under
- *    `ADJUDICATE`, not fixed: which comparator these datasources should use is
- *    a decision about what dependa proposes, not a test's to make.
+ *  - permuting the registry's listing, and reordering the keys of npm's
+ *    `versions` object, never moves the order out;
+ *  - two entries the collator cannot tell apart no longer leave the head to
+ *    whichever the registry listed first;
+ *  - the ambient locale does not reach the answer.
+ *
+ * The last two were findings of this round rather than properties that already
+ * held. Both were reachable: `1.0` and `01.0` compare equal under `numeric`,
+ * and `undefined` as a locale means whatever `LC_ALL`/`LANG` says on the runner
+ * — which, for an action running inside somebody else's workflow, is theirs to
+ * set. The cases below are written from the failing side, so each states what
+ * went wrong before it states that it no longer does.
  *
  * Nothing here reaches a network. `fetch` is stubbed exactly the way
  * `npm.test.ts` and `docker-registry.test.ts` already stub it, and every
@@ -185,47 +191,55 @@ describe("the newest-first order is a function of the version set, not of the li
   });
 });
 
-// ── The half that does not ───────────────────────────────────────────────
+// ── What the newest-first order must not read besides the versions ───────
 
-describe("ADJUDICATE: what the newest-first order still reads besides the versions", () => {
-  it("two versions the collator calls equal leave the head to the registry's listing order", async () => {
+describe("what the newest-first order does not read", () => {
+  it("does not leave the head to the listing when the collator calls two versions equal", async () => {
     // `"1.0"` and `"01.0"` compare 0 under `{ numeric: true }` — the numeric
     // collation reads both as the number 1 and the leading zero is not a
     // tie-break. `Array.prototype.sort` is stable, so a tie keeps the input
     // order, and the input order is the registry's.
     expect("1.0".localeCompare("01.0", undefined, { numeric: true })).toBe(0);
 
+    // The tie is still there — this is a property of the collator, not
+    // something a datasource can talk it out of — so the comparator breaks it
+    // in byte order, which no listing and no locale can move.
     const listedPlain = await dockerOrder(["1.0", "01.0", "0.9"]);
     const listedPadded = await dockerOrder(["01.0", "1.0", "0.9"]);
 
+    expect(listedPlain).toEqual(listedPadded);
     expect(listedPlain[0]).toBe("1.0");
-    expect(listedPadded[0]).toBe("01.0");
 
-    // And it is a different proposal, not a different array. Both tags parse to
-    // the same `Semver`, so a repository pinned at `1.0` is told to move to
-    // `01.0` — `main.ts` skips a candidate only on `targetVersion ===
-    // dep.currentVersion`, which is a string comparison this passes.
+    // It was a different *proposal*, not just a different array, which is why
+    // it mattered. Both tags parse to the same `Semver`, and `main.ts` skips a
+    // candidate only on `targetVersion === dep.currentVersion` — a string
+    // comparison — so a repository pinned at `1.0` used to be sent a pull
+    // request moving it to `01.0` whenever the registry happened to list the
+    // padded spelling first. Docker tag names allow a leading zero
+    // (`[a-zA-Z0-9_][a-zA-Z0-9._-]*`) and so do git tag names, so it was
+    // reachable rather than theoretical.
     expect(latestAvailable(listedPlain)).toBe("1.0");
-    expect(latestAvailable(listedPadded)).toBe("01.0");
-
-    // Docker tag names allow a leading zero (`[a-zA-Z0-9_][a-zA-Z0-9._-]*`) and
-    // so do git tag names, so this is reachable rather than theoretical.
-    // Question for adjudication: should the datasources sort with the module's
-    // own `compare` from `semver.ts`, which is a total order on what it parses,
-    // and fall back to byte order — never a collator — on what it does not?
+    expect(latestAvailable(listedPadded)).toBe("1.0");
   });
 
-  it("the order is the ambient locale's, so the same registry answer sorts differently per runner", async () => {
+  it("does not read the ambient locale, so every runner sorts the same registry answer alike", async () => {
     // `localeCompare(a, undefined, …)` reads the default locale, which Node
     // derives from `LC_ALL`/`LANG` at start-up. A GitHub Action inherits the
-    // workflow's `env:`, so a consumer with `LANG: cs_CZ.UTF-8` on the job runs
+    // workflow's `env:`, so a consumer with `LANG: cs_CZ.UTF-8` on the job ran
     // dependa under Czech collation, where `ch` is one letter sorting between
-    // `h` and `i`. Nothing in this repository pins it.
+    // `h` and `i` — and the version it proposed moved with that setting. Same
+    // registry, same repository, same commit, two answers.
     //
-    // Simulated by forcing the default rather than by reading the process
-    // locale, so the test asserts the same thing on every runner. The
-    // precondition is that this Node build carries ICU data for `cs` — every
-    // official build since 13 does, and `.node-version` pins 24.
+    // Simulated by forcing the *default* rather than by reading the process
+    // locale, so the test asserts the same thing on every runner — and note
+    // what that makes this case: the helper below only substitutes a locale
+    // where the caller passed `undefined`, so it reaches the comparator only
+    // if the comparator has stopped naming one. It is the mutation and the
+    // assertion at once.
+    //
+    // The precondition is that this Node build carries ICU data for `cs` —
+    // every official build since 13 does, and `.node-version` pins 24 — so a
+    // build without it would make this vacuous rather than red.
     expect(Intl.Collator.supportedLocalesOf(["cs"])).toEqual(["cs"]);
 
     // Two container tags that differ only in the digraph. Under the root
@@ -236,25 +250,20 @@ describe("ADJUDICATE: what the newest-first order still reads besides the versio
     const root = await withDefaultLocale("en-US", () => dockerOrder(tags));
     const czech = await withDefaultLocale("cs-CZ", () => dockerOrder(tags));
 
+    expect(czech).toEqual(root);
     expect(root[0]).toBe("21-cs");
-    expect(czech[0]).toBe("21-chiselled");
-    expect(czech).not.toEqual(root);
-
-    // The version dependa would propose moves with the runner's locale, which
-    // is the whole of the finding: same registry, same repository, same commit,
-    // two answers.
-    expect(candidateVersions(root, null)).not.toEqual(candidateVersions(czech, null));
+    expect(candidateVersions(root, null)).toEqual(candidateVersions(czech, null));
   });
 
-  it("every datasource reads the ambient locale, so this is one decision in six places", async () => {
+  it("holds for every datasource, because they sort through one comparator", async () => {
     const tags = ["21-chiselled", "21-cs", "21-alpine"] as const;
 
     for (const source of SOURCES) {
       const root = await withDefaultLocale("en-US", () => source.order(tags));
       const czech = await withDefaultLocale("cs-CZ", () => source.order(tags));
-      expect({ source: source.name, first: czech[0] }).toEqual({
+      expect({ source: source.name, order: czech }).toEqual({
         source: source.name,
-        first: "21-chiselled",
+        order: root,
       });
       expect({ source: source.name, first: root[0] }).toEqual({
         source: source.name,

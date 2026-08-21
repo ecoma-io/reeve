@@ -472,28 +472,69 @@ describe("evaluateTrack", () => {
     expect(result.due?.stepIndex).toBe(0);
   });
 
-  // Two cases this duty gets WRONG when its own login is unreadable. Both
-  // compare a login against `facts.ownLogin` with `===`, and two empty strings
-  // compare equal:
+  // The same two cases with this run's own login unreadable, which is the
+  // shape that made both of them wrong.
   //
-  //   - `resolveOwnLogin` (`timeline.ts:141`) answers `data.login ?? ""`;
-  //   - `readEvents` (`timeline.ts:169`) and `readComments` (`:121`) answer
-  //     `""` for an event or comment whose account GitHub no longer reports.
+  // `resolveOwnLogin` answers `data.login ?? ""`, and `readEvents` and
+  // `readComments` answer `""` for an event or comment whose account GitHub no
+  // longer reports. Those are two different unknowns, and comparing them with
+  // `===` called them the same actor — so a run that could not read its own
+  // identity attributed every actorless event to itself. Measured before the
+  // fix: the first case below yielded `toUnstale: ["stale"]`, un-staling a
+  // label this duty never applied; the second yielded `due.stepIndex === 1`,
+  // the *closing* step, on a thread nobody had nudged.
   //
-  // So a run whose `getAuthenticated()` answered without a login attributes
-  // every actorless `labeled` event to itself — un-staling a label this duty
-  // never applied — and reads a deleted account's comment carrying the
-  // (public, computable) fingerprint as its own step firing, which advances
-  // the ladder to the close. `clock.ts`'s header promises the opposite in both
-  // cases: "absent or ambiguous attribution leaves the label alone".
-  //
-  // Both repros are the two cases above with `ownLogin: ""` added to `facts`.
-  // Verified red against the current source: the first yields
-  // `toUnstale: ["stale"]`, the second `due.stepIndex === 1` — the closing
-  // step. Left as todos rather than pinned, because pinning either would
-  // bless it.
-  it.todo("an unreadable own login never claims a label event that names no actor");
-  it.todo("an unreadable own login never reads an actorless comment as its own step firing");
+  // `isOwnActor` in `clock.ts` is the guard, and it is one function rather
+  // than three comparisons precisely so a fourth call site cannot reintroduce
+  // the `===`.
+
+  it("never claims a label event that names no actor when its own login is unreadable too", () => {
+    const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
+    const staleApplication = new Date(T0.getTime() + DAY);
+    const reset = new Date(staleApplication.getTime() + DAY);
+    const f = facts({
+      createdAt: T0,
+      ownLogin: "",
+      labels: ["stale"],
+      events: [event({ event: "labeled", label: "stale", login: "", createdAt: staleApplication })],
+      comments: [comment({ login: "alice", createdAt: reset })],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(reset.getTime() + 1),
+    );
+    expect(result.toUnstale).toEqual([]);
+  });
+
+  it("never reads an actorless comment as its own step firing when its own login is unreadable too", () => {
+    const t = track({
+      name: "stale",
+      resets: "author",
+      steps: [step({ after: DAY, say: { kind: "built-in" } }), step({ after: DAY, close: true })],
+    });
+    const fp0 = fingerprintFor(t, 0, T0);
+    const f = facts({
+      createdAt: T0,
+      ownLogin: "",
+      comments: [
+        comment({
+          login: "",
+          body: MARKER.render(fp0),
+          createdAt: new Date(T0.getTime() + DAY),
+        }),
+      ],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(T0.getTime() + 5 * DAY),
+    );
+    // Step 0, not step 1: the ladder never advanced, so the close is not due.
+    expect(result.due?.stepIndex).toBe(0);
+  });
 
   it("the clock-hand exception: never un-stales a label with no matching event in the fetched history — ambiguous attribution is left alone", () => {
     const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });

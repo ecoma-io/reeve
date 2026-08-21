@@ -1101,10 +1101,11 @@ function describeRequestError(error: unknown, timeoutMs: number): string {
 /**
  * Reads the protocol's `error`, in both the shapes providers send it.
  *
- * An `error` that is present but carries nothing — `null`, `""`, `{}` — is not
- * a report of anything, and several gateways send one alongside a perfectly
- * good answer. Only a field with something in it condemns the response;
- * otherwise a model that worked would be rotated past for punctuation.
+ * An `error` that is present but carries nothing — `null`, `""`, `{}`,
+ * `{"message": ""}`, `{"code": null}` — is not a report of anything, and
+ * several gateways send one alongside a perfectly good answer. Only a field
+ * with something in it condemns the response; otherwise a model that worked
+ * would be rotated past for punctuation.
  */
 function readErrorMessage(payload: unknown): string | null {
   const error = asRecord(payload)?.error;
@@ -1112,12 +1113,27 @@ function readErrorMessage(payload: unknown): string | null {
   if (typeof error === "string") return error.trim().length > 0 ? error : null;
 
   const reported = asRecord(error);
-  if (reported === null || Object.keys(reported).length === 0) return null;
+  if (reported === null) return null;
 
   const message = reported.message;
-  return typeof message === "string" && message.trim().length > 0
-    ? message
-    : `provider reported an error — ${excerpt(JSON.stringify(reported))}`;
+  if (typeof message === "string" && message.trim().length > 0) return message;
+
+  // "Carries nothing" is about the contents, not about the key count. `{}` was
+  // already tolerated here; `{"message": ""}`, `{"message": "   "}` and
+  // `{"code": null}` were not, and each of them is the same absence wearing a
+  // field name. A gateway that stamps one of those on every response — several
+  // do — turned the whole roster protocol-exhausted and ended a run red on a
+  // provider that was answering perfectly well, which is the failure this
+  // paragraph of the doc comment above exists to prevent.
+  const carries = Object.values(reported).some(
+    (value) =>
+      value !== null &&
+      value !== undefined &&
+      !(typeof value === "string" && value.trim().length === 0),
+  );
+  if (!carries) return null;
+
+  return `provider reported an error — ${excerpt(JSON.stringify(reported))}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

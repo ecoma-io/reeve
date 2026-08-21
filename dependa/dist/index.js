@@ -33439,6 +33439,13 @@ function budgetExhausted(maxRequests, meter, budget) {
 // src/duties/dependa/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
+// src/duties/dependa/datasources/types.ts
+function byVersionDescending(a, b) {
+  const collated = b.version.localeCompare(a.version, "en-US", { numeric: true });
+  if (collated !== 0) return collated;
+  return b.version < a.version ? -1 : b.version > a.version ? 1 : 0;
+}
+
 // src/duties/dependa/datasources/crates.ts
 var ID = "crates";
 var CRATES_API = "https://crates.io/api/v1/crates";
@@ -33532,9 +33539,7 @@ function parseCratesResponse(body) {
   if (releases.length === 0) {
     return { status: "malformed-metadata", reason: "crates.io response has no valid versions" };
   }
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, void 0, { numeric: true });
-  });
+  releases.sort(byVersionDescending);
   return { status: "available", releases };
 }
 function isPrereleaseVersion(version) {
@@ -33717,9 +33722,7 @@ function parseDockerHubResponse(results) {
   if (releases.length === 0) {
     return { status: "available", releases: [] };
   }
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, void 0, { numeric: true });
-  });
+  releases.sort(byVersionDescending);
   return { status: "available", releases };
 }
 function parseV2Response(tags) {
@@ -33738,9 +33741,7 @@ function parseV2Response(tags) {
       diffUrl: null
     });
   }
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, void 0, { numeric: true });
-  });
+  releases.sort(byVersionDescending);
   return { status: "available", releases };
 }
 function isSafeRegistry(registry) {
@@ -33935,9 +33936,7 @@ async function resolve3(token, packageName) {
   if (releases.length === 0) {
     return { status: "not-found" };
   }
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, void 0, { numeric: true });
-  });
+  releases.sort(byVersionDescending);
   return { status: "available", releases };
 }
 function parseDate3(value) {
@@ -34046,9 +34045,7 @@ async function resolve4(packageName) {
       }
     }
   }
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, void 0, { numeric: true });
-  });
+  releases.sort(byVersionDescending);
   return { status: "available", releases };
 }
 function isPrereleaseVersion2(version) {
@@ -34248,9 +34245,7 @@ function parseRegistryResponse(body) {
   if (releases.length === 0) {
     return { status: "malformed-metadata", reason: "npm registry response has no valid versions" };
   }
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, void 0, { numeric: true });
-  });
+  releases.sort(byVersionDescending);
   return { status: "available", releases };
 }
 function isPrereleaseVersion3(version) {

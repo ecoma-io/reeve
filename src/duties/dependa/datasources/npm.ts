@@ -16,7 +16,7 @@
  * to propose it — the policy decides.
  */
 import type { Release, ResolutionResult } from "../model.js";
-import type { Datasource, DatasourceId } from "./types.js";
+import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
 
 /** The npm datasource identifier. */
 const ID: DatasourceId = "npm";
@@ -154,12 +154,8 @@ function parseRegistryResponse(body: Record<string, unknown>): ResolutionResult 
     return { status: "malformed-metadata", reason: "npm registry response has no valid versions" };
   }
 
-  // Sort newest-first
-  releases.sort((a, b) => {
-    // Simple reverse alphabetical sort for semver versions
-    // (not perfectly accurate for all semver but good enough for ordering)
-    return b.version.localeCompare(a.version, undefined, { numeric: true });
-  });
+  // Newest first — see `byVersionDescending` for why the locale is named.
+  releases.sort(byVersionDescending);
 
   return { status: "available", releases };
 }

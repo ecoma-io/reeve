@@ -385,3 +385,70 @@ describe("a roster no model on it can serve", () => {
     expect(weather.grounded("a")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// An `error` field that reports nothing is not a report.
+// ---------------------------------------------------------------------------
+
+describe("an `error` field that carries nothing does not condemn a good answer", () => {
+  // Several OpenAI-compatible gateways stamp an `error` key onto every
+  // response and leave it empty when nothing went wrong. `readErrorMessage`'s
+  // doc comment has always said so; the code tested only whether the object
+  // had any keys at all, so `{}` was tolerated and `{"message": ""}` — the
+  // same absence with a field name on it — was not.
+  //
+  // That direction of the mistake is a run turning red on a provider that
+  // answered. Every model on the roster fails with `protocol`, which is the
+  // one shape `failIfProtocolExhausted` is required to call a configuration
+  // error, so a gateway with this habit made every run of every duty red and
+  // told the maintainer their configuration was broken.
+  it.each([
+    ["an empty object", {}],
+    ["an empty message", { message: "" }],
+    ["a message of whitespace", { message: "   " }],
+    ["a null code and nothing else", { code: null }],
+    ["a null message beside a null code", { message: null, code: null }],
+    ["a JSON null", null],
+    ["an empty string", ""],
+    // Not a record, so it was never read as one.
+    ["an empty array", []],
+  ])("reads a body carrying %s as the answer it also carries", async (_case, error) => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ error, choices: [{ message: { role: "assistant", content: "hi" } }] }),
+        { status: 200 },
+      ),
+    );
+
+    const completion = await subject().complete("m", HELLO);
+
+    expect(completion.ok).toBe(true);
+    expect(completion.ok ? completion.content : null).toBe("hi");
+  });
+
+  it.each([
+    ["a message", { message: "rate limited" }, "rate limited"],
+    ["a code with no message", { code: "insufficient_quota" }, "provider reported an error"],
+    [
+      "a number beside an empty message",
+      { message: "", status: 500 },
+      "provider reported an error",
+    ],
+    ["a plain string", "upstream refused", "upstream refused"],
+  ])("still refuses a body whose error carries %s", async (_case, error, expected) => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ error, choices: [{ message: { role: "assistant", content: "hi" } }] }),
+        { status: 200 },
+      ),
+    );
+
+    const failure = expectFailure(await subject().complete("m", HELLO));
+
+    // A 200 carrying a real error is a protocol failure, not weather: the
+    // endpoint is reachable and answered, and what it said was that it would
+    // not serve this. The content is never mined out from under it.
+    expect(failure.kind).toBe("protocol");
+    expect(failure.reason).toContain(expected);
+  });
+});

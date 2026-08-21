@@ -129,7 +129,7 @@ async function portMethods(file: string, name: string): Promise<string[]> {
   expect(end, `\`${name}\` in ${file} is not brace-balanced`).toBeGreaterThan(-1);
 
   const port = text.slice(start, end);
-  return [...port.matchAll(/^\s*(\w+)\s*\(params/gm)].map((m) => m[1]).sort();
+  return [...port.matchAll(/^\s*(\w+)\s*\(params/gm)].map((m) => m[1] ?? "").sort();
 }
 
 async function offenders(banned: readonly (readonly [string, RegExp])[]): Promise<string[]> {
