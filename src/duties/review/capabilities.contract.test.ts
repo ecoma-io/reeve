@@ -17,19 +17,29 @@
  * **KNOWN LIMITATIONS — read these before trusting a green run here.**
  *
  * The module list is a `readdir` of this directory, so a NEW file cannot slip
- * past by not being on a list somebody forgot to update. That is the only
- * evasion this file closes. Two others remain open, both confirmed defeats:
+ * past by not being on a list somebody forgot to update. Two evasions remain
+ * open, and both are confirmed defeats:
  *
  * 1. **Dynamic construction defeats the source scan.** The scan is a substring
  *    and regex read of the file's text. `["write", "Contents", "File"].join("")`
  *    behind an `await import("../../core/forge.js")` reads as none of the
  *    banned strings and passes. Closing this needs the check to move from
  *    source text to the resolved module graph.
- * 2. **The port-shape regex is indentation-sensitive.** `/^\s{6}(\w+)\(params/gm`
- *    counts methods declared at exactly six spaces, which is the nesting every
- *    port in this duty happens to use. A method declared one level deeper —
- *    `rest.repos.contents.put()` at eight spaces — widens the port without
- *    changing the count this test reads.
+ *
+ * 2. **A port method whose first parameter is not named `params` is invisible.**
+ *    `portMethods` matches `/^\s*(\w+)\s*\(params/gm`, so a method declared as
+ *    `writeFile(input: …)` is not counted and does not move the method list
+ *    below. Every port here happens to use `params`, which is what makes the
+ *    check work at all; nothing enforces that it stays true.
+ *
+ * Half of the second one used to be worse and that half is now closed: the
+ * regex was also indentation-sensitive (`/^\s{6}(\w+)\(params/gm` counted
+ * methods at exactly six spaces, so a method one level deeper widened a port
+ * without moving the count). `portMethods` bounds the search by the
+ * interface's own braces instead, so depth no longer matters — only the
+ * parameter name does. Its doc comment carries the rest of that history,
+ * including the two `indexOf` anchors it replaced — one of which was a
+ * doc-comment string in the module below the port.
  *
  * **And a boundary property no test in this file can change.** These ports are
  * TypeScript interfaces, which are erased at runtime. `main.ts:952` builds one
@@ -86,6 +96,51 @@ async function reviewModules(): Promise<readonly string[]> {
  * Every `<module>: <what it reached>` this duty's source names, across every
  * module in the directory — empty when the boundary holds.
  */
+/**
+ * The methods a port declares, read by matching the interface's own braces.
+ *
+ * This used to slice between two `indexOf` calls, the second of which was a
+ * doc-comment string in the module below the port — so rewording a comment
+ * silently moved the region this test judged, and a missing anchor returned
+ * `-1` into `slice`, which does not throw. Both anchors are structural now:
+ * the declaration this file names, and the brace that closes it. A port that
+ * has been renamed fails here saying so, rather than failing three lines later
+ * about a method list nobody chose.
+ *
+ * It also narrows the second of the KNOWN LIMITATIONS above without closing
+ * it. The old regex counted methods at exactly six spaces of indentation — the
+ * nesting these ports happen to use — so a method declared one level deeper
+ * widened the port without moving the count. Bounding the search by the
+ * interface's braces instead of by indentation means every method is counted
+ * at whatever depth it is written. What survives is the `(params` anchor: a
+ * method whose first parameter is named anything else is still not seen at
+ * all.
+ */
+async function portMethods(file: string, name: string): Promise<string[]> {
+  const text = await source(file);
+  const start = text.indexOf(`export interface ${name} {`);
+  // Named rather than left to `slice(-1, …)`, which yields a region the test
+  // would then judge as if somebody had chosen it.
+  expect(start, `${file} no longer declares \`export interface ${name}\``).toBeGreaterThan(-1);
+
+  let depth = 0;
+  let end = -1;
+  for (let i = text.indexOf("{", start); i < text.length; i += 1) {
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  expect(end, `\`${name}\` in ${file} is not brace-balanced`).toBeGreaterThan(-1);
+
+  const port = text.slice(start, end);
+  return [...port.matchAll(/^\s*(\w+)\s*\(params/gm)].map((m) => m[1] ?? "").sort();
+}
+
 async function offenders(banned: readonly (readonly [string, RegExp])[]): Promise<string[]> {
   const found: string[] = [];
   for (const file of await reviewModules()) {
@@ -195,39 +250,19 @@ describe("the write surface review actually holds", () => {
   it("the_review_thread_port_declares_only_the_three_review_comment_methods", async () => {
     // The port is the answer to "what can this reach?", so it is read from the
     // interface rather than from the call sites.
-    const text = await source("threads.ts");
-    const port = text.slice(
-      text.indexOf("export interface ReviewThreadApi"),
-      text.indexOf("/** This duty's own inline thread"),
-    );
-    // KNOWN LIMITATION: this counts methods at exactly six spaces of
-    // indentation — the nesting every port here uses. A method declared one
-    // level deeper widens the port without moving this count. See the module
-    // doc; closing it needs a type-level check, not a text one.
-    const methods = [...port.matchAll(/^\s{6}(\w+)\(params/gm)].map((m) => m[1]);
-    expect(methods.sort()).toEqual(
+    expect(await portMethods("threads.ts", "ReviewThreadApi")).toEqual(
       ["createReviewComment", "listReviewComments", "updateReviewComment"].sort(),
     );
   });
 
   it("the_summary_comment_port_declares_only_the_three_issue_comment_methods", async () => {
-    const text = await source("publish.ts");
-    const port = text.slice(
-      text.indexOf("export interface ReviewCommentApi"),
-      text.indexOf("const COMMENT_PAGE"),
+    expect(await portMethods("publish.ts", "ReviewCommentApi")).toEqual(
+      ["createComment", "listComments", "updateComment"].sort(),
     );
-    const methods = [...port.matchAll(/^\s{6}(\w+)\(params/gm)].map((m) => m[1]);
-    expect(methods.sort()).toEqual(["createComment", "listComments", "updateComment"].sort());
   });
 
   it("the_pull_request_port_is_read_only", async () => {
-    const text = await source("pr.ts");
-    const port = text.slice(
-      text.indexOf("export interface PrApi"),
-      text.indexOf("/** A pull request as this duty reads it. */"),
-    );
-    const methods = [...port.matchAll(/^\s{6}(\w+)\(params/gm)].map((m) => m[1]);
-    expect(methods.sort()).toEqual(["get", "listFiles"].sort());
+    expect(await portMethods("pr.ts", "PrApi")).toEqual(["get", "listFiles"].sort());
   });
 });
 
@@ -237,9 +272,24 @@ describe("remediation stays a proposal, from the review side of the boundary", (
     // `encodeEnvelope`). It is data a later duty reads back — never a command,
     // a patch, or a path this duty asks anyone to write.
     const text = await source("publish.ts");
-    expect(text).toContain("Buffer.from(JSON.stringify(previous)");
-    for (const forbidden of ["exec", "spawn", "child_process"]) {
-      expect(text).not.toContain(forbidden);
+    // The envelope is base64 of a JSON serialisation, matched as that shape
+    // rather than as one literal expression: the previous spelling pinned
+    // `Buffer.from(JSON.stringify(previous)` including the local variable's
+    // name, so renaming a local — which changes nothing about what crosses
+    // the boundary — failed this test.
+    expect(text).toMatch(/Buffer\.from\(\s*JSON\.stringify\(/);
+    expect(text).toMatch(/toString\(\s*"base64"\s*\)/);
+    // Matched as calls and imports, not as bare substrings. `not.toContain("exec")`
+    // fails on any identifier that merely spells it — `execute`, `executed`,
+    // a regex `.exec(` — which is a red suite for a module that reaches
+    // nothing, and trains a reader to edit the test rather than look.
+    const executable: readonly (readonly [string, RegExp])[] = [
+      ["a shell", /\bexec(File|Sync)?\s*\(/],
+      ["a spawned process", /\bspawn(Sync)?\s*\(/],
+      ["the child-process module", /["']node:child_process["']/],
+    ];
+    for (const [what, pattern] of executable) {
+      expect(pattern.test(text), `publish.ts reaches ${what}`).toBe(false);
     }
   });
 

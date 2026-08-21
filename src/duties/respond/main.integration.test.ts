@@ -109,6 +109,8 @@ interface State {
   nextCommentId: number;
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
+  /** A status posting the reply fails with, instead of the comment landing. */
+  postStatus: number | null;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -173,6 +175,7 @@ async function startStub(): Promise<Stub> {
     labels: [],
     repositoryLabels: [],
     comments: [],
+    postStatus: null,
     nextCommentId: 1,
     answer: stageAnswer(),
     asked: [],
@@ -240,6 +243,10 @@ async function route(
     return;
   }
   if (method === "POST" && comments) {
+    if (stub.postStatus !== null) {
+      send(response, stub.postStatus, { message: "the comment was refused" });
+      return;
+    }
     const payload = parsed(raw) as { body?: string };
     const comment: Comment = {
       id: stub.nextCommentId,
@@ -911,6 +918,55 @@ describe("the action contract", () => {
 function proposalBody(): string {
   return `A proposal.\n\n${markerFor("propose").render(fingerprint("proposal", ["respond"]))}`;
 }
+
+describe("GitHub refusing the reply", () => {
+  /** The run every case here differs from by one thing: the post is refused. */
+  function drafted(): void {
+    stub.body = VIETNAMESE;
+    stub.answer = stageAnswer({ draft: JSON.stringify({ text: REPLY, confidence: 0.92 }) });
+  }
+
+  it("posts nothing and does not report a reply it never made, on a refused write", async () => {
+    // The outputs are what a workflow branches on. Reporting `posted` for a
+    // comment GitHub refused would have the next step act on a thread that
+    // never heard from this duty.
+    drafted();
+    stub.postStatus = 422;
+
+    const run = await runAction(stub);
+
+    expect(stub.comments).toEqual([]);
+    expect(run.outputs.responded).not.toBe("true");
+  });
+
+  it("goes red rather than green-and-silent when the write is refused", async () => {
+    drafted();
+    stub.postStatus = 422;
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+  });
+
+  it("posts nothing when the write hits a rate limit", async () => {
+    drafted();
+    stub.postStatus = 429;
+
+    await runAction(stub);
+
+    expect(stub.comments).toEqual([]);
+  });
+
+  it("posts the reply when GitHub does not refuse it, so the cases above are not vacuous", async () => {
+    drafted();
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.comments).toHaveLength(1);
+    expect(run.outputs.responded).toBe("true");
+  });
+});
 
 describe("the Reeve-proposal recursion guard", () => {
   it("says nothing at all on Reeve's own proposal pull request", async () => {

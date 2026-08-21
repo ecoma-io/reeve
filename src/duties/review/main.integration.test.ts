@@ -67,6 +67,32 @@ const PATCH_ONE = "@@ -1 +12,2 @@\n+const one = 1;\n+const two = 2;";
 /** A second state for the same file, so a rerun can move the diff. */
 const PATCH_TWO = "@@ -1 +14,2 @@\n+const one = 1;\n+const two = 2;\n+const three = 3;";
 
+/**
+ * A verdict naming both lines `PATCH_ONE` proves, so the run has two threads
+ * to anchor and a thread write can fail with one already committed.
+ */
+const TWO_FINDINGS = JSON.stringify({
+  findings: [
+    {
+      rule: "dedup",
+      severity: "warning",
+      path: "src/a.ts",
+      line: 12,
+      snippet: "const one = 1;",
+      body: "This constant is declared twice.",
+    },
+    {
+      rule: "dedup",
+      severity: "warning",
+      path: "src/a.ts",
+      line: 13,
+      snippet: "const two = 2;",
+      body: "This repeats the constant above.",
+    },
+  ],
+  confidence: 0.8,
+});
+
 beforeAll(async () => {
   // Built rather than assumed: CI runs `pnpm test` before `pnpm build`, so a
   // case driving the committed bundle would be driving whatever was committed
@@ -91,6 +117,13 @@ interface Ask {
   readonly system: string;
   readonly user: string;
   readonly authorization: string | null;
+  /**
+   * Every message role in the request, in order — the only thing that tells a
+   * fresh conversation from an inherited one. An agentic attempt that died
+   * mid-loop leaves `assistant`/`tool` turns behind in ITS conversation, and
+   * the next model in the rotation must be handed none of them.
+   */
+  readonly roles: readonly string[];
 }
 
 interface Answer {
@@ -142,6 +175,13 @@ interface State {
   nextThreadId: number;
   /** Whether the thread-listing walk should report an uncertain listing. */
   threadFails?: { create?: boolean; update?: boolean; list?: boolean };
+  /**
+   * Once the stub already holds this many threads, every further create
+   * answers 500 — a failure `syncThreads` does not treat as "GitHub cannot
+   * anchor this" (that is only 422) and therefore rethrows, mid-loop, with the
+   * earlier creates already committed. `null` never fails.
+   */
+  createFailsPast: number | null;
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
 }
@@ -211,6 +251,7 @@ async function startStub(): Promise<Stub> {
     nextCommentId: 1,
     threads: [],
     nextThreadId: 1,
+    createFailsPast: null,
     answer: stageAnswer(),
     asked: [],
   };
@@ -337,6 +378,10 @@ async function route(
       send(response, 422, { message: "line must be part of the diff" });
       return;
     }
+    if (stub.createFailsPast !== null && stub.threads.length >= stub.createFailsPast) {
+      send(response, 500, { message: "internal server error" });
+      return;
+    }
     const payload = parsed(raw) as { body?: string; path?: string; line?: number };
     const thread: Thread = {
       id: stub.nextThreadId,
@@ -381,7 +426,13 @@ function askOf(raw: string, authorization: string | null): Ask {
   };
   const system = payload.messages?.find((message) => message.role === "system")?.content;
   const user = payload.messages?.find((message) => message.role === "user")?.content;
-  return { model: String(payload.model), system: system ?? "", user: user ?? "", authorization };
+  return {
+    model: String(payload.model),
+    system: system ?? "",
+    user: user ?? "",
+    authorization,
+    roles: (payload.messages ?? []).map((message) => message.role ?? ""),
+  };
 }
 
 function parsed(raw: string): unknown {
@@ -1450,7 +1501,7 @@ describe("the action", () => {
     expect(stub.comments).toHaveLength(0);
     expect(run.outputs.commented).toBe("false");
     expect(run.outputs.findings).toBe("0");
-    expect(run.log).toContain("every model on the roster failed with a protocol error");
+    expect(run.log).toContain("no model on the roster produced a usable answer");
     expect(run.log).toContain("the model does not accept this prompt");
   });
 
@@ -1472,8 +1523,8 @@ describe("the action", () => {
     expect(run.log).not.toContain("failed with a protocol error");
   });
 
-  it("stays green when at least one pass read the diff, even if another was protocol-exhausted", async () => {
-    // A high-risk diff costs three passes. Two are protocol-exhausted and one
+  it("stays green when at least one pass read the diff, even if another's roster was exhausted", async () => {
+    // A high-risk diff costs three passes. Two have exhausted rosters and one
     // reads readably — the roster was NOT wholly exhausted by protocol
     // errors, so the run stays green; the unreadable adversarial pass merely
     // withholds the all-clear.
@@ -1760,6 +1811,89 @@ describe("the action", () => {
     const assembledAsk = stub.asked.find((ask) => ask.system.includes("whole universe"));
     expect(assembledAsk).toBeDefined();
     expect(assembledAsk?.user).toContain("const two = 2;");
+  });
+
+  it("hands the next model a fresh conversation when the provider fails midway through a tool loop", async () => {
+    // The failure the tool loop makes possible and the single-shot ask cannot:
+    // the provider dies with the conversation already half spent — one tool
+    // call asked, answered and fenced back in. `agentic.ts` promises rotation
+    // hands the next model "a fresh conversation, not this one's history", and
+    // that is only observable from what the second model was actually sent.
+    let firstModelAsks = 0;
+    stub.answer = stageAnswer({
+      review: (ask) => {
+        if (ask.model === "first-model") {
+          firstModelAsks += 1;
+          if (firstModelAsks === 1) {
+            return {
+              status: 200,
+              payload: {
+                choices: [
+                  {
+                    message: {
+                      role: "assistant",
+                      content: null,
+                      tool_calls: [
+                        {
+                          id: "c1",
+                          type: "function",
+                          function: {
+                            name: "read_diff",
+                            arguments: JSON.stringify({ path: "src/a.ts" }),
+                          },
+                        },
+                      ],
+                    },
+                    finish_reason: "tool_calls",
+                  },
+                ],
+                usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+              },
+            };
+          }
+          // Round two, mid-conversation: the endpoint falls over.
+          return { status: 503, payload: { error: { message: "upstream unavailable" } } };
+        }
+        return saying(
+          JSON.stringify({
+            findings: [
+              {
+                rule: "dedup",
+                severity: "warning",
+                path: "src/a.ts",
+                line: 13,
+                snippet: "const two = 2;",
+                body: "This repeats the constant above.",
+              },
+            ],
+            confidence: 0.9,
+          }),
+        );
+      },
+    });
+
+    const run = await runAction(stub, {
+      "review-mode": "agentic",
+      models: "first-model,second-model",
+    });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.findings).toBe("1");
+    // The failure really was mid-loop: the first model was asked twice, and
+    // its second request carried the tool result from the first.
+    expect(firstModelAsks).toBe(2);
+    const reviewAsks = stub.asked.filter((ask) => ask.system.includes("served by your tools"));
+    const failed = reviewAsks.filter((ask) => ask.model === "first-model");
+    expect(failed).toHaveLength(2);
+    expect(failed[1]?.roles).toContain("tool");
+    // And the model rotated to inherited none of it: system and user only, the
+    // same shape the dead attempt started from.
+    const fresh = reviewAsks.filter((ask) => ask.model === "second-model");
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0]?.roles).toEqual(["system", "user"]);
+    // Weather, not a broken configuration: the run posted its review anyway.
+    expect(stub.comments).toHaveLength(1);
+    expect(stub.comments[0]?.body).toContain("New findings (1)");
   });
 
   it("refuses an unknown review-mode red rather than guessing", async () => {
@@ -2084,6 +2218,59 @@ describe("the action", () => {
     expect(stub.comments).toHaveLength(0);
     expect(stub.threads).toHaveLength(0);
     expect(run.log).toContain("scope missing");
+  });
+
+  it("keeps the thread it already wrote when the next thread write fails mid-loop, and posts no summary comment", async () => {
+    // The no-rollback decision, driven rather than reasoned about
+    // (`threads.ts`: "a permission failure aborts before the summary write,
+    // and the next run's relisting finds no half-written state").
+    //
+    // Two anchorable findings means two creates. The second one fails with a
+    // status that is NOT 422 — the only status `syncThreads` reads as "GitHub
+    // cannot anchor this here" — so it rethrows with the first create already
+    // committed on the pull request. What must be true afterwards: the
+    // committed thread STANDS (nothing undoes it), the summary comment was
+    // never written (threads come first precisely so a rerun cannot duplicate
+    // it), and the run is red rather than a green run that did half the work.
+    stub.answer = stageAnswer({ review: TWO_FINDINGS });
+    stub.createFailsPast = 1;
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+    // Written, and not rolled back: the first thread is on the pull request.
+    expect(stub.threads).toHaveLength(1);
+    expect(stub.threads[0]?.line).toBe(12);
+    // Nothing was written past the failure — no second thread, no summary
+    // comment for a rerun to have to reconcile against.
+    expect(stub.comments).toHaveLength(0);
+    expect(run.outputs.commented).toBe("false");
+  });
+
+  it("converges on a rerun after a half-written thread set — the standing thread is recognised, never duplicated", async () => {
+    // The other half of the no-rollback decision: the state a failed run left
+    // behind is the next run's input, and reconciling it is what makes "no
+    // rollback" safe. The same pull request, the same diff, the same verdict —
+    // the only change is that the forge stops failing.
+    stub.answer = stageAnswer({ review: TWO_FINDINGS });
+    stub.createFailsPast = 1;
+    const first = await runAction(stub);
+    expect(first.code).not.toBe(0);
+    expect(stub.threads).toHaveLength(1);
+
+    stub.createFailsPast = null;
+    const second = await runAction(stub);
+
+    expect(second.code).toBe(0);
+    // Two threads, not three: the thread the failed run committed is matched
+    // by key, line and path and left exactly as it was.
+    expect(stub.threads).toHaveLength(2);
+    expect(stub.threads.map((thread) => thread.line)).toEqual([12, 13]);
+    expect(stub.threads[0]?.id).toBe(1);
+    // And the summary comment the failed run never reached is posted once.
+    expect(stub.comments).toHaveLength(1);
+    expect(stub.comments[0]?.body).toContain("### New findings (2)");
+    expect(second.outputs.findings).toBe("2");
   });
 
   it("leaves a resolved finding summary-only — the moved-on line gets a Resolved row, never a thread", async () => {

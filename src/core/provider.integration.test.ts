@@ -232,3 +232,165 @@ describe("the provider against a real endpoint", () => {
     expect(answer.ok ? "" : answer.reason).toContain("request failed");
   });
 });
+
+describe("a tool loop over a real socket", () => {
+  /** The one tool the cases below offer — shape only; nothing executes it. */
+  const READ_DIFF = {
+    name: "read_diff",
+    description: "Read one file's patch.",
+    parameters: { type: "object", properties: { path: { type: "string" } } },
+  };
+
+  it("offers the tools, reads the calls back, and carries the answer under the wire's own names", async () => {
+    // The whole round trip a bounded tool loop makes, over a socket rather
+    // than a replaced `fetch`. The second request is the one that matters:
+    // a tool result the wire cannot read (`tool_call_id` misspelled, or the
+    // assistant's own call list dropped) is refused by providers that check,
+    // and a stub that never saw the bytes could not tell.
+    const baseUrl = await serving((entry, respond) => {
+      const asked = bodyOf(entry).messages as { role: string }[];
+      if (asked.length === 1) {
+        respond(
+          200,
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call-1",
+                      type: "function",
+                      function: { name: "read_diff", arguments: '{"path":"src/a.ts"}' },
+                    },
+                  ],
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      respond(200, completion("done"));
+    });
+
+    const provider = createProvider({ baseUrl, apiKey: "" });
+    const first = await provider.complete("m", [{ role: "user", content: "review this" }], {
+      tools: [READ_DIFF],
+    });
+
+    expect(first.ok).toBe(true);
+    expect(first.ok ? first.toolCalls : []).toEqual([
+      { id: "call-1", name: "read_diff", arguments: '{"path":"src/a.ts"}' },
+    ]);
+    // A tool-calling answer carries no prose, and that is not an empty answer.
+    expect(first.ok ? first.content : "?").toBe("");
+
+    const second = await provider.complete(
+      "m",
+      [
+        { role: "user", content: "review this" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call-1", name: "read_diff", arguments: '{"path":"src/a.ts"}' }],
+        },
+        { role: "tool", content: "@@ -1 +1 @@", toolCallId: "call-1" },
+      ],
+      { tools: [READ_DIFF] },
+    );
+
+    expect(second).toMatchObject({ ok: true, content: "done" });
+
+    // What the endpoint actually received, both times.
+    const offered = bodyOf(received[0]!).tools as {
+      type: string;
+      function: { name: string };
+    }[];
+    expect(offered).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "read_diff",
+          description: READ_DIFF.description,
+          parameters: READ_DIFF.parameters,
+        },
+      },
+    ]);
+    const replayed = bodyOf(received[1]!).messages as Record<string, unknown>[];
+    expect(replayed[1]).toEqual({
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "call-1",
+          type: "function",
+          function: { name: "read_diff", arguments: '{"path":"src/a.ts"}' },
+        },
+      ],
+    });
+    expect(replayed[2]).toEqual({
+      role: "tool",
+      content: "@@ -1 +1 @@",
+      tool_call_id: "call-1",
+    });
+  });
+
+  it("refuses a tool_calls array it cannot read whole, rather than answering calls the model never made", async () => {
+    // Half a call list is the injection-shaped answer D5 refuses everywhere
+    // else: a caller that answered the readable entries would be executing a
+    // request nobody made.
+    const baseUrl = await serving((_entry, respond) => {
+      respond(
+        200,
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [{ id: "call-1", type: "function", function: { name: "read_diff" } }],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+        }),
+      );
+    });
+
+    const answer = await createProvider({ baseUrl, apiKey: "" }).complete(
+      "m",
+      [{ role: "user", content: "hi" }],
+      { tools: [READ_DIFF] },
+    );
+
+    expect(answer.ok).toBe(false);
+    expect(answer.ok ? "" : answer.kind).toBe("protocol");
+    expect(answer.ok ? "" : answer.reason).toContain("tool_calls array was not readable");
+  });
+
+  it("reports a mid-loop answer with neither prose nor calls as the failure it is", async () => {
+    // The model that goes quiet in the middle of a loop: a 200, a well-formed
+    // envelope, and nothing in it. Rotation is the answer, so it has to arrive
+    // as a failure rather than as an empty verdict.
+    const baseUrl = await serving((_entry, respond) => {
+      respond(
+        200,
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: null }, finish_reason: "stop" }],
+        }),
+      );
+    });
+
+    const answer = await createProvider({ baseUrl, apiKey: "" }).complete(
+      "m",
+      [{ role: "user", content: "hi" }],
+      { tools: [READ_DIFF] },
+    );
+
+    expect(answer.ok).toBe(false);
+    expect(answer.ok ? "" : answer.reason).toContain("message content was not a string");
+  });
+});

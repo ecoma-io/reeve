@@ -72,6 +72,10 @@ interface State {
   readonly blobs: Map<string, string>;
   /** What the model endpoint answers with, by call order. */
   answer: (at: number) => { status: number; payload: unknown };
+  /** A status the Contents API PUT fails with, instead of accepting a write. */
+  writeStatus: number | null;
+  /** A status `POST /pulls` fails with, instead of opening the pull request. */
+  createPullStatus: number | null;
 }
 
 type Stub = State & { readonly url: string; close: () => Promise<void> };
@@ -125,6 +129,8 @@ async function startStub(): Promise<Stub> {
       ["docs/start.vi.md", TARGET_DOC],
     ]),
     answer: defaultAnswer,
+    writeStatus: null,
+    createPullStatus: null,
   };
 
   const server = createServer((request, response) => {
@@ -248,12 +254,18 @@ async function route(
       return;
     }
     if (method === "PUT") {
+      if (stub.writeStatus !== null) {
+        send(response, stub.writeStatus, { message: "the Contents API refused this write" });
+        return;
+      }
       const body = JSON.parse(raw) as { content: string; branch?: string };
-      stub.writes.push({
-        path: at,
-        branch: body.branch,
-        content: Buffer.from(body.content, "base64").toString("utf8"),
-      });
+      const content = Buffer.from(body.content, "base64").toString("utf8");
+      stub.writes.push({ path: at, branch: body.branch, content });
+      // A write with no branch lands on the default branch, and the next run
+      // reads it back from there — which is how the provenance state survives
+      // between runs. Without this the repository would forget everything
+      // between two runs and an idempotent rerun could never be observed.
+      if (body.branch === undefined || body.branch === "main") stub.files.set(at, content);
       send(response, 200, { content: { sha: `written-${at}` } });
       return;
     }
@@ -264,9 +276,13 @@ async function route(
       return;
     }
     if (method === "POST") {
+      if (stub.createPullStatus !== null) {
+        send(response, stub.createPullStatus, { message: "the pull request was refused" });
+        return;
+      }
       const body = JSON.parse(raw) as { title: string; head: string };
       stub.pulls.push({ title: body.title, head: body.head });
-      send(response, 201, { number: 202 });
+      send(response, 201, { number: 202 + stub.pulls.length - 1 });
       return;
     }
   }
@@ -351,6 +367,20 @@ async function runAction(inputs: Record<string, string> = {}): Promise<Run> {
     outputs: readOutputs(await readFile(outputFile, "utf8")),
     summary: await readFile(summaryFile, "utf8"),
   };
+}
+
+/** The provenance state file, at the default `provenance-dir`. */
+const STATE_PATH = ".reeve/state.json";
+
+/**
+ * Forgets what the last run recorded, so the next one starts cold.
+ *
+ * The repository the stub models keeps default-branch writes, so a second
+ * `runAction` reads back the state the first one wrote. That is the point for
+ * the rerun cases; for a case that wants two independent runs it is not.
+ */
+function forgetProvenance(): void {
+  stub.files.delete(STATE_PATH);
 }
 
 function readOutputs(text: string): Record<string, string> {
@@ -485,6 +515,12 @@ describe("the injection fence around document content", () => {
     const first = /<untrusted-diff id="([a-f0-9]+)">/.exec(stub.asked[0]?.system ?? "")?.[1];
 
     stub.asked.length = 0;
+    // The first run left provenance state behind, and a second run reading it
+    // finds nothing stale and asks no model at all — which is the subject of
+    // "the second run over a repository it already synced" below, and would
+    // make this case assert on a request that was never sent. Forget the state
+    // so the second run classifies again, which is what is under test here.
+    forgetProvenance();
     await runAction();
     const second = /<untrusted-diff id="([a-f0-9]+)">/.exec(stub.asked[0]?.system ?? "")?.[1];
 
@@ -690,4 +726,283 @@ describe("the bootstrap opt-in", () => {
     const write = stub.writes.find((w) => w.path === "docs/start.vi.md");
     expect(write?.content).toContain("(guide.vi.md)");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Reruns. The provenance state file is the whole of this duty's memory: it is
+// what stops a scheduled run from re-translating and re-proposing the same
+// document every time it fires. `main.ts` writes it and reads it back, and
+// nothing drove the duty twice over one repository to find out whether the
+// loop actually closes.
+// ---------------------------------------------------------------------------
+
+describe("the second run over a repository it already synced", () => {
+  it("opens no second pull request, and spends no model request deciding not to", async () => {
+    const first = await runAction();
+    expect(first.code).toBe(0);
+    expect(stub.pulls).toHaveLength(1);
+    const spentFirst = stub.asked.length;
+    expect(spentFirst).toBeGreaterThan(0);
+
+    const second = await runAction();
+
+    expect(second.code).toBe(0);
+    // One pull request, still — and nothing was asked of a model, because the
+    // provenance state answered before any request was worth sending.
+    expect(stub.pulls).toHaveLength(1);
+    expect(stub.asked).toHaveLength(spentFirst);
+    expect(stub.writes.filter((write) => write.path === "docs/start.vi.md")).toHaveLength(1);
+  });
+
+  it("records the state it read back, so the silence is the state's doing and not an accident", async () => {
+    // Without this case the one above would also pass against a duty that had
+    // simply stopped working after its first run. Forgetting the state is the
+    // only difference between the two, so it is the only thing that can
+    // explain the second run's behaviour.
+    await runAction();
+    expect(stub.writes.map((write) => write.path)).toContain(STATE_PATH);
+    forgetProvenance();
+    // The stub scripts its answers by call index across the whole stub, so a
+    // second run has to start the script over to be given the same answers.
+    stub.asked.length = 0;
+
+    const second = await runAction();
+
+    expect(second.code).toBe(0);
+    expect(stub.pulls).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Runs with nothing to do, and runs where the model or GitHub came apart.
+// Every one of these is a "do nothing, loudly" branch, which is the tier the
+// duties guide says decides whether a duty is safe.
+// ---------------------------------------------------------------------------
+
+describe("a run with nothing to synchronise", () => {
+  it("writes nothing and says so when no document has a locale variant", async () => {
+    stub.files.clear();
+    stub.files.set("docs/start.md", SOURCE_DOC);
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(stub.writes).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+    expect(stub.asked).toEqual([]);
+    expect(run.log).toContain("no document groups found");
+  });
+
+  it("writes nothing when the classifier finds the change carries no meaning", async () => {
+    // A cosmetic edit — whitespace, a reflowed line — is the common case, and
+    // re-translating on one would burn a roster for nothing and churn a PR.
+    stub.answer = (at) =>
+      at === 0 ? saying("cosmetic|Reflowed a paragraph") : saying("SHOULD NOT BE ASKED");
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(stub.writes.filter((write) => write.path === "docs/start.vi.md")).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+    // The classifier was asked; no drafter was.
+    expect(stub.asked).toHaveLength(1);
+  });
+});
+
+describe("a model that answers with something unusable", () => {
+  it("writes nothing when the drafter answers with an empty document", async () => {
+    // `scoreDraft` refuses an empty draft outright, so nothing is admitted and
+    // there is nothing to publish.
+    stub.answer = (at) =>
+      at === 0 ? saying("semantic|Explains the repository set-up") : saying("");
+
+    const run = await runAction();
+
+    expect(run.log).toContain("no admissible draft");
+    expect(stub.writes.filter((write) => write.path === "docs/start.vi.md")).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+  });
+
+  it("writes nothing when the drafter hands back the target unchanged", async () => {
+    // Not a sync: re-committing the existing translation would churn a pull
+    // request and record a sync that propagated nothing.
+    stub.answer = (at) =>
+      at === 0 ? saying("semantic|Explains the repository set-up") : saying(TARGET_DOC);
+
+    await runAction();
+
+    expect(stub.writes.filter((write) => write.path === "docs/start.vi.md")).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+  });
+
+  // A draft that is an English refusal — "I'm sorry, I can't help with that." —
+  // is COMMITTED over the maintainer's Vietnamese translation and opened as a
+  // pull request. `scoreDraft` (`score.ts:47-66`) refuses only for the empty
+  // draft, the unchanged draft, a translated glossary term and a foreign
+  // script; English and Vietnamese are both Latin, so the script check cannot
+  // separate them, and `measured()` has no floor beneath it
+  // (`core/score.ts:65`). `translate` refuses exactly this draft one refusal
+  // list over — `translate/score.ts:171-172` positively identifies a draft
+  // still written in the source language — and the two duties otherwise keep
+  // their refusal rules word for word in step. Left as a todo rather than
+  // pinned, because pinning the write would bless it.
+  it.todo("refuses a draft still written in the source language, as translate does");
+
+  it("writes nothing when the classifier answers in a shape it has no reading for", async () => {
+    stub.answer = () => saying("{}");
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(stub.writes.filter((write) => write.path === "docs/start.vi.md")).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+  });
+});
+
+describe("GitHub failing while the sync is being published", () => {
+  it("fails red and opens no pull request when the file write is refused", async () => {
+    // Unlike the provenance-state write, a sync write has no capacity catch
+    // around it: a 5xx aborts the run. That is the safe direction — the
+    // alternative is a pull request whose branch carries no edit — but it does
+    // mean a momentary 503 turns the job red rather than leaving it for the
+    // next run.
+    stub.writeStatus = 500;
+
+    const run = await runAction();
+
+    expect(run.code).not.toBe(0);
+    expect(stub.writes).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+    expect(run.log).toContain("refused this write");
+  });
+
+  it("leaves the branch standing and goes red when the pull request itself is refused", async () => {
+    // The documented no-rollback decision: the locale file is already on the
+    // branch when the pull request is refused. The run must go red rather than
+    // report a sync nobody can see.
+    stub.createPullStatus = 422;
+
+    const run = await runAction();
+
+    expect(run.code).not.toBe(0);
+    expect(stub.pulls).toEqual([]);
+    expect(stub.writes.map((write) => write.path)).toContain("docs/start.vi.md");
+    // And no provenance state was written claiming the locale is in sync.
+    expect(stub.writes.map((write) => write.path)).not.toContain(STATE_PATH);
+  });
+
+  it("finishes the half-published sync on the next run, reusing the branch the failed one left", async () => {
+    // The other half of the no-rollback decision, which is what makes it safe:
+    // the failed run's leftovers are the next run's input. No provenance state
+    // was recorded, so nothing tells this run the work is done — and the
+    // branch is already there, holding the edit, so the run must recognise it
+    // rather than mint a second one.
+    stub.createPullStatus = 422;
+    const first = await runAction();
+    expect(first.code).not.toBe(0);
+    expect(stub.refs).toHaveLength(1);
+
+    stub.createPullStatus = null;
+    // The stub scripts its answers by call index across the whole stub, so a
+    // second run has to start the script over to be given the same answers.
+    stub.asked.length = 0;
+    const second = await runAction();
+
+    expect(second.code).toBe(0);
+    // One pull request, on the branch that was already standing — not a
+    // second branch beside it.
+    expect(stub.pulls).toHaveLength(1);
+    expect(stub.refs).toHaveLength(1);
+    expect(stub.pulls[0]?.head).toBe(stub.refs[0]?.replace("refs/heads/", ""));
+    // And only now is the provenance state recorded — the run that failed
+    // claimed nothing.
+    expect(stub.writes.filter((write) => write.path === STATE_PATH)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The order the repository's own listing arrives in.
+//
+// `discoverGroups` walks the tree entries in the order the Git Trees API hands
+// them over and groups by base name as it goes, so the group order — and with
+// it the order every later stage works in, and the order the outputs are
+// rendered in — is inherited from a listing nothing in this repository
+// controls. GitHub does not promise one, and a repository that grows a file
+// re-orders the tree it serves. A run over the same repository content must
+// therefore do the same work whichever order the entries turn up in.
+// ---------------------------------------------------------------------------
+
+describe("the order the tree listing arrives in", () => {
+  /** The two document groups, sharing one source text so one scripted draft answers for either. */
+  const TWO_GROUPS: Readonly<Record<string, string>> = {
+    "docs/start.md": SOURCE_DOC,
+    "docs/start.vi.md": TARGET_DOC,
+    "docs/setup.md": SOURCE_DOC,
+    "docs/setup.vi.md": TARGET_DOC,
+  };
+
+  /** Serves exactly those files, in the order named — the tree route reads insertion order. */
+  function listedAs(order: readonly string[]): void {
+    stub.files.clear();
+    for (const path of order) stub.files.set(path, TWO_GROUPS[path] ?? "");
+    stub.writes.length = 0;
+    stub.pulls.length = 0;
+    stub.refs.length = 0;
+    stub.asked.length = 0;
+    stub.existingRefs.clear();
+    stub.existingRefs.add("heads/main");
+  }
+
+  /** The locale files this run wrote, and the branches it opened, as sets. */
+  function workDone(): { written: string[]; heads: string[] } {
+    return {
+      written: stub.writes
+        .map((write) => write.path)
+        .filter((path) => path.endsWith(".vi.md"))
+        .sort(),
+      heads: stub.pulls.map((pull) => pull.head).sort(),
+    };
+  }
+
+  it("syncs the same document groups whichever order the tree lists them in", async () => {
+    // Scripted by what is being asked rather than by call index: two groups
+    // interleave classification and drafting, and a positional script would
+    // measure the order rather than the work.
+    stub.answer = (at) =>
+      (stub.asked[at]?.system ?? "").includes("You classify changes")
+        ? saying("semantic|Explains the repository set-up")
+        : saying(DRAFT_DOC);
+
+    listedAs(["docs/setup.md", "docs/setup.vi.md", "docs/start.md", "docs/start.vi.md"]);
+    const first = await runAction();
+    expect(first.code).toBe(0);
+    const firstWork = workDone();
+    expect(firstWork.written).toEqual(["docs/setup.vi.md", "docs/start.vi.md"]);
+    expect(firstWork.heads).toHaveLength(2);
+    const firstSynced = JSON.parse(first.outputs.synced ?? "[]") as string[];
+
+    // The same four files, listed the other way round — a repository nothing
+    // has changed, served in an order nothing promised.
+    listedAs(["docs/start.vi.md", "docs/start.md", "docs/setup.vi.md", "docs/setup.md"]);
+    const second = await runAction();
+
+    expect(second.code).toBe(0);
+    // Every file that was written, and every branch that was opened, is the
+    // same one — the work a run does is a fact about the repository, never
+    // about the order its tree came back in.
+    expect(workDone()).toEqual(firstWork);
+    expect((JSON.parse(second.outputs.synced ?? "[]") as string[]).slice().sort()).toEqual(
+      firstSynced.slice().sort(),
+    );
+  });
+
+  // The same two runs report the same groups in DIFFERENT orders: `synced`
+  // came back `["docs/setup","docs/start"]` and then `["docs/start","docs/setup"]`,
+  // because `discoverGroups` inherits the tree's own order and nothing sorts
+  // it afterwards. Harmless while `max-requests` is `none` — the set is the
+  // same either way — and not harmless once a budget can stop the walk
+  // partway, since then the listing decides WHICH groups get synced. Left as
+  // a todo rather than pinned: pinning today's order would bless a listing
+  // order GitHub never promised.
+  it.todo("reports its groups in an order that does not come from the tree listing");
 });

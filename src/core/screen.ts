@@ -95,8 +95,9 @@ export function screen(request: ScreenRequest): Screened | null {
 
 /** A heading, at any level. */
 const HEADING = /^\s{0,3}#{1,6}\s/;
-/** An HTML comment, which is how a Markdown template carries its instructions. */
-const COMMENT = /<!--[\s\S]*?-->/g;
+/** How a Markdown template carries its instructions: an HTML comment. */
+const OPENER = "<!--";
+const CLOSER = "-->";
 /** What a GitHub issue form writes for a field the reporter left alone. */
 const NO_RESPONSE = /^\s*_No response_\s*$/i;
 /** An unticked box. The label beside it is the template's words, not the author's. */
@@ -118,7 +119,7 @@ const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
  * deserves the difference.
  */
 function strip(body: string): { scaffolded: boolean; authored: string } {
-  const withoutComments = body.replace(COMMENT, "\n");
+  const withoutComments = removeComments(body);
   let scaffolded = withoutComments !== body;
 
   const kept: string[] = [];
@@ -131,6 +132,52 @@ function strip(body: string): { scaffolded: boolean; authored: string } {
   }
 
   return { scaffolded, authored: kept.join("\n").trim() };
+}
+
+/**
+ * The body with every closed HTML comment replaced by a newline.
+ *
+ * One pass, left to right, for the reason `sanitize.ts`'s `defangComments`
+ * gives at length: this reads whatever a stranger typed into an issue, so the
+ * cost of reading it has to be its length. The regex this replaced —
+ * `/<!--[\s\S]*?-->/g` — was the same shape that module documents having
+ * fixed, and was quadratic on the same input. An unclosed `<!--` made the
+ * engine scan to the end of the body looking for a closer, once per opener,
+ * and a body of nothing but openers at the 65536 characters GitHub allows took
+ * 574ms here. Reached on the raw thread body of every screened item, so a
+ * sweep of a hundred such threads spent a minute of runner time before asking
+ * a model anything.
+ *
+ * The bound is the same one that defuses it there: a closer the scan finds is
+ * consumed, so its cost is paid out of the text it retires, and only a search
+ * that finds nothing scans without consuming. Where the last closer sits is
+ * settled once, up front, and an opener past it never searches at all.
+ *
+ * What is stripped is unchanged: a comment needs a closer to be a comment, so
+ * an opener with nothing to close it stays in the body as the literal text
+ * GitHub will render, and counts as the author's.
+ */
+function removeComments(body: string): string {
+  const lastCloser = body.lastIndexOf(CLOSER);
+  let out = "";
+  let read = 0;
+
+  for (;;) {
+    const opener = body.indexOf(OPENER, read);
+    if (opener === -1) return out + body.slice(read);
+
+    // Folded into the expression rather than checked as its own branch, the
+    // way `defangComments` does it: written as two `if`s, the second is
+    // unreachable — passing the first means `lastCloser >= opener + 4`, so the
+    // search must find at least `lastCloser` — and an unreachable branch is a
+    // mutant that survives for ever.
+    const closer =
+      opener + OPENER.length > lastCloser ? -1 : body.indexOf(CLOSER, opener + OPENER.length);
+    if (closer === -1) return out + body.slice(read);
+
+    out += `${body.slice(read, opener)}\n`;
+    read = closer + CLOSER.length;
+  }
 }
 
 /** A URL, which is a reproduction, a log or a related issue more often than not. */

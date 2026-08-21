@@ -15,7 +15,7 @@
  * **External metadata is evidence, never authority.**
  */
 import type { Release, ResolutionResult } from "../model.js";
-import type { Datasource, DatasourceId } from "./types.js";
+import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
 
 /** The GitHub tags datasource identifier. */
 const ID: DatasourceId = "github-tags";
@@ -183,13 +183,9 @@ async function resolve(token: string, packageName: string): Promise<ResolutionRe
     return { status: "not-found" };
   }
 
-  // Sort newest-first (tags are usually returned newest-first from GitHub,
-  // but we sort to be safe)
-  releases.sort((a, b) => {
-    // For GitHub Actions, version tags are typically v1, v2, v3, etc.
-    // Sort in reverse order (newest first)
-    return b.version.localeCompare(a.version, undefined, { numeric: true });
-  });
+  // Newest first — GitHub usually lists tags that way already, but a
+  // registry's order is not a promise. See `byVersionDescending`.
+  releases.sort(byVersionDescending);
 
   return { status: "available", releases };
 }

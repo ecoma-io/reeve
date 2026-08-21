@@ -47,7 +47,7 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
+import { failIfRosterExhausted, writeRunSummary } from "../../core/summary.js";
 import {
   dutyLanguages,
   openAuthority,
@@ -728,18 +728,21 @@ async function decide(
     bounded.skipped.length > 0 &&
     bounded.skipped.every((entry) => entry.reason === "ignored");
 
-  // A diff that was shown but never reviewed readably: when every pass's
-  // roster failed with a protocol error — a decommissioned model id, a body
-  // the provider rejected, a field it does not accept — that is a
-  // configuration problem, not capacity weather, and a run that cannot do its
-  // job must not stay green behind warnings (D5). `failIfProtocolExhausted`
-  // draws the all-protocol vs all-capacity line itself, so capacity weather
-  // keeps the green exit below; a pass that answered unreadably carries no
-  // failures at all and is equally left green. The call must come before the
-  // returns below so no path — comment denied, silent-no-verdict, dry run —
-  // turns the red green.
+  // A diff that was shown but never reviewed readably: when every failure the
+  // passes collected is something other than capacity — a decommissioned model
+  // id, a body the provider rejected, a field it does not accept, a key an
+  // endpoint refused — that is a configuration problem, not capacity weather,
+  // and a run that cannot do its job must not stay green behind warnings (D5).
+  // `failIfRosterExhausted` draws that line itself (`rosterExhausted` is
+  // `every(not capacity)`, so an `auth` failure counts alongside a `protocol`
+  // one), so a roster that failed on capacity anywhere keeps the green exit
+  // below — as does a roster that mixed capacity with the rest, which the
+  // predicate deliberately does not cover. A pass that answered unreadably
+  // carries no failures at all, and the `failures.length >= models.length`
+  // guard leaves it green too. The call must come before the returns below so
+  // no path — comment denied, silent-no-verdict, dry run — turns the red green.
   if (bounded.shown.length > 0 && readablePassCount === 0) {
-    failIfProtocolExhausted(
+    failIfRosterExhausted(
       settings.models,
       passResults.flatMap((result) => result.failures),
       settings.modelNames,

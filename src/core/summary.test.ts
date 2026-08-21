@@ -13,7 +13,7 @@ import {
   cost,
   count,
   fence,
-  failIfProtocolExhausted,
+  failIfRosterExhausted,
   starvedWarning,
   table,
   warnIfPanelIdle,
@@ -298,14 +298,14 @@ describe("warnIfStarved", () => {
   });
 });
 
-describe("failIfProtocolExhausted", () => {
+describe("failIfRosterExhausted", () => {
   it("fails the run when every model on the roster failed with a protocol error", () => {
     const failures: Failure[] = [
       { ok: false, model: "a", reason: "model not found", kind: "protocol" },
       { ok: false, model: "b", reason: "invalid request", kind: "protocol" },
     ];
 
-    expect(failIfProtocolExhausted(["a", "b"], failures)).toBe(true);
+    expect(failIfRosterExhausted(["a", "b"], failures)).toBe(true);
     expect(vi.mocked(core.setFailed)).toHaveBeenCalledTimes(1);
     const message = String(vi.mocked(core.setFailed).mock.calls[0]?.[0]);
     expect(message).toContain("configuration problem");
@@ -313,18 +313,49 @@ describe("failIfProtocolExhausted", () => {
     expect(message).toContain("b: invalid request");
   });
 
-  it("does not fail the run when at least one failure is not protocol", () => {
+  it("fails the run when every model failed on auth or protocol", () => {
+    // Both kinds are configuration: a key an endpoint refused and a body the
+    // provider rejected are equally not weather.
+    const failures: Failure[] = [
+      { ok: false, model: "a", reason: "401", kind: "auth" },
+      { ok: false, model: "b", reason: "model not found", kind: "protocol" },
+    ];
+
+    expect(failIfRosterExhausted(["a", "b"], failures)).toBe(true);
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fail the run on a mixture of capacity and configuration — see the todo below", () => {
     const failures: Failure[] = [
       { ok: false, model: "a", reason: "timeout", kind: "capacity" },
       { ok: false, model: "b", reason: "model not found", kind: "protocol" },
     ];
 
-    expect(failIfProtocolExhausted(["a", "b"], failures)).toBe(false);
+    expect(failIfRosterExhausted(["a", "b"], failures)).toBe(false);
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  // The remaining hole, stated rather than pinned. A roster where one model was
+  // rate-limited and another returned HTML answers nothing and is reported by
+  // neither this nor `starved`, so the run writes what "nothing to do" writes.
+  // Closing it means deciding once per run, against what the run delivered,
+  // rather than at each of the per-item call sites this function has today —
+  // where firing on a mixture would redden a run for one degraded item out of
+  // a hundred that published correctly.
+  it.todo("fails a run that delivered nothing whose roster failed for mixed reasons");
+
+  it("does not fail the run when every failure is capacity — that is weather, and `starved` says so", () => {
+    const failures: Failure[] = [
+      { ok: false, model: "a", reason: "timeout", kind: "capacity" },
+      { ok: false, model: "b", reason: "429", kind: "capacity" },
+    ];
+
+    expect(failIfRosterExhausted(["a", "b"], failures)).toBe(false);
     expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
   });
 
   it("does not fail the run for an empty roster", () => {
-    expect(failIfProtocolExhausted([], [])).toBe(false);
+    expect(failIfRosterExhausted([], [])).toBe(false);
     expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
   });
 
@@ -339,7 +370,7 @@ describe("failIfProtocolExhausted", () => {
     ];
     const names = new Map([["gh/deepseek-v4-flash-free", "deepseek-v4-flash"]]);
 
-    expect(failIfProtocolExhausted(["gh/deepseek-v4-flash-free"], failures, names)).toBe(true);
+    expect(failIfRosterExhausted(["gh/deepseek-v4-flash-free"], failures, names)).toBe(true);
     const message = String(vi.mocked(core.setFailed).mock.calls[0]?.[0]);
     expect(message).toContain("deepseek-v4-flash: model not found");
     expect(message).not.toContain("gh/deepseek-v4-flash-free");

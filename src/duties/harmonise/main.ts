@@ -59,7 +59,7 @@ import {
 import {
   warnIfStarved,
   warnIfPanelIdle,
-  failIfProtocolExhausted,
+  failIfRosterExhausted,
   writeRunSummary,
 } from "../../core/summary.js";
 import { newAccumulator, remainingOf, reportNoSweep } from "../../core/sweep.js";
@@ -748,7 +748,7 @@ async function processGroup(
     }
 
     if (result.attempts.length === 0) {
-      failIfProtocolExhausted(settings.models, result.failures, settings.modelNames);
+      failIfRosterExhausted(settings.models, result.failures, settings.modelNames);
       core.warning(
         `harmonise: no admissible draft produced for ${locale} translation of ${group.id}`,
       );

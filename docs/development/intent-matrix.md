@@ -98,26 +98,38 @@ could not read`).
 - **Tests:** `provider.test.ts` 1161-1211 (`assembleClient` seeds), 1192
   (grounded models never re-asked).
 
-### A5 — Starvation (all-capacity) delivery vs protocol exhaustion (all-config)
+### A5 — Starvation (all-capacity) delivery vs roster exhaustion (any-config)
 
-- **Intent:** “every model is out of capacity” and “every model returned a
-  protocol error” are different failures with different run colours.
+- **Intent:** “every model is out of capacity” and “the roster answered nothing
+  and something other than weather is why” are different failures with
+  different run colours.
 - **Invariant:** `starved()` (all roster models grounded) → duty warns and
-  stays green, delivering what it finished; `protocolExhausted()` (every failure
-  protocol AND `failures.length >= models.length`) → `failIfProtocolExhausted`
-  sets the job red naming each reason (`src/core/provider.ts:814, 828-837`;
-  `src/core/summary.ts:129-146`). Empty roster → neither (a duty that asked no
-  model has not starved).
-- **Scope:** all model-asking duties (call sites `triage/main.ts:1009`,
-  `respond/main.ts:462`, `duplicate/main.ts:630`, `translate/main.ts:366,468`,
-  `harmonise/main.ts:668`).
+  stays green, delivering what it finished; `rosterExhausted()` (`failures.length
+  > = models.length`AND at least one failure is not`capacity`) →
+`failIfRosterExhausted` sets the job red naming each reason. Empty roster →
+  > neither (a duty that asked no model has not starved).
+- **Scope:** all model-asking duties (call sites `triage/main.ts`,
+  `respond/main.ts`, `duplicate/main.ts`, `translate/main.ts`,
+  `harmonise/main.ts`, `review/main.ts`, `dependa/main.ts`).
 - **Required:** capacity-only exhaustion ends green with a named “every model
-  failed” note and `starved` output true; protocol-only exhaustion ends red.
+  failed” note and `starved` output true; **any** non-capacity failure on a
+  roster that produced nothing usable ends red.
 - **Forbidden:** red-failing a 429-only run; a malformed-answer run reported as
-  clean “nothing to do”.
-- **Tests:** `provider.test.ts` 777-806 (`starved`/`protocolExhausted`);
-  `summary.test.ts` `failIfProtocolExhausted` block; `triage/main.integration.test.ts`
-  814 (stays green when every model failed).
+  clean “nothing to do”; **a mixed roster reported as neither.**
+- **Note (round 2):** the predicate read `every(kind === "protocol")` until this
+  round, which left a hole exactly between the two: one model rate-limited and
+  the next serving HTML satisfied neither `starved` nor exhaustion, so a run
+  that reached no answer at all warned about nothing and exited 0 with
+  `responded=false` — byte for byte what a run with nothing to do writes, which
+  is the shape D5 forbids. The multi-endpoint variant was worse, because
+  `authExhausted` needs _every_ endpoint to refuse the key before `settleAuth`
+  throws, so a real 401 beside a protocol failure also exited 0.
+- **Tests:** `provider.test.ts` (`starved`/`rosterExhausted`);
+  `provider.contract.test.ts` (`a_mixed_capacity_and_protocol_roster_is_exhaustion…`
+  and its all-capacity companion); `summary.test.ts` and
+  `summary.contract.test.ts` `failIfRosterExhausted` blocks;
+  `triage/main.integration.test.ts` (stays green when every model failed on
+  capacity).
 
 ### A6 — screen-models: the cheap roster, with a documented fallback
 
@@ -307,7 +319,7 @@ deliberate-difference table is in **Disagreements**.
 - **Marker:** `markerFor("translate")`; `fingerprint` keyed on text+keys,
   order/case-insensitive.
 - **Failure:** one chunk failing skips the whole language
-  (`engine.ts:157`); protocol-exhaustion → `failIfProtocolExhausted` at the
+  (`engine.ts:157`); roster exhaustion → `failIfRosterExhausted` at the
   single-operation boundary; capacity → deliver-what-finished.
 - **Tests:** `translate/main.integration.test.ts` (dry-run 906, edit-body
   withholding 1556, auth-red 668), `engine.test.ts` 242/261/295, `text.test.ts`.
@@ -319,7 +331,7 @@ deliberate-difference table is in **Disagreements**.
   shortlist never offered is refused whole.
 - **Defaults:** `DEFAULT_CAPABILITIES=[]`, `DUPLICATE_CAPABILITIES=["comment"]`.
 - **Marker:** `postOrReplace`/`rehearse` fingerprint.
-- **Failure:** `judge.model===null` → `failIfProtocolExhausted`
+- **Failure:** `judge.model===null` → `failIfRosterExhausted`
   (`duplicate/main.ts:630`); all failing/capacity → green + note; over-floor
   verdict under floor → report-withhold.
 - **Tests:** `duplicate/verdict.test.ts`, `duplicate/proposal.test.ts`,
@@ -361,7 +373,7 @@ deliberate-difference table is in **Disagreements**.
 - **Defaults:** `DEFAULT_CAPABILITIES=[]`.
 - **Failure:** source-language null → `core.setFailed`
   (`harmonise/main.ts:250`), a config error not weather; protocol exhaustion →
-  `failIfProtocolExhausted` (`harmonise/main.ts:668`); classify whole-roster
+  `failIfRosterExhausted` (`harmonise/main.ts:668`); classify whole-roster
   protocol → throw (`harmonise/main.test.ts:34`).
 - **Tests:** `harmonise/main.test.ts`, `harmonise/publish.test.ts`,
   `harmonise/draft.integration.test.ts`, `harmonise/budget.test.ts`.
@@ -593,7 +605,7 @@ not a prompt instruction (`docs/doctrine/north-star.md#d8---every-thread-is-host
    spam screen, not for detection. → contract test below (F1/F2).
 2. **[GAP] No unit pins the “all-protocol → red vs all-capacity → green”
    distinction at a duty boundary.** `provider.test.ts` and `summary.test.ts`
-   pin the predicates; no test drives `failIfProtocolExhausted` from a real
+   pin the predicates; no test drives `failIfRosterExhausted` from a real
    duty call. → contract test below.
 3. **[GAP] Propose-marked PR recursion guard (`isReeveProposalPr`) has no
    lifecycle-main coverage** (triage/harmonise/respond/duplicate/review all

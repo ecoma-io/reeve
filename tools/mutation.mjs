@@ -131,7 +131,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * deliberate and visible rather than silent — which is the whole difference
  * between a gate that failed and a gate that was never asked.
  */
-const TABLE_FLOOR = 70;
+const TABLE_FLOOR = 78;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -209,14 +209,24 @@ export const MUTATIONS = [
     note: "D12 inverted: a refused key rotates and the run finishes green instead of failing red.",
   },
   {
-    name: "starvation reported as protocol exhaustion",
+    name: "starvation reported as roster exhaustion",
     file: "src/core/provider.ts",
-    from: 'failures.every((f) => f.kind === "protocol")',
-    to: 'failures.some((f) => f.kind === "protocol")',
-    targets: ["src/core/provider.test.ts"],
+    from: 'failures.every((f) => f.kind !== "capacity")',
+    to: 'failures.some((f) => f.kind !== "capacity")',
+    targets: ["src/core/provider.test.ts", "src/core/summary.contract.test.ts"],
     stage: "fast",
     owner: "TL2",
-    note: "A rate-limited roster with one bad answer in it is reported as a configuration error.",
+    note: "A rate-limited roster with one bad answer in it is reported as a configuration error \u2014 which reddens a whole sweep over one degraded item, because every caller sits inside a per-item loop.",
+  },
+  {
+    name: "an endpoint that refused the key is not a configuration error",
+    file: "src/core/provider.ts",
+    from: 'failures.every((f) => f.kind !== "capacity")',
+    to: 'failures.every((f) => f.kind === "protocol")',
+    targets: ["src/core/provider.test.ts", "src/core/summary.contract.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "The multi-endpoint hole reopens: `settleAuth` does not throw while another endpoint still authenticates, so a run that saw a 401 and delivered nothing exits green.",
   },
   {
     name: "judge seat consumes only its first model",
@@ -927,8 +937,83 @@ export const MUTATIONS = [
     owner: "TL4",
     note: "The regression this expression was adjudicated out of: finding any owned thread suppresses the walk\u2019s uncertainty, and every finding whose thread sits past the ceiling is created again on every run.",
   },
+  // ── Round 2: the seams this round's fixes created ───────────────────────
+  //
+  // Each names a defect this round found and fixed, mutated back to the shape
+  // it had. A row here is the only evidence that the test committed beside the
+  // fix actually fails when the behaviour returns — coverage says the line
+  // ran, and only this says the suite noticed.
+  {
+    name: "the screen strips a comment without leaving a gap",
+    file: "src/core/screen.ts",
+    from: "out += `${body.slice(read, opener)}\\n`;",
+    to: "out += body.slice(read, opener);",
+    targets: ["src/core/screen.scan.test.ts", "src/core/screen.test.ts"],
+    stage: "fast",
+    owner: "TL3",
+    note: "A template's instructions are removed by joining the words either side of them, so two fields a reporter left blank read as one authored sentence.",
+  },
+  {
+    name: "the screen's comment scan finds no closer at all",
+    file: "src/core/screen.ts",
+    from: "opener + OPENER.length > lastCloser ? -1 : body.indexOf(CLOSER, opener + OPENER.length);",
+    to: "-1;",
+    targets: ["src/core/screen.scan.test.ts", "src/core/screen.test.ts"],
+    stage: "fast",
+    owner: "TL3",
+    note: "The bound that makes the scan linear is also what finds a closer: without it nothing is stripped and every template's own words count as the reporter's.",
+  },
+  {
+    name: "an error field carrying nothing condemns the answer beside it",
+    file: "src/core/provider.ts",
+    from: "  if (!carries) return null;",
+    to: "",
+    targets: ["src/core/provider.failure.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "A gateway that stamps an empty error object on every response makes every model fail with `protocol`, so a working provider ends every run red.",
+  },
+  {
+    name: "an unreadable own login matches an actorless event",
+    file: "src/duties/lifecycle/clock.ts",
+    from: "  return ownLogin.length > 0 && login === ownLogin;",
+    to: "  return login === ownLogin;",
+    targets: ["src/duties/lifecycle/clock.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "Two empty strings compare equal, so a run that could not read its own login removes labels it never applied and reads an actorless comment as its own step firing.",
+  },
+  {
+    name: "the newest version is chosen with the runner's locale",
+    file: "src/duties/dependa/datasources/types.ts",
+    from: 'b.version.localeCompare(a.version, "en-US", { numeric: true })',
+    to: "b.version.localeCompare(a.version, undefined, { numeric: true })",
+    targets: ["src/duties/dependa/datasources/ordering.determinism.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "`undefined` is whatever `LC_ALL` says on the runner, and this order IS the version proposed — same registry, same commit, a different pull request per locale.",
+  },
+  {
+    name: "a padded version spelling wins the tie",
+    file: "src/duties/dependa/datasources/types.ts",
+    from: "  if (a.version.length !== b.version.length) return a.version.length - b.version.length;",
+    to: "",
+    targets: ["src/duties/dependa/datasources/ordering.determinism.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "The collator calls `1.0` and `1.00` equal, so without the canonical-spelling rule a repository pinned at `1.0` is sent a pull request moving it to `1.00`.",
+  },
+  {
+    name: "superseded pull requests are matched on the unsanitised group id",
+    file: "src/duties/dependa/publish.ts",
+    from: "  const activeBranchSegments = new Set([...activeGroupIds].map(sanitizeBranchSegment));",
+    to: "  const activeBranchSegments = new Set(activeGroupIds);",
+    targets: ["src/duties/dependa/publish.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "A branch name holds the sanitised id, so no scoped package ever matches: the run opens a pull request and closes it as superseded, and D3 then refuses to recreate it for ever.",
+  },
 ];
-
 // ── argv ────────────────────────────────────────────────────────────────────
 
 /** `--only <substring>`, `--stage <fast|full>`, `--list`. Nothing else is accepted. */

@@ -18,7 +18,7 @@
  */
 import * as core from "@actions/core";
 import type { Release, ResolutionResult } from "../model.js";
-import type { Datasource, DatasourceId } from "./types.js";
+import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
 
 /** The Docker registry datasource identifier. */
 const ID: DatasourceId = "docker-registry";
@@ -233,10 +233,8 @@ function parseDockerHubResponse(results: readonly Record<string, unknown>[]): Re
     return { status: "available", releases: [] };
   }
 
-  // Sort newest-first (for semver-like tags, reverse numeric sort)
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, undefined, { numeric: true });
-  });
+  // Newest first — see `byVersionDescending` for why the locale is named.
+  releases.sort(byVersionDescending);
 
   return { status: "available", releases };
 }
@@ -264,10 +262,8 @@ function parseV2Response(tags: readonly string[]): ResolutionResult {
     });
   }
 
-  // Sort newest-first
-  releases.sort((a, b) => {
-    return b.version.localeCompare(a.version, undefined, { numeric: true });
-  });
+  // Newest first — see `byVersionDescending` for why the locale is named.
+  releases.sort(byVersionDescending);
 
   return { status: "available", releases };
 }

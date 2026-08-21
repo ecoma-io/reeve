@@ -26,9 +26,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { GitHubApi, Location, TrackerApi } from "../../core/forge.js";
+import type { ContentsApi, GitHubApi, Location, TrackerApi } from "../../core/forge.js";
 
-import { attributedClose, isTrustedReopener, removedByAutomation } from "./outcome.js";
+import { attributedClose, gateClose, isTrustedReopener, removedByAutomation } from "./outcome.js";
 
 const AT: Location = { owner: "acme", repo: "widgets", number: 42 };
 
@@ -179,5 +179,65 @@ describe("isTrustedReopener", () => {
     // refuse. A failed lookup is not evidence of standing — it answers
     // the same way a "none" permission would.
     await expect(isTrustedReopener(api, AT, "stranger")).resolves.toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `gateClose` reads the corrections store through the Contents API, and its
+// own doc comment draws a line: a shard it could not DECODE is ambiguity and
+// holds the close, while everything else is somebody else's problem to
+// classify. `outcome.test.ts` covers both sides of that line. What it does not
+// cover is what the read does when the API itself misbehaves — and the two
+// answers are deliberately different, so neither may be assumed from the
+// other.
+// ---------------------------------------------------------------------------
+
+/** A store whose listing works and whose shard read fails however the case says. */
+function contentsWhoseShardRead(failure: Error): ContentsApi {
+  const shard = "corrections/2026-08.ndjson";
+  return {
+    rest: {
+      repos: {
+        getContent: ({ path }: { path: string }) => {
+          if (path === "corrections") {
+            return Promise.resolve({
+              data: [{ name: "2026-08.ndjson", path: shard, sha: "sha-1" }],
+            });
+          }
+          return Promise.reject(failure);
+        },
+        createOrUpdateFileContents: () => {
+          throw new Error("not used by these tests");
+        },
+      },
+    },
+  };
+}
+
+describe("gateClose", () => {
+  it("propagates a transport failure rather than reading it as an unreadable shard", async () => {
+    // A 500 is not the same fact as "this shard cannot be decoded": one is the
+    // API having a bad minute, the other is a file whose contents might hold
+    // the very record the gate is looking for. Folding the first into the
+    // second would turn every outage into a silent, permanent refusal to
+    // close anything — green runs, no closes, and nothing saying why.
+    const api = contentsWhoseShardRead(Object.assign(new Error("Server Error"), { status: 500 }));
+
+    await expect(gateClose(api, AT, "corrections", "acme/widgets", 42)).rejects.toThrow(
+      "Server Error",
+    );
+  });
+
+  it("skips a shard that disappeared between the listing and the read", async () => {
+    // A 404 on a file the listing named a moment ago is a race with another
+    // writer, not ambiguity: the shard is gone, so it holds no record, and the
+    // gate neither refuses nor reports it unreadable.
+    const api = contentsWhoseShardRead(Object.assign(new Error("Not Found"), { status: 404 }));
+
+    await expect(gateClose(api, AT, "corrections", "acme/widgets", 42)).resolves.toEqual({
+      refuse: false,
+      found: false,
+      unreadable: [],
+    });
   });
 });

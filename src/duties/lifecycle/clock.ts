@@ -246,7 +246,8 @@ export function evaluateTrack(
       // evidence this duty's own step fired.
       const marker = facts.comments.find(
         (comment) =>
-          comment.login === facts.ownLogin && MARKER.split(comment.body).fingerprint === fp,
+          isOwnActor(comment.login, facts.ownLogin) &&
+          MARKER.split(comment.body).fingerprint === fp,
       );
       firedAt = marker?.createdAt ?? null;
     } else if (step.label !== null) {
@@ -310,6 +311,29 @@ function collectStaleLabels(steps: readonly LifecycleStep[], facts: TrackFacts):
 }
 
 /**
+ * Whether `login` is this run's own actor.
+ *
+ * The empty-string half is the whole reason this is a function rather than
+ * `===`. `resolveOwnLogin` returns `""` for an identity GitHub would not
+ * report, and `readEvents`/`readComments` write `""` for an actor it no
+ * longer carries — a deleted account, an app whose installation is gone.
+ * Those are two different unknowns, and `===` called them the same actor: a
+ * run whose own login could not be read attributed **every actorless event
+ * to itself**, which is the exact opposite of what the three call sites
+ * below are for.
+ *
+ * Measured before it was fixed: a `labeled` event with no actor got its label
+ * removed, and an actorless comment carrying a forgeable fingerprint was read
+ * as this duty's own step firing — advancing a track to its *closing* step on
+ * a thread nobody had nudged.
+ *
+ * Unknown is never a match. Both sides have to be somebody.
+ */
+function isOwnActor(login: string, ownLogin: string): boolean {
+  return ownLogin.length > 0 && login === ownLogin;
+}
+
+/**
  * Whether the most recent `labeled` event for `label`, across every actor
  * this run fetched history for, was raised by `ownLogin` — the attribution
  * gate un-staling requires. `false` on no event at all (no history reached
@@ -322,7 +346,7 @@ function isOwnApplied(events: readonly TimedEvent[], label: string, ownLogin: st
     if (event.event !== "labeled" || event.label !== label) continue;
     if (latest === null || event.createdAt > latest.createdAt) latest = event;
   }
-  return latest !== null && latest.login === ownLogin;
+  return latest !== null && isOwnActor(latest.login, ownLogin);
 }
 
 /** The latest `labeled` event for `label` this run's own login raised — the firing evidence a label-only step reads instead of a marker comment. */
@@ -333,7 +357,8 @@ function latestOwnLabelEvent(
 ): Date | null {
   let latest: Date | null = null;
   for (const event of events) {
-    if (event.event !== "labeled" || event.label !== label || event.login !== ownLogin) continue;
+    if (event.event !== "labeled" || event.label !== label) continue;
+    if (!isOwnActor(event.login, ownLogin)) continue;
     if (latest === null || event.createdAt > latest) latest = event.createdAt;
   }
   return latest;

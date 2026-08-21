@@ -967,23 +967,53 @@ export function starved(models: readonly string[], weather: Weather): boolean {
 }
 
 /**
- * True when every model on the roster failed for a non-capacity reason and
- * nobody answered — a model id that does not exist, a body that would not
- * parse, a field the provider rejected. These are configuration errors, not
- * weather, and a run that cannot reach a single usable answer this way should
- * not complete green.
+ * True when the roster came back with nothing usable and at least one model
+ * failed for a reason that is not capacity — a model id that does not exist, a
+ * body that would not parse, a field the provider rejected, a key the endpoint
+ * refused. Those are configuration errors, not weather, and
+ * [D5](../../docs/doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
+ * says a run that cannot do its job fails red rather than completing green
+ * with nothing in it.
  *
  * Called alongside `starved` at the point a duty knows its roster came back
- * empty. `starved` catches the capacity case; this catches the protocol case.
+ * empty. This reads `every(not capacity)` rather than the `every(protocol)` it
+ * used to, which widens it by exactly one kind: an endpoint that refused the
+ * key. `auth` and `protocol` are both configuration, and a roster where every
+ * model failed on one or the other is a roster nobody has configured
+ * correctly.
+ *
+ * That closes the multi-endpoint hole. With `endpoints` configured, `reckon`
+ * defers an auth failure to `weather.failAuth`, and `authExhausted` stays
+ * false while any other endpoint still authenticates — so `settleAuth` never
+ * throws. A run that saw an HTTP 401 on one endpoint and a malformed body on
+ * another delivered nothing and exited 0, because `every(protocol)` was false
+ * for the `auth` failure. Now it is red.
+ *
+ * **What this deliberately does NOT cover, and why.** A roster where one model
+ * was rate-limited and another returned HTML satisfies neither this predicate
+ * nor `starved`, so a run that reached no usable answer at all still reports
+ * neither. That hole is real and is written up as a finding — but the fix is
+ * not to widen this to `some(not capacity)`. Every call site of
+ * {@link failIfRosterExhausted} sits inside a per-item loop — per candidate in
+ * `dependa`, per locale in `harmonise`, per chunk in `translate`, per thread in
+ * `respond` — so `some` turns one degraded item into a red run for work that
+ * otherwise fully succeeded. `dependa`'s call guards an opt-in narrative
+ * flourish whose absence the surrounding code explicitly handles; reddening the
+ * whole run over it is worse than the hole. Closing the mixture case honestly
+ * means deciding it once at run level, against what the run actually
+ * delivered, which is a change to five duties' failure accounting rather than
+ * to this predicate.
+ *
+ * The `failures.length >= models.length` guard is what keeps this about an
+ * exhausted roster rather than a rotation that failed once and then succeeded.
+ * Every caller also reaches it only on the branch where nothing usable came
+ * back, so the two agree.
  */
-export function protocolExhausted(
-  models: readonly string[],
-  failures: readonly Failure[],
-): boolean {
+export function rosterExhausted(models: readonly string[], failures: readonly Failure[]): boolean {
   return (
     models.length > 0 &&
     failures.length >= models.length &&
-    failures.every((f) => f.kind === "protocol")
+    failures.every((f) => f.kind !== "capacity")
   );
 }
 
@@ -1101,10 +1131,11 @@ function describeRequestError(error: unknown, timeoutMs: number): string {
 /**
  * Reads the protocol's `error`, in both the shapes providers send it.
  *
- * An `error` that is present but carries nothing — `null`, `""`, `{}` — is not
- * a report of anything, and several gateways send one alongside a perfectly
- * good answer. Only a field with something in it condemns the response;
- * otherwise a model that worked would be rotated past for punctuation.
+ * An `error` that is present but carries nothing — `null`, `""`, `{}`,
+ * `{"message": ""}`, `{"code": null}` — is not a report of anything, and
+ * several gateways send one alongside a perfectly good answer. Only a field
+ * with something in it condemns the response; otherwise a model that worked
+ * would be rotated past for punctuation.
  */
 function readErrorMessage(payload: unknown): string | null {
   const error = asRecord(payload)?.error;
@@ -1112,12 +1143,27 @@ function readErrorMessage(payload: unknown): string | null {
   if (typeof error === "string") return error.trim().length > 0 ? error : null;
 
   const reported = asRecord(error);
-  if (reported === null || Object.keys(reported).length === 0) return null;
+  if (reported === null) return null;
 
   const message = reported.message;
-  return typeof message === "string" && message.trim().length > 0
-    ? message
-    : `provider reported an error — ${excerpt(JSON.stringify(reported))}`;
+  if (typeof message === "string" && message.trim().length > 0) return message;
+
+  // "Carries nothing" is about the contents, not about the key count. `{}` was
+  // already tolerated here; `{"message": ""}`, `{"message": "   "}` and
+  // `{"code": null}` were not, and each of them is the same absence wearing a
+  // field name. A gateway that stamps one of those on every response — several
+  // do — exhausted the whole roster and ended a run red on a
+  // provider that was answering perfectly well, which is the failure this
+  // paragraph of the doc comment above exists to prevent.
+  const carries = Object.values(reported).some(
+    (value) =>
+      value !== null &&
+      value !== undefined &&
+      !(typeof value === "string" && value.trim().length === 0),
+  );
+  if (!carries) return null;
+
+  return `provider reported an error — ${excerpt(JSON.stringify(reported))}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

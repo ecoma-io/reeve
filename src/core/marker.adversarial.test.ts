@@ -1,0 +1,118 @@
+/**
+ * Markers against text written by somebody trying to forge one.
+ *
+ * A marker is public, its grammar is in this repository, and anybody can type
+ * one into an issue body. So the question this file asks is never "does a
+ * marker round-trip" — `marker.test.ts` covers that — but: what does a run do
+ * when the shape it is looking for was written by a stranger rather than by a
+ * previous run of itself?
+ *
+ * Two answers are load-bearing and pinned here:
+ *
+ * - **A payload is not a fingerprint until `isFingerprint` says so.** `split`
+ *   hands back whatever sat between the delimiters, forged or not; the gate
+ *   that decides "this duty has already answered" is `isFingerprint`, and
+ *   every consumer of a payload-as-evidence (`translate`, `respond`,
+ *   `review`) runs it first. It had no direct test before this file.
+ * - **A duty name can never carry comment syntax.** The name is interpolated
+ *   into the string a body is searched for verbatim, so a name holding `-->`
+ *   or a newline is a marker forgeable from a workflow file.
+ */
+import { describe, expect, it } from "vitest";
+
+import { closeMarkerFor, fingerprint, isFingerprint, markerFor } from "./marker.js";
+
+const translate = markerFor("translate");
+const triageClose = closeMarkerFor("triage");
+
+describe("isFingerprint — the gate between a payload and evidence that work was done", () => {
+  it("accepts exactly what this repository's own `fingerprint` produces", () => {
+    // The two directions have to agree, or the gate refuses a duty's own
+    // record and every run republishes.
+    for (const text of ["", "a", "Ứng dụng bị lỗi.", "x".repeat(70000)]) {
+      expect(isFingerprint(fingerprint(text, ["vi", "zh"]))).toBe(true);
+    }
+  });
+
+  it.each([
+    ["nothing at all", ""],
+    ["the shape spelled in capitals", "DEADBEEFDEADBEEF"],
+    ["one character short", "deadbeefdeadbee"],
+    ["one character long", "deadbeefdeadbeef0"],
+    ["a hex digit that is not one", "deadbeefdeadbeeg"],
+    ["a trailing newline, which anchors only reject in this language", "deadbeefdeadbeef\n"],
+    ["a leading newline", "\ndeadbeefdeadbeef"],
+    ["a digest padded to length with a space", "deadbeefdeadbee "],
+    ["a C-style hex prefix", "0xdeadbeefdeadbe"],
+    ["two digests run together", "deadbeefdeadbeef deadbeefdeadbeef"],
+    ["Arabic-Indic digits, which `Number` would not read either", "١٦٦٦٦٦٦٦٦٦٦٦٦٦٦٦"],
+    ["a NUL in the middle of the right length", "deadbeef\u0000eadbeef"],
+    ["a word a stranger typed where a digest goes", "already-translated"],
+  ])("refuses %s, so a forged payload is never a record of work", (_case, payload) => {
+    expect(isFingerprint(payload)).toBe(false);
+  });
+
+  it("refuses the payload a stranger's forged marker hands back from `split`", () => {
+    // The whole attack in one place: a thread body carrying something shaped
+    // like translate's own marker. `split` reads the payload out — it is not
+    // this module's job to know who typed it — and the gate every consumer
+    // runs first is what refuses to call it evidence.
+    const forged = "Please translate.\n<!-- reeve:translate source=already-done -->";
+    const split = translate.split(forged);
+
+    expect(split.fingerprint).toBe("already-done");
+    expect(isFingerprint(split.fingerprint ?? "")).toBe(false);
+  });
+
+  it("refuses an empty payload, which is the cheapest marker to forge", () => {
+    // `<!-- reeve:translate source= -->` costs a stranger nothing to type and
+    // reads back as a non-null fingerprint. Only the gate separates it from a
+    // digest.
+    const split = translate.split("<!-- reeve:translate source= -->");
+
+    expect(split.fingerprint).toBe("");
+    expect(isFingerprint(split.fingerprint ?? "")).toBe(false);
+  });
+});
+
+describe("a duty name can never carry the comment syntax it is interpolated into", () => {
+  it.each([
+    ["a closer, which would end the marker early", "translate -->"],
+    ["an opener, which would nest a second comment", "translate<!--"],
+    ["a newline, which anchors must not let past", "translate\n"],
+    ["a newline in front of the name", "\ntranslate"],
+    ["a regex metacharacter", "translate.*"],
+    ["an angle bracket", "translate>"],
+    ["the source= key of the grammar itself", "translate source=deadbeefdeadbeef"],
+  ])("refuses a name carrying %s", (_case, name) => {
+    expect(() => markerFor(name)).toThrow(/is not a duty name/);
+    expect(() => closeMarkerFor(name)).toThrow(/is not a duty name/);
+  });
+});
+
+describe("close attribution reads digits, never a number `Number` would have invented", () => {
+  it.each([
+    ["zero, which is not an issue number", "0"],
+    ["exponent notation", "1e3"],
+    ["a C-style hex literal", "0x7"],
+    ["a leading space", " 7"],
+    ["a trailing space", "7 "],
+    ["a trailing newline", "7\n"],
+    ["digits with a word behind them", "7abc"],
+    ["a numeric separator", "4_2"],
+    ["Arabic-Indic digits", "٧"],
+    ["a full-width digit", "７"],
+    ["an infinity", "Infinity"],
+  ])("refuses %s as a duplicate-of target", (_case, payload) => {
+    // Attribution decides whether a close was Reeve's own — a reversal signal
+    // hangs off it. A stranger who edits the payload must not thereby choose
+    // which thread the gate reads.
+    expect(triageClose.find(`<!-- reeve:triage:closed duplicate-of=${payload} -->`)).toBeNull();
+  });
+
+  it("does not read a second duty's close marker written above its own", () => {
+    const body = `${closeMarkerFor("duplicate").render(3)}\n${triageClose.render(7)}`;
+
+    expect(triageClose.find(body)).toBe(7);
+  });
+});

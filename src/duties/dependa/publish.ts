@@ -670,6 +670,23 @@ export async function closeSupersededPRs(
     per_page: 100,
   });
 
+  // Compared in the branch's own alphabet, because that is the only form the
+  // answer can be read back in.
+  //
+  // `activeGroupIds` holds group ids, and a branch name holds
+  // `sanitizeBranchSegment` of one — which strips `@` and rewrites `/`. So for
+  // every scoped package (`@types/node`, and every `@scope/name` in the npm
+  // ecosystem) the recovered segment could not match any member of the set,
+  // and the run closed the pull request it had just opened. The next run then
+  // refused to recreate it, because D3 never reopens a closed-unmerged
+  // proposal — so the dependency became permanently un-updatable, silently,
+  // with both log lines present and neither of them wrong on its own.
+  //
+  // Sanitising here rather than at the caller keeps the encoding owned by the
+  // module that applies it: `publishGroup` above is the only place a branch
+  // name is built, and this is the only place one is read back.
+  const activeBranchSegments = new Set([...activeGroupIds].map(sanitizeBranchSegment));
+
   let closedCount = 0;
   for (const pr of openPrs) {
     // Only touch PRs with the dependa marker
@@ -681,8 +698,8 @@ export async function closeSupersededPRs(
     const prefix = "reeve/dependa/";
     if (!branchName.startsWith(prefix)) continue;
 
-    const groupId = branchName.slice(prefix.length);
-    if (activeGroupIds.has(groupId)) continue;
+    const segment = branchName.slice(prefix.length);
+    if (activeBranchSegments.has(segment)) continue;
 
     // This PR's group is no longer proposed — close it.
     try {
@@ -693,7 +710,7 @@ export async function closeSupersededPRs(
         state: "closed",
       });
       core.info(
-        `dependa: closed superseded PR #${String(pr.number)} (group \`${groupId}\` is no longer proposed).`,
+        `dependa: closed superseded PR #${String(pr.number)} (branch \`${prefix}${segment}\` names no group this run proposed).`,
       );
       closedCount++;
     } catch (error) {

@@ -94,10 +94,24 @@ describe("createToolExecutor", () => {
   });
 
   it("refuses a secret path before any read happens", async () => {
-    const source = stubSource({ ".env": "TOKEN=x" });
+    // "Before any read" is the claim, so the source records what it was asked
+    // for and the case asserts it was asked for nothing: a denylist that fired
+    // only on the way back would already have had the file in memory.
+    const asked: string[] = [];
+    const source: WorkspaceSource = {
+      root: "/workspace",
+      readText: (rel) => {
+        asked.push(rel);
+        return Promise.resolve("TOKEN=x");
+      },
+      readDir: () => Promise.resolve([]),
+      history: () => Promise.resolve(null),
+    };
     const executor = createToolExecutor([file()], new Map(), source, BUDGET);
     const text = await executor.execute(call("read_file", { path: ".env" }));
     expect(text).toContain("Error");
+    expect(text).not.toContain("TOKEN=x");
+    expect(asked).toEqual([]);
     expect(executor.trace().at(-1)?.ok).toBe(false);
   });
 

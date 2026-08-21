@@ -76,6 +76,10 @@ interface State {
   comments: Comment[];
   /** Every mutation the stub has seen — the no-create proof counts these. */
   mutations: string[];
+  /** Every comment listing served, so a case can prove a read never happened. */
+  reads: number;
+  /** When set, the comment listing answers with this status instead of the list. */
+  commentsFailWith: number | null;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -128,6 +132,8 @@ async function startStub(): Promise<Stub> {
       { id: 1, body: envelopeComment([standingFinding()]), login: "reeve[bot]", type: "Bot" },
     ],
     mutations: [],
+    reads: 0,
+    commentsFailWith: null,
   };
 
   const server = createServer((request, response) => {
@@ -174,6 +180,11 @@ function route(stub: State, request: IncomingMessage, response: ServerResponse):
 
   const comments = /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.exec(path);
   if (method === "GET" && comments) {
+    stub.reads += 1;
+    if (stub.commentsFailWith !== null) {
+      send(response, stub.commentsFailWith, { message: "the comment listing is unavailable" });
+      return;
+    }
     send(
       response,
       200,
@@ -395,6 +406,60 @@ describe("the action", () => {
     expect(run.outputs.proposals).toBe("1");
     expect(run.summary).toContain("**Dry run**");
     expect(stub.mutations).toEqual([]);
+  });
+});
+
+describe("when the one read this duty makes does not answer", () => {
+  it.each([
+    ["is unavailable", 500],
+    ["is out of quota", 429],
+    ["refuses the token", 403],
+  ])(
+    "fails red when the comment listing %s, rather than reporting nothing to propose",
+    async (_case, status) => {
+      // "The review left nothing to fix" and "the API did not answer" both end
+      // in zero proposals, and only one of them is an answer. A green run here
+      // would tell a maintainer their pull request is clean on the strength of
+      // a request that never completed.
+      stub.commentsFailWith = status;
+
+      const run = await runAction(stub);
+
+      expect(run.code).not.toBe(0);
+      expect(run.outputs.proposed).toBe("false");
+      expect(run.outputs.note).toContain("stopped before proposing");
+      expect(run.summary).not.toContain("no review envelope found");
+      expect(stub.mutations).toEqual([]);
+    },
+  );
+
+  it("names no thread and reads nothing when the event carries no number", async () => {
+    // The duty is spawned by a workflow, and a workflow can be wired to an
+    // event that names no pull request at all. Asking for `issues/NaN/comments`
+    // is the shape that turns a misconfiguration into a confusing 404.
+    const run = await runAction(stub, { number: "" }, { GITHUB_EVENT_NAME: "schedule" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("names no issue or pull request");
+    expect(stub.reads).toBe(0);
+    expect(stub.mutations).toEqual([]);
+  });
+});
+
+describe("a rerun over the same pull request", () => {
+  it("derives the same proposals again and writes nothing either time", async () => {
+    // The envelope is the memory and the records are a pure function of it,
+    // which is what makes re-running cheap. Two runs must therefore agree
+    // exactly — including the fingerprints a later fixing-PR stage keys off —
+    // and the second must be as write-less as the first.
+    const first = await runAction(stub);
+    const second = await runAction(stub);
+
+    expect(first.outputs).toEqual(second.outputs);
+    expect(first.summary).toBe(second.summary);
+    expect(stub.mutations).toEqual([]);
+    // Read once per run, and nothing else on the thread was touched.
+    expect(stub.reads).toBe(2);
   });
 });
 
