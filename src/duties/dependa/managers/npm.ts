@@ -412,29 +412,55 @@ function collectSectionVersions(
 }
 
 /**
+ * Everything from the first `(` onwards, removed.
+ *
+ * pnpm writes a resolution's peer context as a parenthetical suffix, and from
+ * v9 those suffixes NEST — `@eslint/js@10.0.1(eslint@10.8.1(jiti@2.6.1)(supports-color@7.2.0))`
+ * is one entry from this repository's own lockfile. A regex built out of
+ * `\([^)]*\)` cannot match a nested group, so the anchored version of it
+ * matched nothing at all and every peer-resolved entry kept its whole suffix:
+ * `currentVersion` came out as `10.0.1(eslint@…)`, which is not a version,
+ * so `classifyUpdate` returned null and the dependency was dropped with a
+ * "could not classify" line. That was every peer-resolved dependency in a
+ * pnpm v9 repository — the majority of a modern one.
+ *
+ * Cutting at the first `(` needs no balancing: a resolved version is a
+ * semver string, and semver has no parenthesis in it. Whatever follows the
+ * first one is peer context by construction.
+ */
+function stripPeerSuffix(raw: string): string {
+  const open = raw.indexOf("(");
+  return open === -1 ? raw : raw.slice(0, open);
+}
+
+/**
  * Normalise a resolved-version string from an importers entry.
  *
- * Strips trailing peer-resolution suffixes (`1.2.3(react@18.0.0)` → `1.2.3`)
- * and rejects anything that is not a version — `link:`, `workspace:`, and
- * `file:` resolutions are local packages, and a constraint like `^1.2.3` is
- * a specifier that leaked in, not a resolution.
+ * Strips trailing peer-resolution suffixes (`1.2.3(react@18.0.0)` → `1.2.3`,
+ * nesting included) and rejects anything that is not a version — `link:`,
+ * `workspace:`, and `file:` resolutions are local packages, and a constraint
+ * like `^1.2.3` is a specifier that leaked in, not a resolution.
  */
 function cleanResolvedVersion(raw: string): string | null {
-  const stripped = raw.replace(/(?:\([^)]*\))+$/, "");
+  const stripped = stripPeerSuffix(raw);
   return /^\d/.test(stripped) ? stripped : null;
 }
 
 /**
  * Split a pnpm `packages` key into a name and a version.
  *
- * The trailing peer parenthetical is stripped BEFORE the split: a
- * peer-resolved key like `/name@1.2.3(peer@1.0.0)` would otherwise split on
- * the `@` inside the parenthetical, and a name and version that are both
- * wrong is a dependency silently dropped from maintenance (see
- * `semver.test.ts`'s empty-current-version block for what that costs).
+ * The peer parenthetical is stripped BEFORE the split: a peer-resolved key
+ * like `/name@1.2.3(peer@1.0.0)` would otherwise split on the `@` inside the
+ * parenthetical, and a name and version that are both wrong is a dependency
+ * silently dropped from maintenance (see `semver.test.ts`'s
+ * empty-current-version block for what that costs). A nested v9 suffix made
+ * that worse than a drop: `@eslint/js@10.0.1(eslint@10.8.1(jiti@2.6.1)(supports-color@7.2.0))`
+ * split at the last `@` — the one inside `(supports-color@7.2.0)` — and
+ * `7.2.0))` starts with a digit, so the wrong name and the wrong version
+ * were returned as a confident answer rather than refused.
  */
 function parsePnpmPackageKey(key: string): { name: string; version: string } | null {
-  const bare = (key.startsWith("/") ? key.slice(1) : key).replace(/(?:\([^)]*\))+$/, "");
+  const bare = stripPeerSuffix(key.startsWith("/") ? key.slice(1) : key);
 
   // v6/v9 style: name@version. lastIndexOf keeps a scope's leading `@` (at
   // index 0) out of the split.
