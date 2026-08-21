@@ -87,6 +87,8 @@ export interface DraftSyncRequest {
    * Deterministic post-processing applied to every draft after sanitising and
    * before ignored blocks are reinserted — link localisation lives here. Runs
    * before `reinsert` so content a maintainer marked ignore is never touched.
+   * Optional only at this boundary: `draftSyncs` defaults it to the identity
+   * once, and every function below takes it as required.
    */
   readonly localise?: (text: string) => string;
 }
@@ -115,8 +117,11 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     weather,
     chunkChars,
     ignore,
-    localise,
   } = request;
+
+  // Normalised once here: downstream, `localise` is always a function, so no
+  // caller below carries an optional field or a conditional spread for it.
+  const localise = request.localise ?? ((text: string) => text);
 
   // Extract ignore markers from source and target. The model sees
   // placeholder comments where ignored blocks were, and the original
@@ -133,6 +138,7 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
       sourceContent: maskedSource,
       targetContent: maskedTarget,
       targetSpans,
+      localise,
     });
   }
 
@@ -148,8 +154,8 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     glossary,
     drafts,
     targetSpans,
+    localise,
     ...(weather !== undefined ? { weather } : {}),
-    ...(localise !== undefined ? { localise } : {}),
   });
 }
 
@@ -194,8 +200,8 @@ async function draftWhole(params: DraftWholeParams): Promise<DraftResult> {
     glossaryTerms: glossary.map((g) => g.term),
     drafts,
     targetSpans,
+    localise,
     ...(weather !== undefined ? { weather } : {}),
-    ...(localise !== undefined ? { localise } : {}),
   });
 }
 
@@ -213,7 +219,7 @@ interface DraftWholeParams {
   readonly drafts: number;
   readonly targetSpans: readonly IgnoreSpan[];
   readonly weather?: Weather;
-  readonly localise?: (text: string) => string;
+  readonly localise: (text: string) => string;
 }
 
 /**
@@ -226,7 +232,10 @@ interface DraftWholeParams {
  * hunks, and the glossary. Scoring applies to the full reassembled draft.
  */
 async function draftChunked(
-  request: DraftSyncRequest & { targetSpans: readonly IgnoreSpan[] },
+  request: DraftSyncRequest & {
+    targetSpans: readonly IgnoreSpan[];
+    localise: (text: string) => string;
+  },
 ): Promise<DraftResult> {
   const {
     provider,
@@ -323,7 +332,7 @@ async function draftChunked(
 
   // Localise links before ignored blocks return: a maintainer-ignored
   // section is preserved byte for byte, links included.
-  const localised = localise !== undefined ? localise(reassembled) : reassembled;
+  const localised = localise(reassembled);
 
   // Reinsert ignored blocks (replaced by placeholders before chunking).
   const reinserted = reinsert(localised, targetSpans);
@@ -405,7 +414,7 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
     const sanitized = sanitize(draftText);
     // Localise links before ignored blocks return: a maintainer-ignored
     // section is preserved byte for byte, links included.
-    const localised = localise !== undefined ? localise(sanitized) : sanitized;
+    const localised = localise(sanitized);
     // Reinsert ignored blocks (replaced by placeholders before the model call).
     const reinserted = reinsert(localised, targetSpans);
     const measured = scoreDraft(
@@ -452,7 +461,7 @@ interface DraftLoopParams {
   readonly drafts: number;
   readonly targetSpans: readonly IgnoreSpan[];
   readonly weather?: Weather;
-  readonly localise?: (text: string) => string;
+  readonly localise: (text: string) => string;
 }
 
 /**

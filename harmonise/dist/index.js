@@ -34394,9 +34394,9 @@ async function draftSyncs(request2) {
     drafts,
     weather,
     chunkChars,
-    ignore,
-    localise
+    ignore
   } = request2;
+  const localise = request2.localise ?? ((text2) => text2);
   const sourceResult = ignore ? extract(sourceContent) : void 0;
   const targetResult = ignore ? extract(targetContent) : void 0;
   const maskedSource = sourceResult?.content ?? sourceContent;
@@ -34407,7 +34407,8 @@ async function draftSyncs(request2) {
       ...request2,
       sourceContent: maskedSource,
       targetContent: maskedTarget,
-      targetSpans
+      targetSpans,
+      localise
     });
   }
   return draftWhole({
@@ -34422,8 +34423,8 @@ async function draftSyncs(request2) {
     glossary,
     drafts,
     targetSpans,
-    ...weather !== void 0 ? { weather } : {},
-    ...localise !== void 0 ? { localise } : {}
+    localise,
+    ...weather !== void 0 ? { weather } : {}
   });
 }
 async function draftWhole(params) {
@@ -34461,8 +34462,8 @@ async function draftWhole(params) {
     glossaryTerms: glossary.map((g) => g.term),
     drafts,
     targetSpans,
-    ...weather !== void 0 ? { weather } : {},
-    ...localise !== void 0 ? { localise } : {}
+    localise,
+    ...weather !== void 0 ? { weather } : {}
   });
 }
 async function draftChunked(request2) {
@@ -34537,7 +34538,7 @@ async function draftChunked(request2) {
     }
   }
   const reassembled = chunkDrafts.join("");
-  const localised = localise !== void 0 ? localise(reassembled) : reassembled;
+  const localised = localise(reassembled);
   const reinserted = reinsert(localised, targetSpans);
   const measured2 = scoreDraft(
     reinserted,
@@ -34600,7 +34601,7 @@ async function draftLoop(params) {
       continue;
     }
     const sanitized = sanitize(draftText);
-    const localised = localise !== void 0 ? localise(sanitized) : sanitized;
+    const localised = localise(sanitized);
     const reinserted = reinsert(localised, targetSpans);
     const measured2 = scoreDraft(
       reinserted,
