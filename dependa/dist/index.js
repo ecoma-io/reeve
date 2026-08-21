@@ -35728,6 +35728,7 @@ function applyUpdate4(manifestContent, proposal) {
 }
 
 // src/duties/dependa/managers/npm.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
 var ID10 = "npm";
 var MANIFEST_FILENAMES5 = ["package.json"];
 function createNpmManager() {
@@ -35814,10 +35815,7 @@ function parseLockfile(content) {
   if (content.trimStart().startsWith("{")) {
     return parsePackageLockJson(content);
   }
-  if (content.startsWith("#") || content.includes("specifiers:") || content.includes("lockfileVersion:")) {
-    return parsePnpmLockYaml(content);
-  }
-  return null;
+  return parsePnpmLockYaml(content);
 }
 function parsePackageLockJson(content) {
   try {
@@ -35853,64 +35851,74 @@ function parsePackageLockJson(content) {
   }
 }
 function parsePnpmLockYaml(content) {
+  let doc;
+  try {
+    doc = (0, import_yaml2.parse)(content);
+  } catch {
+    return null;
+  }
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) return null;
+  const lock = doc;
   const versions = /* @__PURE__ */ new Map();
-  const lines = content.split("\n");
-  let inPackages = false;
-  for (const line of lines) {
-    const trimmedLine = line.trimEnd();
-    if (trimmedLine === "packages:" || trimmedLine === "importers:") {
-      inPackages = true;
-      continue;
-    }
-    if (inPackages && /^[a-zA-Z]/.test(trimmedLine) && !trimmedLine.startsWith("/")) {
-      inPackages = false;
-    }
-    if (!inPackages) continue;
-    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine.replace(/(?:\([^)]*\))+(?=:$)/, ""));
-    if (packageMatch !== null) {
-      const name = packageMatch[1] ?? "";
-      const version = packageMatch[2] ?? "";
-      if (name.length > 0 && version.length > 0) {
-        const cleanVersion = version.replace(/\([^)]*\)$/, "");
-        versions.set(name, cleanVersion);
-      }
-    }
-    const versionMatch = /^ {4,6}version:\s+(\S+)$/.exec(trimmedLine);
-    if (versionMatch !== null) {
+  const importers = lock.importers;
+  if (typeof importers === "object" && importers !== null && !Array.isArray(importers)) {
+    for (const importer of Object.values(importers)) {
+      collectImporterVersions(importer, versions);
     }
   }
-  let inImporters = false;
-  let inSpecifiers = false;
-  for (const line of lines) {
-    const trimmedLine = line.trimEnd();
-    if (trimmedLine === "importers:") {
-      inImporters = true;
-      continue;
-    }
-    if (inImporters && /^[a-zA-Z]/.test(trimmedLine)) {
-      inImporters = false;
-    }
-    if (trimmedLine.includes("specifiers:")) {
-      inSpecifiers = true;
-      continue;
-    }
-    if (inSpecifiers && (!trimmedLine.startsWith(" ") || /^[^ ]/.test(trimmedLine))) {
-      inSpecifiers = false;
-    }
-    if (inImporters && !inSpecifiers) {
-      const depMatch = /^\s{2,}([a-zA-Z0-9@/._-]+):\s+(\S+)$/.exec(trimmedLine);
-      if (depMatch !== null) {
-        const name = depMatch[1] ?? "";
-        const version = depMatch[2] ?? "";
-        if (/^\d/.test(version) || version.startsWith("(")) {
-          if (!name.includes(":") && name !== "specifiers" && name !== "dependencies") {
-            versions.set(name, version.replace(/^\(/, "").replace(/\)$/, ""));
-          }
-        }
+  collectSectionVersions(lock, versions);
+  const packages = lock.packages;
+  if (typeof packages === "object" && packages !== null && !Array.isArray(packages)) {
+    for (const key of Object.keys(packages)) {
+      const entry = parsePnpmPackageKey(key);
+      if (entry !== null && !versions.has(entry.name)) {
+        versions.set(entry.name, entry.version);
       }
     }
   }
   return versions.size > 0 ? versions : null;
+}
+var IMPORTER_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"];
+function collectImporterVersions(importer, versions) {
+  if (typeof importer !== "object" || importer === null || Array.isArray(importer)) return;
+  const record = importer;
+  collectSectionVersions(record, versions);
+  for (const [name, entry] of Object.entries(record)) {
+    if (name === "specifiers" || IMPORTER_SECTIONS.includes(name)) continue;
+    if (typeof entry !== "string") continue;
+    const version = cleanResolvedVersion(entry);
+    if (version !== null) versions.set(name, version);
+  }
+}
+function collectSectionVersions(record, versions) {
+  for (const section of IMPORTER_SECTIONS) {
+    const block = record[section];
+    if (typeof block !== "object" || block === null || Array.isArray(block)) continue;
+    for (const [name, entry] of Object.entries(block)) {
+      const version = typeof entry === "string" ? cleanResolvedVersion(entry) : typeof entry === "object" && entry !== null && typeof entry.version === "string" ? cleanResolvedVersion(entry.version) : null;
+      if (version !== null) versions.set(name, version);
+    }
+  }
+}
+function cleanResolvedVersion(raw) {
+  const stripped = raw.replace(/(?:\([^)]*\))+$/, "");
+  return /^\d/.test(stripped) ? stripped : null;
+}
+function parsePnpmPackageKey(key) {
+  const bare = (key.startsWith("/") ? key.slice(1) : key).replace(/(?:\([^)]*\))+$/, "");
+  const at = bare.lastIndexOf("@");
+  if (at > 0) {
+    const name = bare.slice(0, at);
+    const version = bare.slice(at + 1);
+    return /^\d/.test(version) ? { name, version } : null;
+  }
+  const slash = bare.lastIndexOf("/");
+  if (slash > 0) {
+    const name = bare.slice(0, slash);
+    const version = bare.slice(slash + 1);
+    return /^\d/.test(version) ? { name, version } : null;
+  }
+  return null;
 }
 function applyUpdate5(manifestContent, proposal) {
   let pkg;

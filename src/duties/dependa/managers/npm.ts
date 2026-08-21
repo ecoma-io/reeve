@@ -13,11 +13,14 @@
  * in real manifests; exotic grammar that does not parse is not proposed for
  * update (the same boundary every other manager draws).
  *
- * Lockfile parsing (pnpm-lock.yaml, package-lock.json, yarn.lock) is handled
- * to resolve `currentVersion` from the lockfile when available. Without a
- * lockfile, `currentVersion` is the constraint itself — which may not be a
- * version at all, and downstream stages handle that case.
+ * Lockfile parsing (pnpm-lock.yaml, package-lock.json) is handled to resolve
+ * `currentVersion` from the lockfile when available. Without a lockfile,
+ * `currentVersion` is the constraint itself — which may not be a version at
+ * all, and downstream stages handle that case. yarn.lock v1 is not YAML and
+ * is reported as an unreadable lockfile rather than guessed at.
  */
+import { parse as parseYaml } from "yaml";
+
 import type { Dependency, UpdateProposal } from "../model.js";
 import type { Manager, ManagerId, ManagerResult } from "./types.js";
 
@@ -172,33 +175,21 @@ function extractPinnedVersion(constraint: string | null): string {
 }
 
 /**
- * Parse a pnpm-lock.yaml to extract resolved versions.
+ * Parse a lockfile to extract resolved versions.
  *
- * pnpm lockfiles are YAML. This is a simplified parser that handles the
- * common structure. It does not need to understand every field — only the
- * version resolution map.
+ * package-lock.json is JSON; pnpm-lock.yaml is YAML. yarn.lock v1 is neither
+ * (its own line grammar fails YAML parsing) and comes back null, which the
+ * caller reports as a partial read rather than a guessed version.
  *
  * Returns null when the lockfile cannot be parsed.
  */
 function parseLockfile(content: string): Map<string, string> | null {
-  // Try to detect lockfile format and parse accordingly.
-  // package-lock.json is JSON; pnpm-lock.yaml and yarn.lock are YAML.
-
   // Quick JSON check — if it starts with '{', it's package-lock.json
   if (content.trimStart().startsWith("{")) {
     return parsePackageLockJson(content);
   }
 
-  // pnpm-lock.yaml or yarn.lock — parse the importers section
-  if (
-    content.startsWith("#") ||
-    content.includes("specifiers:") ||
-    content.includes("lockfileVersion:")
-  ) {
-    return parsePnpmLockYaml(content);
-  }
-
-  return null;
+  return parsePnpmLockYaml(content);
 }
 
 /**
@@ -246,111 +237,162 @@ function parsePackageLockJson(content: string): Map<string, string> | null {
 }
 
 /**
- * Parse pnpm-lock.yaml format.
+ * Parse pnpm-lock.yaml with a real YAML parser, across lockfile generations.
  *
- * This is a simplified YAML parser for the specific structure of pnpm
- * lockfiles. It extracts the version map from the `importers` section
- * and the `packages` section. It does not need to be a general YAML parser.
+ * The shapes that matter, by `lockfileVersion`:
+ * - **5.x**: `packages` keys are `/name/1.2.3`; importers map names straight
+ *   to version strings under `dependencies:`/`devDependencies:`.
+ * - **6.x**: `packages` keys are `/name@1.2.3`, with peer-resolved entries
+ *   suffixed `(peer@1.0.0)`.
+ * - **9.0** (pnpm 9/10): `packages` keys drop the leading slash —
+ *   `name@1.2.3` — and importers entries become `{specifier, version}`
+ *   objects, where `version` may carry peer suffixes of its own.
+ *
+ * Importers are read first: they name the version the manifest's own
+ * constraint resolved to, which is exactly what `currentVersion` means. The
+ * `packages` keys are a fallback for names the importers did not resolve —
+ * they never overwrite an importer's answer, because `packages` may hold
+ * several versions of one name (one per consumer) and picking among those is
+ * a guess the importers section exists to avoid.
+ *
+ * Returns null when the content is not a YAML mapping or resolves nothing —
+ * the caller reports that as a partial read.
  */
 function parsePnpmLockYaml(content: string): Map<string, string> | null {
+  let doc: unknown;
+  try {
+    doc = parseYaml(content);
+  } catch {
+    return null;
+  }
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) return null;
+
+  const lock = doc as Record<string, unknown>;
   const versions = new Map<string, string>();
 
-  // Look for package entries like:
-  //   /lodash@4.17.21:
-  //     version: 4.17.21
-  // or in importers:
-  //   lodash: 4.17.21
-  const lines = content.split("\n");
-  let inPackages = false;
-
-  for (const line of lines) {
-    const trimmedLine = line.trimEnd();
-
-    // Detect the packages section
-    if (trimmedLine === "packages:" || trimmedLine === "importers:") {
-      inPackages = true;
-      continue;
-    }
-
-    // New top-level key ends the packages section
-    if (inPackages && /^[a-zA-Z]/.test(trimmedLine) && !trimmedLine.startsWith("/")) {
-      inPackages = false;
-    }
-
-    if (!inPackages) continue;
-
-    // Match package entries: /name@version:
-    //
-    // The trailing parenthetical is stripped BEFORE the split, not after it.
-    // pnpm 6+ writes a package resolved against a peer as
-    // `/name@version(peer@version):`, and both capture groups below are
-    // greedy — so a split on the raw line lands on the `@` INSIDE the
-    // parenthetical and hands back a name and a version that are both wrong,
-    // which is a dependency silently dropped from maintenance (see
-    // `semver.test.ts`'s empty-current-version block for what that costs).
-    // Stripping first leaves `/name@version:`, the shape this pattern was
-    // written for.
-    const packageMatch = /^ {2}\/(.+)@(.+):$/.exec(trimmedLine.replace(/(?:\([^)]*\))+(?=:$)/, ""));
-    if (packageMatch !== null) {
-      const name = packageMatch[1] ?? "";
-      const version = packageMatch[2] ?? "";
-      if (name.length > 0 && version.length > 0) {
-        // Strip any parenthetical indicators like _(patched)
-        const cleanVersion = version.replace(/\([^)]*\)$/, "");
-        versions.set(name, cleanVersion);
-      }
-    }
-
-    // Match version lines under a package entry: version: X.Y.Z
-    const versionMatch = /^ {4,6}version:\s+(\S+)$/.exec(trimmedLine);
-    if (versionMatch !== null) {
-      // This is a version line — but we already captured from the key
-      // This handles the case where the key doesn't have the version
+  // Importers — one entry per workspace project.
+  const importers = lock.importers;
+  if (typeof importers === "object" && importers !== null && !Array.isArray(importers)) {
+    for (const importer of Object.values(importers as Record<string, unknown>)) {
+      collectImporterVersions(importer, versions);
     }
   }
 
-  // Also look for importers section patterns like:
-  //   lodash: 4.17.21
-  let inImporters = false;
-  let inSpecifiers = false;
-  for (const line of lines) {
-    const trimmedLine = line.trimEnd();
+  // A v5 lockfile without workspaces keeps its sections at the root. Only
+  // the named sections are read here — a flat scan of root keys would
+  // mistake `lockfileVersion: '6.0'` itself for a resolution.
+  collectSectionVersions(lock, versions);
 
-    if (trimmedLine === "importers:") {
-      inImporters = true;
-      continue;
-    }
-
-    if (inImporters && /^[a-zA-Z]/.test(trimmedLine)) {
-      inImporters = false;
-    }
-
-    if (trimmedLine.includes("specifiers:")) {
-      inSpecifiers = true;
-      continue;
-    }
-
-    if (inSpecifiers && (!trimmedLine.startsWith(" ") || /^[^ ]/.test(trimmedLine))) {
-      inSpecifiers = false;
-    }
-
-    if (inImporters && !inSpecifiers) {
-      // Match: "  lodash: 4.17.21" or "    lodash: 4.17.21"
-      const depMatch = /^\s{2,}([a-zA-Z0-9@/._-]+):\s+(\S+)$/.exec(trimmedLine);
-      if (depMatch !== null) {
-        const name = depMatch[1] ?? "";
-        const version = depMatch[2] ?? "";
-        // Skip if it looks like a section header, not a version
-        if (/^\d/.test(version) || version.startsWith("(")) {
-          if (!name.includes(":") && name !== "specifiers" && name !== "dependencies") {
-            versions.set(name, version.replace(/^\(/, "").replace(/\)$/, ""));
-          }
-        }
+  // Fallback: `packages` keys, for names no importer resolved.
+  const packages = lock.packages;
+  if (typeof packages === "object" && packages !== null && !Array.isArray(packages)) {
+    for (const key of Object.keys(packages)) {
+      const entry = parsePnpmPackageKey(key);
+      if (entry !== null && !versions.has(entry.name)) {
+        versions.set(entry.name, entry.version);
       }
     }
   }
 
   return versions.size > 0 ? versions : null;
+}
+
+/** The importer sections whose entries resolve dependency versions. */
+const IMPORTER_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"] as const;
+
+/**
+ * Collect resolved versions from one importer (or the lockfile root).
+ *
+ * Handles both entry shapes: a plain string version (v5/v6) and a
+ * `{specifier, version}` object (v9). The `specifiers` block names
+ * constraints, not resolved versions, and is never read.
+ */
+function collectImporterVersions(importer: unknown, versions: Map<string, string>): void {
+  if (typeof importer !== "object" || importer === null || Array.isArray(importer)) return;
+  const record = importer as Record<string, unknown>;
+
+  collectSectionVersions(record, versions);
+
+  // Some importer blocks map names straight to versions with no section
+  // wrapper. Only plain string values count; `specifiers` is a constraint
+  // block, never a resolution.
+  for (const [name, entry] of Object.entries(record)) {
+    if (name === "specifiers" || (IMPORTER_SECTIONS as readonly string[]).includes(name)) continue;
+    if (typeof entry !== "string") continue;
+    const version = cleanResolvedVersion(entry);
+    if (version !== null) versions.set(name, version);
+  }
+}
+
+/**
+ * Collect resolved versions from the named dependency sections of a record —
+ * an importer, or the root of a v5 lockfile without workspaces.
+ */
+function collectSectionVersions(
+  record: Record<string, unknown>,
+  versions: Map<string, string>,
+): void {
+  for (const section of IMPORTER_SECTIONS) {
+    const block = record[section];
+    if (typeof block !== "object" || block === null || Array.isArray(block)) continue;
+
+    for (const [name, entry] of Object.entries(block as Record<string, unknown>)) {
+      const version =
+        typeof entry === "string"
+          ? cleanResolvedVersion(entry)
+          : typeof entry === "object" &&
+              entry !== null &&
+              typeof (entry as Record<string, unknown>).version === "string"
+            ? cleanResolvedVersion((entry as Record<string, unknown>).version as string)
+            : null;
+      if (version !== null) versions.set(name, version);
+    }
+  }
+}
+
+/**
+ * Normalise a resolved-version string from an importers entry.
+ *
+ * Strips trailing peer-resolution suffixes (`1.2.3(react@18.0.0)` → `1.2.3`)
+ * and rejects anything that is not a version — `link:`, `workspace:`, and
+ * `file:` resolutions are local packages, and a constraint like `^1.2.3` is
+ * a specifier that leaked in, not a resolution.
+ */
+function cleanResolvedVersion(raw: string): string | null {
+  const stripped = raw.replace(/(?:\([^)]*\))+$/, "");
+  return /^\d/.test(stripped) ? stripped : null;
+}
+
+/**
+ * Split a pnpm `packages` key into a name and a version.
+ *
+ * The trailing peer parenthetical is stripped BEFORE the split: a
+ * peer-resolved key like `/name@1.2.3(peer@1.0.0)` would otherwise split on
+ * the `@` inside the parenthetical, and a name and version that are both
+ * wrong is a dependency silently dropped from maintenance (see
+ * `semver.test.ts`'s empty-current-version block for what that costs).
+ */
+function parsePnpmPackageKey(key: string): { name: string; version: string } | null {
+  const bare = (key.startsWith("/") ? key.slice(1) : key).replace(/(?:\([^)]*\))+$/, "");
+
+  // v6/v9 style: name@version. lastIndexOf keeps a scope's leading `@` (at
+  // index 0) out of the split.
+  const at = bare.lastIndexOf("@");
+  if (at > 0) {
+    const name = bare.slice(0, at);
+    const version = bare.slice(at + 1);
+    return /^\d/.test(version) ? { name, version } : null;
+  }
+
+  // v5 style: name/version.
+  const slash = bare.lastIndexOf("/");
+  if (slash > 0) {
+    const name = bare.slice(0, slash);
+    const version = bare.slice(slash + 1);
+    return /^\d/.test(version) ? { name, version } : null;
+  }
+
+  return null;
 }
 
 /**

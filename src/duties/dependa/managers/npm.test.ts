@@ -660,9 +660,9 @@ describe("npm applyUpdate — indentation preservation", () => {
 // Lockfile resolution — the half of `parse` that turns a constraint into the
 // version actually installed.
 //
-// `parseLockfile` (npm.ts:183) dispatches on the lockfile's own shape and
+// `parseLockfile` (npm.ts:186) dispatches on the lockfile's own shape and
 // hands off to one of two readers. The pnpm reader (`parsePnpmLockYaml`,
-// npm.ts:255) had no coverage at all, and it is the one that decides what
+// npm.ts:261) had no coverage at all, and it is the one that decides what
 // `currentVersion` a proposal is measured FROM — a wrong answer there proposes
 // an update from a version the repository is not on.
 //
@@ -884,6 +884,187 @@ describe("npm parse: pnpm-lock.yaml", () => {
 
   it("reports partial for content that is neither JSON nor a recognised lockfile", () => {
     expect(resolved("just some prose\nand another line").partial).toBe(true);
+  });
+
+  it("reads a v5 packages key, where the version follows a slash rather than an @", () => {
+    const lockfile = ["lockfileVersion: 5.4", "packages:", "  /lodash/4.17.21:"].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("reads a v5 scoped packages key without splitting inside the scope", () => {
+    const lockfile = ["lockfileVersion: 5.4", "packages:", "  /@types/node/20.1.0:"].join("\n");
+
+    expect(resolved(lockfile, { "@types/node": "^20" }).version).toBe("20.1.0");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REGRESSION — pnpm lockfileVersion 9.0 (pnpm 9/10) resolved NOTHING.
+//
+// v9 changed both shapes the old line-oriented parser matched on. `packages`
+// keys dropped their leading slash (`'lodash@4.17.21':` instead of
+// `/lodash@4.17.21:`), so the `/^ {2}\/…/` pattern matched no key at all. And
+// importers entries became `{specifier, version}` objects, whose `version:`
+// sub-line the importers scan then matched AS a package — a package named
+// `version`. Every real dependency came out with `currentVersion: ""`, and
+// `classify("")` returns null, so every npm dependency in a pnpm 9/10
+// repository — this one included — was silently dropped from maintenance.
+//
+// The fix parses the lockfile with the `yaml` library and reads shapes by
+// structure rather than by line: these cases pin each v9 shape, and the last
+// pins the `version`-as-a-package confusion closed.
+// ---------------------------------------------------------------------------
+
+describe("npm parse: pnpm-lock.yaml v9", () => {
+  it("reads a version out of a bare name@version packages key", () => {
+    const lockfile = ["lockfileVersion: '9.0'", "packages:", "  'lodash@4.17.21':"].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("keeps a scoped package's leading @ out of the split", () => {
+    const lockfile = ["lockfileVersion: '9.0'", "packages:", "  '@types/node@20.1.0':"].join("\n");
+
+    expect(resolved(lockfile, { "@types/node": "^20" }).version).toBe("20.1.0");
+  });
+
+  it("reads a version out of an importers {specifier, version} entry", () => {
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    dependencies:",
+      "      lodash:",
+      "        specifier: ^4.17.0",
+      "        version: 4.17.21",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("strips the peer suffixes a v9 importers resolution carries", () => {
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    devDependencies:",
+      "      '@commitlint/cli':",
+      "        specifier: ^21.2.1",
+      "        version: 21.2.1(@types/node@26.2.0)(typescript@5.9.3)",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@commitlint/cli": "^21" }).version).toBe("21.2.1");
+  });
+
+  it("never mistakes the specifier for the resolution", () => {
+    // The specifier is the manifest's constraint echoed back. Reading it as
+    // the installed version would measure every update from a range.
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    dependencies:",
+      "      lodash:",
+      "        specifier: ^4.17.0",
+      "        version: 4.17.21",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).not.toBe("^4.17.0");
+  });
+
+  it("prefers the importer's resolution over a packages key naming another version", () => {
+    // `packages` holds every version any consumer installed; the importer
+    // names the one THIS manifest resolved to. When they disagree, the
+    // importer is the answer — the packages key belongs to someone else's
+    // dependency tree.
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    dependencies:",
+      "      lodash:",
+      "        specifier: ^4.17.0",
+      "        version: 4.17.21",
+      "packages:",
+      "  'lodash@3.10.1':",
+      "  'lodash@4.17.21':",
+    ].join("\n");
+
+    expect(resolved(lockfile).version).toBe("4.17.21");
+  });
+
+  it("skips a workspace link rather than reporting it as a version", () => {
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    dependencies:",
+      "      my-local:",
+      "        specifier: workspace:*",
+      "        version: link:../my-local",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "my-local": "workspace:*" }).version).toBe("");
+  });
+
+  it("does not resolve a dependency named `version` from an importers sub-line", () => {
+    // The old importers scan matched `version: 4.17.21` sub-lines as a
+    // package named `version` — so a manifest that really depends on the npm
+    // package `version` would have resolved to some OTHER dependency's
+    // number.
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    dependencies:",
+      "      lodash:",
+      "        specifier: ^4.17.0",
+      "        version: 4.17.21",
+    ].join("\n");
+
+    expect(resolved(lockfile, { version: "^1.0.0" }).version).toBe("");
+  });
+
+  it("resolves a full v9 lockfile shaped like this repository's own", () => {
+    // The dogfood witness: settings, importers with peer-suffixed
+    // resolutions, packages, and snapshots — the sections a real pnpm 9/10
+    // lockfile carries, in the order pnpm writes them.
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "",
+      "settings:",
+      "  autoInstallPeers: true",
+      "  excludeLinksFromLockfile: false",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    dependencies:",
+      "      '@actions/core':",
+      "        specifier: ^3.0.1",
+      "        version: 3.0.1",
+      "    devDependencies:",
+      "      typescript:",
+      "        specifier: ^5.9.3",
+      "        version: 5.9.3",
+      "",
+      "packages:",
+      "",
+      "  '@actions/core@3.0.1':",
+      "    resolution: {integrity: sha512-abc}",
+      "",
+      "  typescript@5.9.3:",
+      "    resolution: {integrity: sha512-def}",
+      "",
+      "snapshots:",
+      "",
+      "  '@actions/core@3.0.1': {}",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@actions/core": "^3.0.1" }).version).toBe("3.0.1");
+    expect(resolved(lockfile, { typescript: "^5.9.3" }).version).toBe("5.9.3");
+    expect(resolved(lockfile).partial).toBe(false);
   });
 });
 
