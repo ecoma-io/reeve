@@ -33794,17 +33794,7 @@ async function writeExplain(leaf) {
     "",
     table2(
       ["Duty", "Action to write"],
-      [
-        ["translate", "`ecoma-io/reeve/translate@<ref>`"],
-        ["triage", "`ecoma-io/reeve/triage@<ref>`"],
-        ["duplicate", "`ecoma-io/reeve/duplicate@<ref>`"],
-        ["respond", "`ecoma-io/reeve/respond@<ref>`"],
-        ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
-        ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
-        ["dependa", "`ecoma-io/reeve/dependa@<ref>`"],
-        ["review", "`ecoma-io/reeve/review@<ref>`"],
-        ["remediation", "`ecoma-io/reeve/remediation@<ref>`"]
-      ]
+      DUTIES.map((duty) => [duty, `\`ecoma-io/reeve/${duty}@<ref>\``])
     ),
     ""
   ];

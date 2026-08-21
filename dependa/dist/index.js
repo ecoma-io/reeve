@@ -31575,6 +31575,71 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// src/core/meter.ts
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
+// src/core/budget.ts
+function createBudget() {
+  return { denied: false };
+}
+function budgetExhausted(maxRequests, meter, budget) {
+  if (maxRequests === null) return false;
+  if (budget.denied) return true;
+  if (total(meter.spent()).requests < maxRequests) return false;
+  budget.denied = true;
+  return true;
+}
+
 // src/core/forge.ts
 var LABEL_PAGE = 100;
 var LABEL_PAGES = 10;
@@ -31725,59 +31790,6 @@ var UnreadableContentsFile = class extends Error {
     this.path = path;
   }
 };
-
-// src/core/meter.ts
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose, temperature) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(
-        model,
-        messages,
-        temperature === void 0 ? options : { temperature, ...options }
-      );
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
-}
 
 // src/core/list.ts
 function parseList(raw) {
@@ -33424,21 +33436,6 @@ function describe(value) {
     return `\`${String(value)}\``;
   }
   return "a value of a kind this file cannot hold";
-}
-
-// src/duties/dependa/budget.ts
-function createBudget() {
-  return { denied: false };
-}
-function budgetExhausted(maxRequests, meter, budget) {
-  if (maxRequests === null) return false;
-  if (budget.denied) return true;
-  const spent = total(meter.spent());
-  if (spent.requests >= maxRequests) {
-    budget.denied = true;
-    return true;
-  }
-  return false;
 }
 
 // src/duties/dependa/capabilities.ts

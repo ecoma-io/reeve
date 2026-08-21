@@ -33136,6 +33136,13 @@ function findClosingRun(text2, from, runLength) {
   }
   return -1;
 }
+function unfenced(answer) {
+  const parts = segments(answer.trim());
+  const [only] = parts;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer;
+  const lines = only.text.split("\n");
+  return lines.slice(1, -1).join("\n");
+}
 
 // src/core/meter.ts
 var STAGE = {
@@ -33555,6 +33562,18 @@ function settleAuth(weather) {
   const [first] = weather.authFailures;
   if (first !== void 0) throw new AuthenticationFailure(first);
 }
+async function askWhole(provider, model, messages, noun = "answer") {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: `the ${noun} was cut off before it finished`
+    };
+  }
+  return completion;
+}
 async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
@@ -33653,9 +33672,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer2, code) {
+function spells(answer, code) {
   const escaped = code.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer2);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -35327,7 +35346,7 @@ async function translateToPivot(request2) {
   const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages),
+    (model) => askWhole(provider, model, messages, "rendering"),
     weather
   );
   if (!rotation.success) return { draft: null, failures: rotation.failures };
@@ -35337,18 +35356,6 @@ async function translateToPivot(request2) {
     draft: { title: sanitize2(draft.title), body: sanitize2(draft.body) },
     failures: rotation.failures
   };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the rendering was cut off before it finished"
-    };
-  }
-  return completion;
 }
 function prompt(title, body, to) {
   const enclosed = enclose("untrusted-thread", `${title}
@@ -35370,8 +35377,8 @@ ${body}`);
     { role: "user", content: enclosed.block }
   ];
 }
-function unwrapped(answer2) {
-  const trimmed = answer2.trim();
+function unwrapped(answer) {
+  const trimmed = answer.trim();
   const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence?.[1] ?? trimmed;
 }
@@ -35567,8 +35574,8 @@ async function sift(request2) {
   if (!rotation.success) return { dropped: null, failures: rotation.failures };
   return { dropped: read(rotation.success.content), failures: rotation.failures };
 }
-function read(answer2) {
-  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer2);
+function read(answer) {
+  const said = (word) => new RegExp(`(?<![a-z-])${word}(?![a-z-])`, "i").test(answer);
   if (said("spam") === said("off-topic")) return null;
   if (said("spam")) {
     return { reason: "spam", note: "the cheap pass read it as spam" };
@@ -37307,10 +37314,10 @@ async function triage(request2) {
     unreadable: verdict2 === null ? rotation.success.content : null
   };
 }
-function parseVerdict(answer2) {
+function parseVerdict(answer) {
   let parsed;
   try {
-    parsed = JSON.parse(unwrapped2(answer2));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -37336,13 +37343,6 @@ function parseVerdict(answer2) {
     duplicateOf: duplicate,
     rationale: rationale.trim()
   };
-}
-function unwrapped2(answer2) {
-  const parts = segments(answer2.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }
 function prompt3(request2) {
   const { title, body, taxonomy, language, recalled } = request2;
@@ -38043,8 +38043,8 @@ function comment(outcome, done) {
   );
   return parts.join("\n");
 }
-function excerpt2(answer2) {
-  const flat = answer2.replace(/\s+/g, " ").trim();
+function excerpt2(answer) {
+  const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
 await run();

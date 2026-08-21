@@ -32520,6 +32520,13 @@ function findClosingRun(text2, from, runLength) {
   }
   return -1;
 }
+function unfenced(answer) {
+  const parts = segments(answer.trim());
+  const [only] = parts;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer;
+  const lines = only.text.split("\n");
+  return lines.slice(1, -1).join("\n");
+}
 
 // src/core/meter.ts
 var STAGE = {
@@ -32939,6 +32946,18 @@ function settleAuth(weather) {
   const [first] = weather.authFailures;
   if (first !== void 0) throw new AuthenticationFailure(first);
 }
+async function askWhole(provider, model, messages, noun = "answer") {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: `the ${noun} was cut off before it finished`
+    };
+  }
+  return completion;
+}
 async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
@@ -33037,9 +33056,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer2, code2) {
+function spells(answer, code2) {
   const escaped = code2.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer2);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -37896,7 +37915,7 @@ function createToolExecutor(files, skipped, source, budget) {
     entries.push({ name, ok, note, chars: text2.length });
     return text2;
   };
-  const answer2 = async (call) => {
+  const answer = async (call) => {
     if (served >= budget.maxTotalPullChars) {
       return record(call.name, false, "pull budget exhausted", EXHAUSTED);
     }
@@ -38027,7 +38046,7 @@ ${slice}`;
     }
   };
   return {
-    execute: answer2,
+    execute: answer,
     trace: () => entries,
     pulled: () => served
   };
@@ -38086,10 +38105,10 @@ async function agenticAnswer(provider, model, base, executor, budget) {
 }
 
 // src/duties/review/verdict.ts
-function parseVerdict(answer2, files) {
+function parseVerdict(answer, files) {
   let parsed;
   try {
-    parsed = JSON.parse(unwrapped(answer2));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -38139,13 +38158,6 @@ function parseFinding(raw, files) {
     snippet: snippet.slice(0, 120)
   };
 }
-function unwrapped(answer2) {
-  const parts = segments(answer2.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer2;
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
-}
 
 // src/duties/review/passes.ts
 var SEVERITY_ORDER = {
@@ -38160,7 +38172,7 @@ async function runPasses(provider, passes, models, context3, weather, agentic) {
     let rotation = await rotateModels(
       roster,
       (model) => {
-        if (agentic === void 0) return answer(provider, model, pass.prompt(context3));
+        if (agentic === void 0) return askWhole(provider, model, pass.prompt(context3));
         const executor = agentic.makeExecutor();
         return agenticAnswer(provider, model, pass.prompt(context3), executor, agentic.budget).then(
           (completion) => {
@@ -38176,7 +38188,7 @@ async function runPasses(provider, passes, models, context3, weather, agentic) {
       const assembled = { ...context3, agentic: false };
       const retry = await rotateModels(
         roster,
-        (model) => answer(provider, model, pass.prompt(assembled)),
+        (model) => askWhole(provider, model, pass.prompt(assembled)),
         weather
       );
       if (retry.success) {
@@ -38208,25 +38220,13 @@ async function runPasses(provider, passes, models, context3, weather, agentic) {
   }
   return results;
 }
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished"
-    };
-  }
-  return completion;
-}
 function correctnessPass() {
   return {
     id: "correctness",
     name: "Correctness",
     models: [],
     prompt: (context3) => correctnessPrompt(context3),
-    parse: (answer2, files) => parseVerdict(answer2, files)
+    parse: (answer, files) => parseVerdict(answer, files)
   };
 }
 function secondOpinionPass() {
@@ -38235,7 +38235,7 @@ function secondOpinionPass() {
     name: "Second opinion",
     models: [],
     prompt: (context3) => secondOpinionPrompt(context3),
-    parse: (answer2, files) => parseVerdict(answer2, files)
+    parse: (answer, files) => parseVerdict(answer, files)
   };
 }
 function adversarialPass(prior) {
@@ -38244,7 +38244,7 @@ function adversarialPass(prior) {
     name: "Adversarial",
     models: [],
     prompt: (context3) => adversarialPrompt(context3, prior),
-    parse: (answer2, files) => parseVerdict(answer2, files)
+    parse: (answer, files) => parseVerdict(answer, files)
   };
 }
 function material(context3, lead, prior) {
