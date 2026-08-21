@@ -576,12 +576,12 @@ export const MUTATIONS = [
   {
     name: "state branch opens a second pull request",
     file: "src/core/state-branch.ts",
-    from: 'core.info(`state-branch: wrote ${file.path} on \\`${branchName}\\``);\n    }\n\n    // Check for an existing open PR on this branch\n    const { data: existing } = await api.rest.pulls.list({\n      owner: at.owner,\n      repo: at.repo,\n      state: "open",\n      head: `${at.owner}:${branchName}`,\n      per_page: 1,\n    });\n\n    const existingPr = existing[0];',
-    to: 'core.info(`state-branch: wrote ${file.path} on \\`${branchName}\\``);\n    }\n\n    // Check for an existing open PR on this branch\n    const { data: existing } = await api.rest.pulls.list({\n      owner: at.owner,\n      repo: at.repo,\n      state: "open",\n      head: `${at.owner}:${branchName}`,\n      per_page: 1,\n    });\n\n    const existingPr = undefined;',
-    targets: ["src/core/state-branch.test.ts"],
+    from: "  const existingPr = existing[0];",
+    to: "  const existingPr = undefined;",
+    targets: ["src/core/state-branch.test.ts", "src/core/state.idempotency.test.ts"],
     stage: "fast",
     owner: "TL3",
-    note: "A rerun opens a fresh pull request beside the one it already has open.",
+    note: "Every run opens another pull request on the same branch instead of updating the one already open. One anchor now, in the extracted `openOrUpdatePr`, so this gates `publishState` AND `publishStatePr` — it used to carry a thirteen-line run just to pick one of two identical copies, and proved nothing about the other.",
   },
   {
     name: "an unknown outcome is read as no outcome",

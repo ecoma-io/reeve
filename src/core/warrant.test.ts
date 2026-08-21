@@ -17,7 +17,6 @@ import {
   readWarrant,
   resolveAbout,
   resolveLanguages,
-  resolvePivot,
   DEFAULT_WARRANT_PATH,
   type Warrant,
 } from "./warrant.js";
@@ -663,34 +662,25 @@ describe("about", () => {
   });
 });
 
-describe("resolvePivot", () => {
-  const EN = { code: "en", label: "English", scripts: ["Latn"] };
-  const VI = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
-
-  it("is the first configured language when the warrant never wrote `pivot:`", () => {
-    expect(resolvePivot(warrant(MINIMAL), [EN, VI])).toBe(EN);
-  });
-
-  it("lets the warrant's own `pivot:` win, case-insensitively", () => {
-    expect(resolvePivot(warrant(`${MINIMAL}pivot: VI\n`), [EN, VI])).toBe(VI);
-  });
-
-  it("refuses a pivot that names a language outside the configured list", () => {
-    expect(() => resolvePivot(warrant(`${MINIMAL}pivot: zh\n`), [EN, VI])).toThrow(
-      /`pivot: zh` is not one of the configured languages \(en, vi\)/,
-    );
-  });
-
-  it("refuses when there are no languages to pivot among, even absent", () => {
-    expect(() => resolvePivot(warrant(MINIMAL), [])).toThrow(/no languages are configured/);
-  });
-});
-
 describe("pivotOrNone", () => {
   const EN = { code: "en", label: "English", scripts: ["Latn"] };
   const VI = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
 
-  it("answers exactly what `resolvePivot` answers when there is a list to choose from", () => {
+  it("is the first configured language when the warrant never wrote `pivot:`", () => {
+    expect(pivotOrNone(warrant(MINIMAL), [EN, VI])).toBe(EN);
+  });
+
+  it("lets the warrant's own `pivot:` win, case-insensitively", () => {
+    expect(pivotOrNone(warrant(`${MINIMAL}pivot: VI\n`), [EN, VI])).toBe(VI);
+  });
+
+  it("refuses a pivot that names a language outside the configured list", () => {
+    expect(() => pivotOrNone(warrant(`${MINIMAL}pivot: zh\n`), [EN, VI])).toThrow(
+      /`pivot: zh` is not one of the configured languages \(en, vi\)/,
+    );
+  });
+
+  it("lets the warrant's pivot win when there is a list to choose from", () => {
     expect(pivotOrNone(warrant(`${MINIMAL}pivot: vi\n`), [EN, VI])).toBe(VI);
   });
 
@@ -710,28 +700,30 @@ describe("pivotOrNone", () => {
 });
 
 describe("resolveAbout", () => {
-  it("lets the warrant's own key win outright, with a notice naming both sources", () => {
-    const resolution = resolveAbout(
-      warrant(`${MINIMAL}about: A database export tool.\n`),
-      "ignored",
-    );
+  beforeEach(() => {
+    vi.mocked(core.notice).mockClear();
+  });
 
-    expect(resolution.about).toBe("A database export tool.");
-    expect(resolution.notice).toContain(`\`${PATH}\`'s \`about:\` key`);
-    expect(resolution.notice).toContain("not the `about` input");
+  it("lets the warrant's own key win outright, and says once which source answered", () => {
+    const about = resolveAbout(warrant(`${MINIMAL}about: A database export tool.\n`), "ignored");
+
+    expect(about).toBe("A database export tool.");
+    expect(vi.mocked(core.notice)).toHaveBeenCalledTimes(1);
+    const [said] = vi.mocked(core.notice).mock.calls[0] ?? [];
+    expect(said).toContain(`\`${PATH}\`'s \`about:\` key`);
+    expect(said).toContain("not the `about` input");
   });
 
   it("falls back to the input, trimmed, when the warrant never mentions the key", () => {
-    const resolution = resolveAbout(warrant(MINIMAL), "  A database export tool.  ");
-
-    expect(resolution.about).toBe("A database export tool.");
-    expect(resolution.notice).toBeNull();
+    expect(resolveAbout(warrant(MINIMAL), "  A database export tool.  ")).toBe(
+      "A database export tool.",
+    );
+    expect(vi.mocked(core.notice)).not.toHaveBeenCalled();
   });
 
-  it("falls back to an empty string when neither source answers", () => {
-    const resolution = resolveAbout(warrant(MINIMAL), "");
-    expect(resolution.about).toBe("");
-    expect(resolution.notice).toBeNull();
+  it("falls back to an empty string when neither source answers, and says nothing", () => {
+    expect(resolveAbout(warrant(MINIMAL), "")).toBe("");
+    expect(vi.mocked(core.notice)).not.toHaveBeenCalled();
   });
 });
 

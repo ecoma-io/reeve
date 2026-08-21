@@ -805,23 +805,24 @@ export function dutyLanguages(
 }
 
 /**
- * The pivot language corrections are bridged through, resolved against the
- * final list of configured languages — the warrant's `languages:` key, or
- * the duty's documented default when the file is silent.
+ * The language every bridge goes through, or null when there is nothing to
+ * bridge between.
  *
- * The warrant's `pivot:` wins outright when written, refused if it names a
- * language that is not in `languages` — a pivot nothing translates into or
- * out of cannot bridge anything. Absent, the first-listed language is the
- * pivot, exactly the behaviour this key made explicit rather than changed.
+ * A single-language project recalls in its own language and never spends a
+ * request on a translation, so an empty list is not an error — it is the
+ * ordinary shape of most repositories, and `null` is the honest answer.
+ *
+ * This used to be two functions: a `resolvePivot` that threw on an empty list,
+ * and this one-line guard in front of it. Every production call site went
+ * through the guard — all four of them — so the throw was unreachable from any
+ * path a run can take, and the only thing the pair bought a reader was the
+ * question "there are two pivot resolvers, which do I want?" whose answer was
+ * always this one.
  */
-export function resolvePivot(warrant: Warrant, languages: readonly Language[]): Language {
+export function pivotOrNone(warrant: Warrant, languages: readonly Language[]): Language | null {
   const first = languages[0];
-  if (warrant.pivot === null) {
-    if (first === undefined) {
-      throw new Error("pivot: no languages are configured to choose one from.");
-    }
-    return first;
-  }
+  if (first === undefined) return null;
+  if (warrant.pivot === null) return first;
 
   const found = findLanguage(languages, warrant.pivot);
   if (found === undefined) {
@@ -834,44 +835,29 @@ export function resolvePivot(warrant: Warrant, languages: readonly Language[]): 
 }
 
 /**
- * {@link resolvePivot}, for the four call sites that have to cope with a run
- * that configured no languages at all.
- *
- * There is no pivot to resolve when nothing is configured to bridge between,
- * and that is not an error: a single-language project recalls in its own
- * language and never spends a request on a translation. `resolvePivot` throws
- * on an empty list because a caller that has already committed to bridging
- * needs to hear about it; a caller still deciding whether to bridge asks this
- * instead and reads `null` as "there is nothing here worth a bridge".
- */
-export function pivotOrNone(warrant: Warrant, languages: readonly Language[]): Language | null {
-  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
-}
-
-/** What resolving `about` against the warrant and the input decided. */
-export interface AboutResolution {
-  readonly about: string;
-  /** Set only when the warrant's key won — see {@link resolveLanguages}'s identical field. */
-  readonly notice: string | null;
-}
-
-/**
  * Which of the two sources answers "what this repository is about" this run —
  * the same warrant-wins, input-falls-back pattern as {@link resolveLanguages},
  * on a field where both an absent warrant key and an absent input are
  * legitimate: an empty answer just leaves the spam screen asking from the
  * title alone, as it always has.
+ *
+ * It emits its own notice, the way {@link dutyLanguages} already does, rather
+ * than returning one for the caller to emit. Both call sites wrote the
+ * identical two lines afterwards — resolve, then `if (notice !== null)
+ * core.notice(notice)` — which is a returned value whose only correct use is
+ * one statement long.
+ *
+ * {@link resolveLanguages} deliberately keeps the returning shape: `doctor`
+ * calls it, and a report is not a run, so it must not emit a runner notice.
  */
-export function resolveAbout(warrant: Warrant, rawInput: string): AboutResolution {
-  if (warrant.about !== null) {
-    return {
-      about: warrant.about,
-      notice:
-        `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input — the file ` +
-        "is the whole answer once that key is written.",
-    };
-  }
-  return { about: rawInput.trim(), notice: null };
+export function resolveAbout(warrant: Warrant, rawInput: string): string {
+  if (warrant.about === null) return rawInput.trim();
+
+  core.notice(
+    `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input — the file ` +
+      "is the whole answer once that key is written.",
+  );
+  return warrant.about;
 }
 
 /** The document, or a parse error that says where in the file it is. */

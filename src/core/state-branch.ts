@@ -196,6 +196,73 @@ export async function ensureBranch(
 }
 
 /**
+ * The open pull request for this branch, updated — or a new draft one.
+ *
+ * This was written out twice, identically down to both `core.info` strings:
+ * once at the end of `publishState` and once in `publishStatePr`. The only
+ * difference was where `defaultBranch` had come from, which is why it is a
+ * parameter here.
+ *
+ * Deduplicating it also un-blinds a gate. The mutation row "state branch opens
+ * a second pull request" could not anchor on the one line that reads the first
+ * open pull request out of the list — that line occurred twice, and the harness
+ * refuses a `from` naming more than one seam — so the row carried a
+ * thirteen-line run beginning at an unrelated `core.info` call purely to pick
+ * one of the copies. It therefore proved the idempotency invariant for
+ * `publishState` and assumed it for `publishStatePr`. With one copy the anchor
+ * is the single line that matters, and one row now gates both entry points.
+ *
+ * (That line is deliberately not quoted above: the harness counts occurrences
+ * across the whole file, so a doc comment repeating it would make the anchor
+ * ambiguous again — which is the same trap, one level up.)
+ *
+ * Draft on creation, always: a state branch's pull request is a record a
+ * maintainer reviews, never something automation should be able to merge.
+ */
+async function openOrUpdatePr(
+  api: StateBranchApi,
+  at: Pick<Location, "owner" | "repo">,
+  branchName: string,
+  defaultBranch: string,
+  prTitle: string,
+  prBody: string,
+): Promise<{ pr: number }> {
+  const { data: existing } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${branchName}`,
+    per_page: 1,
+  });
+
+  const existingPr = existing[0];
+  if (existingPr !== undefined) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr.number,
+      title: prTitle,
+      body: prBody,
+    });
+    core.info(`state-branch: updated PR #${String(existingPr.number)}`);
+    return { pr: existingPr.number };
+  }
+
+  const { data: pr } = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title: prTitle,
+    head: branchName,
+    base: defaultBranch,
+    body: prBody,
+    draft: true,
+  });
+
+  core.info(`state-branch: opened PR #${String(pr.number)}`);
+  return { pr: pr.number };
+}
+
+/**
  * Publishes state files to a branch and opens or updates a draft pull request.
  *
  * Follows the same pattern as `publishSync` (harmonise) and `writeProposal`
@@ -271,42 +338,7 @@ export async function publishState(
       core.info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
 
-    // Check for an existing open PR on this branch
-    const { data: existing } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1,
-    });
-
-    const existingPr = existing[0];
-    if (existingPr !== undefined) {
-      // Update existing PR
-      await api.rest.pulls.update({
-        owner: at.owner,
-        repo: at.repo,
-        pull_number: existingPr.number,
-        title: prTitle,
-        body: prBody,
-      });
-      core.info(`state-branch: updated PR #${String(existingPr.number)}`);
-      return { pr: existingPr.number };
-    }
-
-    // Create new draft PR
-    const { data: pr } = await api.rest.pulls.create({
-      owner: at.owner,
-      repo: at.repo,
-      title: prTitle,
-      head: branchName,
-      base: defaultBranch,
-      body: prBody,
-      draft: true,
-    });
-
-    core.info(`state-branch: opened PR #${String(pr.number)}`);
-    return { pr: pr.number };
+    return await openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody);
   } catch (error) {
     if (isCapacityError(error)) {
       // Says what actually happened rather than what usually happens. A
@@ -358,41 +390,7 @@ export async function publishStatePr(
     const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
     const defaultBranch = repo.default_branch ?? "main";
 
-    // Check for an existing open PR on this branch
-    const { data: existing } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1,
-    });
-
-    const existingPr = existing[0];
-    if (existingPr !== undefined) {
-      await api.rest.pulls.update({
-        owner: at.owner,
-        repo: at.repo,
-        pull_number: existingPr.number,
-        title: prTitle,
-        body: prBody,
-      });
-      core.info(`state-branch: updated PR #${String(existingPr.number)}`);
-      return { pr: existingPr.number };
-    }
-
-    // Create new draft PR
-    const { data: pr } = await api.rest.pulls.create({
-      owner: at.owner,
-      repo: at.repo,
-      title: prTitle,
-      head: branchName,
-      base: defaultBranch,
-      body: prBody,
-      draft: true,
-    });
-
-    core.info(`state-branch: opened PR #${String(pr.number)}`);
-    return { pr: pr.number };
+    return await openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody);
   } catch (error) {
     if (isCapacityError(error)) {
       core.warning(`state-branch: could not open PR on \`${branchName}\` — capacity error.`);
