@@ -217,20 +217,21 @@ export function publication(translated: Translated): Publication {
 }
 
 /**
- * Where the logo is fetched from, pinned to a tag rather than to a branch.
+ * Where the logo is fetched from — `main`, not a release tag, on purpose.
  *
- * This block outlives the run that wrote it, in somebody else's issue body, for
- * as long as that issue exists. A `main` URL would render whatever this
- * repository's `main` happens to hold years from now — a redesigned mark, or a
- * 404 the day the file moves — into thousands of threads nobody is going to
- * come back and edit. `v0.8.0` is the newest release tag carrying
- * `.github/assets/logo.png`, and a tag is the only ref here that promises the
- * bytes it names today are the bytes it names later.
+ * This block outlives the run that wrote it, in somebody else's issue body,
+ * and a `main` URL means every one of those bodies shows whatever the mark is
+ * *now* — a rebrand reaches the whole backlog the day it merges, with no run
+ * spent republishing anything. A tag-pinned URL is the other defensible
+ * answer (the bytes never change under an old thread), and it was rejected
+ * here because a thousand threads wearing last year's logo is the worse
+ * outcome for a line whose only job is to say what Reeve looks like today.
  *
- * Bumping this is a deliberate act, not a consequence of moving the asset: a
- * run that bumps it republishes the block on every thread whose translation is
- * otherwise unchanged, so it is worth doing at most once a release and never as
- * a drive-by.
+ * The price of that choice is that this path is now a commitment:
+ * `.github/assets/logo.png` moving or disappearing from `main` breaks the
+ * image in every body ever published. Renaming that file is a breaking change
+ * to threads this repository does not own — leave a copy at this path
+ * forever, whatever the assets directory does next.
  *
  * The PNG rather than the SVG sitting beside it, even though this host serves
  * both with the right content type. A body is not only read in the web UI: it
@@ -239,7 +240,7 @@ export function publication(translated: Translated): Publication {
  * renderer agrees on, and at 14 pixels there is nothing the vector was going to
  * win.
  */
-const LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/v0.8.0/.github/assets/logo.png";
+const LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/main/.github/assets/logo.png";
 
 /** Where clicking either half of the branding line goes. */
 const HOME = "https://github.com/ecoma-io/reeve";

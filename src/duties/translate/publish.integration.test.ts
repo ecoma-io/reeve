@@ -197,7 +197,7 @@ describe("publishing what a real run produced", () => {
 
     expect(outcome.action).toBe("published");
     expect(thread.body()).toContain(
-      '<img src="https://raw.githubusercontent.com/ecoma-io/reeve/v0.',
+      '<img src="https://raw.githubusercontent.com/ecoma-io/reeve/main/',
     );
     expect(thread.body()).toContain("— autonomous repository operations</sub>");
     expect(marker.split(thread.body()).official).toBe(SOURCE);

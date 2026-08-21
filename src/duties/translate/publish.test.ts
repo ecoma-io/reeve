@@ -62,8 +62,8 @@ function translated(over: Partial<Translated> = {}): Translated {
   };
 }
 
-/** The logo URL the branding line publishes — pinned, and pinned to a tag. */
-const LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/v0.8.0/.github/assets/logo.png";
+/** The logo URL the branding line publishes — `main`, so every published block wears the current mark. */
+const LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/main/.github/assets/logo.png";
 
 /** The body a reader would see: what the core writes from what this duty renders. */
 function body(over: Partial<Translated> = {}, official = OFFICIAL): string {
@@ -299,12 +299,12 @@ describe("the branding line", () => {
     );
   });
 
-  it("pins the mark to a tag, because the block outlives the run that wrote it", () => {
-    // A `main` URL would render whatever this repository holds years from now
-    // into thousands of bodies nobody is going to come back and edit.
+  it("serves the mark from main, so every published block wears the current one", () => {
+    // The owner's call, and the opposite of a tag pin: a rebrand reaches the
+    // whole backlog the day it merges, and the price is that the asset's path
+    // on `main` is now a commitment — see `LOGO`'s own doc comment.
     const rendered = body({ branding: true });
-    expect(rendered).toContain("raw.githubusercontent.com/ecoma-io/reeve/v0.");
-    expect(rendered).not.toContain("raw.githubusercontent.com/ecoma-io/reeve/main/");
+    expect(rendered).toContain("raw.githubusercontent.com/ecoma-io/reeve/main/");
   });
 
   it("costs one line whatever the language count, like everything outside the sections", () => {
