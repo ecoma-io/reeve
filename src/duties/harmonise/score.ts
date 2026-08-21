@@ -15,6 +15,7 @@
  * - Glossary: glossary terms respected
  */
 import { containsScript } from "../../core/script.js";
+import { termsPreserved, translatedTerm } from "../../core/glossary.js";
 import { segments } from "../../core/markdown.js";
 import { measured, refused, type Score, type Check } from "../../core/score.js";
 import type { Language } from "../../core/languages.js";
@@ -36,11 +37,11 @@ export function scoreDraft(
   // --- Refusal checks (binary, provably wrong) ---
   if (draft.trim().length === 0) return refused("empty draft");
   if (draft === original) return refused("unchanged from original");
-  for (const term of glossaryTerms) {
-    if (original.includes(term) && !draft.includes(term)) {
-      return refused(`glossary term \`${term}\` was translated`);
-    }
-  }
+  // The same rule `translate` refuses on, from the same shared module — the
+  // file the terms came from is shared too, so the two duties must not disagree
+  // about what counts as losing one. See `core/glossary.ts`.
+  const lost = translatedTerm(original, draft, glossaryTerms);
+  if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
 
   // Language verification: a draft in the wrong script is refused.
   const script = foreignScript(source, draft, targetLanguage, languages);
@@ -170,17 +171,7 @@ function lengthCheck(draft: string, original: string): number {
 
 /** Glossary terms preserved in the draft. Only terms present in the original are scored. */
 function glossaryCheck(draft: string, original: string, glossaryTerms: readonly string[]): number {
-  if (glossaryTerms.length === 0) return 1;
-
-  const relevant = glossaryTerms.filter((term) => original.includes(term));
-  if (relevant.length === 0) return 1; // No terms in original — nothing to check
-
-  let preserved = 0;
-  for (const term of relevant) {
-    if (draft.includes(term)) preserved++;
-  }
-
-  return preserved / relevant.length;
+  return termsPreserved(original, draft, glossaryTerms).value;
 }
 
 /** Approximate prose character count (excluding code segments). */

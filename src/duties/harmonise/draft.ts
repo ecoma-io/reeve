@@ -16,6 +16,7 @@
 import * as core from "@actions/core";
 
 import { enclose } from "../../core/enclose.js";
+import type { GlossaryEntry } from "../../core/glossary.js";
 import type { Language } from "../../core/languages.js";
 import { chunks, isCodeOnly } from "../../core/markdown.js";
 import type { Completion, Failure, Provider, Weather } from "../../core/provider.js";
@@ -471,12 +472,6 @@ async function answer(
     };
   }
   return completion;
-}
-
-/** A glossary entry read from the `glossary-dir` input. */
-export interface GlossaryEntry {
-  readonly term: string;
-  readonly note?: string;
 }
 
 function formatGlossary(entries: readonly GlossaryEntry[]): string {

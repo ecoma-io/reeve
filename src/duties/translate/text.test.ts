@@ -60,6 +60,8 @@ function settingsWith(overrides: Partial<Settings> = {}): Settings {
     replies: false,
     maxReplies: null,
     chunkChars: 4000,
+    glossaryDir: ".reeve/glossary.yml",
+    glossary: [],
     maxRequests: null,
     attribution: "none",
     branding: true,

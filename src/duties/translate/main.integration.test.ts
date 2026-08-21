@@ -185,6 +185,15 @@ interface State {
    * list-shaped assertion that only counted how many changed.
    */
   readonly replies: Map<number, string>;
+  /**
+   * Repository files the Contents API serves, by path — in practice the one
+   * file this duty ever reads through it, `.reeve/glossary.yml`. Empty for every
+   * case that is not about the glossary, which answers the read with the 404 a
+   * repository without one really produces.
+   */
+  readonly files: Map<string, string>;
+  /** Every path the Contents API was asked for, in order — present or not. */
+  readonly contentReads: string[];
   answer: (ask: Ask) => Answer;
   readonly asked: Ask[];
 }
@@ -249,6 +258,8 @@ async function startStub(): Promise<Stub> {
     issues: [],
     listings: 0,
     replies: new Map(),
+    files: new Map(),
+    contentReads: [],
     answer: translating({}),
     asked: [],
   };
@@ -369,6 +380,26 @@ async function route(
     return;
   }
 
+  // The Contents API, which this duty reads exactly one file through: the
+  // glossary, at the path `glossary-dir` names. A path nothing was seeded at
+  // falls through to the 404 below, which is what a repository without a
+  // glossary answers and what every other case in this suite runs on.
+  const contents = /^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/.exec(path);
+  if (method === "GET" && contents) {
+    const at = decodeURIComponent(contents[1] ?? "");
+    stub.contentReads.push(at);
+    const file = stub.files.get(at);
+    if (file !== undefined) {
+      send(response, 200, {
+        path: at,
+        sha: `sha-${at}`,
+        content: Buffer.from(file, "utf8").toString("base64"),
+        encoding: "base64",
+      });
+      return;
+    }
+  }
+
   if (method === "POST" && path === "/v1/chat/completions") {
     const ask = askOf(raw, request.headers.authorization ?? null);
     stub.asked.push(ask);
@@ -443,6 +474,10 @@ function baseInputs(stub: Stub, warrant: string): Record<string, string> {
     "judge-models": "",
     "max-body-chars": "6000",
     "chunk-chars": "6000",
+    // The default path, which the stub below serves nothing at unless a case
+    // puts a file there: a repository with no glossary is the common case, and
+    // every case not about the glossary should run as one.
+    "glossary-dir": ".reeve/glossary.yml",
     "translate-replies": "false",
     "max-replies": "100",
     "show-attribution": "none",
@@ -1619,7 +1654,7 @@ describe("zero config", () => {
 describe("the branding line", () => {
   /** The whole line, exactly as a reader's body receives it. */
   const LINE =
-    '<sub>[<img src="https://raw.githubusercontent.com/ecoma-io/reeve/v0.8.0/.github/assets/logo.png" ' +
+    '<sub>[<img src="https://raw.githubusercontent.com/ecoma-io/reeve/main/.github/assets/logo.png" ' +
     'height="14" alt=""> **Reeve**](https://github.com/ecoma-io/reeve) — autonomous repository operations</sub>';
 
   it("names Reeve above the translations, where nothing has to be unfolded to see it", async () => {
@@ -1666,6 +1701,104 @@ describe("the branding line", () => {
     expect(run.code).toBe(0);
     expect(run.log).toContain("already carries the translation");
     expect(stub.body).toBe(published);
+  });
+});
+
+describe("the glossary", () => {
+  /**
+   * The file as a maintainer writes it: a YAML map of term to note, at the
+   * default path, served through the Contents API because that is where it
+   * lives — in the repository at the ref that triggered the run, not in
+   * whatever the workflow happened to check out.
+   */
+  const GLOSSARY = [
+    "Reeve: The product name. Never translated.",
+    "warrant: The authority file.",
+  ].join("\n");
+
+  /** A body using two of the terms, in a language the free detector can place. */
+  const SOURCE = `Reeve không đọc được warrant sau khi tải lại. ${VIETNAMESE}`;
+  const FAITHFUL = `Reeve could not read the warrant after a reload. ${ENGLISH}`;
+  /** The same translation, with both terms translated along with the prose. */
+  const LOSING = `The steward could not read the authority file after a reload. ${ENGLISH}`;
+
+  beforeEach(() => {
+    stub.body = SOURCE;
+    stub.files.set(".reeve/glossary.yml", GLOSSARY);
+  });
+
+  it("refuses a draft that translated a term, and publishes nothing for that language", async () => {
+    // The whole point of the file: this draft is fluent, keeps the structure,
+    // keeps the length, and is wrong in the one way a reader cannot recover
+    // from — `the authority file` appears nowhere else in this repository, so
+    // nobody reading it can find `warrant:` in the reference docs.
+    stub.answer = translating({ en: LOSING });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("was refused — glossary term `Reeve` was translated");
+    expect(run.log).toContain("::warning::#42 en: no model produced a translation this run.");
+    expect(run.outputs.translated).toBe(JSON.stringify([]));
+    expect(run.outputs.skipped).toBe(JSON.stringify(["en"]));
+    expect(stub.body).not.toContain("the authority file");
+  });
+
+  it("names each term, with its note, in the system message and nowhere else", async () => {
+    // Repository configuration goes beside the rules. The user message is the
+    // stranger's own body inside its fence, and a term sitting in there would
+    // read as text to translate rather than as a rule about it.
+    stub.answer = translating({ en: FAITHFUL });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    const drafting = stub.asked.find((ask) => ask.system.includes("(en)"));
+    expect(drafting?.system).toContain("- Reeve — The product name. Never translated.");
+    expect(drafting?.system).toContain("- warrant — The authority file.");
+    expect(drafting?.user).not.toContain("The product name");
+  });
+
+  it("publishes the draft that carried every term through", async () => {
+    stub.answer = translating({ en: FAITHFUL });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(stub.body).toContain(FAITHFUL);
+  });
+
+  it("says nothing about terms when the repository has no glossary file", async () => {
+    // The common case, and the one every other case in this suite runs: the
+    // read 404s, the glossary is empty, and the prompt is the prompt it always
+    // was. A duty that failed for want of an optional file would have made the
+    // file mandatory by another name.
+    stub.files.clear();
+    stub.answer = translating({ en: FAITHFUL });
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    const drafting = stub.asked.find((ask) => ask.system.includes("(en)"));
+    expect(drafting?.system).not.toContain("one spelling");
+  });
+
+  it("reads the file once for a whole sweep, not once per thread", async () => {
+    // A sweep of a hundred threads is entitled to one read of a file that
+    // cannot change under it mid-run.
+    stub.issues = [
+      { number: 7, body: SOURCE, createdAt: "2026-01-02T00:00:00Z" },
+      { number: 8, body: SOURCE, createdAt: "2026-01-01T00:00:00Z" },
+    ];
+    stub.answer = translating({ en: FAITHFUL });
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("2");
+    expect(stub.contentReads).toEqual([".reeve/glossary.yml"]);
   });
 });
 

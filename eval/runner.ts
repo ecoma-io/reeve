@@ -576,6 +576,10 @@ const TRANSLATE_INPUTS: Record<string, string> = {
   "translate-replies": "false",
   "max-replies": "100",
   "chunk-chars": "6000",
+  // The default path, as a real workflow runs it: the eval stub serves no
+  // contents endpoint, so the read 404s and the glossary is empty — which is
+  // exactly what a fixture repository without one gets.
+  "glossary-dir": ".reeve/glossary.yml",
   "max-requests": "none",
   "show-attribution": "none",
   // Off here, unlike `action.yml`'s own default: a fixture's expectations are

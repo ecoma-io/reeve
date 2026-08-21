@@ -12,12 +12,19 @@
  * code across untouched and required to leave a URL alone.
  *
  * **Refusal and rank are different answers.** A draft is inadmissible only for
- * something provable — it is empty, it is the source unchanged, it closes a
- * section it does not own, it carries letters of a script the source never had,
- * or it is still in the language it was supposed to be translated out of.
- * Everything else lowers the rank instead.
+ * something provable — it is empty, it is the source unchanged, it translated a
+ * term this project wrote down as one to keep, it closes a section it does not
+ * own, it carries letters of a script the source never had, or it is still in
+ * the language it was supposed to be translated out of. Everything else lowers
+ * the rank instead.
+ *
+ * The glossary is the one measurement here that is not a fact about the two
+ * texts alone: it is a list a maintainer committed to the repository, shared
+ * with `harmonise` down to the file it is read from, and both duties enforce it
+ * through the same shared checks in `core/glossary.ts`.
  */
 import { detectLanguage } from "../../core/detect.js";
+import { termsPreserved, translatedTerm, type GlossaryEntry } from "../../core/glossary.js";
 import type { Language } from "../../core/languages.js";
 import { segments } from "../../core/markdown.js";
 import { measured, overlap, refused, shared, type Check, type Score } from "../../core/score.js";
@@ -33,12 +40,21 @@ import { containsScript } from "../../core/script.js";
  * down — the reader can see it is broken but cannot recover where it pointed.
  * Length is last because it is the only one that measures a plausible range
  * rather than an equality.
+ *
+ * Glossary sits with links, at 3, and for the same kind of reason: a term this
+ * project wrote down is a literal string a reader maps back to an input name, an
+ * identifier, or a page in the reference docs, and a translated one leaves them
+ * holding a word that appears nowhere else in the repository. Like code and
+ * unlike length, it measures an equality rather than a plausible range — the
+ * only thing separating it from the other three is that it measures nothing at
+ * all until a repository has written the list down.
  */
 const WEIGHTS = {
   code: 4,
   links: 3,
   structure: 2,
   length: 1,
+  glossary: 3,
 } as const;
 
 /**
@@ -77,6 +93,20 @@ export interface Draft {
    * special-casing the whole design avoids.
    */
   readonly languages: readonly Language[];
+  /**
+   * The terms this project keeps in one spelling, whatever language is being
+   * written — `.reeve/glossary.yml`, read once per run and handed down.
+   *
+   * Absent is the common case and means the same as empty: most repositories
+   * have no protected terms, and nothing here is measured for them.
+   *
+   * **Matched against this chunk's source, not the whole body.** A body wider
+   * than `chunk-chars` is scored one chunk at a time, and a term that appears
+   * in chunk three is nothing chunk one could have lost. Per-chunk is also what
+   * makes the rule keep terminology steady across a long body: every chunk is
+   * held to the same list, so the same term comes back the same way in each.
+   */
+  readonly glossary?: readonly GlossaryEntry[];
 }
 
 /** Measures one draft against its source. */
@@ -87,12 +117,21 @@ export async function score(request: Draft): Promise<Score> {
   const refusal = await refuse(request, before, after);
   if (refusal) return refused(refusal);
 
-  return measured([
+  const checks: Check[] = [
     codeCheck(before, after),
     linkCheck(before, after),
     structureCheck(before, after),
     lengthCheck(before, after),
-  ]);
+  ];
+  const glossary = glossaryCheck(request);
+  if (glossary !== null) checks.push(glossary);
+
+  return measured(checks);
+}
+
+/** Every glossary term, as the checks compare them: the spelling and nothing else. */
+function terms({ glossary }: Draft): readonly string[] {
+  return (glossary ?? []).map((entry) => entry.term);
 }
 
 /**
@@ -103,13 +142,19 @@ export async function score(request: Draft): Promise<Score> {
  * fails, and it fails while producing text that every other measurement here
  * scores perfectly — same code, same links, same structure, same length.
  */
-async function refuse(
-  { source, draft, from, to, languages }: Draft,
-  before: Outline,
-  after: Outline,
-): Promise<string | null> {
+async function refuse(request: Draft, before: Outline, after: Outline): Promise<string | null> {
+  const { source, draft, from, to, languages } = request;
   if (draft.trim().length === 0) return "the draft is empty";
   if (draft.trim() === source.trim()) return "the draft is the source, unchanged";
+
+  // A term this project wrote down and this chunk's source used, gone from the
+  // draft. Provable in the way the rules above are: the string was there and it
+  // is not, and no reading of the draft makes that a translation choice. The
+  // wording is `harmonise`'s, word for word, because the two duties refuse on
+  // the same rule read out of the same file — see `core/glossary.ts`.
+  const translated = translatedTerm(source, draft, terms(request));
+  if (translated !== null) return `glossary term \`${translated}\` was translated`;
+
   if (closesUnopenedSection(after.prose)) {
     return "the draft closes a `<details>` section it never opened";
   }
@@ -307,6 +352,43 @@ function lengthCheck(before: Outline, after: Outline): Check {
       : (impossiblyLong - ratio) / (impossiblyLong - longest);
 
   return { name: "length", weight, value: Math.max(0, Math.min(1, value)), note };
+}
+
+/**
+ * How many of the glossary terms this chunk's source used the draft carried
+ * through, or null when it used none.
+ *
+ * Null rather than a perfect score: a check worth 3 that reads 1 for every draft
+ * in every repository without a glossary — which is most of them — would move
+ * every number this duty reports while measuring nothing, and `measured` already
+ * treats a check nobody added as a check nobody failed.
+ *
+ * Measured on the raw source and the raw draft rather than on the outline,
+ * because half of what a glossary protects is the name of something and lives
+ * inside a code span. Those spans are already required to come back unchanged,
+ * so a term inside one is measured twice — which is the correct amount for the
+ * one rule a maintainer wrote out by hand.
+ *
+ * A draft that lost a term never reaches here; `refuse` above already ended it.
+ * So what this reports is the ranked draft's own account of the rule it was held
+ * to — `2 of 2 glossary terms carried through unchanged` — and the weight is
+ * what keeps it a measurement rather than a note if that refusal is ever
+ * narrowed to something short of total.
+ */
+function glossaryCheck(request: Draft): Check | null {
+  const { relevant, preserved, value } = termsPreserved(
+    request.source,
+    request.draft,
+    terms(request),
+  );
+  if (relevant === 0) return null;
+
+  return {
+    name: "glossary",
+    weight: WEIGHTS.glossary,
+    value,
+    note: `${String(preserved)} of ${String(relevant)} glossary terms carried through unchanged`,
+  };
 }
 
 /**

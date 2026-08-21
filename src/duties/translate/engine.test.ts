@@ -42,6 +42,8 @@ const settings: Settings = {
   replies: false,
   maxReplies: null,
   chunkChars: 40,
+  glossaryDir: ".reeve/glossary.yml",
+  glossary: [],
   maxRequests: null,
   attribution: "detail",
   branding: true,

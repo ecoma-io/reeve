@@ -164,6 +164,25 @@ the headline accuracy number for any duty is **the worst language, not the
 average** ([D11](../doctrine/north-star.md#d11--every-duty-ships-with-an-evaluation)), so a
 duty that quietly degrades outside English fails its own gate.
 
+### Words that stay in one language
+
+Some words should survive every translation unchanged: the project's own name,
+the term a reference page and the code both spell one way, an input's name. A
+translated one reads fine and cannot be looked up. Write them into
+`.reeve/glossary.yml`, a map of term to a note explaining why it is there:
+
+```yaml
+# .reeve/glossary.yml
+Reeve: The product name. Never translated, never transliterated.
+warrant: The authority file, as a concept. Readers must be able to find it in the docs.
+```
+
+Both [`translate`](../reference/duties/translate.md) and
+[`harmonise`](../reference/duties/harmonise.md) read that one file. Each names
+the terms in its prompt and then refuses any draft that lost one, so the list is
+a check rather than a request. A repository without the file has no protected
+terms, which is the ordinary case and costs nothing.
+
 ## Configuring for a project with one maintainer language
 
 The common case: contributors write in several languages, maintainers all read

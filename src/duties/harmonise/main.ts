@@ -35,6 +35,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
+import { loadGlossary, type GlossaryEntry } from "../../core/glossary.js";
 import {
   bounded,
   counted,
@@ -75,7 +76,7 @@ import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 import { classifyDiff, type ClassificationResult } from "./classify.js";
 import { computeSourceDiff, formatInitialSync } from "./diff.js";
 import { discoverGroups, type DocumentGroup } from "./discover.js";
-import { draftSyncs, type Draft, type GlossaryEntry } from "./draft.js";
+import { draftSyncs, type Draft } from "./draft.js";
 import { parsePaths } from "./inputs.js";
 import { judge as judgePanel, type Verdict } from "./judge.js";
 import {
@@ -286,8 +287,10 @@ export async function run(): Promise<void> {
       settings.stateBranch !== "" ? settings.stateBranch : undefined,
     );
 
-    // Load glossary
-    const glossary = await loadGlossary(api, context.repo, settings.glossaryDir);
+    // Load glossary — one Contents API read, shared with `translate` down to
+    // the default path: see `core/glossary.ts` for why a missing file is not an
+    // error and why this is never read off the runner's working directory.
+    const glossary = await loadGlossary(api, context.repo, settings.glossaryDir, "harmonise");
 
     // Process each document group
     for (const group of groups) {
@@ -828,43 +831,6 @@ async function listMarkdownFiles(
   }
 
   return files;
-}
-
-/**
- * Loads the glossary from the `glossary-dir` input.
- *
- * Returns empty when the file does not exist — a missing glossary is not an
- * error, it just means there are no project-specific terms to protect.
- */
-async function loadGlossary(
-  api: ReturnType<typeof getOctokit>,
-  at: Pick<Location, "owner" | "repo">,
-  path: string,
-): Promise<readonly GlossaryEntry[]> {
-  const file = await readContentsFile(api, at, path);
-  if (file === null) return [];
-
-  try {
-    const { parse } = await import("yaml");
-    const parsed: unknown = parse(file.text);
-
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
-
-    const record = parsed as Record<string, unknown>;
-    const entries: GlossaryEntry[] = [];
-    for (const [term, value] of Object.entries(record)) {
-      if (typeof term === "string" && term.length > 0) {
-        entries.push(typeof value === "string" ? { term, note: value } : { term });
-      }
-    }
-
-    return entries;
-  } catch {
-    core.warning(
-      `harmonise: glossary file \`${path}\` could not be parsed — continuing without glossary.`,
-    );
-    return [];
-  }
 }
 
 /**

@@ -30,6 +30,7 @@
  * work.
  */
 import { enclose } from "../../core/enclose.js";
+import type { GlossaryEntry } from "../../core/glossary.js";
 import type { Language } from "../../core/languages.js";
 import { segments } from "../../core/markdown.js";
 import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
@@ -84,6 +85,17 @@ export interface TranslateRequest {
   /** How many answers to ask for. Fewer are produced when the models run out. */
   readonly drafts: number;
   /**
+   * The terms this project keeps in one spelling — `.reeve/glossary.yml`, read
+   * once per run and handed down. Absent means the same as empty, which is the
+   * common case: most repositories have no protected terms.
+   *
+   * Named in the prompt and then measured by `score`, exactly as every other
+   * rule here is. The list is repository configuration, committed by a
+   * maintainer, so it goes into the system message beside the rules rather than
+   * into the fenced user message beside the stranger's text.
+   */
+  readonly glossary?: readonly GlossaryEntry[];
+  /**
    * This run's memory of capacity failures, seeded here and updated as drafts
    * are attempted — so a model already grounded by an earlier thread's draft,
    * or by this thread's own first draft, starts every later draft off the
@@ -94,7 +106,11 @@ export interface TranslateRequest {
 
 export async function translate(request: TranslateRequest): Promise<Translation> {
   const { provider, models, source, from, to, languages, drafts, weather } = request;
-  const messages = prompt(source, from, to);
+  // Absent and empty mean the same thing here, and the difference is settled
+  // once: the prompt and the score are held to the same list, so a draft can
+  // never be asked for a term it will not be measured on.
+  const glossary = request.glossary ?? [];
+  const messages = prompt(source, from, to, glossary);
 
   const attempts: Attempt[] = [];
   const refused: Attempt[] = [];
@@ -126,7 +142,7 @@ export async function translate(request: TranslateRequest): Promise<Translation>
     // as the model wrote it — the honest comparison. Scoring the sanitized text
     // instead would hold a draft carrying Reeve's own defang markers up
     // against a source that has none, and charge the draft for the difference.
-    const measured = await score({ source, draft: draftText, from, to, languages });
+    const measured = await score({ source, draft: draftText, from, to, languages, glossary });
     (measured.admissible ? attempts : refused).push({
       model: rotation.success.model,
       text: sanitize(draftText),
@@ -207,8 +223,20 @@ async function answer(
  * **The prompt is rebuilt for every language, not shared across them.** The
  * nonce is per call by construction, and reusing one built once per run would
  * quietly turn it back into a fixed delimiter for the length of that run.
+ *
+ * **The glossary is not fenced, and that is not an oversight.** The boundary
+ * exists because the body is whatever a stranger typed; the glossary is a file a
+ * maintainer committed to the repository, read at the ref that triggered the
+ * run, and it is the same tier of trust as these instructions themselves. What
+ * it must never be is part of the user message, where a term would sit next to
+ * the untrusted body and read as text to translate rather than as a rule.
  */
-function prompt(source: string, from: Language | null, to: Language): Message[] {
+function prompt(
+  source: string,
+  from: Language | null,
+  to: Language,
+  glossary: readonly GlossaryEntry[],
+): Message[] {
   const origin = from === null ? "" : ` from ${from.label}`;
   const body = enclose("untrusted-thread", source);
 
@@ -229,6 +257,7 @@ function prompt(source: string, from: Language | null, to: Language): Message[] 
         "- Keep headings, lists, tables and blank lines where they are.",
         "- Leave @mentions, #123 references, commit hashes, file paths, command names,",
         "  version numbers and product names as they are written.",
+        ...glossarySection(glossary),
         "",
         "Translate the prose faithfully. Do not summarise it, do not expand on it, and",
         "do not correct the author.",
@@ -237,6 +266,31 @@ function prompt(source: string, from: Language | null, to: Language): Message[] 
       ].join("\n"),
     },
     { role: "user", content: body.block },
+  ];
+}
+
+/**
+ * The terms this project keeps in one spelling, as lines of the system message —
+ * or nothing at all, which is what most repositories get.
+ *
+ * The instruction says every language rather than this one, because a body being
+ * translated into three languages is three separate calls and the term has to
+ * come back the same way in all of them. The note beside a term is the
+ * maintainer's own sentence about why it is on the list: a model told that
+ * `weather` names provider capacity here, and not the sky, has what it needs to
+ * leave it alone in a sentence where translating it would otherwise read as
+ * obviously right.
+ */
+function glossarySection(glossary: readonly GlossaryEntry[]): string[] {
+  if (glossary.length === 0) return [];
+
+  return [
+    "",
+    "This project keeps these terms in one spelling. Reproduce each of them exactly as",
+    "written, in every language — never translated, transliterated or inflected:",
+    ...glossary.map(({ term, note }) =>
+      note === undefined || note.length === 0 ? `- ${term}` : `- ${term} — ${note}`,
+    ),
   ];
 }
 

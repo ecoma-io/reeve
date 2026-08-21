@@ -22,6 +22,8 @@ function settingsWith(maxRequests: number | null): Settings {
     replies: false,
     maxReplies: null,
     chunkChars: 4000,
+    glossaryDir: ".reeve/glossary.yml",
+    glossary: [],
     maxRequests,
     attribution: "none",
     branding: true,

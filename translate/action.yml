@@ -144,6 +144,24 @@ inputs:
     required: false
     default: "6000"
 
+  glossary-dir:
+    description: >-
+      A file of terms this project keeps in one spelling, whatever language a
+      thread is being translated into — a product name, a term of art, the
+      English word an input and a reference page are both spelled with. A YAML
+      map: each key is a term, and its value is a note the model is shown
+      beside it.
+
+      Every draft is asked to carry these terms through unchanged and then
+      checked for it, per chunk against that chunk's own source: a draft that
+      lost a term its source used is refused outright, and what is left is
+      measured. Missing at this default path is not a failure — it means this
+      project has no protected terms, which is the common case. The same file
+      `harmonise` reads, so a term that stays English in a committed
+      translation stays English in a thread too.
+    required: false
+    default: .reeve/glossary.yml
+
   translate-replies:
     description: >-
       Also translate the thread's replies, each detected and fingerprinted on
