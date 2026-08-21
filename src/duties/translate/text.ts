@@ -62,11 +62,21 @@ export function nothing(what: string, note: string): Report {
  * over a thread and twelve replies otherwise reports thirteen indistinguishable
  * verdicts. `thread` is the port to write back through, so this function never
  * knows whether it is editing an issue body or a comment.
+ *
+ * `branding` is the one thing that has to come from the caller, precisely
+ * *because* this function cannot tell a body from a reply and must not learn
+ * to. The branding line belongs on a thread's body and on nothing else: a
+ * reader lands on a body once, and scrolls past every reply under it. So the
+ * two call sites decide — `processThread` passes what the workflow configured,
+ * `translateReplies` passes `false` — and everything between them stays
+ * identical, which is the property that keeps a reply from quietly getting a
+ * cheaper pipeline than a body.
  */
 export async function translateText(
   what: string,
   body: string,
   thread: Thread,
+  branding: boolean,
   settings: Settings,
   stages: Stages,
   weather: Weather,
@@ -191,6 +201,7 @@ export async function translateText(
     truncated,
     fingerprint: achieved,
     attribution: settings.attribution,
+    branding,
   };
 
   if (settings.dryRun) {
@@ -332,6 +343,11 @@ export async function translateReplies(
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
       createReply(api, at, reply),
+      // Never on a reply, whatever `show-branding` says. The setting decides
+      // whether a thread carries the line at all; this decides that "a thread"
+      // means its body — a logo repeated under every comment on an active
+      // thread is not a signature, it is noise the reader cannot collapse.
+      false,
       settings,
       stages,
       weather,
@@ -383,6 +399,9 @@ export async function processThread(
     `#${String(at.number)}`,
     body,
     thread,
+    // The body is the one text in the thread that gets the branding line, so
+    // this is the only place the workflow's own answer is consulted.
+    settings.branding,
     settings,
     stages,
     weather,

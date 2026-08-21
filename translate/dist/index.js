@@ -19619,7 +19619,7 @@ var require_dist = __commonJS({
      */
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.format = format;
-    exports.parse = parse4;
+    exports.parse = parse5;
     var TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
     var TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
     var QUOTE_REGEXP = /[\\"]/g;
@@ -19646,7 +19646,7 @@ var require_dist = __commonJS({
       }
       return result;
     }
-    function parse4(header, options) {
+    function parse5(header, options) {
       const len = header.length;
       let index = skipOWS(header, 0, len);
       const valueStart = index;
@@ -26971,7 +26971,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse4(src, reviver, options) {
+    function parse5(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -27012,7 +27012,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse4;
+    exports.parse = parse5;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
     exports.stringify = stringify;
@@ -31752,6 +31752,77 @@ async function listOpenThreads(api, at, since, state = "open", maxPages) {
   }
   return listed;
 }
+function isMissing(error2) {
+  return typeof error2 === "object" && error2 !== null && "status" in error2 && error2.status === 404;
+}
+async function readContentsFile(api, at, path, ref) {
+  let data;
+  try {
+    ({ data } = await api.rest.repos.getContent({
+      owner: at.owner,
+      repo: at.repo,
+      path,
+      ...ref !== void 0 ? { ref } : {}
+    }));
+  } catch (error2) {
+    if (isMissing(error2)) return null;
+    throw error2;
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
+  const file = data;
+  if (typeof file.sha !== "string") return null;
+  if (typeof file.content === "string" && file.encoding === "base64") {
+    return { text: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
+  }
+  throw new UnreadableContentsFile(path);
+}
+var UnreadableContentsFile = class extends Error {
+  /** The shard's path, repeated here so a catcher can name it without re-parsing the message. */
+  path;
+  constructor(path) {
+    super(
+      `\`${path}\` could not be read as text \u2014 the Contents API answered without base64 content, which is what it sends for a file over the 1 MB that endpoint can inline. Split the corrections store into smaller shards.`
+    );
+    this.name = "UnreadableContentsFile";
+    this.path = path;
+  }
+};
+
+// src/core/glossary.ts
+var import_yaml = __toESM(require_dist2(), 1);
+async function loadGlossary(api, at, path, duty) {
+  const file = await readContentsFile(api, at, path);
+  if (file === null) return [];
+  try {
+    const parsed = (0, import_yaml.parse)(file.text);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+    const record = parsed;
+    const entries = [];
+    for (const [term, value] of Object.entries(record)) {
+      if (typeof term === "string" && term.length > 0) {
+        entries.push(typeof value === "string" ? { term, note: value } : { term });
+      }
+    }
+    return entries;
+  } catch {
+    warning(
+      `${duty}: glossary file \`${path}\` could not be parsed \u2014 continuing without glossary.`
+    );
+    return [];
+  }
+}
+function translatedTerm(source, draft, terms2) {
+  for (const term of terms2) {
+    if (source.includes(term) && !draft.includes(term)) return term;
+  }
+  return null;
+}
+function termsPreserved(source, draft, terms2) {
+  const relevant = terms2.filter((term) => source.includes(term));
+  if (relevant.length === 0) return { relevant: 0, preserved: 0, value: 1 };
+  const preserved = relevant.filter((term) => draft.includes(term)).length;
+  return { relevant: relevant.length, preserved, value: preserved / relevant.length };
+}
 
 // src/core/list.ts
 function parseList(raw) {
@@ -32766,7 +32837,7 @@ async function sweepThreads(acc, candidates, settings, weather, hooks) {
 
 // src/core/warrant.ts
 import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
+var import_yaml2 = __toESM(require_dist2(), 1);
 
 // src/duties/dependa/model.ts
 var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
@@ -32969,9 +33040,9 @@ function dutyLanguages(warrant, denied, fallback) {
 function load(path, source) {
   let document2;
   try {
-    document2 = (0, import_yaml.parse)(source);
+    document2 = (0, import_yaml2.parse)(source);
   } catch (error2) {
-    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
   }
   if (document2 === null || typeof document2 !== "object" || Array.isArray(document2)) {
@@ -34787,7 +34858,8 @@ var WEIGHTS = {
   code: 4,
   links: 3,
   structure: 2,
-  length: 1
+  length: 1,
+  glossary: 3
 };
 var PLAUSIBLE_LENGTH = {
   shortest: 0.5,
@@ -34800,16 +34872,25 @@ async function score(request2) {
   const after = outline(request2.draft);
   const refusal = await refuse(request2, before, after);
   if (refusal) return refused(refusal);
-  return measured([
+  const checks = [
     codeCheck(before, after),
     linkCheck(before, after),
     structureCheck(before, after),
     lengthCheck(before, after)
-  ]);
+  ];
+  const glossary = glossaryCheck(request2);
+  if (glossary !== null) checks.push(glossary);
+  return measured(checks);
 }
-async function refuse({ source, draft, from, to, languages }, before, after) {
+function terms({ glossary }) {
+  return (glossary ?? []).map((entry) => entry.term);
+}
+async function refuse(request2, before, after) {
+  const { source, draft, from, to, languages } = request2;
   if (draft.trim().length === 0) return "the draft is empty";
   if (draft.trim() === source.trim()) return "the draft is the source, unchanged";
+  const translated = translatedTerm(source, draft, terms(request2));
+  if (translated !== null) return `glossary term \`${translated}\` was translated`;
   if (closesUnopenedSection(after.prose)) {
     return "the draft closes a `<details>` section it never opened";
   }
@@ -34906,6 +34987,20 @@ function lengthCheck(before, after) {
   const value = ratio < shortest ? (ratio - impossiblyShort) / (shortest - impossiblyShort) : (impossiblyLong - ratio) / (impossiblyLong - longest);
   return { name: "length", weight, value: Math.max(0, Math.min(1, value)), note };
 }
+function glossaryCheck(request2) {
+  const { relevant, preserved, value } = termsPreserved(
+    request2.source,
+    request2.draft,
+    terms(request2)
+  );
+  if (relevant === 0) return null;
+  return {
+    name: "glossary",
+    weight: WEIGHTS.glossary,
+    value,
+    note: `${String(preserved)} of ${String(relevant)} glossary terms carried through unchanged`
+  };
+}
 var COUNTED = ["headings", "listItems", "tableRows", "blocks"];
 var HEADING = /^ {0,3}#{1,6}(?: |$)/;
 var LIST_ITEM = /^ {0,3}(?:[-*+]|\d{1,9}[.)])(?: |$)/;
@@ -34927,7 +35022,8 @@ function links(prose) {
 // src/duties/translate/draft.ts
 async function translate(request2) {
   const { provider, models, source, from, to, languages, drafts, weather } = request2;
-  const messages = prompt(source, from, to);
+  const glossary = request2.glossary ?? [];
+  const messages = prompt(source, from, to, glossary);
   const attempts = [];
   const refused2 = [];
   const failures = [];
@@ -34946,7 +35042,7 @@ async function translate(request2) {
     }
     if (!rotation.success) break;
     const draftText = unwrapped(rotation.success.content, source);
-    const measured2 = await score({ source, draft: draftText, from, to, languages });
+    const measured2 = await score({ source, draft: draftText, from, to, languages, glossary });
     (measured2.admissible ? attempts : refused2).push({
       model: rotation.success.model,
       text: sanitize(draftText),
@@ -34977,7 +35073,7 @@ async function answer(provider, model, messages) {
   }
   return completion;
 }
-function prompt(source, from, to) {
+function prompt(source, from, to, glossary) {
   const origin = from === null ? "" : ` from ${from.label}`;
   const body = enclose("untrusted-thread", source);
   return [
@@ -34997,6 +35093,7 @@ function prompt(source, from, to) {
         "- Keep headings, lists, tables and blank lines where they are.",
         "- Leave @mentions, #123 references, commit hashes, file paths, command names,",
         "  version numbers and product names as they are written.",
+        ...glossarySection(glossary),
         "",
         "Translate the prose faithfully. Do not summarise it, do not expand on it, and",
         "do not correct the author.",
@@ -35005,6 +35102,17 @@ function prompt(source, from, to) {
       ].join("\n")
     },
     { role: "user", content: body.block }
+  ];
+}
+function glossarySection(glossary) {
+  if (glossary.length === 0) return [];
+  return [
+    "",
+    "This project keeps these terms in one spelling. Reproduce each of them exactly as",
+    "written, in every language \u2014 never translated, transliterated or inflected:",
+    ...glossary.map(
+      ({ term, note }) => note === void 0 || note.length === 0 ? `- ${term}` : `- ${term} \u2014 ${note}`
+    )
   ];
 }
 function unwrapped(answer2, source) {
@@ -35171,7 +35279,12 @@ async function translateChunk(to, settings, stages, from, source, weather, onPro
     to,
     languages: settings.languages,
     drafts: settings.drafts,
-    weather
+    weather,
+    // Per chunk, against this chunk's own source — a term that appears in
+    // chunk three is nothing chunk one could have lost, and holding every
+    // chunk to the same list is what keeps one term coming back one way
+    // across a body wide enough to be split.
+    glossary: settings.glossary
   });
   const model = (id) => shown(settings.modelNames, id);
   for (const failure of drafted.failures) {
@@ -35824,12 +35937,16 @@ function publication(translated) {
     fingerprint: translated.fingerprint,
     sections: [
       "---",
+      ...translated.branding ? [BRANDING] : [],
       ...translated.posted.map(
         (entry) => section(entry, translated, translated.posted.length === 1)
       )
     ]
   };
 }
+var LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/main/.github/assets/logo.png";
+var HOME = "https://github.com/ecoma-io/reeve";
+var BRANDING = `<sub>[<img src="${LOGO}" height="14" alt=""> **Reeve**](${HOME}) \u2014 autonomous repository operations</sub>`;
 function boundary(entry) {
   return `> ${chrome("translateBoundary", entry.to.code)}`;
 }
@@ -36090,7 +36207,7 @@ async function publish(thread, marker2, publication2) {
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
-async function translateText(what, body, thread, settings, stages, weather, meter, budget, onProtocolExhausted) {
+async function translateText(what, body, thread, branding, settings, stages, weather, meter, budget, onProtocolExhausted) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -36162,7 +36279,8 @@ async function translateText(what, body, thread, settings, stages, weather, mete
     skipped,
     truncated,
     fingerprint: achieved,
-    attribution: settings.attribution
+    attribution: settings.attribution,
+    branding
   };
   if (settings.dryRun) {
     const would = publication(translated);
@@ -36246,6 +36364,11 @@ async function translateReplies(api, at, settings, stages, looked, weather, mete
       `#${String(at.number)} comment ${String(reply.id)}`,
       reply.body,
       createReply(api, at, reply),
+      // Never on a reply, whatever `show-branding` says. The setting decides
+      // whether a thread carries the line at all; this decides that "a thread"
+      // means its body — a logo repeated under every comment on an active
+      // thread is not a signature, it is noise the reader cannot collapse.
+      false,
       settings,
       stages,
       weather,
@@ -36264,6 +36387,9 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
     `#${String(at.number)}`,
     body,
     thread,
+    // The body is the one text in the thread that gets the branding line, so
+    // this is the only place the workflow's own answer is consulted.
+    settings.branding,
     settings,
     stages,
     weather,
@@ -36304,8 +36430,14 @@ function readSettings() {
     replies: getBooleanInput("translate-replies"),
     maxReplies: bounded("max-replies", getInput("max-replies")),
     chunkChars: parseChunkChars(getInput("chunk-chars")),
+    glossaryDir: getInput("glossary-dir", { required: true }),
     maxRequests: bounded("max-requests", getInput("max-requests")),
-    attribution: readAttribution()
+    attribution: readAttribution(),
+    // Read here rather than anywhere deeper for the reason this file's own
+    // header gives: the action-contract audit scans exactly two files for
+    // `getInput` call sites, and a third would leave it proving less than it
+    // claims to.
+    branding: getBooleanInput("show-branding")
   };
 }
 function readAttribution() {
@@ -36426,10 +36558,17 @@ async function run() {
       );
     }
     const permitted = authority2.warrant.granted("translate", DEFAULT_CAPABILITIES);
+    const glossary = await loadGlossary(api, context2.repo, base.glossaryDir, "translate");
+    if (glossary.length > 0) {
+      info(
+        `glossary: ${String(glossary.length)} term${glossary.length === 1 ? "" : "s"} from \`${base.glossaryDir}\` will be carried through unchanged.`
+      );
+    }
     settings = {
       ...base,
       languages,
-      permitted
+      permitted,
+      glossary
     };
     if (settings.sweep) {
       bulk = newAccumulator();

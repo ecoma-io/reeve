@@ -5,9 +5,10 @@
  * marker, keeping the author's half byte-for-byte, recognising a run that
  * changed nothing. This module decides only what goes *in* the block, which is
  * the part no other duty could reuse: a horizontal rule marking where the
- * machine's half begins, then one collapsible section per language — each
- * carrying its own boundary note, the translation, and a footer naming what
- * this run did not manage, all in that section's language.
+ * machine's half begins, one small line naming what put the block there, then
+ * one collapsible section per language — each carrying its own boundary note,
+ * the translation, and a footer naming what this run did not manage, all in
+ * that section's language.
  *
  * **Appended, never rewritten.** The author's text stays where they put it and
  * the translation goes underneath it, behind the marker. That is what keeps
@@ -122,6 +123,24 @@ export interface Translated {
    * rewriting a hundred threads for a cosmetic difference.
    */
   readonly attribution: Attribution;
+  /**
+   * Whether this block carries the line naming what wrote it.
+   *
+   * True for a thread's body and false for every reply, decided by the caller
+   * rather than here — see `translateText`'s own parameter for why that is the
+   * seam. A body is the one place a reader lands once; a reply is somewhere
+   * they scroll past twenty of, and twenty copies of the same logo is not
+   * attribution, it is decoration nobody asked for.
+   *
+   * Deliberately not part of the fingerprint, for the same reason `attribution`
+   * above is not: turning it off is a decision about how the next thread reads,
+   * not a mandate to re-spend a translation budget on every old one. A thread
+   * already carrying a translation keeps the block it was published with until
+   * its text or its languages change, and the identical-bytes check in the
+   * core's `publish` is what stops a run from rewriting a hundred threads over
+   * one line of chrome.
+   */
+  readonly branding: boolean;
 }
 
 /**
@@ -172,9 +191,15 @@ export function translationFingerprint(translated: string, languages: readonly L
  * Everything Reeve has to say about a translation lives *inside* the section it
  * is about. A section is single-language throughout, so its boundary note and
  * its footer render in that one language — and what sits outside the sections
- * never grows with the language count: the rule, and one `<summary>` line per
- * language. Ten configured languages are ten collapsed lines, not ten copies of
- * the same two sentences stacked above and below them.
+ * never grows with the language count: the rule, the branding line, and one
+ * `<summary>` line per language. Ten configured languages are ten collapsed
+ * lines, not ten copies of the same two sentences stacked above and below them.
+ *
+ * The branding line is the one thing here that is about Reeve rather than about
+ * a translation, and it is the only reason anything sits between the rule and
+ * the first section — see `BRANDING` below for why it is outside the sections
+ * rather than in them, and why it costs one line no matter how many languages
+ * follow it.
  */
 export function publication(translated: Translated): Publication {
   if (translated.posted.length === 0) return { fingerprint: translated.fingerprint, sections: [] };
@@ -183,12 +208,83 @@ export function publication(translated: Translated): Publication {
     fingerprint: translated.fingerprint,
     sections: [
       "---",
+      ...(translated.branding ? [BRANDING] : []),
       ...translated.posted.map((entry) =>
         section(entry, translated, translated.posted.length === 1),
       ),
     ],
   };
 }
+
+/**
+ * Where the logo is fetched from — `main`, not a release tag, on purpose.
+ *
+ * This block outlives the run that wrote it, in somebody else's issue body,
+ * and a `main` URL means every one of those bodies shows whatever the mark is
+ * *now* — a rebrand reaches the whole backlog the day it merges, with no run
+ * spent republishing anything. A tag-pinned URL is the other defensible
+ * answer (the bytes never change under an old thread), and it was rejected
+ * here because a thousand threads wearing last year's logo is the worse
+ * outcome for a line whose only job is to say what Reeve looks like today.
+ *
+ * The price of that choice is that this path is now a commitment:
+ * `.github/assets/logo.png` moving or disappearing from `main` breaks the
+ * image in every body ever published. Renaming that file is a breaking change
+ * to threads this repository does not own — leave a copy at this path
+ * forever, whatever the assets directory does next.
+ *
+ * The PNG rather than the SVG sitting beside it, even though this host serves
+ * both with the right content type. A body is not only read in the web UI: it
+ * goes out in every notification email the thread sends, and mail clients are
+ * where SVG support stops being universal. The raster copy is the one every
+ * renderer agrees on, and at 14 pixels there is nothing the vector was going to
+ * win.
+ */
+const LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/main/.github/assets/logo.png";
+
+/** Where clicking either half of the branding line goes. */
+const HOME = "https://github.com/ecoma-io/reeve";
+
+/**
+ * The one line in the block that is about Reeve rather than about a translation.
+ *
+ * Reeve already names itself inside every section's boundary note, which is the
+ * right place for the sentence a reader needs before they trust a translation —
+ * and the wrong place for the mark, because a collapsed `<details>` shows
+ * neither. So the name gets one always-visible line, immediately under the rule
+ * and above the sections: a reader who never unfolds anything still knows what
+ * put the block there and where to go to find out what it is.
+ *
+ * **One fixed line, whatever the language count.** It sits outside the
+ * sections, which is the rule the whole layout is built on — ten configured
+ * languages are ten collapsed lines plus this one, not eleven copies of it.
+ *
+ * **Trusted scaffolding, so it never goes through `escapeHtml` or `chrome`.**
+ * Every other string in this module is either a workflow's value or a
+ * translated sentence; this one is a literal written here, holding an `<img>`
+ * tag that escaping would turn into visible source. It is also deliberately not
+ * localised: it is a name and a tagline, and a name translated is a different
+ * name.
+ *
+ * `height="14"` inline rather than in a stylesheet GitHub would strip, and no
+ * `vertical-align` at all — an `<img>` sits on the text baseline by default,
+ * which is exactly where a 14px mark next to `<sub>` text belongs. The mark's
+ * own colours are indigo, teal and violet on a transparent ground with the
+ * knocked-out lines white and fully enclosed by the bubbles, so it reads on
+ * GitHub's light and dark themes alike — there is no white plate to glow on
+ * dark and no dark ink to vanish on it. One asset therefore serves both themes,
+ * which is why this is a bare `<img>` rather than the `<picture>` element
+ * GitHub does support: a theme-switching pair would be two files to keep
+ * pinned, for a mark that never needed switching.
+ *
+ * The `alt` is empty on purpose: the word "Reeve" follows immediately, and a
+ * mark that announced itself would have a screen reader say the name twice.
+ * Logo and name are inside one link so either half is clickable, which is what
+ * a reader tries first.
+ */
+const BRANDING =
+  `<sub>[<img src="${LOGO}" height="14" alt=""> **Reeve**]` +
+  `(${HOME}) — autonomous repository operations</sub>`;
 
 /**
  * The line that says which half of the body is which.

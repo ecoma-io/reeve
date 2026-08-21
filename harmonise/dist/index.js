@@ -19619,7 +19619,7 @@ var require_dist = __commonJS({
      */
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.format = format;
-    exports.parse = parse4;
+    exports.parse = parse5;
     var TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
     var TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
     var QUOTE_REGEXP = /[\\"]/g;
@@ -19646,7 +19646,7 @@ var require_dist = __commonJS({
       }
       return result;
     }
-    function parse4(header, options) {
+    function parse5(header, options) {
       const len = header.length;
       let index = skipOWS(header, 0, len);
       const valueStart = index;
@@ -26971,7 +26971,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse4(src, reviver, options) {
+    function parse5(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -27012,7 +27012,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse4;
+    exports.parse = parse5;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
     exports.stringify = stringify;
@@ -31761,6 +31761,42 @@ async function writeContentsFile(api, at, path, text2, message, sha, branch) {
   });
 }
 
+// src/core/glossary.ts
+var import_yaml = __toESM(require_dist2(), 1);
+async function loadGlossary(api, at, path, duty) {
+  const file = await readContentsFile(api, at, path);
+  if (file === null) return [];
+  try {
+    const parsed = (0, import_yaml.parse)(file.text);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+    const record = parsed;
+    const entries = [];
+    for (const [term, value] of Object.entries(record)) {
+      if (typeof term === "string" && term.length > 0) {
+        entries.push(typeof value === "string" ? { term, note: value } : { term });
+      }
+    }
+    return entries;
+  } catch {
+    warning(
+      `${duty}: glossary file \`${path}\` could not be parsed \u2014 continuing without glossary.`
+    );
+    return [];
+  }
+}
+function translatedTerm(source, draft, terms) {
+  for (const term of terms) {
+    if (source.includes(term) && !draft.includes(term)) return term;
+  }
+  return null;
+}
+function termsPreserved(source, draft, terms) {
+  const relevant = terms.filter((term) => source.includes(term));
+  if (relevant.length === 0) return { relevant: 0, preserved: 0, value: 1 };
+  const preserved = relevant.filter((term) => draft.includes(term)).length;
+  return { relevant: relevant.length, preserved, value: preserved / relevant.length };
+}
+
 // src/core/list.ts
 function parseList(raw) {
   return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
@@ -32709,7 +32745,7 @@ function remainingOf(acc) {
 
 // src/core/warrant.ts
 import { readFile } from "node:fs/promises";
-var import_yaml = __toESM(require_dist2(), 1);
+var import_yaml2 = __toESM(require_dist2(), 1);
 
 // src/duties/dependa/model.ts
 var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
@@ -32912,9 +32948,9 @@ function dutyLanguages(warrant, denied, fallback) {
 function load(path, source) {
   let document;
   try {
-    document = (0, import_yaml.parse)(source);
+    document = (0, import_yaml2.parse)(source);
   } catch (error2) {
-    const reason = error2 instanceof import_yaml.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
+    const reason = error2 instanceof import_yaml2.YAMLParseError ? error2.message : error2 instanceof Error ? error2.message : "";
     throw new Error(`warrant: \`${path}\` is not valid YAML \u2014 ${reason}`, { cause: error2 });
   }
   if (document === null || typeof document !== "object" || Array.isArray(document)) {
@@ -34236,11 +34272,8 @@ function measured(checks) {
 function scoreDraft(draft, original, glossaryTerms, source, targetLanguage, languages) {
   if (draft.trim().length === 0) return refused("empty draft");
   if (draft === original) return refused("unchanged from original");
-  for (const term of glossaryTerms) {
-    if (original.includes(term) && !draft.includes(term)) {
-      return refused(`glossary term \`${term}\` was translated`);
-    }
-  }
+  const lost = translatedTerm(original, draft, glossaryTerms);
+  if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
   const script = foreignScript(source, draft, targetLanguage, languages);
   if (script !== null) {
     return refused(`draft contains \`${script}\` script not in source or target language`);
@@ -34316,14 +34349,7 @@ function lengthCheck(draft, original) {
   return Math.max(0, 2 - ratio);
 }
 function glossaryCheck(draft, original, glossaryTerms) {
-  if (glossaryTerms.length === 0) return 1;
-  const relevant = glossaryTerms.filter((term) => original.includes(term));
-  if (relevant.length === 0) return 1;
-  let preserved = 0;
-  for (const term of relevant) {
-    if (draft.includes(term)) preserved++;
-  }
-  return preserved / relevant.length;
+  return termsPreserved(original, draft, glossaryTerms).value;
 }
 function proseLength(markdown) {
   return segments(markdown).filter((s) => s.kind === "prose").reduce((sum, s) => sum + s.text.length, 0);
@@ -35401,7 +35427,7 @@ async function run() {
       provenancePath,
       settings.stateBranch !== "" ? settings.stateBranch : void 0
     );
-    const glossary = await loadGlossary(api, context2.repo, settings.glossaryDir);
+    const glossary = await loadGlossary(api, context2.repo, settings.glossaryDir, "harmonise");
     for (const group of groups) {
       if (starved(settings.models, weather)) {
         acc.starvedRun = true;
@@ -35780,28 +35806,6 @@ async function listMarkdownFiles(api, at) {
     }
   }
   return files;
-}
-async function loadGlossary(api, at, path) {
-  const file = await readContentsFile(api, at, path);
-  if (file === null) return [];
-  try {
-    const { parse: parse4 } = await Promise.resolve().then(() => __toESM(require_dist2(), 1));
-    const parsed = parse4(file.text);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
-    const record = parsed;
-    const entries = [];
-    for (const [term, value] of Object.entries(record)) {
-      if (typeof term === "string" && term.length > 0) {
-        entries.push(typeof value === "string" ? { term, note: value } : { term });
-      }
-    }
-    return entries;
-  } catch {
-    warning(
-      `harmonise: glossary file \`${path}\` could not be parsed \u2014 continuing without glossary.`
-    );
-    return [];
-  }
 }
 function parseSourceLanguage(raw, warrantLanguages, denied) {
   if (denied) return null;

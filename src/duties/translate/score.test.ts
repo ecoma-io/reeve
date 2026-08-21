@@ -133,6 +133,42 @@ describe("score", () => {
       expect(result.admissible).toBe(true);
     });
 
+    it("refuses a draft that translated a glossary term", async () => {
+      // Provable in the way the rules above it are: the string was in the
+      // source and it is not in the draft, and no reading of the draft makes
+      // that a translation choice. The wording is `harmonise`'s word for word,
+      // because both duties refuse on the same rule out of the same file.
+      const result = await score(
+        request("Reeve đọc warrant.", "Reeve reads the authority file.", {
+          glossary: [{ term: "warrant", note: "The authority file." }],
+        }),
+      );
+
+      expect(result.admissible).toBe(false);
+      expect(result.reason).toBe("glossary term `warrant` was translated");
+    });
+
+    it("admits a draft for a glossary term this chunk's source never used", async () => {
+      // Each chunk of a body is scored on its own, against its own source. A
+      // term that appears in chunk three is nothing chunk one could have lost,
+      // and charging a draft for every term in the file would refuse every
+      // draft the moment the glossary grew.
+      const result = await score(
+        request("Có lỗi.", "An error.", { glossary: [{ term: "warrant" }] }),
+      );
+
+      expect(result.admissible).toBe(true);
+    });
+
+    it("matches a glossary term case-sensitively, because a term is a spelling", async () => {
+      const result = await score(
+        request("Reeve đọc tệp.", "reeve reads the file.", { glossary: [{ term: "Reeve" }] }),
+      );
+
+      expect(result.admissible).toBe(false);
+      expect(result.reason).toBe("glossary term `Reeve` was translated");
+    });
+
     it("refuses a draft carrying a script neither the target nor the source has", async () => {
       // The failure a cheap model produces most visibly: a phrase of the wrong
       // language left sitting in an otherwise plausible translation. Every
@@ -244,6 +280,84 @@ describe("score", () => {
       await score(request("An error", "A failure", { from: { ...english, code: "EN" } }));
 
       expect(mockedDetect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("glossary terms carried through", () => {
+    it("reports every term this chunk's source used and the draft kept", async () => {
+      const result = await score(
+        request("Reeve đọc warrant.", "Reeve reads the warrant.", {
+          glossary: [{ term: "Reeve" }, { term: "warrant" }],
+        }),
+      );
+
+      expect(valueOf(result.checks, "glossary")).toBe(1);
+      expect(result.checks.find((check) => check.name === "glossary")?.note).toBe(
+        "2 of 2 glossary terms carried through unchanged",
+      );
+    });
+
+    it("counts only the terms this chunk's source used", async () => {
+      // The glossary is a list for the whole repository. Most of it has nothing
+      // to say about any one chunk, and the note has to say so honestly rather
+      // than reporting a denominator nobody wrote.
+      const result = await score(
+        request("Reeve đọc tệp.", "Reeve reads the file.", {
+          glossary: [{ term: "Reeve" }, { term: "warrant" }, { term: "sweep" }],
+        }),
+      );
+
+      expect(result.checks.find((check) => check.name === "glossary")?.note).toBe(
+        "1 of 1 glossary terms carried through unchanged",
+      );
+    });
+
+    it("measures the raw text, so a term inside a code span still counts", async () => {
+      // Half of what a glossary protects is the name of something, and names
+      // live in code spans. The segmenter would hand those back separately, so
+      // a check reading the prose alone would be blind to exactly the terms
+      // most likely to be on the list.
+      splitting([{ kind: "code", text: "`dry-run`" }], [{ kind: "code", text: "`dry-run`" }]);
+
+      const result = await score(
+        request("Bật `dry-run`.", "Turn on `dry-run`.", { glossary: [{ term: "dry-run" }] }),
+      );
+
+      expect(valueOf(result.checks, "glossary")).toBe(1);
+    });
+
+    it("measures nothing at all when the chunk used no term", async () => {
+      // A perfect score worth 3 added to every draft in every repository
+      // without a glossary — which is most of them — would move every number
+      // this duty reports while measuring nothing.
+      const result = await score(
+        request("Có lỗi.", "An error.", { glossary: [{ term: "Reeve" }] }),
+      );
+
+      expect(result.checks.map((check) => check.name)).not.toContain("glossary");
+    });
+
+    it("measures nothing when there is no glossary", async () => {
+      const result = await score(request("Có lỗi.", "An error."));
+
+      expect(result.checks.map((check) => check.name)).toEqual([
+        "code",
+        "links",
+        "structure",
+        "length",
+      ]);
+    });
+
+    it("weighs the glossary as heavily as links", async () => {
+      // A term the project decided on is a literal string a reader maps back to
+      // an input name or a reference page, exactly as a link destination is.
+      const result = await score(
+        request("Reeve đọc tệp.", "Reeve reads the file.", { glossary: [{ term: "Reeve" }] }),
+      );
+
+      const weightOf = (name: string): number | undefined =>
+        result.checks.find((check) => check.name === name)?.weight;
+      expect(weightOf("glossary")).toBe(weightOf("links"));
     });
   });
 

@@ -147,6 +147,11 @@ async function run(targets: [Language, Record<string, string>][]): Promise<Trans
     skipped,
     truncated: false,
     attribution: "none",
+    // Off by default here, so every case below reads the block a translation
+    // renders rather than the chrome around it. The one case that is about the
+    // line turns it on for itself — and a reply never gets it at all, which is
+    // `translateReplies`'s decision rather than this stage's.
+    branding: false,
     fingerprint: translationFingerprint(
       SOURCE,
       targets.map(([to]) => to),
@@ -176,6 +181,26 @@ describe("publishing what a real run produced", () => {
     // it cannot notify anyone a second time.
     expect(thread.body()).toContain("#<!---->42");
     expect(thread.body()).toContain("@<!---->johnitvn");
+  });
+
+  it("carries the branding line through a real write, with the author's half intact", async () => {
+    // The `<img>` is the one piece of raw HTML this duty writes on purpose, so
+    // it is worth seeing it survive the assembler and come back out of a
+    // written body — and worth seeing that the marker still splits the body in
+    // the same place with it there.
+    const thread = threadWith(SOURCE);
+
+    const outcome = await publishing(thread, {
+      ...(await run([[english, { a: ENGLISH }]])),
+      branding: true,
+    });
+
+    expect(outcome.action).toBe("published");
+    expect(thread.body()).toContain(
+      '<img src="https://raw.githubusercontent.com/ecoma-io/reeve/main/',
+    );
+    expect(thread.body()).toContain("— autonomous repository operations</sub>");
+    expect(marker.split(thread.body()).official).toBe(SOURCE);
   });
 
   it("leaves the author's own text untouched, references and all", async () => {

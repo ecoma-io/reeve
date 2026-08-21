@@ -80,6 +80,11 @@ export async function translateChunk(
     languages: settings.languages,
     drafts: settings.drafts,
     weather,
+    // Per chunk, against this chunk's own source — a term that appears in
+    // chunk three is nothing chunk one could have lost, and holding every
+    // chunk to the same list is what keeps one term coming back one way
+    // across a body wide enough to be split.
+    glossary: settings.glossary,
   });
 
   // Named as the workflow named them, everywhere a person reads them. A

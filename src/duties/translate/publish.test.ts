@@ -54,9 +54,16 @@ function translated(over: Partial<Translated> = {}): Translated {
     truncated: false,
     fingerprint: "abc123",
     attribution: "none",
+    // Off in the default fixture, so every case below reads the block a
+    // translation actually renders rather than the chrome around it. The cases
+    // about the line turn it on themselves.
+    branding: false,
     ...over,
   };
 }
+
+/** The logo URL the branding line publishes — `main`, so every published block wears the current mark. */
+const LOGO = "https://raw.githubusercontent.com/ecoma-io/reeve/main/.github/assets/logo.png";
 
 /** The body a reader would see: what the core writes from what this duty renders. */
 function body(over: Partial<Translated> = {}, official = OFFICIAL): string {
@@ -268,6 +275,72 @@ describe("publication", () => {
       official: OFFICIAL,
       fingerprint: "cafe1234",
     });
+  });
+});
+
+describe("the branding line", () => {
+  it("sits between the rule and the first section, where nothing has to be unfolded", () => {
+    // The whole point: Reeve already names itself in every section's boundary
+    // note, and a collapsed <details> shows none of it.
+    const rendered = body({ branding: true });
+    const rule = rendered.indexOf("\n---\n");
+    const line = rendered.indexOf("<sub>[<img");
+    const first = rendered.indexOf("<details");
+    expect(rule).toBeGreaterThan(-1);
+    expect(line).toBeGreaterThan(rule);
+    expect(line).toBeLessThan(first);
+  });
+
+  it("names Reeve and what it does, small, with the mark beside it", () => {
+    const rendered = body({ branding: true });
+    expect(rendered).toContain(
+      `<sub>[<img src="${LOGO}" height="14" alt=""> **Reeve**]` +
+        "(https://github.com/ecoma-io/reeve) — autonomous repository operations</sub>",
+    );
+  });
+
+  it("serves the mark from main, so every published block wears the current one", () => {
+    // The owner's call, and the opposite of a tag pin: a rebrand reaches the
+    // whole backlog the day it merges, and the price is that the asset's path
+    // on `main` is now a commitment — see `LOGO`'s own doc comment.
+    const rendered = body({ branding: true });
+    expect(rendered).toContain("raw.githubusercontent.com/ecoma-io/reeve/main/");
+  });
+
+  it("costs one line whatever the language count, like everything outside the sections", () => {
+    const rendered = body({
+      branding: true,
+      posted: [posted(english), posted(chinese), posted(vietnamese)],
+    });
+    expect(rendered.split("<sub>[<img")).toHaveLength(2);
+  });
+
+  it("renders nothing at all when the workflow turned it off", () => {
+    const rendered = body({ branding: false });
+    expect(rendered).not.toContain("<img");
+    expect(rendered).not.toContain("autonomous repository operations");
+    // And the block still starts where it always did.
+    expect(rendered).toContain("---\n\n<details");
+  });
+
+  it("renders nothing when no language produced a translation", () => {
+    // A run that translated nothing writes nothing — not even a logo.
+    expect(publication(translated({ branding: true, posted: [] })).sections).toEqual([]);
+  });
+
+  it("is left out of the fingerprint, so turning it on retranslates nothing", () => {
+    // The `attribution` precedent exactly: a cosmetic choice about how the next
+    // thread reads is not a mandate to re-spend a budget on every old one.
+    expect(publication(translated({ branding: true })).fingerprint).toBe(
+      publication(translated({ branding: false })).fingerprint,
+    );
+  });
+
+  it("is not escaped, because it is this module's own markup rather than a workflow's", () => {
+    // Every other string in the block arrives from somewhere and is escaped;
+    // this one is written here, and escaping it would publish its source.
+    const rendered = body({ branding: true });
+    expect(rendered).not.toContain("&lt;img");
   });
 });
 

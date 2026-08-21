@@ -14,6 +14,10 @@
  *      checked here, once, before a single thread is read — sweep or not,
  *      exactly as triage's own enumeration is total. Nothing below this line
  *      runs; the summary says why, and the run is green.
+ *   1b. Read the glossary at `glossary-dir` — the terms this project keeps in
+ *      one spelling, whatever language a thread is translated into. One
+ *      Contents API read for the whole run, empty when there is no file, which
+ *      is the common case. The same file `harmonise` reads.
  *   2. Read the thread, and keep only the author's half of the body — anything
  *      below the marker is this duty's own output, not a source.
  *   3. Stop when there is nothing to translate — an empty body, or text with no
@@ -86,6 +90,7 @@ import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
 import { listOpenThreads, readStanding } from "../../core/forge.js";
+import { loadGlossary, type GlossaryEntry } from "../../core/glossary.js";
 import {
   bounded,
   parseAttribution,
@@ -166,6 +171,14 @@ export interface Settings {
   readonly maxReplies: number | null;
   /** How large one chunk of a body can be before it is its own request. See `parseChunkChars`. */
   readonly chunkChars: number;
+  /** Where the glossary lives in the repository — the path `glossary-dir` named. */
+  readonly glossaryDir: string;
+  /**
+   * The terms this project keeps in one spelling, read from `glossaryDir` once
+   * per run and handed to every draft and every score. Empty when there is no
+   * file at that path, which is the common case — see `core/glossary.ts`.
+   */
+  readonly glossary: readonly GlossaryEntry[];
   /**
    * How many provider requests — detection, drafting and judging combined —
    * this run may spend before it stops asking for more. `null` is no bound.
@@ -173,6 +186,12 @@ export interface Settings {
    */
   readonly maxRequests: number | null;
   readonly attribution: Attribution;
+  /**
+   * Whether the published block carries the line naming what wrote it. Applies
+   * to a thread's body only — `translateReplies` refuses it for a reply
+   * whatever this says, so a chatty thread never collects one logo per comment.
+   */
+  readonly branding: boolean;
   readonly dryRun: boolean;
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -194,11 +213,12 @@ export interface Settings {
  * a run that continued past one would translate into a language nobody asked for
  * or spend a provider's budget on a number that was never a number.
  *
- * `languages` and `permitted` are missing from what this returns. Both need
- * the warrant, and reading the warrant is async while every other input here
- * is not — `run` completes the object once `resolveAuthority` has answered.
+ * `languages`, `permitted` and `glossary` are missing from what this returns.
+ * The first two need the warrant and the third needs a Contents API read, and
+ * all three are async while every other input here is not — `run` completes the
+ * object once `resolveAuthority` and the glossary read have answered.
  */
-function readSettings(): Omit<Settings, "languages" | "permitted"> {
+function readSettings(): Omit<Settings, "languages" | "permitted" | "glossary"> {
   const shared = readShared();
   const panel = parseSeats(core.getInput("judge-models"));
 
@@ -212,8 +232,14 @@ function readSettings(): Omit<Settings, "languages" | "permitted"> {
     replies: core.getBooleanInput("translate-replies"),
     maxReplies: bounded("max-replies", core.getInput("max-replies")),
     chunkChars: parseChunkChars(core.getInput("chunk-chars")),
+    glossaryDir: core.getInput("glossary-dir", { required: true }),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     attribution: readAttribution(),
+    // Read here rather than anywhere deeper for the reason this file's own
+    // header gives: the action-contract audit scans exactly two files for
+    // `getInput` call sites, and a third would leave it proving less than it
+    // claims to.
+    branding: core.getBooleanInput("show-branding"),
   };
 }
 
@@ -427,10 +453,26 @@ export async function run(): Promise<void> {
     // it, so the grant is the permitted list, decided once here for the run.
     const permitted = authority.warrant.granted("translate", DEFAULT_CAPABILITIES);
 
+    // One Contents API read for the whole run, before a single thread is
+    // looked at. The glossary is repository configuration at the ref that
+    // triggered this workflow — the same file `harmonise` reads, down to the
+    // default path — so a sweep of a hundred threads reads it once rather than
+    // once per thread, and a `dry-run` reads it exactly as a real run does:
+    // nothing here writes anything. A missing file is the common case and is
+    // silent, so this costs an ordinary 404 and no configuration at all.
+    const glossary = await loadGlossary(api, context.repo, base.glossaryDir, "translate");
+    if (glossary.length > 0) {
+      core.info(
+        `glossary: ${String(glossary.length)} term${glossary.length === 1 ? "" : "s"} from ` +
+          `\`${base.glossaryDir}\` will be carried through unchanged.`,
+      );
+    }
+
     settings = {
       ...base,
       languages,
       permitted,
+      glossary,
     };
 
     if (settings.sweep) {

@@ -121,6 +121,54 @@ describe("translate", () => {
       expect(system).toContain("English");
     });
 
+    it("names every glossary term, and the note beside it, in the system message", async () => {
+      // The list is repository configuration a maintainer committed, so it
+      // belongs beside the rules rather than beside the stranger's text — and
+      // the instruction says every language, because a body translated into
+      // three is three separate calls that all have to answer the same way.
+      const provider = answering({ a: "A translation." });
+      await translate(
+        request({
+          provider,
+          glossary: [{ term: "Reeve", note: "The product name." }, { term: "warrant" }],
+        }),
+      );
+
+      const [, messages] = vi.mocked(provider.complete).mock.calls[0] ?? [];
+      const system = (messages as Message[])[0]?.content ?? "";
+      expect(system).toContain("in every language");
+      expect(system).toContain("- Reeve — The product name.");
+      expect(system).toContain("- warrant");
+    });
+
+    it("says nothing about a glossary when there is none", async () => {
+      // The common case. A heading over an empty list is a rule the model has
+      // to interpret, and the only honest interpretation of it is nothing.
+      const provider = answering({ a: "A translation." });
+      await translate(request({ provider }));
+
+      const [, messages] = vi.mocked(provider.complete).mock.calls[0] ?? [];
+      const system = (messages as Message[])[0]?.content ?? "";
+      expect(system).not.toContain("one spelling");
+    });
+
+    it("keeps the glossary out of the user message, where the untrusted body is", async () => {
+      const provider = answering({ a: "A translation." });
+      await translate(request({ provider, glossary: [{ term: "Reeve" }] }));
+
+      const [, messages] = vi.mocked(provider.complete).mock.calls[0] ?? [];
+      expect((messages as Message[])[1]?.content).not.toContain("Reeve");
+    });
+
+    it("scores against the same glossary it prompted with", async () => {
+      // The prompt asks and the score checks, and a draft asked for one list
+      // and measured against another would be refused for obeying.
+      const glossary = [{ term: "Reeve" }];
+      await translate(request({ glossary }));
+
+      expect(mockedScore).toHaveBeenCalledWith(expect.objectContaining({ glossary }));
+    });
+
     it("sends the body as the user message, untouched inside the fence", async () => {
       // Nothing is stripped, escaped or rewritten on the way in. A duty that
       // quietly edited a body before reading it would report on a thread that
@@ -340,6 +388,7 @@ describe("translate", () => {
         from: vietnamese,
         to: english,
         languages: [vietnamese, english],
+        glossary: [],
       });
       expect(result.attempts[0]?.text).toBe("[safe]cc @alice about #42.");
     });

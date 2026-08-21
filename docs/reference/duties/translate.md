@@ -70,9 +70,9 @@ jobs:
 
 That writes one block into the issue body carrying every configured language
 except the one the issue was written in, below the author's own text and a
-horizontal rule — one collapsible section per language, each opening with a
-note in its own language saying which half is which — keep `dry-run: true`
-until you want a run to edit anything. Edit the issue and it replaces that
+horizontal rule — one small line naming Reeve, then one collapsible section
+per language, each opening with a note in its own language saying which half
+is which — keep `dry-run: true` until you want a run to edit anything. Edit the issue and it replaces that
 block rather than adding a second one; edit nothing and the next run
 recognises its own output and stops before it spends a single request.
 
@@ -126,9 +126,11 @@ Every input `translate/action.yml` declares.
 | `judge-models`      | no       | _(empty)_                   | A panel asked which draft reads best. `\|` adds a seat (one more vote); `,` is a fallback inside one, as in `models` — see below.                                                                                                                              |
 | `max-body-chars`    | no       | `6000`                      | How much of the author's own text one run reads, or `none` for no bound.                                                                                                                                                                                       |
 | `chunk-chars`       | no       | `6000`                      | How large one chunk of a body can be before it is asked for as its own request, rather than folded into a larger one. Refused below `500`; no ceiling.                                                                                                         |
+| `glossary-dir`      | no       | `.reeve/glossary.yml`       | A YAML map of terms this project keeps in one spelling, whatever language a thread is translated into. Missing at this path is not a failure. The same file `harmonise` reads.                                                                                 |
 | `translate-replies` | no       | `false`                     | Also translate the thread's replies, each detected and fingerprinted on its own.                                                                                                                                                                               |
 | `max-replies`       | no       | `100`                       | How many of a thread's most recent replies one run reads, when `translate-replies` is on, or `none` for no bound.                                                                                                                                              |
 | `show-attribution`  | no       | `none`                      | How much of the machinery the published block names: `none`, `model`, or `detail`.                                                                                                                                                                             |
+| `show-branding`     | no       | `true`                      | Whether the published block carries one small line naming Reeve, with its mark, linking to the project. A thread's body only — never a reply.                                                                                                                  |
 | `dry-run`           | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                    |
 | `sweep`             | no       | `false`                     | Work the backlog instead of the one thread this event named. Cannot combine with `number`.                                                                                                                                                                     |
 | `since`             | no       | _(empty)_                   | The oldest thread a sweep will consider, bounded by when it was opened.                                                                                                                                                                                        |
@@ -167,6 +169,36 @@ paragraph is worse than no translation this run, and the next run tries
 again in full. The fingerprint is over the source text, never over where the
 chunk boundaries happened to fall, so the same body always fingerprints the
 same way regardless of `max-body-chars`.
+
+**`glossary-dir` names the terms a translation may not translate.**
+`.reeve/glossary.yml` is a YAML map: each key is a term, each value a note the
+model is shown beside it. It is for the words that look like ordinary prose and
+are not — a product name, an input's own name, the English term a reference page
+and the code both use. Translating one of those does not produce a worse
+sentence, it produces a sentence nobody can act on, because the translated word
+appears nowhere else in the repository for a reader to map it back to.
+
+Every draft is asked to carry these terms through unchanged, and then checked
+for it rather than trusted. A draft whose source used a term and whose answer
+does not is **refused** — inadmissible, out of the ranking entirely, the same
+tier as a draft that came back in the source language — and what survives is
+measured as its own weighted check beside code, links, structure and length.
+Matching is a case-sensitive literal substring, so `Reeve` and `reeve` are two
+terms and a glossary that means both says both.
+
+The check runs **per chunk, against that chunk's own source**, because each
+chunk is drafted and scored on its own: a term that appears in the third chunk
+is nothing the first could have lost. That is also what keeps terminology steady
+down a long body — every chunk of it is held to the same list, so the same term
+comes back the same way in each, however the chunk boundaries happened to fall.
+
+The file is read once per run through the Contents API, at the ref that
+triggered the workflow, and a missing file is not an error: it means this
+project has no protected terms, which is the common case, and nothing about a
+glossary reaches the prompt at all. It is the same file
+[`harmonise`](harmonise.md) reads — same default path, same grammar, same
+refusal — so a term that stays English in a committed `README.vi.md` stays
+English in the issue body beside it.
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
@@ -247,6 +279,21 @@ partway through a language, so a language already being translated always
 finishes atomically: what already published stands, and only the work not
 yet started is left for a later run (or, under `sweep`, counted into
 `remaining`). `none`, the default, never trips it.
+
+**`show-branding` is one fixed line, not one per language.** Between the rule
+and the first collapsible section the block carries a single small line — the
+Reeve mark, the name, and _"autonomous repository operations"_ — linking to
+the project. It sits outside the sections on purpose: the boundary note inside
+each section already names Reeve, but a collapsed `<details>` shows none of
+it, and a reader who has never seen this before deserves to know what put a
+block in their issue without unfolding anything to find out. Ten configured
+languages are ten collapsed lines plus this one, never eleven copies of it.
+**A reply never carries it**, whatever this is set to — a logo under every
+comment on an active thread is decoration rather than attribution. The mark is
+served from `main`, so every block ever published wears the current one — a
+rebrand reaches the whole backlog the day it merges, and the asset's path is a
+commitment for the same reason. Turning it off is not part of the fingerprint: it applies
+to the next block published and retranslates nothing already carrying one.
 
 **The run report** is written to the job's own summary, not the thread: what
 was translated (model, score, votes), what was not and why, and cost —
