@@ -23,7 +23,13 @@ import { containsScript } from "./script.js";
 // this module is deciding whether to trust.
 vi.mock("./script.js", () => ({ containsScript: vi.fn() }));
 vi.mock("./languages.js", () => ({ findLanguage: vi.fn() }));
-vi.mock("./provider.js", () => ({ rotateModels: vi.fn() }));
+// `importOriginal` rather than a bare factory: this module stubs the
+// rotation, but the callback it hands the rotation is `askWhole`, which
+// is real code and must stay real for the stub to exercise it.
+vi.mock("./provider.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./provider.js")>()),
+  rotateModels: vi.fn(),
+}));
 
 const mockedContainsScript = vi.mocked(containsScript);
 const mockedFindLanguage = vi.mocked(findLanguage);

@@ -11,7 +11,13 @@ import { translateToPivot, type PivotRequest } from "./pivot.js";
 // as every other module that sits on top of them: what this file owes its
 // caller is which prompt it sent and what it does with what came back, not a
 // second copy of `rotateModels`'s own retry logic or `sanitize`'s own rules.
-vi.mock("./provider.js", () => ({ rotateModels: vi.fn() }));
+// `importOriginal` rather than a bare factory: this module stubs the
+// rotation, but the callback it hands the rotation is `askWhole`, which
+// is real code and must stay real for the stub to exercise it.
+vi.mock("./provider.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./provider.js")>()),
+  rotateModels: vi.fn(),
+}));
 vi.mock("./sanitize.js", () => ({ sanitize: vi.fn() }));
 
 const mockedRotate = vi.mocked(rotateModels);

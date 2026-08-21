@@ -27,7 +27,8 @@
 import { enclose } from "../../core/enclose.js";
 import { segments } from "../../core/markdown.js";
 import type { Correction } from "../../core/memory.js";
-import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
+import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
 import type { Label } from "../../core/warrant.js";
@@ -90,7 +91,7 @@ export async function draft(request: DraftRequest): Promise<Draft> {
 
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages),
+      (model) => askWhole(provider, model, messages),
       weather,
     );
     for (const failure of rotation.failures) exhausted.add(failure.model);
@@ -133,19 +134,6 @@ function remaining(
   if (live.length === 0) return [];
   const start = at % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
-}
-
-async function answer(provider: Provider, model: string, messages: Message[]): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      reason: "the answer was cut off before it finished",
-      kind: "protocol",
-    };
-  }
-  return completion;
 }
 
 /**

@@ -18,7 +18,13 @@ import { score } from "./score.js";
 // second model produced the draft" is asserting this module's ordering rather
 // than the provider's loop.
 vi.mock("../../core/markdown.js", () => ({ segments: vi.fn() }));
-vi.mock("../../core/provider.js", () => ({ rotateModels: vi.fn() }));
+// `importOriginal` rather than a bare factory: this module stubs the
+// rotation, but the callback it hands the rotation is `askWhole`, which
+// is real code and must stay real for the stub to exercise it.
+vi.mock("../../core/provider.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../core/provider.js")>()),
+  rotateModels: vi.fn(),
+}));
 vi.mock("../../core/sanitize.js", () => ({ sanitize: vi.fn() }));
 vi.mock("./score.js", () => ({ score: vi.fn() }));
 

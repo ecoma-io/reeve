@@ -89,6 +89,7 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
+import { budgetExhausted, createBudget, type Budget } from "../../core/budget.js";
 import { listOpenThreads, readStanding } from "../../core/forge.js";
 import { loadGlossary, type GlossaryEntry } from "../../core/glossary.js";
 import {
@@ -131,7 +132,6 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { budgetExhausted, createBudget, type Budget } from "./budget.js";
 import { type Stages } from "./engine.js";
 import { parseChunkChars } from "./inputs.js";
 import { summarize, summarizeSweep, type Run, type SweptThread } from "./summary.js";
@@ -378,7 +378,7 @@ async function runSweep(
     // answer, including when the very last candidate is the one that denies
     // work inside its own per-language or per-reply checkpoint with no
     // further iteration left to notice — `budget` already has it by then.
-    exhausted: () => budgetExhausted(settings, meter, budget),
+    exhausted: () => budgetExhausted(settings.maxRequests, meter, budget),
     processOne: async (thread) => {
       const at = { ...context.repo, number: thread.number };
       const result = await processThread(

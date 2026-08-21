@@ -32,7 +32,8 @@
  * nobody actually reviewed is never stamped all-clear.
  */
 import { enclose } from "../../core/enclose.js";
-import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
+import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { agenticAnswer } from "./agentic.js";
 import type { ToolBudget, ToolExecutor } from "./tools.js";
@@ -209,7 +210,7 @@ export async function runPasses(
     let rotation = await rotateModels(
       roster,
       (model) => {
-        if (agentic === undefined) return answer(provider, model, pass.prompt(context));
+        if (agentic === undefined) return askWhole(provider, model, pass.prompt(context));
         const executor = agentic.makeExecutor();
         return agenticAnswer(provider, model, pass.prompt(context), executor, agentic.budget).then(
           (completion) => {
@@ -237,7 +238,7 @@ export async function runPasses(
       const assembled: PassContext = { ...context, agentic: false };
       const retry = await rotateModels(
         roster,
-        (model) => answer(provider, model, pass.prompt(assembled)),
+        (model) => askWhole(provider, model, pass.prompt(assembled)),
         weather,
       );
       if (retry.success) {
@@ -268,24 +269,6 @@ export async function runPasses(
     });
   }
   return results;
-}
-
-/** One completion, with a truncated answer reported as the failure it is. */
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: readonly Message[],
-): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished",
-    };
-  }
-  return completion;
 }
 
 /**

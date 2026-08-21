@@ -34,6 +34,7 @@
 import * as core from "@actions/core";
 import { context, getOctokit } from "@actions/github";
 
+import { budgetExhausted, createBudget, type Budget } from "../../core/budget.js";
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
 import { loadGlossary, type GlossaryEntry } from "../../core/glossary.js";
 import {
@@ -71,7 +72,6 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
-import { budgetExhausted, createBudget, type Budget } from "./budget.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 import { classifyDiff, type ClassificationResult, type ClassifiedHunk } from "./classify.js";
 import { computeSourceDiff, formatInitialSync } from "./diff.js";
@@ -359,7 +359,7 @@ export async function run(): Promise<void> {
       // Budget check: checked before spending the requests a group is about to
       // cost — so a budget already at its ceiling does not start a group it
       // cannot finish.
-      if (budgetExhausted(settings, meter, budget)) {
+      if (budgetExhausted(settings.maxRequests, meter, budget)) {
         core.warning(
           "`max-requests` was reached, so remaining document groups were not attempted this run. " +
             "What was already drafted still publishes.",
@@ -681,7 +681,7 @@ async function processGroup(
     // Checked before spending the requests a locale is about to cost, not
     // after — so a budget set tight enough to stop mid-group stops before
     // the request that would have gone over it.
-    if (budgetExhausted(settings, meter, budget)) {
+    if (budgetExhausted(settings.maxRequests, meter, budget)) {
       const remaining = doc.stale.slice(doc.stale.indexOf(locale));
       skipped.push(...remaining);
       core.warning(

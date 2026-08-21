@@ -21,7 +21,7 @@
 import * as core from "@actions/core";
 
 import { runDoctor } from "./doctor/run.js";
-import { leafActionFor, refusal } from "./refusal.js";
+import { DUTIES, leafActionFor, refusal } from "./refusal.js";
 
 export async function run(): Promise<void> {
   // Guarded, not a bare `if`: a `doctor:` value outside the accepted
@@ -63,11 +63,20 @@ export async function run(): Promise<void> {
  * reading surface for the person who just got it. Always written under
  * `doctor: false`, never under `doctor: true`, whose own report owns the page.
  *
- * The table is the canonical route from a duty to the leaf action that runs it.
- * The nine duties and their leaves are written here and in
- * `docs/reference/root-action.md`; the leaf pages (`docs/reference/duties/`)
- * are the single source for what each duty does, and a `description:` drift
- * there never reaches this page the way it reaches the marketplace listing.
+ * The table is the canonical route from a duty to the leaf action that runs it,
+ * and its rows are derived from `DUTIES` rather than written out. That is not
+ * tidiness: the roster is spelled literally in several places on purpose —
+ * `tools/build.mjs`'s entry points and `release.yml`'s archive list are two,
+ * and `architecture.md` names them as a known hazard — but this copy was the
+ * one nothing checked. `refusal.test.ts` pins `DUTIES` itself and
+ * `main.integration.test.ts` asserted only that this table has a header row, so
+ * a tenth duty would have taken its authority slot in the warrant and its row
+ * in the doctor's report and still never appeared here, on the page whose whole
+ * job is to send a reader to the right leaf.
+ *
+ * The leaf pages (`docs/reference/duties/`) remain the single source for what
+ * each duty does, and a `description:` drift there never reaches this page the
+ * way it reaches the marketplace listing.
  */
 async function writeExplain(leaf: string): Promise<void> {
   const parts = [
@@ -78,17 +87,7 @@ async function writeExplain(leaf: string): Promise<void> {
     "",
     table(
       ["Duty", "Action to write"],
-      [
-        ["translate", "`ecoma-io/reeve/translate@<ref>`"],
-        ["triage", "`ecoma-io/reeve/triage@<ref>`"],
-        ["duplicate", "`ecoma-io/reeve/duplicate@<ref>`"],
-        ["respond", "`ecoma-io/reeve/respond@<ref>`"],
-        ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
-        ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
-        ["dependa", "`ecoma-io/reeve/dependa@<ref>`"],
-        ["review", "`ecoma-io/reeve/review@<ref>`"],
-        ["remediation", "`ecoma-io/reeve/remediation@<ref>`"],
-      ],
+      DUTIES.map((duty) => [duty, `\`ecoma-io/reeve/${duty}@<ref>\``]),
     ),
     "",
   ];

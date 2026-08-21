@@ -6,7 +6,7 @@ import { createWeather } from "../../core/provider.js";
 import type { Meter, Spend } from "../../core/meter.js";
 import type { Thread } from "../../core/forge.js";
 
-import { createBudget } from "./budget.js";
+import { createBudget } from "../../core/budget.js";
 import type { Stages } from "./engine.js";
 import type { Settings } from "./main.js";
 import { marker, translationFingerprint } from "./publish.js";

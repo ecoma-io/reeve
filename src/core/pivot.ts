@@ -23,11 +23,11 @@
 import { enclose } from "./enclose.js";
 import type { Language } from "./languages.js";
 import {
-  rotateModels,
-  type Completion,
+  askWhole,
   type Failure,
   type Message,
   type Provider,
+  rotateModels,
   type Weather,
 } from "./provider.js";
 import { sanitize } from "./sanitize.js";
@@ -77,7 +77,7 @@ export async function translateToPivot(request: PivotRequest): Promise<PivotResu
   const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages),
+    (model) => askWhole(provider, model, messages, "rendering"),
     weather,
   );
   if (!rotation.success) return { draft: null, failures: rotation.failures };
@@ -89,32 +89,6 @@ export async function translateToPivot(request: PivotRequest): Promise<PivotResu
     draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
     failures: rotation.failures,
   };
-}
-
-/**
- * One completion, with a truncated rendering reported as the failure it is —
- * the same rule `draft.ts` follows for the same reason. `finish_reason:
- * length` means the model ran out of room before the JSON closed, which
- * reads as unparseable rather than merely short, and rotation's next model
- * may have more room to give it. Left unchecked, that failure would look
- * identical to an ordinary unreadable answer — this is what tells the two
- * apart in the one place that can still do something about it.
- */
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: readonly Message[],
-): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the rendering was cut off before it finished",
-    };
-  }
-  return completion;
 }
 
 /**
