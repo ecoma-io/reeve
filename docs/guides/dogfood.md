@@ -6,8 +6,9 @@ Reeve is dogfooded: its duties run against this repository's own
 issues, pull requests, and dependencies. `triage` and `translate` act on
 real threads; `duplicate`, `respond` and `review` run in report-only mode,
 writing verdicts to job summaries and touching nothing; `lifecycle` observes
-in dry-run; and `dependa` runs in shadow alongside Renovate, maintaining and
-comparing rather than owning. `harmonise` is configured to watch `README.md`,
+in dry-run; and `dependa` acts on its grant — committing manifest updates and
+opening draft PRs alongside Renovate, whose comparison run still measures it
+weekly. `harmonise` is configured to watch `README.md`,
 whose sync to Vietnamese/Chinese is pending the bootstrap of its first
 translations — see [the harmonise reference](../reference/duties/harmonise.md#bootstrap).
 This is not self-modification; it is **proving the execution path**. A duty

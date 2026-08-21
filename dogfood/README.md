@@ -1,7 +1,8 @@
 # Dependa vs Renovate Dogfood
 
 > **Dependa is being evaluated alongside Renovate and is not yet the production replacement.**
-> Renovate remains the authoritative dependency-maintenance system.
+> Renovate remains the authoritative dependency-maintenance system; dependa's
+> PRs open as drafts a maintainer promotes or closes.
 
 ## Architecture
 
@@ -11,10 +12,10 @@
             ┌────────┴────────┐
             ↓                 ↓
         Renovate           Dependa
-        production          shadow
+        production          dogfood
             │                 │
             ↓                 ↓
-       real PRs          observations
+       real PRs           draft PRs
             │                 │
             └────────┬────────┘
                      ↓
@@ -27,24 +28,44 @@
 **Renovate** is the production system. It runs weekly (Monday before 6am UTC)
 and creates real dependency update PRs.
 
-**Dependa** runs in shadow mode — the warrant omits `dependa` from its
-`duties:` block, so no grant exists for it to act on. It discovers what it
-would propose, but creates no branches, commits no files, and opens no PRs.
-Its findings are observations, not actions.
+**Dependa** dogfoods for real — the warrant grants
+`dependa: [edit-file, open-pr]`, so the Wednesday drafting run commits
+manifest updates to `reeve/dependa/*` branches and opens draft PRs, exactly
+as a consumer's installation would. The Thursday conformance run keeps its
+original shadow shape (`dry-run: true` on the action): the whole pipeline
+runs, nothing is written, and what dependa discovered is compared against
+Renovate.
+
+> PRs opened with `GITHUB_TOKEN` do not trigger `pull_request` workflows —
+> CI on a dependa PR starts after a maintainer's close/reopen or push. This
+> is the documented trade against holding a long-lived PAT
+> (see `.github/renovate.json5` for the same reasoning on Renovate's side).
 
 **The comparison** produces a machine-readable conformance dataset that
 classifies every discrepancy between what the two systems found.
 
 ## How to Run
 
-### Shadow comparison (CI)
+### On demand (CI)
 
-The conformance row of the dogfood workflow runs automatically on Thursdays
-at 03:17 UTC, or manually via `workflow_dispatch`:
+The workflow's `duty` input runs a single duty without waking the other
+eight. A dispatch defaults to `dry-run: true` — observation:
 
 ```
-gh workflow run reeve.yml
+gh workflow run reeve.yml -f duty=dependa
 ```
+
+To let a manual run act (commit branches, open draft PRs), a maintainer
+says so explicitly:
+
+```
+gh workflow run reeve.yml -f duty=dependa -f dry-run=false
+```
+
+### On schedule (CI)
+
+The drafting row runs Wednesdays at 03:17 UTC and acts on the warrant's
+grant; the conformance row runs Thursdays at 03:17 UTC and only observes.
 
 ### Local comparison
 
@@ -154,15 +175,21 @@ verifies the expected classification for the fixture.
 ## Security Boundaries
 
 1. **No shared mutation path**: Renovate creates PRs on `renovate/` branches;
-   dependa would create PRs on `reeve/dependa/` branches (but doesn't in shadow mode).
-2. **Token permissions**: The dogfood workflow declares `contents: read` and
-   `pull-requests: read` only — least-privilege for a read-only observation.
-3. **Warrant enforcement**: The warrant at `.github/reeve.yml` deliberately
-   omits `dependa` from its `duties:` block, so no grant exists for the duty
-   to act on — even a manually granted capability list would refuse.
-4. **Branch protection**: The `main` branch requires CI checks and review.
-5. **No secrets exfiltration**: With `drafts: 0`, no data is sent to the
-   LLM provider. The run is fully deterministic.
+   dependa creates PRs on `reeve/dependa/` branches. The two never write the
+   same ref.
+2. **Warrant enforcement**: The warrant at `.github/reeve.yml` grants
+   `dependa: [edit-file, open-pr]` and nothing else — no merge, no close of
+   human PRs, no writes outside discovered manifests (the edit-path allowlist
+   refuses paths that were never discovered as dependency manifests).
+3. **Draft-only PRs**: Every dependa PR opens as a draft under the default
+   `auto-approve: none`; a human promotes or closes it. Renovate remains
+   authoritative until the conformance dataset shows parity.
+4. **Observation stays observation**: The Thursday conformance row and any
+   default manual dispatch run `dry-run: true` — the pipeline runs whole and
+   writes nothing, whatever the job's token could do.
+5. **Branch protection**: The `main` branch requires CI checks and review.
+6. **No secrets exfiltration**: With `risk-interpretation` off (the default),
+   no data is sent to the LLM provider. The pipeline is fully deterministic.
 
 ## Why Renovate Remains Authoritative
 

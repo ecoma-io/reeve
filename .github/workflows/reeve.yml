@@ -21,27 +21,29 @@ name: Reeve
 # boundary between modes is a deliberate act, never a default:
 #
 #   observe    — dry-run or shadow. The pipeline runs whole; nothing is written.
-#                `duplicate`, `respond`, `lifecycle`, `review` and the dependa
-#                rows live here until a maintainer has read enough job summaries
-#                to trust them.
+#                `duplicate`, `respond`, `lifecycle`, `review` and the Thursday
+#                dependa conformance row live here until a maintainer has read
+#                enough job summaries to trust them.
 #   propose    — the duty drafts (and judges) but the warrant is what decides
 #                whether a draft becomes a write: translate's edit-body,
 #                harmonise's edit-file + open-pr. The workflow withholds nothing;
 #                the warrant does.
 #   controlled — the duty writes what the warrant grants, narrowed by its own
-#                `dry-run`. Only `triage` (label, record) is configured here,
-#                and only on the repository that owns the warrant.
+#                `dry-run`. `triage` (label, record) and the Wednesday dependa
+#                drafting row (edit-file, open-pr) are configured here, and only
+#                on the repository that owns the warrant.
 #
 # `observe` is the only mode that is write-safe BY CONSTRUCTION — dry-run cannot
 # be turned off from a matrix row. `propose` and `controlled` are write modes
 # that answer to the warrant, which is the single authority file and the only
 # thing that can widen them. Nothing in this file can grant a capability the
-# warrant does not. dependa is the proof: the warrant deliberately omits it from
-# `duties:`, so both dependa rows below — the Wednesday drafting shape inherited
-# from reeve-dependa.yml and the Thursday conformance shape inherited from
-# reeve-dependa-dogfood.yml — are observation in effect, whatever drafts count
-# or permission scope they carry. Granting `dependa: [edit-file, open-pr]` in
-# the warrant would be the act that transitions it from observer to actor.
+# warrant does not. dependa lived that proof: its rows ran for a stretch with
+# the warrant deliberately omitting it from `duties:`, observation in effect
+# whatever permission scope they carried. The warrant now grants
+# `dependa: [edit-file, open-pr]` — the act that transitioned it from
+# observer to actor — and the Thursday conformance row stays observation by
+# its own `dry-run: true`, because the Renovate comparison needs a reading,
+# not a second writer.
 #
 # ONE ROSTER, EXPLICITLY. Every duty runs on the same roster —
 # `ECOMA_REEVE_MODEL` holds the model ids in preference order (a primary and
@@ -162,6 +164,26 @@ on:
         description: Report what would happen, change nothing
         type: boolean
         default: true
+      # Which duty a manual run exercises. `all` keeps the old behaviour —
+      # every job whose `if:` admits a dispatch runs. Naming one duty runs it
+      # alone, which is how a maintainer tests a single duty on demand
+      # (`gh workflow run reeve.yml -f duty=dependa`) without waking the
+      # other eight.
+      duty:
+        description: Run only this duty (all = every duty this event admits)
+        type: choice
+        default: all
+        options:
+          - all
+          - triage
+          - translate
+          - duplicate
+          - respond
+          - lifecycle
+          - harmonise
+          - review
+          - dependa
+          - sweep
 
 # Best-effort: the top-level block exists so a job added later has a safe
 # default. Every job below narrows it further — a job's own `concurrency` block
@@ -180,7 +202,7 @@ jobs:
     name: Triage
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'triage'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -275,7 +297,7 @@ jobs:
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot') ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.user.type != 'Bot') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'translate'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -344,7 +366,7 @@ jobs:
     name: Duplicate check
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'duplicate'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -410,7 +432,7 @@ jobs:
     name: First reply
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'respond'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -481,7 +503,7 @@ jobs:
     name: Lifecycle
     if: >
       (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'lifecycle'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -531,7 +553,7 @@ jobs:
     name: Harmonise
     if: >
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'harmonise'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -598,7 +620,7 @@ jobs:
     name: Review
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'review'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -668,25 +690,28 @@ jobs:
           echo "| outcome | ${{ steps.review.outcome }} — findings: ${{ steps.review.outputs.findings }} |" >> "$GITHUB_STEP_SUMMARY"
 
   # ────────────────────────────── dependa ────────────────────────────────────
-  # The dependency maintainer. Both rows are observation in effect: the warrant
-  # deliberately omits dependa from `duties:`, so no grant exists for it to act
-  # on. The Wednesday row keeps the drafting shape of the old reeve-dependa.yml
-  # (it would open pull requests the moment the warrant grants edit-file + open-
-  # pr; until then it drafts and stops). The Thursday row keeps the shadow
-  # conformance shape of the old reeve-dependa-dogfood.yml: what it discovers,
-  # classifies and groups is compared against Renovate's own findings and
-  # uploaded as a conformance dataset. MODE: observe for both — see
-  # dogfood/README.md.
+  # The dependency maintainer, dogfooding for real: the warrant grants
+  # `dependa: [edit-file, open-pr]`, so the Wednesday drafting row commits
+  # manifest updates to `reeve/dependa/*` branches and opens draft PRs — the
+  # same duty a consumer would run. The Thursday conformance row keeps its
+  # observation shape (`dry-run: true`): what dependa discovers, classifies
+  # and groups is compared against Renovate's own findings and uploaded as a
+  # conformance dataset, and Renovate stays the authority until that dataset
+  # says parity — see dogfood/README.md. A manual dispatch defaults to
+  # dry-run and needs `dry-run: false` to act, the same double-consent every
+  # write duty above requires. PRs opened with `GITHUB_TOKEN` do not trigger
+  # `pull_request` workflows — a maintainer's close/reopen (or push) starts
+  # CI on them, the documented trade against holding a long-lived PAT.
   dependa:
     name: Dependa ${{ matrix.shape }}
     if: >
       (github.event_name == 'schedule' && (github.event.schedule == '17 3 * * 3' || github.event.schedule == '17 3 * * 4')) ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'dependa'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: read
-      pull-requests: read
+      contents: write # edit-file — manifest updates committed to reeve/dependa/* branches
+      pull-requests: write # open-pr — draft PRs for proposal groups
     strategy:
       fail-fast: false
       matrix:
@@ -730,13 +755,17 @@ jobs:
             if [ -n "$id" ]; then echo "::add-mask::$id"; fi
           done
 
-      # Run dependa — observations only, no mutations. The warrant deliberately
-      # omits dependa from its `duties:` block, so no grant exists for this duty
-      # to act on.
+      # Run dependa. The drafting shape acts on what the warrant grants
+      # (edit-file, open-pr); the conformance shape and a default manual
+      # dispatch run `dry-run: true` and observe. `node-version` and `docker`
+      # joined the scan when dependa learned the manifests Renovate already
+      # read here: `.node-version`, `packageManager`, and workflow container
+      # images.
       - id: dependa
         uses: ecoma-io/reeve/dependa@main
         with:
-          ecosystems: "npm, github-actions"
+          ecosystems: "npm, github-actions, docker, node-version"
+          dry-run: ${{ matrix.shape == 'conformance' || (github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
@@ -746,7 +775,7 @@ jobs:
       # + JSONL dataset.
       - if: matrix.shape == 'conformance'
         name: Run conformance comparison
-        run: npx tsx dogfood/conformance/cli.ts --repo-root . --ecosystems npm,github-actions
+        run: npx tsx dogfood/conformance/cli.ts --repo-root . --ecosystems npm,github-actions,docker,node-version
 
       - if: matrix.shape == 'conformance'
         name: Upload conformance data
@@ -762,7 +791,7 @@ jobs:
         env:
           DUTY: dependa
           REPOSITORY: ecoma-io/reeve
-          MODE: observe
+          MODE: ${{ matrix.shape == 'conformance' && 'observe' || 'controlled' }}
         run: |
           echo "## Dogfood — $DUTY (${{ matrix.shape }})" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -771,7 +800,7 @@ jobs:
           echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
           echo "| duty | $DUTY / ${{ matrix.shape }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| event | ${{ github.event_name }} ${{ github.event.schedule }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| mode | $MODE (shadow — the warrant grants dependa nothing) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (the warrant grants edit-file, open-pr; conformance reads only) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| outcome | ${{ steps.dependa.outcome }} — proposals: ${{ steps.dependa.outputs.proposed }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -f dogfood/conformance-report.jsonl ]; then
@@ -792,7 +821,7 @@ jobs:
     name: Sweep — ${{ matrix.duty }}
     if: >
       (github.event_name == 'schedule' && github.event.schedule == '0 4 * * 1') ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'sweep'))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
