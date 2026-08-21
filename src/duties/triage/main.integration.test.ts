@@ -206,6 +206,12 @@ interface State {
    */
   collaboratorPermissions: Record<string, string>;
   /**
+   * When set, every `POST .../issues/{n}/comments` answers this status instead
+   * of accepting the comment — the forge failing on the LAST effect `act`
+   * performs, with the labels of the same run already applied.
+   */
+  commentStatus: number | null;
+  /**
    * The thread author's login, returned in the `user` field of the GET issue
    * response. `checkReversal` compares this against the reopener's login to
    * detect an author reopen (which is never recorded, only surfaced).
@@ -265,6 +271,7 @@ async function startStub(): Promise<Stub> {
     truncatedLabelHistory: new Set(),
     replies: {},
     collaboratorPermissions: {},
+    commentStatus: null,
     issueAuthor: "reporter",
   };
 
@@ -455,6 +462,10 @@ async function route(
   }
 
   if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(path)) {
+    if (stub.commentStatus !== null) {
+      send(response, stub.commentStatus, { message: "stubbed comment failure" });
+      return;
+    }
     const payload = parsed(raw) as { body?: string };
     stub.effects.comments.push(payload.body ?? "");
     send(response, 201, { id: 1, body: payload.body });
@@ -1018,6 +1029,49 @@ describe("the action", () => {
 
     expect(again.code).toBe(0);
     expect(stub.effects.comments).toHaveLength(1);
+  });
+
+  it("leaves the label it already applied standing when the comment write fails, and goes red", async () => {
+    // `act` writes in order — labels, then the announcement — and nothing
+    // rolls the earlier effect back. The failure is a 500 rather than a 403 so
+    // it cannot be read as the permission gate: this is the forge falling over
+    // between two writes of the same run.
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, comment]"));
+    stub.commentStatus = 500;
+
+    const run = await runAction(stub);
+
+    expect(run.code).not.toBe(0);
+    // The label is on the thread and stays there.
+    expect(stub.effects.applied).toEqual(["bug"]);
+    expect(stub.labels).toEqual(["bug"]);
+    expect(stub.effects.comments).toEqual([]);
+  });
+
+  it("writes nothing at all on the rerun after a failed announcement — and never retries the comment it owed", async () => {
+    // What a maintainer actually gets after the case above, driven rather than
+    // assumed. The label IS this duty's idempotency marker on the thread, so
+    // the rerun's verdict is refused by enforcement (the label is already
+    // there), and `comment` describes what THIS run did — which is nothing.
+    // The announcement the failed run never posted is therefore never posted
+    // at all: convergence here means "quiet", not "eventually complete".
+    await writeFile(warrantPath, WARRANT.replace("triage: [label]", "triage: [label, comment]"));
+    stub.commentStatus = 500;
+    const first = await runAction(stub);
+    expect(first.code).not.toBe(0);
+    expect(stub.labels).toEqual(["bug"]);
+
+    stub.commentStatus = null;
+    const second = await runAction(stub);
+
+    expect(second.code).toBe(0);
+    // Nothing was written on the rerun — no second label, and no comment.
+    expect(stub.effects.applied).toEqual(["bug"]);
+    expect(stub.effects.comments).toEqual([]);
+    // The `applied` output says so too: a real run (not the dry run's `{}`)
+    // that applied no label and announced nothing.
+    expect(second.outputs.applied).toContain('"labels":[]');
+    expect(second.outputs.applied).toContain('"commented":false');
   });
 
   it("assigns the owner the taxonomy names for a label it applied", async () => {

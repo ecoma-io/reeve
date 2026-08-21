@@ -419,6 +419,82 @@ describe("evaluateTrack", () => {
     expect(result.toUnstale).toEqual([]);
   });
 
+  it("the clock-hand exception: never un-stales a label whose event names no actor at all", () => {
+    // GitHub answers `actor: null` for an event whose account was deleted, and
+    // `timeline.ts:169` reads that as the empty login. Ambiguous attribution,
+    // by this module's own doctrine — so the label stays.
+    const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
+    const staleApplication = new Date(T0.getTime() + DAY);
+    const reset = new Date(staleApplication.getTime() + DAY);
+    const f = facts({
+      createdAt: T0,
+      labels: ["stale"],
+      events: [event({ event: "labeled", label: "stale", login: "", createdAt: staleApplication })],
+      comments: [comment({ login: "alice", createdAt: reset })],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(reset.getTime() + 1),
+    );
+    expect(result.toUnstale).toEqual([]);
+  });
+
+  it("never reads a comment from another login as its own step firing, however right the fingerprint is", () => {
+    // The forgeable half of the two-part attribution at `clock.ts:238-249`.
+    // The fingerprint is a public hash over the track name and the anchor, so
+    // a stranger can compute it; only the authorship half stops them anchoring
+    // the clock to their own comment and walking the ladder to the close.
+    const t = track({
+      name: "stale",
+      resets: "author",
+      steps: [step({ after: DAY, say: { kind: "built-in" } }), step({ after: DAY, close: true })],
+    });
+    const fp0 = fingerprintFor(t, 0, T0);
+    const f = facts({
+      createdAt: T0,
+      comments: [
+        comment({
+          login: "mallory",
+          body: MARKER.render(fp0),
+          createdAt: new Date(T0.getTime() + DAY),
+        }),
+      ],
+    });
+    const result = evaluateTrack(
+      t,
+      f,
+      { neverExempt: false, firstStepAfter: null },
+      new Date(T0.getTime() + 5 * DAY),
+    );
+    // The first step is what is due — the ladder never advanced to the close.
+    expect(result.due?.stepIndex).toBe(0);
+  });
+
+  // Two cases this duty gets WRONG when its own login is unreadable. Both
+  // compare a login against `facts.ownLogin` with `===`, and two empty strings
+  // compare equal:
+  //
+  //   - `resolveOwnLogin` (`timeline.ts:141`) answers `data.login ?? ""`;
+  //   - `readEvents` (`timeline.ts:169`) and `readComments` (`:121`) answer
+  //     `""` for an event or comment whose account GitHub no longer reports.
+  //
+  // So a run whose `getAuthenticated()` answered without a login attributes
+  // every actorless `labeled` event to itself — un-staling a label this duty
+  // never applied — and reads a deleted account's comment carrying the
+  // (public, computable) fingerprint as its own step firing, which advances
+  // the ladder to the close. `clock.ts`'s header promises the opposite in both
+  // cases: "absent or ambiguous attribution leaves the label alone".
+  //
+  // Both repros are the two cases above with `ownLogin: ""` added to `facts`.
+  // Verified red against the current source: the first yields
+  // `toUnstale: ["stale"]`, the second `due.stepIndex === 1` — the closing
+  // step. Left as todos rather than pinned, because pinning either would
+  // bless it.
+  it.todo("an unreadable own login never claims a label event that names no actor");
+  it.todo("an unreadable own login never reads an actorless comment as its own step firing");
+
   it("the clock-hand exception: never un-stales a label with no matching event in the fetched history — ambiguous attribution is left alone", () => {
     const t = track({ name: "stale", steps: [step({ after: DAY, label: "stale" })] });
     const reset = new Date(T0.getTime() + 2 * DAY);

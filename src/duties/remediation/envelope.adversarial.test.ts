@@ -29,7 +29,13 @@ import { markerFor } from "../../core/marker.js";
 import type { Previous } from "../review/findings.js";
 import { encodeEnvelope as reviewEncodeEnvelope } from "../review/publish.js";
 
-import { readEnvelope, type CommentApi, type Envelope, type Finding } from "./envelope.js";
+import {
+  decodeEnvelope,
+  readEnvelope,
+  type CommentApi,
+  type Envelope,
+  type Finding,
+} from "./envelope.js";
 import { proposeAll } from "./proposal.js";
 import { page } from "./report.js";
 
@@ -324,6 +330,98 @@ describe("model prose in the envelope is data, never a decision", () => {
 
     expect(rendered).toContain("nothing was written to the repository");
     expect(rendered).toContain("fails red rather than acting");
+  });
+});
+
+describe("an unanswered read is never an empty envelope", () => {
+  it("propagates a listing failure rather than reporting nothing to propose", async () => {
+    // The two facts are indistinguishable in the output and opposite in
+    // meaning: "the review found nothing left to fix" and "the API was down"
+    // both end in zero proposals. Only one of them may be reported as an
+    // answer, so the failure has to leave this function rather than be
+    // absorbed into the same `null` an envelope-less thread returns.
+    const api: CommentApi = {
+      rest: {
+        issues: {
+          listComments: () =>
+            Promise.reject(Object.assign(new Error("Server Error"), { status: 500 })),
+        },
+      },
+    };
+
+    await expect(readEnvelope(api, AT)).rejects.toThrow("Server Error");
+  });
+
+  it("propagates a permission failure the same way, rather than proposing from nothing", async () => {
+    // A token that cannot read the thread's comments is a configuration
+    // problem, and a green run that proposed nothing would hide it for as
+    // long as nobody looked at the workflow.
+    const api: CommentApi = {
+      rest: {
+        issues: {
+          listComments: () =>
+            Promise.reject(
+              Object.assign(new Error("Resource not accessible by integration"), { status: 403 }),
+            ),
+        },
+      },
+    };
+
+    await expect(readEnvelope(api, AT)).rejects.toThrow("not accessible");
+  });
+});
+
+describe("one malformed finding does not decide the fate of the others", () => {
+  /** A payload holding one entry review's field set accepts and one it does not. */
+  function mixedPayload(): string {
+    const findings = [
+      {
+        id: "good:src/app.ts:1",
+        ruleId: "good",
+        ruleName: "Good rule",
+        ruleBody: "Body.",
+        path: "src/app.ts",
+        line: 1,
+        severity: "warning",
+        body: "A well-formed claim.",
+        marker: "",
+        wasResolved: false,
+      },
+      // `line` is a string and `wasResolved` is missing: not review's shape.
+      {
+        id: "bad:src/app.ts:2",
+        ruleId: "bad",
+        ruleName: "Bad rule",
+        ruleBody: "Body.",
+        path: "src/app.ts",
+        line: "2",
+        severity: "critical",
+        body: "A claim in the wrong shape.",
+        marker: "",
+      },
+    ];
+    const encoded = Buffer.from(JSON.stringify({ findings, reviewedShas: [] }), "utf8").toString(
+      "base64",
+    );
+    return `${"a".repeat(16)} ${encoded}`;
+  }
+
+  it("keeps the well-formed finding and drops the one that is not review's shape", () => {
+    // The direction matters: dropping the bad entry loses a proposal, while
+    // reading it would let a hand-edited comment supply a finding whose
+    // fields were never the ones review writes.
+    const envelope = decodeEnvelope(mixedPayload());
+
+    expect(envelope?.findings.map((finding) => finding.id)).toEqual(["good:src/app.ts:1"]);
+    expect(envelope?.previous.map((finding) => finding.id)).toEqual(["good:src/app.ts:1"]);
+  });
+
+  it("proposes for the survivor and never for the dropped claim", () => {
+    const envelope = decodeEnvelope(mixedPayload());
+    expect(envelope).not.toBeNull();
+    const proposals = proposeAll(envelope!);
+
+    expect(proposals.map((proposal) => proposal.ruleId)).toEqual(["good"]);
   });
 });
 

@@ -171,6 +171,13 @@ interface State {
   };
   /** A thread number whose standing read answers 429 — simulates GitHub's own capacity running out mid-sweep (D12). */
   capacityFailAt: number | null;
+  /**
+   * A thread number whose label write answers a bare 403 — a permission
+   * failure, not weather, arriving after an earlier thread in the same sweep
+   * was already labelled. D12's other side: this one is configuration, so it
+   * stays red rather than stopping the walk quietly.
+   */
+  writeForbiddenAt: number | null;
 }
 
 type Stub = State & { readonly url: string; close(): Promise<void> };
@@ -183,6 +190,7 @@ async function startStub(): Promise<Stub> {
     repositoryLabels: ["bug", "stale", "pinned", "needs-attention"],
     effects: { applied: [], removed: [], comments: [], closed: [] },
     capacityFailAt: null,
+    writeForbiddenAt: null,
   };
 
   const server = createServer((request, response) => {
@@ -343,6 +351,12 @@ async function route(
   const labelsAdd = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/labels$/.exec(path);
   if (method === "POST" && labelsAdd) {
     const number = Number(labelsAdd[1]);
+    if (stub.writeForbiddenAt === number) {
+      // No rate-limit headers: a bare 403 is a permission failure, which
+      // `isCapacityError` must not read as weather.
+      send(response, 403, { message: "Resource not accessible by integration" });
+      return;
+    }
     const payload = parsed(raw) as { labels?: string[] };
     const names = payload.labels ?? [];
     for (const name of names) stub.effects.applied.push({ number, label: name });
@@ -772,6 +786,56 @@ describe("the sweep", () => {
       expect(run.summary).toContain("Stopped early");
     },
   );
+
+  it("goes red on a permission failure mid-sweep, and still reports the threads it had already done", async () => {
+    // D12's other side, and the accumulator's whole reason for being mutated
+    // in place (`sweep.ts`: "a value returned only on success cannot be read by
+    // a caller that never got the return"). A bare 403 is configuration, not
+    // weather, so the walk does not stop politely — it throws. What must
+    // survive the throw is the work already committed to the forge and the
+    // run's own account of it: a red job that reported zero would tell a
+    // maintainer nothing about the thread it had already labelled.
+    stub.threads.set(911, thread({ createdAt: daysAgo(90).toISOString() }));
+    stub.threads.set(912, thread({ createdAt: daysAgo(80).toISOString() }));
+    stub.threads.set(913, thread({ createdAt: daysAgo(70).toISOString() }));
+    stub.listing.push(911, 912, 913);
+    stub.writeForbiddenAt = 912;
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).not.toBe(0);
+    // The first thread's label stands — nothing rolls a committed write back.
+    expect(stub.effects.applied).toEqual([{ number: 911, label: "stale" }]);
+    // And the run says so, on the outputs and on the page, rather than
+    // reporting an empty sweep.
+    expect(run.outputs.processed).toBe("1");
+    expect(run.outputs.labeled).toBe("1");
+    expect(run.summary).toContain("#911");
+    expect(run.log).toContain("Resource not accessible by integration");
+  });
+
+  it("works the backlog oldest-first however the listing hands it over", async () => {
+    // The listing's order is GitHub's business and it is not the sweep's: a
+    // clock check wants the thread that has waited longest first, so the walk
+    // sorts by creation date rather than trusting the order it was handed. A
+    // listing served newest-first must therefore produce exactly the same
+    // work, in exactly the same order, as one served oldest-first.
+    stub.threads.set(921, thread({ createdAt: daysAgo(90).toISOString() }));
+    stub.threads.set(922, thread({ createdAt: daysAgo(60).toISOString() }));
+    stub.threads.set(923, thread({ createdAt: daysAgo(30).toISOString() }));
+    // Newest first — the reverse of the order the walk has to work in.
+    stub.listing.push(923, 922, 921);
+
+    const run = await runAction(stub, { sweep: "true", number: "" });
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("3");
+    expect(stub.effects.applied).toEqual([
+      { number: 921, label: "stale" },
+      { number: 922, label: "stale" },
+      { number: 923, label: "stale" },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrackerApi } from "../core/forge.js";
 
 import { diagnose, problems, type ProviderProbe, type Report } from "./diagnose.js";
+import { summarize } from "./summary.js";
 
 const AT = { owner: "ecoma-io", repo: "reeve" };
 
@@ -241,5 +242,98 @@ describe("the provider probe reports a class of answer, never a provider's words
     expect(finding?.severity).toBe("green");
     expect(finding?.text).toContain("answered with a rate limit or server error");
     expect(finding?.text).not.toContain("slow down");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One report, both registers at once.
+//
+// Every case above drives a single failure. What a real broken configuration
+// looks like is several at once — the forge having a bad minute, the provider
+// refusing a key, and one genuine misspelling in the warrant — and the whole
+// value of D12's split is that the count a maintainer is failed on must come
+// from the last of those alone. A report that added weather to `problems`
+// would fail a job for a 503, and a report that let a red finding hide behind
+// two greens would pass a broken warrant.
+// ---------------------------------------------------------------------------
+
+describe("a report that mixes weather with configuration", () => {
+  /** A warrant granting `duplicate` a capability its own ladder has no use for — the canonical red. */
+  const INERT_GRANT = `${TAXONOMY}\nduties:\n  duplicate: [close]\n`;
+
+  async function mixedReport(): Promise<Report> {
+    await writeFile(warrantPath, INERT_GRANT);
+    return diagnose({
+      // The labels endpoint is having a bad minute: weather, so the check is
+      // reported as not performed rather than as a fault.
+      api: rejecting({ status: 503, message: "upstream unavailable" }),
+      at: AT,
+      warrantPath,
+      defaultWarrantPath: warrantPath,
+      duty: null,
+      provider: {
+        baseUrl: "http://provider.test/v1",
+        apiKey: "probe-key",
+        requestTimeoutMs: 5_000,
+        models: ["probe-model"],
+        modelNames: new Map(),
+        endpoints: [],
+        apiKeys: [],
+      },
+    });
+  }
+
+  it("counts only the finding that would refuse a duty, whatever else went wrong on the way", async () => {
+    // The provider refuses the key outright — red in a real run, weather here,
+    // because doctor is not the run and nothing a provider says grants or
+    // denies anything.
+    probeFetch.mockResolvedValue(new Response("no", { status: 401 }));
+
+    const report = await mixedReport();
+
+    // Three failures, one problem.
+    expect(problems(report)).toBe(1);
+    const red = report.findings.filter((finding) => finding.severity === "red");
+    expect(red).toHaveLength(1);
+    expect(red[0]?.text).toContain("`duplicate` is granted `close`");
+    // And neither weather finding was lost on the way to that count.
+    const green = report.findings.filter((finding) => finding.severity === "green");
+    expect(green.some((finding) => finding.text.includes("not performed, capacity"))).toBe(true);
+    expect(green.some((finding) => finding.text.startsWith("Provider probe"))).toBe(true);
+  });
+
+  it("renders both registers on the page, each under its own heading", async () => {
+    probeFetch.mockResolvedValue(new Response("no", { status: 401 }));
+
+    const page = summarize(await mixedReport());
+    const problemsAt = page.indexOf("### Problems");
+    const notesAt = page.indexOf("### Notes");
+
+    expect(problemsAt).toBeGreaterThan(-1);
+    expect(notesAt).toBeGreaterThan(problemsAt);
+    // The red finding is above the notes; the weather is below it. A page that
+    // filed either one under the other heading would be telling a maintainer
+    // to fix the wrong thing.
+    expect(page.slice(problemsAt, notesAt)).toContain("`duplicate` is granted `close`");
+    expect(page.slice(notesAt)).toContain("Provider probe");
+    expect(page.slice(notesAt)).toContain("not performed, capacity");
+    expect(page.slice(problemsAt, notesAt)).not.toContain("Provider probe");
+  });
+
+  it("still refuses the duty's own row nothing, so the table and the finding agree", async () => {
+    // The row and the finding are two renderings of one decision: `close` is
+    // granted in the file and filtered out by the ladder, so the effective
+    // grant is empty and the note says where the difference came from. A
+    // report whose table quietly showed `close` would contradict its own
+    // problem list.
+    probeFetch.mockResolvedValue(new Response("no", { status: 401 }));
+
+    const report = await mixedReport();
+    const row = report.authority.find((entry) => entry.duty === "duplicate");
+
+    expect(row?.granted).toEqual([]);
+    expect(row?.unused).toEqual(["close"]);
+    expect(row?.denied).toBe(false);
+    expect(summarize(report)).toContain("this duty has no use for it");
   });
 });
