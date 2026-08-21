@@ -625,6 +625,57 @@ describe("closeSupersededPRs", () => {
     expect(closedPrs).not.toContain(20);
   });
 
+  it("keeps a scoped package's own pull request, whose branch holds the sanitised id", async () => {
+    // The regression this guards. `publishGroup` builds the branch from
+    // `sanitizeBranchSegment(group.id)`, so `@types/node` opens
+    // `reeve/dependa/branch-types-node` — while the active set holds the group
+    // id unsanitised. Comparing the two directly, no scoped group ever matches
+    // its own branch, so the run closed the pull request it had just opened as
+    // superseded. D3 then refuses to recreate a closed-unmerged proposal, and
+    // the dependency is un-updatable for ever after — silently, because both
+    // log lines are individually correct.
+    const closedPrs: number[] = [];
+    const api: PublishApi = {
+      rest: {
+        repos: {
+          get: () => Promise.resolve({ data: { default_branch: "main" } }),
+          getContent: () => Promise.reject(Object.assign(new Error("Not Found"), { status: 404 })),
+          createOrUpdateFileContents: () => Promise.resolve({}),
+          listCommits: () => Promise.resolve({ data: [] }),
+          compareCommits: () =>
+            Promise.resolve({ data: { ahead_by: 0, behind_by: 0, commits: [] } }),
+        },
+        git: {
+          getRef: () => Promise.resolve({ data: { object: { sha: "sha" } } }),
+          createRef: () => Promise.resolve({}),
+          updateRef: () => Promise.resolve({}),
+        },
+        pulls: {
+          list: () =>
+            Promise.resolve({
+              data: [
+                makePr(50, "reeve/dependa/branch-types-node", markerBody("@types/node")),
+                makePr(51, "reeve/dependa/branch-stale-scope", markerBody("@stale/scope")),
+              ],
+            }),
+          create: () => Promise.resolve({ data: { number: 99 } }),
+          update: (params) => {
+            if (params.state === "closed") closedPrs.push(params.pull_number);
+            return Promise.resolve({});
+          },
+        },
+      },
+    };
+
+    // The active set carries the id as the run computed it — unsanitised.
+    const count = await closeSupersededPRs(api, AT, new Set(["@types/node"]));
+
+    // The scoped group that is still active survives; the one that is not is
+    // still closed, so the fix did not simply stop closing anything.
+    expect(closedPrs).toEqual([51]);
+    expect(count).toBe(1);
+  });
+
   it("returns 0 when all open PRs are still active", async () => {
     const api: PublishApi = {
       rest: {
