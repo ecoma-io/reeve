@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.9.0](https://github.com/ecoma-io/reeve/compare/v0.8.0...v0.9.0) (2026-08-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **provider:** unify model roster grammar and stop model-id leaks ([#109](https://github.com/ecoma-io/reeve/issues/109))
+
+### Features
+
+* **dependa:** close the Renovate discovery gaps and dogfood for real ([#125](https://github.com/ecoma-io/reeve/issues/125)) ([185154d](https://github.com/ecoma-io/reeve/commit/185154de7f46c5ea5919f7d734dba65f2d5f357e))
+* **docs:** bootstrap README.vi.md and README.zh.md for harmonise ([#116](https://github.com/ecoma-io/reeve/issues/116)) ([cd8d12d](https://github.com/ecoma-io/reeve/commit/cd8d12dcfadcd7d7952617aee2e395c4aa6cb92e))
+* **harmonise:** bootstrap missing locale files and localise internal links ([#121](https://github.com/ecoma-io/reeve/issues/121)) ([42cde8c](https://github.com/ecoma-io/reeve/commit/42cde8c4feb2a69304542c7af6aa74a6faa2bd89))
+* **provider:** unify model roster grammar and stop model-id leaks ([#109](https://github.com/ecoma-io/reeve/issues/109)) ([4f91e3b](https://github.com/ecoma-io/reeve/commit/4f91e3b3a2ebcd3b9690ebd5bd4c02e01dd1dd48))
+* **review:** agentic mode — the diff served by bounded read-only tools ([#119](https://github.com/ecoma-io/reeve/issues/119)) ([5784e48](https://github.com/ecoma-io/reeve/commit/5784e480a89dba5f571883d44448527472aaa776))
+* **review:** enable review comment on dogfood PRs ([#114](https://github.com/ecoma-io/reeve/issues/114)) ([e933f3d](https://github.com/ecoma-io/reeve/commit/e933f3d5d0903e22545b52381af20f350c36b371))
+* **review:** generated-skip defaults, SARIF export, and the tool-loop doctrine ([#118](https://github.com/ecoma-io/reeve/issues/118)) ([2d408f0](https://github.com/ecoma-io/reeve/commit/2d408f0a6b08e4ebc759ebf1d57733678b36587c))
+* **review:** triple default budget to 12000, override to 600k/300k in dogfood ([#113](https://github.com/ecoma-io/reeve/issues/113)) ([d6ddcca](https://github.com/ecoma-io/reeve/commit/d6ddcca547fe31244eba8e41458461100891a8d0))
+* **translate:** branding line, shared glossary enforcement, and runtime-first README ([#122](https://github.com/ecoma-io/reeve/issues/122)) ([f67d69e](https://github.com/ecoma-io/reeve/commit/f67d69e70625c2e333267c478c5613df48b58369))
+* **translate:** fold boundary note and footer into each language's section ([#115](https://github.com/ecoma-io/reeve/issues/115)) ([44788ec](https://github.com/ecoma-io/reeve/commit/44788ec1509f9ed003e2c85b6fa902383363d4a8))
+
+
+### Bug Fixes
+
+* **ci:** repair fabricated action digest pins and run scripts self-tests ([#100](https://github.com/ecoma-io/reeve/issues/100)) ([79485df](https://github.com/ecoma-io/reeve/commit/79485df6d50b11a24f88df26a943f6a4fbe1eede))
+* **dependa:** parse pnpm-lock.yaml v9 with a real YAML parser ([#123](https://github.com/ecoma-io/reeve/issues/123)) ([48deb12](https://github.com/ecoma-io/reeve/commit/48deb124fe01db7d4a99fd55eddbd148108875e0))
+* **harmonise:** paths filter scopes document groups, not raw file paths ([#124](https://github.com/ecoma-io/reeve/issues/124)) ([e81b73a](https://github.com/ecoma-io/reeve/commit/e81b73ada7a6be41e4062eae4913359be30e7d16))
+* **review:** drop empty generated suffixes at the parse boundary ([#107](https://github.com/ecoma-io/reeve/issues/107)) ([752ff8e](https://github.com/ecoma-io/reeve/commit/752ff8e7ec8cd712f59f34222e575faa9e7862b3))
+* **review:** fail red when every pass is exhausted by protocol errors ([#103](https://github.com/ecoma-io/reeve/issues/103)) ([79adbb2](https://github.com/ecoma-io/reeve/commit/79adbb2b4d0ec497af026138da7ab3ad75909fa5))
+* **workspace:** determinism P1 — same input, same bytes, in any environment or listing order ([#104](https://github.com/ecoma-io/reeve/issues/104)) ([c39d2be](https://github.com/ecoma-io/reeve/commit/c39d2be1dee37f79dee548419576f861bb533d06))
+
 ## [0.8.0](https://github.com/ecoma-io/reeve/compare/v0.7.0...v0.8.0) (2026-08-18)
 
 
