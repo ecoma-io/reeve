@@ -158,25 +158,38 @@ describe("resolveOwnLogin", () => {
     expect(await resolveOwnLogin(api)).toBe("reeve[bot]");
   });
 
-  it("lets a refused identity read propagate rather than answering with a guess", async () => {
-    // A GitHub App installation token is refused by `/user` outright. The
-    // error reaching the caller is what keeps the run from proceeding with an
-    // identity nobody established.
+  it("answers the same unknown for a refused identity read as for a login-less one", async () => {
+    // A GitHub App installation token is refused by `/user` outright — 403
+    // "Resource not accessible by integration". This used to propagate, on
+    // the reasoning that an error reaching the caller is what keeps a run
+    // from proceeding with an identity nobody established.
+    //
+    // What it actually kept the run from was PROCEEDING AT ALL, on the path
+    // every consumer takes: `GITHUB_TOKEN` is an installation token, so the
+    // 403 is the default answer, not the exceptional one. This repository's
+    // own nightly lifecycle run and its run 48 both died here, before
+    // reading a single thread, and no repository without a PAT configured
+    // could ever have run the duty.
+    //
+    // So the refusal is now the same unknown a login-less 200 already
+    // produced, which `clock.ts`'s `isOwnActor` reads correctly: unknown is
+    // never a match, nothing is ever attributed to this duty on its
+    // strength. That answers the `""`-is-blessed worry this block used to
+    // carry a todo for — an unreadable identity is unusable now, not merely
+    // unequal. `main.ts` is where it is made unusable: an empty login turns
+    // the whole run observe-only, so a clock that cannot recognise its own
+    // markers cannot re-post them either. `main.integration.test.ts`'s
+    // "a token that cannot answer `GET /user`" block pins that end of it.
     const api = apiWith({}, { authFails: true });
 
-    await expect(resolveOwnLogin(api)).rejects.toThrow("Forbidden");
+    await expect(resolveOwnLogin(api)).resolves.toBe("");
   });
 
-  // An identity read that SUCCEEDS without a login answers `""`
-  // (`timeline.ts:141`), and `""` is also what `readEvents`/`readComments`
-  // answer for an actor GitHub no longer reports — two different unknowns that
-  // a `===` compared as the same actor, attributing every actorless event to
-  // this duty. That defect is fixed: `isOwnActor` in `clock.ts` never calls an
-  // unreadable identity a match, and the two tests at `clock.test.ts:491` and
-  // `:511` pin the pair of cases it used to get wrong. What is still a todo is
-  // only this end of it — reporting an unreadable identity as unusable instead
-  // of as `""` — left unpinned because pinning `""` would bless it.
-  it.todo("reports an unreadable identity as unusable rather than as an empty login");
+  it("answers the same unknown when the read succeeds carrying no login", async () => {
+    const api = apiWith({}, {});
+
+    await expect(resolveOwnLogin(api)).resolves.toBe("");
+  });
 });
 
 describe("isDraftPr", () => {

@@ -159,6 +159,13 @@ function thread(over: Partial<ThreadRecord> = {}): ThreadRecord {
 
 interface State {
   ownLogin: string;
+  /**
+   * `GET /user` answers 403 instead of a login — what a GitHub App
+   * installation token, which every default `GITHUB_TOKEN` is, actually gets
+   * back. The stub answered 200 unconditionally, which is why the duty
+   * shipped with a run-ending throw on the path every consumer takes.
+   */
+  ownLoginForbidden: boolean;
   threads: Map<number, ThreadRecord>;
   /** The order a sweep's listing hands threads back in — `main.ts` re-sorts oldest-first itself, so this need not be pre-sorted. */
   listing: number[];
@@ -185,6 +192,7 @@ type Stub = State & { readonly url: string; close(): Promise<void> };
 async function startStub(): Promise<Stub> {
   const state: State = {
     ownLogin: "reeve[bot]",
+    ownLoginForbidden: false,
     threads: new Map(),
     listing: [],
     repositoryLabels: ["bug", "stale", "pinned", "needs-attention"],
@@ -225,6 +233,10 @@ async function route(
   const raw = await readAll(request);
 
   if (method === "GET" && path === "/user") {
+    if (stub.ownLoginForbidden) {
+      send(response, 403, { message: "Resource not accessible by integration" });
+      return;
+    }
     send(response, 200, { login: stub.ownLogin });
     return;
   }
@@ -1071,5 +1083,101 @@ describe("the `label` gate on un-staling", () => {
     expect(run.code).toBe(0);
     expect(stub.effects.removed).toEqual([]);
     expect(run.outputs.unstaled).toBe("1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A token that cannot answer `GET /user`.
+//
+// `GITHUB_TOKEN` is a GitHub App installation token, and `GET /user` answers
+// 403 "Resource not accessible by integration" for every one of those — so
+// this is the path EVERY consumer takes unless they configured a personal
+// access token. The un-caught 403 failed the run before it reached its first
+// thread; catching it alone would have been worse, because `isOwnActor`
+// refuses to match an unknown identity, so no marker this duty posted would
+// ever be recognised as its own and every talking step would be re-posted on
+// every run. These cases pin the third answer: the run completes, computes
+// its whole ledger, and writes nothing.
+// ---------------------------------------------------------------------------
+
+describe("a token that cannot answer `GET /user`", () => {
+  const WHEN_WARRANT = [
+    "version: 1",
+    "labels:",
+    "  - name: bug",
+    "    description: A defect.",
+    "lifecycle:",
+    "  tracks:",
+    "    - name: stale",
+    "      when: needs-attention",
+    "      steps:",
+    "        - label: stale",
+    "          after: 14d",
+    "duties:",
+    "  lifecycle: [label, comment, close]",
+  ].join("\n");
+
+  beforeEach(() => {
+    stub.ownLoginForbidden = true;
+  });
+
+  it("completes the run instead of dying on the 403", async () => {
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(run.log).not.toContain("Resource not accessible by integration");
+  });
+
+  it("still computes the full ledger — the pipeline runs, only the writes are withheld", async () => {
+    const run = await runAction(stub);
+
+    expect(run.outputs.labeled).toBe("1");
+    expect(run.summary).toContain("labeled `stale`");
+  });
+
+  it("writes nothing at all to the thread", async () => {
+    // The same thread the first case in this file labels for real. Without an
+    // identity there is no attribution, and a duty that cannot attribute what
+    // it already did must not do more.
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.applied).toEqual([]);
+    expect(stub.effects.comments).toEqual([]);
+    expect(stub.effects.closed).toEqual([]);
+  });
+
+  it("says why it withheld them, rather than reading as a quiet no-op", async () => {
+    const run = await runAction(stub);
+
+    expect(run.log).toContain("cannot name itself");
+  });
+
+  it("removes no clock-hand label either, even one a bot plainly left behind", async () => {
+    // The thread the `label` gate suite un-stales with a resolved identity.
+    // With none, `isOwnActor` refuses the match and the observe-only fallback
+    // would refuse the write in any case — belt and braces, deliberately.
+    await writeFile(warrantPath, WHEN_WARRANT);
+    stub.threads.set(
+      42,
+      thread({
+        labels: ["stale"],
+        events: [
+          {
+            event: "labeled",
+            label: "stale",
+            login: stub.ownLogin,
+            bot: true,
+            createdAt: daysAgo(30).toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const run = await runAction(stub);
+
+    expect(run.code).toBe(0);
+    expect(stub.effects.removed).toEqual([]);
+    expect(run.outputs.unstaled).toBe("0");
   });
 });

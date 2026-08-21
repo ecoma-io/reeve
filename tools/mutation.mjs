@@ -131,7 +131,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * deliberate and visible rather than silent — which is the whole difference
  * between a gate that failed and a gate that was never asked.
  */
-const TABLE_FLOOR = 78;
+const TABLE_FLOOR = 81;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -1012,6 +1012,44 @@ export const MUTATIONS = [
     stage: "fast",
     owner: "TL2",
     note: "A branch name holds the sanitised id, so no scoped package ever matches: the run opens a pull request and closes it as superseded, and D3 then refuses to recreate it for ever.",
+  },
+  // ── the three seams the dogfood round found ─────────────────────────────
+  //
+  // Each of these was silent in a different way. The peer-suffix strip was a
+  // regex that matched nothing and therefore did nothing; the identity read
+  // was an exception nobody caught; the observe-only fallback is a single
+  // assignment whose absence looks exactly like the code without it. None
+  // would be noticed by reading the diff.
+  {
+    name: "nested pnpm peer suffix left on the resolved version",
+    file: "src/duties/dependa/managers/npm.ts",
+    from: "  return open === -1 ? raw : raw.slice(0, open);",
+    to: "  return raw;",
+    targets: ["src/duties/dependa/managers/npm.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "`currentVersion` comes out as `10.0.1(eslint@10.8.1(jiti@2.6.1))` rather than `10.0.1`, so `classifyUpdate` refuses it and every peer-resolved dependency in a pnpm v9 repository is dropped from maintenance.",
+  },
+  {
+    name: "a refused identity read kills the lifecycle run",
+    file: "src/duties/lifecycle/timeline.ts",
+    from: '  } catch {\n    return "";\n  }',
+    to: "  } catch (error) {\n    throw error;\n  }",
+    targets: ["src/duties/lifecycle/timeline.test.ts"],
+    stage: "fast",
+    owner: "TL2",
+    note: "`GET /user` answers 403 for every installation token, so the duty dies before its first thread in every repository running on the default `GITHUB_TOKEN`.",
+  },
+  {
+    name: "lifecycle writes without an identity to attribute the writes to",
+    file: "src/duties/lifecycle/main.ts",
+    from: "      settings = { ...settings, dryRun: true };",
+    to: "      settings = { ...settings };",
+    targets: ["src/duties/lifecycle/main.integration.test.ts"],
+    rebuilds: "lifecycle",
+    stage: "full",
+    owner: "TL2",
+    note: "A run that cannot read its own login labels, says and closes anyway — and since no marker it posts is recognisable as its own next run, it says the same thing again every run after that.",
   },
 ];
 // ── argv ────────────────────────────────────────────────────────────────────

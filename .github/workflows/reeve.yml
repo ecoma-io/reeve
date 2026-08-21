@@ -153,8 +153,15 @@ on:
     - cron: "17 3 * * 4" # Thursday — dependa shadow conformance
   workflow_dispatch:
     inputs:
+      # Required by every thread duty. `triage`, `translate`, `duplicate`,
+      # `respond` and `review` each act on ONE named thread — a dispatch that
+      # names none has nothing for them to read, and the leaf action says so by
+      # failing ("this event names no issue or pull request"). Their `if:`
+      # blocks below therefore gate on this input being non-empty, so a
+      # `duty: all` dispatch left blank runs the duties that sweep (lifecycle,
+      # harmonise, dependa, sweep) and quietly skips the five that cannot.
       number:
-        description: Issue or pull request number to act on
+        description: Issue or pull request number to act on (required by triage, translate, duplicate, respond, review)
         required: false
       # A manual run defaults to observation. The write duties (triage,
       # translate, harmonise, the sweep) answer to the warrant, and a maintainer
@@ -165,7 +172,8 @@ on:
         type: boolean
         default: true
       # Which duty a manual run exercises. `all` keeps the old behaviour —
-      # every job whose `if:` admits a dispatch runs. Naming one duty runs it
+      # every job whose `if:` admits a dispatch runs, which for the five thread
+      # duties means "and a `number` was given". Naming one duty runs it
       # alone, which is how a maintainer tests a single duty on demand
       # (`gh workflow run reeve.yml -f duty=dependa`) without waking the
       # other eight.
@@ -202,7 +210,7 @@ jobs:
     name: Triage
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'triage'))
+      (github.event_name == 'workflow_dispatch' && inputs.number != '' && (inputs.duty == 'all' || inputs.duty == 'triage'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -297,7 +305,7 @@ jobs:
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot') ||
       (github.event_name == 'pull_request_target' && github.event.pull_request.user.type != 'Bot') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'translate'))
+      (github.event_name == 'workflow_dispatch' && inputs.number != '' && (inputs.duty == 'all' || inputs.duty == 'translate'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -366,7 +374,7 @@ jobs:
     name: Duplicate check
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')) ||
-      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'duplicate'))
+      (github.event_name == 'workflow_dispatch' && inputs.number != '' && (inputs.duty == 'all' || inputs.duty == 'duplicate'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -432,7 +440,7 @@ jobs:
     name: First reply
     if: |
       (github.event_name == 'issues' && github.event.issue.user.type != 'Bot' && !endsWith(github.event.issue.user.login, '[bot]')) ||
-      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'respond'))
+      (github.event_name == 'workflow_dispatch' && inputs.number != '' && (inputs.duty == 'all' || inputs.duty == 'respond'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -620,7 +628,7 @@ jobs:
     name: Review
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot') ||
-      (github.event_name == 'workflow_dispatch' && (inputs.duty == 'all' || inputs.duty == 'review'))
+      (github.event_name == 'workflow_dispatch' && inputs.number != '' && (inputs.duty == 'all' || inputs.duty == 'review'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -765,6 +773,19 @@ jobs:
         uses: ecoma-io/reeve/dependa@main
         with:
           ecosystems: "npm, github-actions, docker, node-version"
+          # The manifests this repository actually maintains, named rather than
+          # left to a whole-tree scan. `dogfood/fixtures/*/package.json` are
+          # eight hand-written conformance fixtures — deliberately stale
+          # (`lodash: ^3.10.1`), partly fictional (`some-lib`, `another-lib`),
+          # and pinned so the comparison has a known answer to check against.
+          # A whole-tree scan reads them as real manifests, and with the
+          # warrant granting `edit-file, open-pr` the drafting row would open
+          # PRs bumping the very fixtures the conformance row measures itself
+          # by. `paths` is a prefix allowlist and doubles as the write
+          # boundary — only a discovered manifest is a valid edit target — so
+          # naming the four real ones fixes the scan and the blast radius in
+          # the same line.
+          paths: "package.json, pnpm-lock.yaml, .node-version, .github/workflows"
           dry-run: ${{ matrix.shape == 'conformance' || (github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
@@ -833,7 +854,14 @@ jobs:
       issues: write
       pull-requests: write
     concurrency:
-      group: reeve-dogfood-sweep
+      # Per matrix leg, the way the dependa matrix above is. One group for all
+      # three legs would put them in the same queue, and a group holds one
+      # running job plus one pending job — the third leg is cancelled before it
+      # starts, which is exactly what happened to `Sweep — translate` on run 48.
+      # The legs touch different threads and different duties; nothing about
+      # them needs serialising against each other, only against the next sweep
+      # of the same duty.
+      group: reeve-dogfood-sweep-${{ matrix.duty }}
       cancel-in-progress: false
     env:
       MODELS: ${{ secrets.ECOMA_REEVE_MODEL }}

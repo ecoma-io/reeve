@@ -165,6 +165,29 @@ declares it machine-managed state in the first place — a maintainer's own
 deliberate line in a reviewed file, which is the more considered of the two
 acts.
 
+## Acting needs a token that can name itself
+
+Every sentence above turns on one comparison: was this duty's own actor the
+one who did it? Answering needs the login the run authenticates as, and the
+only way to ask is `GET /user` — an endpoint a GitHub App installation token,
+which is exactly what the default `GITHUB_TOKEN` is, answers `403` for. So a
+run under the default token knows what it is doing but not who it is.
+
+When that happens the duty **reports and writes nothing**. The whole pipeline
+runs, every track is walked, the would-do ledger and the outputs are exactly
+what they would have been — and no label, comment or close reaches a thread. A
+notice says so once.
+
+That is stricter than it might look, and deliberately so. An unknown identity
+matches nothing, so un-staling already retracts nothing; but the same rule
+means no marker this duty posted is recognisable as its own, so a step that
+`say:`s would read as never having fired and would be posted again on the next
+run, and the one after that. Withholding the writes is the only answer that is
+neither a lie about the past nor noise in the future.
+
+Pass a personal access token as `github-token` to give the run an identity, and
+the writes come back with it.
+
 ## Outputs
 
 Every output `lifecycle/action.yml` declares.

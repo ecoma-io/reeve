@@ -36124,12 +36124,16 @@ function collectSectionVersions(record, versions) {
     }
   }
 }
+function stripPeerSuffix(raw) {
+  const open2 = raw.indexOf("(");
+  return open2 === -1 ? raw : raw.slice(0, open2);
+}
 function cleanResolvedVersion(raw) {
-  const stripped = raw.replace(/(?:\([^)]*\))+$/, "");
+  const stripped = stripPeerSuffix(raw);
   return /^\d/.test(stripped) ? stripped : null;
 }
 function parsePnpmPackageKey(key) {
-  const bare = (key.startsWith("/") ? key.slice(1) : key).replace(/(?:\([^)]*\))+$/, "");
+  const bare = stripPeerSuffix(key.startsWith("/") ? key.slice(1) : key);
   const at = bare.lastIndexOf("@");
   if (at > 0) {
     const name = bare.slice(0, at);

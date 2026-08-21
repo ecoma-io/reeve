@@ -957,6 +957,68 @@ describe("npm parse: pnpm-lock.yaml v9", () => {
     expect(resolved(lockfile, { "@commitlint/cli": "^21" }).version).toBe("21.2.1");
   });
 
+  // REGRESSION — a NESTED peer suffix kept the whole suffix as the version.
+  //
+  // The case above is flat: `21.2.1(a@1)(b@2)`, which `(?:\([^)]*\))+$`
+  // matches. From v9 pnpm nests them, and this repository's own lockfile is
+  // full of it: `@eslint/js` resolves to
+  // `10.0.1(eslint@10.8.1(jiti@2.6.1)(supports-color@7.2.0))`. `[^)]*` cannot
+  // cross the inner `)`, so the anchored group matched NOTHING and the strip
+  // was a no-op — `currentVersion` came out as the whole peer soup, which is
+  // not a version, so `classifyUpdate` returned null and the dependency was
+  // dropped with a "could not classify" line at `core.info`.
+  //
+  // Run 48's dogfood log is the record: every peer-resolved dependency in
+  // this repository — `@eslint/js`, `@vitest/eslint-plugin`,
+  // `eslint-config-prettier`, `typescript-eslint`, `vitest` — was refused
+  // that way, and `typescript-eslint 8.66.0 → 8.67.0` is a real update that
+  // was never proposed because of it.
+  //
+  // The fix cuts at the FIRST `(` instead of matching balanced groups from
+  // the end: a resolved version is semver, and semver has no parenthesis in
+  // it, so everything from the first one is peer context by construction.
+  it("strips a NESTED v9 peer suffix, not only a flat one", () => {
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    devDependencies:",
+      "      '@eslint/js':",
+      "        specifier: ^10.0.1",
+      "        version: 10.0.1(eslint@10.8.1(jiti@2.6.1)(supports-color@7.2.0))",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@eslint/js": "^10.0.1" }).version).toBe("10.0.1");
+  });
+
+  it("strips a peer suffix nested several levels deep", () => {
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "importers:",
+      "  .:",
+      "    devDependencies:",
+      "      '@vitest/eslint-plugin':",
+      "        specifier: ^1.6.26",
+      "        version: 1.6.26(@typescript-eslint/eslint-plugin@8.66.0(@typescript-eslint/parser@8.66.0(eslint@10.8.1(jiti@2.6.1))(typescript@5.9.3))(eslint@10.8.1(jiti@2.6.1))(typescript@5.9.3))(eslint@10.8.1(jiti@2.6.1))",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@vitest/eslint-plugin": "^1.6.26" }).version).toBe("1.6.26");
+  });
+
+  it("refuses a nested peer-suffixed packages key rather than confidently mis-splitting it", () => {
+    // Worse than a drop, before the fix: with the suffix still attached, the
+    // split at the last `@` landed inside `(supports-color@7.2.0)`, and
+    // `7.2.0))` starts with a digit — so a wrong name and a wrong version
+    // passed the `/^\d/` guard and were returned as an answer.
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "packages:",
+      "  '@eslint/js@10.0.1(eslint@10.8.1(jiti@2.6.1)(supports-color@7.2.0))':",
+    ].join("\n");
+
+    expect(resolved(lockfile, { "@eslint/js": "^10.0.1" }).version).toBe("10.0.1");
+  });
+
   it("never mistakes the specifier for the resolution", () => {
     // The specifier is the manifest's constraint echoed back. Reading it as
     // the installed version would measure every update from a range.
