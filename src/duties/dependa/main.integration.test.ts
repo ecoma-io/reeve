@@ -1308,27 +1308,30 @@ describe("auto-close", () => {
     expect(run.log).not.toContain("closed superseded PR");
   });
 
-  // For a SCOPED package the same run opens the pull request and then closes
-  // it, in that order, and the next run refuses to reopen it (D3, "closed
-  // without merge — refusing to recreate"). The dependency becomes permanently
-  // un-updatable.
-  //
-  // Why: `packageId` (`policy.ts:400-405`) rewrites `/` but keeps `@`, so the
-  // group id is `npm-@types-node-20.0.1`. `sanitizeBranchSegment`
-  // (`publish.ts:138-141`) then strips the `@`, so the branch is
-  // `reeve/dependa/npm--types-node-20.0.1`. `closeSupersededPRs`
-  // (`publish.ts:684`) recovers the group id by slicing the branch name and
-  // compares that against the ACTIVE set, which holds the unsanitised id — so
-  // no active group ever matches and every such pull request reads as
-  // superseded.
-  //
-  // Repro, verified red against the current source: the case above with
-  // `scopedPackage()` called first. Observed log:
-  //   "dependa: closed superseded PR #101 (group `npm--types-node-20.0.1` is
-  //    no longer proposed)."
-  // Left as a todo rather than pinned, because pinning the self-close would
-  // bless it. `scopedPackage` is kept beside it so the case is one line away.
-  it.todo("leaves the pull request it just opened alone for a scoped package too");
+  it("leaves the pull request it just opened alone for a scoped package too", async () => {
+    // This was the case the ordinary one above could not catch, and it cost a
+    // dependency permanently: the same run opened the pull request and then
+    // closed it, in that order, and the next run refused to reopen it (D3,
+    // "closed without merge — refusing to recreate").
+    //
+    // Why it only happened to scoped packages: `packageId` builds a group id
+    // that keeps the `@` (`npm-@types-node-20.0.1`), `sanitizeBranchSegment`
+    // strips it when it builds the branch (`reeve/dependa/npm--types-node-20.0.1`),
+    // and `closeSupersededPRs` compared the segment it read back off the branch
+    // against the set of unsanitised ids — which no scoped id could ever be in.
+    // Both log lines were present and neither was wrong on its own.
+    scopedPackage();
+    await perPackageAutoClose();
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(stub.pulls).toHaveLength(1);
+    expect(run.log).not.toContain("closed superseded PR");
+    // The pull request this run opened is still open, which is the fact the
+    // next run's D3 check reads.
+    expect(stub.updatedPulls).not.toContain(stub.pulls[0]?.number);
+  });
 
   it("closes a pull request whose group really is no longer proposed", async () => {
     // The other half: auto-close is a gate, not a constant. A dependa pull
@@ -1350,7 +1353,7 @@ describe("auto-close", () => {
     const run = await runAction();
 
     expect(run.code).toBe(0);
-    expect(run.log).toContain("no longer proposed");
+    expect(run.log).toContain("closed superseded PR #77");
     expect(stub.updatedPulls).toContain(77);
   });
 

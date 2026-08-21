@@ -12,7 +12,7 @@
  *
  * The second thing asserted throughout: a failure leaves this module carrying
  * the `kind` the provider gave it. Duties feed `verdict.failures` straight
- * into `failIfProtocolExhausted`, so a capacity failure rewritten as
+ * into `failIfRosterExhausted`, so a capacity failure rewritten as
  * `protocol` on the way through would turn an ordinary out-of-quota morning
  * into a red run, and a protocol failure rewritten as `capacity` would do the
  * reverse and hide a broken configuration.

@@ -113,7 +113,7 @@ import { createMeter, type Meter } from "../../core/meter.js";
 import {
   warnIfStarved,
   warnIfPanelIdle,
-  failIfProtocolExhausted,
+  failIfRosterExhausted,
   writeRunSummary,
 } from "../../core/summary.js";
 import {
@@ -390,7 +390,7 @@ async function runSweep(
         weather,
         meter,
         budget,
-        failIfProtocolExhausted,
+        failIfRosterExhausted,
       );
       return { number: thread.number, outcome: describeOutcome(result) };
     },
@@ -509,7 +509,7 @@ export async function run(): Promise<void> {
               weather,
               meter,
               budget,
-              failIfProtocolExhausted,
+              failIfRosterExhausted,
             );
       }
       single = { number, result };

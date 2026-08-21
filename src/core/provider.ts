@@ -967,23 +967,44 @@ export function starved(models: readonly string[], weather: Weather): boolean {
 }
 
 /**
- * True when every model on the roster failed for a non-capacity reason and
- * nobody answered — a model id that does not exist, a body that would not
- * parse, a field the provider rejected. These are configuration errors, not
- * weather, and a run that cannot reach a single usable answer this way should
- * not complete green.
+ * True when the roster came back with nothing usable and at least one model
+ * failed for a reason that is not capacity — a model id that does not exist, a
+ * body that would not parse, a field the provider rejected, a key the endpoint
+ * refused. Those are configuration errors, not weather, and
+ * [D5](../../docs/doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
+ * says a run that cannot do its job fails red rather than completing green
+ * with nothing in it.
  *
  * Called alongside `starved` at the point a duty knows its roster came back
- * empty. `starved` catches the capacity case; this catches the protocol case.
+ * empty. Between them the three cases are covered, and the third one is why
+ * this predicate reads `some(not capacity)` rather than `every(protocol)`:
+ *
+ *  - every failure is capacity → weather, D12. `starved` warns, the run stays
+ *    green, and the `starved` output says so. Unchanged.
+ *  - every failure is a configuration error → red. Unchanged.
+ *  - **a mixture** → red, and this is the case that used to fall through both.
+ *
+ * `every(f => f.kind === "protocol")` was false for a roster where one model
+ * answered `429` and the next served HTML, and `starved` was false because not
+ * every model was grounded. So nothing warned and nothing failed: the duty
+ * wrote `responded=false`, `commented=false`, `starved=false` and exited 0 —
+ * byte for byte what a run that correctly decided there was nothing to do
+ * writes. A maintainer could not tell the two apart, which is precisely the
+ * shape D5 exists to forbid. The multi-endpoint variant was worse: a real
+ * `401` on one endpoint alongside a protocol failure on another also exited 0,
+ * because `authExhausted` needs *every* endpoint to have refused the key
+ * before `settleAuth` throws.
+ *
+ * The `failures.length >= models.length` guard is what keeps this about an
+ * exhausted roster rather than a rotation that failed once and then succeeded.
+ * Every caller also reaches it only on the branch where nothing usable came
+ * back, so the two agree.
  */
-export function protocolExhausted(
-  models: readonly string[],
-  failures: readonly Failure[],
-): boolean {
+export function rosterExhausted(models: readonly string[], failures: readonly Failure[]): boolean {
   return (
     models.length > 0 &&
     failures.length >= models.length &&
-    failures.every((f) => f.kind === "protocol")
+    failures.some((f) => f.kind !== "capacity")
   );
 }
 

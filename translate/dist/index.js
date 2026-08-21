@@ -32237,8 +32237,8 @@ function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
 function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
-function protocolExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+function rosterExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.some((f) => f.kind !== "capacity");
 }
 function weatherFailure(model) {
   return {
@@ -32294,9 +32294,14 @@ function readErrorMessage(payload) {
   const error2 = asRecord(payload)?.error;
   if (typeof error2 === "string") return error2.trim().length > 0 ? error2 : null;
   const reported = asRecord(error2);
-  if (reported === null || Object.keys(reported).length === 0) return null;
+  if (reported === null) return null;
   const message = reported.message;
-  return typeof message === "string" && message.trim().length > 0 ? message : `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
+  if (typeof message === "string" && message.trim().length > 0) return message;
+  const carries = Object.values(reported).some(
+    (value) => value !== null && value !== void 0 && !(typeof value === "string" && value.trim().length === 0)
+  );
+  if (!carries) return null;
+  return `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
 }
 function asRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -32714,12 +32719,12 @@ function warnIfPanelIdle(seats, drafts) {
   }
   return idle;
 }
-function failIfProtocolExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
-  const exhausted2 = protocolExhausted(models, failures);
+function failIfRosterExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
+  const exhausted2 = rosterExhausted(models, failures);
   if (exhausted2) {
     const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     setFailed(
-      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+      `no model on the roster produced a usable answer, and at least one failed for a reason that is not capacity \u2014 this is a configuration problem, not weather. ${reasons}`
     );
   }
   return exhausted2;
@@ -36532,7 +36537,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
         weather,
         meter,
         budget,
-        failIfProtocolExhausted
+        failIfRosterExhausted
       );
       return { number: thread.number, outcome: describeOutcome(result) };
     }
@@ -36598,7 +36603,7 @@ async function run() {
           weather,
           meter,
           budget,
-          failIfProtocolExhausted
+          failIfRosterExhausted
         );
       }
       single = { number, result };

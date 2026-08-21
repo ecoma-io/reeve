@@ -18,7 +18,7 @@ import {
   shown,
   splitEndpointAlias,
   starved,
-  protocolExhausted,
+  rosterExhausted,
   weatherFailure,
   type Completion,
   type Failure,
@@ -799,23 +799,31 @@ describe("rotateModels", () => {
       expect(starved(["a", "b"], weather)).toBe(true);
     });
 
-    it("reports protocolExhausted when every model failed with a protocol error", () => {
+    it("reports rosterExhausted when every model failed with a protocol error", () => {
       const failures: Failure[] = [failed("a", "protocol"), failed("b", "protocol")];
-      expect(protocolExhausted(["a", "b"], failures)).toBe(true);
+      expect(rosterExhausted(["a", "b"], failures)).toBe(true);
     });
 
-    it("does not report protocolExhausted when at least one failure is capacity", () => {
+    it("reports rosterExhausted when a capacity failure sits beside a protocol one", () => {
+      // The mixture used to satisfy neither this predicate nor `starved`, so a
+      // roster that answered nothing produced a green run indistinguishable
+      // from one that had nothing to do.
       const failures: Failure[] = [failed("a", "protocol"), failed("b", "capacity")];
-      expect(protocolExhausted(["a", "b"], failures)).toBe(false);
+      expect(rosterExhausted(["a", "b"], failures)).toBe(true);
     });
 
-    it("does not report protocolExhausted for an empty roster", () => {
-      expect(protocolExhausted([], [])).toBe(false);
+    it("does not report rosterExhausted when every failure is capacity — that is `starved`", () => {
+      const failures: Failure[] = [failed("a", "capacity"), failed("b", "capacity")];
+      expect(rosterExhausted(["a", "b"], failures)).toBe(false);
     });
 
-    it("does not report protocolExhausted when fewer failures than models", () => {
+    it("does not report rosterExhausted for an empty roster", () => {
+      expect(rosterExhausted([], [])).toBe(false);
+    });
+
+    it("does not report rosterExhausted when fewer failures than models", () => {
       const failures: Failure[] = [failed("a", "protocol")];
-      expect(protocolExhausted(["a", "b"], failures)).toBe(false);
+      expect(rosterExhausted(["a", "b"], failures)).toBe(false);
     });
 
     it("reckon grounds on capacity and throws on auth, leaving protocol untouched", () => {

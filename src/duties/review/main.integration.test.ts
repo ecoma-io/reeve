@@ -1501,7 +1501,7 @@ describe("the action", () => {
     expect(stub.comments).toHaveLength(0);
     expect(run.outputs.commented).toBe("false");
     expect(run.outputs.findings).toBe("0");
-    expect(run.log).toContain("every model on the roster failed with a protocol error");
+    expect(run.log).toContain("no model on the roster produced a usable answer");
     expect(run.log).toContain("the model does not accept this prompt");
   });
 

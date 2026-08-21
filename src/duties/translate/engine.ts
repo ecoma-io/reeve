@@ -23,7 +23,7 @@ import { shown, type Failure, type Provider, type Weather } from "../../core/pro
  * reconstruct which operation's models exhausted the roster from any run-wide
  * aggregate. The callback receives the exact models and failures from the
  * single empty-draft operation, which is the only semantically safe input for
- * {@link failIfProtocolExhausted}: merging unrelated failures from separate
+ * {@link failIfRosterExhausted}: merging unrelated failures from separate
  * rotations could falsely imply the entire roster was protocol-exhausted when
  * each rotation independently had at least one success.
  *

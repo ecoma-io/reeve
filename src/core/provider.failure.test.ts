@@ -24,7 +24,7 @@ import {
   AuthenticationFailure,
   createProvider,
   createWeather,
-  protocolExhausted,
+  rosterExhausted,
   rotateModels,
   starved,
   type Completion,
@@ -297,7 +297,7 @@ describe("a roster no model on it can serve", () => {
   it("asks every unknown model in order and reports exhaustion rather than starvation", async () => {
     // The roster-mismatch case: three ids nobody at this endpoint has ever
     // heard of. It is a configuration error, not weather, and D5 says the run
-    // goes red — so `protocolExhausted` must be true and `starved` false, and
+    // goes red — so `rosterExhausted` must be true and `starved` false, and
     // nothing may be grounded, because a model that does not exist tells the
     // run nothing about the endpoint's capacity.
     const missing = (id: string) => () =>
@@ -314,7 +314,7 @@ describe("a roster no model on it can serve", () => {
 
     expect(asked).toEqual(["gone-1", "gone-2", "gone-3"]);
     expect(rotation.success).toBeNull();
-    expect(protocolExhausted(["gone-1", "gone-2", "gone-3"], rotation.failures)).toBe(true);
+    expect(rosterExhausted(["gone-1", "gone-2", "gone-3"], rotation.failures)).toBe(true);
     expect(starved(["gone-1", "gone-2", "gone-3"], weather)).toBe(false);
     expect(rotation.failures.map((failure) => failure.model)).toEqual([
       "gone-1",
@@ -399,7 +399,7 @@ describe("an `error` field that carries nothing does not condemn a good answer",
   //
   // That direction of the mistake is a run turning red on a provider that
   // answered. Every model on the roster fails with `protocol`, which is the
-  // one shape `failIfProtocolExhausted` is required to call a configuration
+  // one shape `failIfRosterExhausted` is required to call a configuration
   // error, so a gateway with this habit made every run of every duty red and
   // told the maintainer their configuration was broken.
   it.each([

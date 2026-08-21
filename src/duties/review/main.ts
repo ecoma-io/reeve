@@ -47,7 +47,7 @@ import {
   type Provider,
   type Weather,
 } from "../../core/provider.js";
-import { failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
+import { failIfRosterExhausted, writeRunSummary } from "../../core/summary.js";
 import {
   dutyLanguages,
   openAuthority,
@@ -732,14 +732,14 @@ async function decide(
   // roster failed with a protocol error — a decommissioned model id, a body
   // the provider rejected, a field it does not accept — that is a
   // configuration problem, not capacity weather, and a run that cannot do its
-  // job must not stay green behind warnings (D5). `failIfProtocolExhausted`
+  // job must not stay green behind warnings (D5). `failIfRosterExhausted`
   // draws the all-protocol vs all-capacity line itself, so capacity weather
   // keeps the green exit below; a pass that answered unreadably carries no
   // failures at all and is equally left green. The call must come before the
   // returns below so no path — comment denied, silent-no-verdict, dry run —
   // turns the red green.
   if (bounded.shown.length > 0 && readablePassCount === 0) {
-    failIfProtocolExhausted(
+    failIfRosterExhausted(
       settings.models,
       passResults.flatMap((result) => result.failures),
       settings.modelNames,

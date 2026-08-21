@@ -34,7 +34,7 @@ import { isCapacityError, type Location, readContentsFile } from "../../core/for
 import { createMeter } from "../../core/meter.js";
 import { assembleClient, createWeather, rotateModels, settleAuth } from "../../core/provider.js";
 import { cronMatches } from "./cron.js";
-import { warnIfStarved, failIfProtocolExhausted, writeRunSummary } from "../../core/summary.js";
+import { warnIfStarved, failIfRosterExhausted, writeRunSummary } from "../../core/summary.js";
 import { openAuthority, type Authority, type Warrant } from "../../core/warrant.js";
 
 import { budgetExhausted, createBudget } from "./budget.js";
@@ -393,7 +393,7 @@ export async function run(): Promise<void> {
               risk = { facts: riskFacts.facts, interpretation };
             }
           } else {
-            failIfProtocolExhausted(settings.models, rotation.failures, settings.modelNames);
+            failIfRosterExhausted(settings.models, rotation.failures, settings.modelNames);
           }
         }
 

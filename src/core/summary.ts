@@ -25,7 +25,7 @@ import * as core from "@actions/core";
 import { STAGE, total, type Spend } from "./meter.js";
 import {
   starved,
-  protocolExhausted,
+  rosterExhausted,
   shown,
   type Failure,
   type Names,
@@ -147,15 +147,19 @@ export function warnIfPanelIdle(seats: readonly (readonly string[])[], drafts: n
 }
 
 /**
- * When every model on the roster failed with a protocol error — a model id
- * that does not exist, a body the provider rejected, a field it does not
- * accept — the roster was not starved by capacity; it was exhausted by a
- * configuration error. A run like this must not stay green: [D5](../../docs/doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
+ * When the roster came back with nothing usable and at least one model failed
+ * for a reason that is not capacity — a model id that does not exist, a body
+ * the provider rejected, a field it does not accept, a key an endpoint refused
+ * — the roster was not starved by weather; it was exhausted by a configuration
+ * error. A run like this must not stay green: [D5](../../docs/doctrine/north-star.md#d5-failure-is-loud-it-is-never-plausible)
  * says a run that cannot do its job fails red.
  *
  * Call this after a rotation returns no usable answer, alongside
- * {@link warnIfStarved} for the capacity case. Returns `true` and sets the
- * job failed; returns `false` when the condition does not apply.
+ * {@link warnIfStarved} for the all-capacity case. Returns `true` and sets the
+ * job failed; returns `false` when the condition does not apply. See
+ * {@link rosterExhausted} for why a mixture of capacity and configuration
+ * failures belongs on this side of the line rather than falling between the
+ * two predicates, which is what it used to do.
  *
  * `names` is the same display map every other reader-facing line consults: a
  * model id is routinely a maintainer's secret, the log of a public repository
@@ -163,16 +167,17 @@ export function warnIfPanelIdle(seats: readonly (readonly string[])[], drafts: n
  * issue asking for help. A caller with no names simply omits it and the ids
  * show, which is the ordinary setting.
  */
-export function failIfProtocolExhausted(
+export function failIfRosterExhausted(
   models: readonly string[],
   failures: readonly Failure[],
   names: Names = new Map(),
 ): boolean {
-  const exhausted = protocolExhausted(models, failures);
+  const exhausted = rosterExhausted(models, failures);
   if (exhausted) {
     const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     core.setFailed(
-      `every model on the roster failed with a protocol error — this is a configuration problem, not capacity weather. ${reasons}`,
+      `no model on the roster produced a usable answer, and at least one failed for a reason ` +
+        `that is not capacity — this is a configuration problem, not weather. ${reasons}`,
     );
   }
   return exhausted;

@@ -29,7 +29,7 @@ import {
   createProvider,
   createRoutedProvider,
   createWeather,
-  protocolExhausted,
+  rosterExhausted,
   rotateModels,
   starved,
   type Completion,
@@ -158,7 +158,7 @@ describe("the roster is an ordered fallback chain", () => {
     await run([], {}, weather);
 
     expect(starved([], weather)).toBe(false);
-    expect(protocolExhausted([], [])).toBe(false);
+    expect(rosterExhausted([], [])).toBe(false);
   });
 });
 
@@ -238,7 +238,7 @@ describe("capacity failures are weather", () => {
     expect(rotation.failures[0]?.kind).toBe("capacity");
     expect(weather.grounded("a")).toBe(true);
     // Capacity is never a protocol exhaustion, whatever else went wrong.
-    expect(protocolExhausted(["a", "b"], rotation.failures)).toBe(false);
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(false);
   });
 
   it("reports_the_whole_roster_starved_when_every_model_ran_out_of_capacity", async () => {
@@ -255,9 +255,9 @@ describe("capacity failures are weather", () => {
     expect(asked).toEqual(["a", "b"]);
     expect(rotation.success).toBeNull();
     expect(starved(["a", "b"], weather)).toBe(true);
-    // Green-with-a-warning, not red: `protocolExhausted` is what turns a run
+    // Green-with-a-warning, not red: `rosterExhausted` is what turns a run
     // red, and a capacity-only run must never reach it.
-    expect(protocolExhausted(["a", "b"], rotation.failures)).toBe(false);
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(false);
   });
 
   it("a_network_error_is_capacity_and_grounds_the_whole_endpoint", async () => {
@@ -281,7 +281,7 @@ describe("capacity failures are weather", () => {
     expect(rotation.success).toBeNull();
     expect(rotation.failures[0]?.kind).toBe("capacity");
     expect(weather.grounded("b")).toBe(true);
-    expect(protocolExhausted(["a", "b"], rotation.failures)).toBe(false);
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(false);
   });
 
   it("a_timeout_is_capacity_but_grounds_only_the_model_that_hit_it", async () => {
@@ -468,11 +468,22 @@ describe("malformed model output is rejected, never delivered as an answer", () 
 
     expect(asked).toEqual(["a", "b"]);
     expect(rotation.success).toBeNull();
-    expect(protocolExhausted(["a", "b"], rotation.failures)).toBe(true);
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(true);
     expect(starved(["a", "b"], weather)).toBe(false);
   });
 
-  it("a_mixed_capacity_and_protocol_roster_is_neither_exhaustion_nor_starvation", async () => {
+  it("a_mixed_capacity_and_protocol_roster_is_exhaustion_even_though_it_is_not_starvation", async () => {
+    // The false green this round found, driven end to end. One model is rate
+    // limited and the next serves prose where JSON was demanded, so nothing
+    // usable comes back and the roster is spent.
+    //
+    // `starved` is correctly false — not every model was grounded, so a later
+    // stage could still try one. What was wrong was the other half: the
+    // exhaustion predicate asked whether EVERY failure was a protocol error,
+    // which the 429 made false, so the duty warned about nothing and exited 0
+    // with `responded=false`. That is byte for byte what a run that decided
+    // there was nothing to do writes, and D5 does not allow the two to look
+    // alike.
     const weather = createWeather();
     const { rotation } = await run(
       ["a", "b"],
@@ -484,8 +495,28 @@ describe("malformed model output is rejected, never delivered as an answer", () 
     );
 
     expect(rotation.success).toBeNull();
-    expect(protocolExhausted(["a", "b"], rotation.failures)).toBe(false);
+    expect(rotation.failures.map((failure) => failure.kind)).toEqual(["capacity", "protocol"]);
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(true);
     expect(starved(["a", "b"], weather)).toBe(false);
+  });
+
+  it("an_all_capacity_roster_is_starvation_and_not_exhaustion", async () => {
+    // The other side of the same line, so the case above cannot be satisfied
+    // by a predicate that simply says yes: weather alone stays green, reported
+    // through `starved`, which is D12.
+    const weather = createWeather();
+    const { rotation } = await run(
+      ["a", "b"],
+      {
+        a: () => new Response("{}", { status: 429 }),
+        b: () => new Response("{}", { status: 503 }),
+      },
+      weather,
+    );
+
+    expect(rotation.success).toBeNull();
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(false);
+    expect(starved(["a", "b"], weather)).toBe(true);
   });
 
   it("a_non_2xx_with_no_error_field_still_fails_rather_than_answering_empty", async () => {

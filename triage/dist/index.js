@@ -33525,8 +33525,8 @@ function createWeather(aliases = /* @__PURE__ */ new Set(), models) {
 function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
-function protocolExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind === "protocol");
+function rosterExhausted(models, failures) {
+  return models.length > 0 && failures.length >= models.length && failures.some((f) => f.kind !== "capacity");
 }
 function weatherFailure(model) {
   return {
@@ -33582,9 +33582,14 @@ function readErrorMessage(payload) {
   const error2 = asRecord(payload)?.error;
   if (typeof error2 === "string") return error2.trim().length > 0 ? error2 : null;
   const reported = asRecord(error2);
-  if (reported === null || Object.keys(reported).length === 0) return null;
+  if (reported === null) return null;
   const message = reported.message;
-  return typeof message === "string" && message.trim().length > 0 ? message : `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
+  if (typeof message === "string" && message.trim().length > 0) return message;
+  const carries = Object.values(reported).some(
+    (value) => value !== null && value !== void 0 && !(typeof value === "string" && value.trim().length === 0)
+  );
+  if (!carries) return null;
+  return `provider reported an error \u2014 ${excerpt(JSON.stringify(reported))}`;
 }
 function asRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
@@ -35511,12 +35516,13 @@ ${authored}`.trim();
   };
 }
 var HEADING = /^\s{0,3}#{1,6}\s/;
-var COMMENT = /<!--[\s\S]*?-->/g;
+var OPENER2 = "<!--";
+var CLOSER2 = "-->";
 var NO_RESPONSE = /^\s*_No response_\s*$/i;
 var UNTICKED = /^\s*[-*]\s*\[ \]\s/;
 var RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
 function strip(body) {
-  const withoutComments = body.replace(COMMENT, "\n");
+  const withoutComments = removeComments(body);
   let scaffolded = withoutComments !== body;
   const kept = [];
   for (const line of withoutComments.split("\n")) {
@@ -35527,6 +35533,21 @@ function strip(body) {
     kept.push(line);
   }
   return { scaffolded, authored: kept.join("\n").trim() };
+}
+function removeComments(body) {
+  const lastCloser = body.lastIndexOf(CLOSER2);
+  let out = "";
+  let read2 = 0;
+  for (; ; ) {
+    const opener = body.indexOf(OPENER2, read2);
+    if (opener === -1) return out + body.slice(read2);
+    if (opener + OPENER2.length > lastCloser) return out + body.slice(read2);
+    const closer = body.indexOf(CLOSER2, opener + OPENER2.length);
+    if (closer === -1) return out + body.slice(read2);
+    out += `${body.slice(read2, opener)}
+`;
+    read2 = closer + CLOSER2.length;
+  }
 }
 var LINK = /https?:\/\/\S/;
 var ERROR = /(^|\n)\s*(at\s+\S+\(|Traceback \(most recent call last\)|File "[^"]+", line \d)|\b([A-Za-z][A-Za-z0-9_.]*)?(Error|Exception|Panic|Fatal|Segmentation fault)\b|\bexit(ed with)? (code|status) [1-9]/i;
@@ -35729,12 +35750,12 @@ function warnIfStarved(models, weather, sweep) {
   if (rosterStarved) warning(starvedWarning(sweep));
   return rosterStarved;
 }
-function failIfProtocolExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
-  const exhausted = protocolExhausted(models, failures);
+function failIfRosterExhausted(models, failures, names = /* @__PURE__ */ new Map()) {
+  const exhausted = rosterExhausted(models, failures);
   if (exhausted) {
     const reasons = failures.map((f) => `${shown(names, f.model)}: ${f.reason}`).join("; ");
     setFailed(
-      `every model on the roster failed with a protocol error \u2014 this is a configuration problem, not capacity weather. ${reasons}`
+      `no model on the roster produced a usable answer, and at least one failed for a reason that is not capacity \u2014 this is a configuration problem, not weather. ${reasons}`
     );
   }
   return exhausted;
@@ -37854,7 +37875,7 @@ async function decide(authority2, standing, settings, stages, weather) {
   }
   const note = triaged.unreadable !== null ? "the verdict did not parse" : triaged.failures.length > 0 && triaged.verdict.labels.length === 0 ? "every model failed" : null;
   if (triaged.verdict.labels.length === 0) {
-    failIfProtocolExhausted(settings.models, triaged.failures, settings.modelNames);
+    failIfRosterExhausted(settings.models, triaged.failures, settings.modelNames);
   }
   const verdict2 = triaged.verdict;
   const decided = {
