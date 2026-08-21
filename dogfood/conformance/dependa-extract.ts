@@ -37,6 +37,7 @@ import { createGithubActionsManager } from "../../src/duties/dependa/managers/gi
 import { createCargoManager } from "../../src/duties/dependa/managers/cargo.js";
 import { createGoManager } from "../../src/duties/dependa/managers/go.js";
 import { createDockerManager } from "../../src/duties/dependa/managers/docker.js";
+import { createNodeVersionManager } from "../../src/duties/dependa/managers/node-version.js";
 import type { Manager } from "../../src/duties/dependa/managers/types.js";
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ function createManagers(): Manager[] {
     createCargoManager(),
     createGoManager(),
     createDockerManager(),
+    createNodeVersionManager(),
   ];
 }
 
@@ -132,8 +134,10 @@ function findManifests(manager: Manager, repoRoot: string): string[] {
     }
 
     for (const entry of entries) {
-      // Skip node_modules, .git, etc.
-      if (entry.name.startsWith(".") && entry.name !== ".github") continue;
+      // Skip hidden directories (.git, .cache, …) except .github — but keep
+      // hidden FILES: manifests like `.node-version` and `.nvmrc` are
+      // dotfiles, and the real action's Contents API tree walk sees them.
+      if (entry.isDirectory() && entry.name.startsWith(".") && entry.name !== ".github") continue;
       if (entry.name === "node_modules" || entry.name === "dist") continue;
 
       const fullPath = path.join(dir, entry.name);

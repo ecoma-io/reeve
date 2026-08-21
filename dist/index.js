@@ -32169,7 +32169,14 @@ function spelled(entry) {
 }
 
 // src/duties/dependa/model.ts
-var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
+var ECOSYSTEMS = [
+  "npm",
+  "github-actions",
+  "cargo",
+  "go",
+  "docker",
+  "node-version"
+];
 var UPDATE_TYPES = [
   "major",
   "minor",

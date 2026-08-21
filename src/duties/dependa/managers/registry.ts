@@ -131,6 +131,7 @@ function getLockfileNames(managerId: ManagerId): readonly string[] {
       return ["go.sum"];
     case "github-actions":
     case "docker":
+    case "node-version":
       return [];
   }
 }

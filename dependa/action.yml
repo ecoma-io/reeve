@@ -108,9 +108,9 @@ inputs:
   ecosystems:
     description: >-
       Which dependency ecosystems to scan, comma or newline separated. `npm`,
-      `github-actions`, `cargo`, `go`, `docker` — or empty for all known.
-      Unknown names are refused. This input narrows the warrant's own
-      `ecosystems:` list; it cannot widen it.
+      `github-actions`, `cargo`, `go`, `docker`, `node-version` — or empty for
+      all known. Unknown names are refused. This input narrows the warrant's
+      own `ecosystems:` list; it cannot widen it.
     required: false
     default: ""
 

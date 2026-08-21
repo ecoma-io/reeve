@@ -160,8 +160,11 @@ function parseFromLine(
  * - `node@sha256:abc123` → { image: "node", tag: null, digest: "sha256:abc123" }
  * - `node:20@sha256:abc123` → { image: "node", tag: "20", digest: "sha256:abc123" }
  * - `ghcr.io/owner/image:tag` → { image: "ghcr.io/owner/image", tag: "tag", digest: null }
+ *
+ * Exported for the GitHub Actions manager, whose workflow `container:` and
+ * `services:` images use exactly this grammar.
  */
-function parseImageRef(
+export function parseImageRef(
   ref: string,
 ): { image: string; tag: string | null; digest: string | null } | null {
   if (ref.length === 0) return null;

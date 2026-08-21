@@ -2097,9 +2097,9 @@ var require_dispatcher_base = __commonJS({
       }
       close(callback) {
         if (callback === void 0) {
-          return new Promise((resolve6, reject) => {
+          return new Promise((resolve7, reject) => {
             this.close((err, data) => {
-              return err ? reject(err) : resolve6(data);
+              return err ? reject(err) : resolve7(data);
             });
           });
         }
@@ -2137,12 +2137,12 @@ var require_dispatcher_base = __commonJS({
           err = null;
         }
         if (callback === void 0) {
-          return new Promise((resolve6, reject) => {
+          return new Promise((resolve7, reject) => {
             this.destroy(err, (err2, data) => {
               return err2 ? (
                 /* istanbul ignore next: should never error */
                 reject(err2)
-              ) : resolve6(data);
+              ) : resolve7(data);
             });
           });
         }
@@ -4409,8 +4409,8 @@ var require_util2 = __commonJS({
     function createDeferredPromise() {
       let res;
       let rej;
-      const promise = new Promise((resolve6, reject) => {
-        res = resolve6;
+      const promise = new Promise((resolve7, reject) => {
+        res = resolve7;
         rej = reject;
       });
       return { promise, resolve: res, reject: rej };
@@ -6657,12 +6657,12 @@ upgrade: ${upgrade}\r
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve6, reject) => {
+      const waitForDrain = () => new Promise((resolve7, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve6;
+          callback = resolve7;
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
@@ -7299,12 +7299,12 @@ var require_client_h2 = __commonJS({
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve6, reject) => {
+      const waitForDrain = () => new Promise((resolve7, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve6;
+          callback = resolve7;
         }
       });
       h2stream.on("close", onDrain).on("drain", onDrain);
@@ -7782,16 +7782,16 @@ var require_client = __commonJS({
         return this[kNeedDrain] < 2;
       }
       async [kClose]() {
-        return new Promise((resolve6) => {
+        return new Promise((resolve7) => {
           if (this[kSize]) {
-            this[kClosedResolve] = resolve6;
+            this[kClosedResolve] = resolve7;
           } else {
-            resolve6(null);
+            resolve7(null);
           }
         });
       }
       async [kDestroy](err) {
-        return new Promise((resolve6) => {
+        return new Promise((resolve7) => {
           const requests = this[kQueue].splice(this[kPendingIdx]);
           for (let i = 0; i < requests.length; i++) {
             const request2 = requests[i];
@@ -7802,7 +7802,7 @@ var require_client = __commonJS({
               this[kClosedResolve]();
               this[kClosedResolve] = null;
             }
-            resolve6(null);
+            resolve7(null);
           };
           if (this[kHTTPContext]) {
             this[kHTTPContext].destroy(err, callback);
@@ -7853,7 +7853,7 @@ var require_client = __commonJS({
         });
       }
       try {
-        const socket = await new Promise((resolve6, reject) => {
+        const socket = await new Promise((resolve7, reject) => {
           client[kConnector]({
             host,
             hostname,
@@ -7865,7 +7865,7 @@ var require_client = __commonJS({
             if (err) {
               reject(err);
             } else {
-              resolve6(socket2);
+              resolve7(socket2);
             }
           });
         });
@@ -8201,8 +8201,8 @@ var require_pool_base = __commonJS({
         if (this[kQueue].isEmpty()) {
           await Promise.all(this[kClients].map((c) => c.close()));
         } else {
-          await new Promise((resolve6) => {
-            this[kClosedResolve] = resolve6;
+          await new Promise((resolve7) => {
+            this[kClosedResolve] = resolve7;
           });
         }
       }
@@ -9445,7 +9445,7 @@ var require_readable = __commonJS({
         if (this._readableState.closeEmitted) {
           return null;
         }
-        return await new Promise((resolve6, reject) => {
+        return await new Promise((resolve7, reject) => {
           if (this[kContentLength] > limit) {
             this.destroy(new AbortError());
           }
@@ -9458,7 +9458,7 @@ var require_readable = __commonJS({
             if (signal?.aborted) {
               reject(signal.reason ?? new AbortError());
             } else {
-              resolve6(null);
+              resolve7(null);
             }
           }).on("error", noop3).on("data", function(chunk) {
             limit -= chunk.length;
@@ -9477,7 +9477,7 @@ var require_readable = __commonJS({
     }
     async function consume(stream, type) {
       assert(!stream[kConsume]);
-      return new Promise((resolve6, reject) => {
+      return new Promise((resolve7, reject) => {
         if (isUnusable(stream)) {
           const rState = stream._readableState;
           if (rState.destroyed && rState.closeEmitted === false) {
@@ -9494,7 +9494,7 @@ var require_readable = __commonJS({
             stream[kConsume] = {
               type,
               stream,
-              resolve: resolve6,
+              resolve: resolve7,
               reject,
               length: 0,
               body: []
@@ -9564,18 +9564,18 @@ var require_readable = __commonJS({
       return buffer;
     }
     function consumeEnd(consume2) {
-      const { type, body, resolve: resolve6, stream, length } = consume2;
+      const { type, body, resolve: resolve7, stream, length } = consume2;
       try {
         if (type === "text") {
-          resolve6(chunksDecode(body, length));
+          resolve7(chunksDecode(body, length));
         } else if (type === "json") {
-          resolve6(JSON.parse(chunksDecode(body, length)));
+          resolve7(JSON.parse(chunksDecode(body, length)));
         } else if (type === "arrayBuffer") {
-          resolve6(chunksConcat(body, length).buffer);
+          resolve7(chunksConcat(body, length).buffer);
         } else if (type === "blob") {
-          resolve6(new Blob(body, { type: stream[kContentType] }));
+          resolve7(new Blob(body, { type: stream[kContentType] }));
         } else if (type === "bytes") {
-          resolve6(chunksConcat(body, length));
+          resolve7(chunksConcat(body, length));
         }
         consumeFinish(consume2);
       } catch (err) {
@@ -9832,9 +9832,9 @@ var require_api_request = __commonJS({
     };
     function request2(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           request2.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve6(data);
+            return err ? reject(err) : resolve7(data);
           });
         });
       }
@@ -10057,9 +10057,9 @@ var require_api_stream = __commonJS({
     };
     function stream(opts, factory, callback) {
       if (callback === void 0) {
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           stream.call(this, opts, factory, (err, data) => {
-            return err ? reject(err) : resolve6(data);
+            return err ? reject(err) : resolve7(data);
           });
         });
       }
@@ -10344,9 +10344,9 @@ var require_api_upgrade = __commonJS({
     };
     function upgrade(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           upgrade.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve6(data);
+            return err ? reject(err) : resolve7(data);
           });
         });
       }
@@ -10438,9 +10438,9 @@ var require_api_connect = __commonJS({
     };
     function connect(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve6, reject) => {
+        return new Promise((resolve7, reject) => {
           connect.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve6(data);
+            return err ? reject(err) : resolve7(data);
           });
         });
       }
@@ -14302,7 +14302,7 @@ var require_fetch = __commonJS({
       function dispatch({ body }) {
         const url = requestCurrentURL(request2);
         const agent = fetchParams.controller.dispatcher;
-        return new Promise((resolve6, reject) => agent.dispatch(
+        return new Promise((resolve7, reject) => agent.dispatch(
           {
             path: url.pathname + url.search,
             origin: url.origin,
@@ -14378,7 +14378,7 @@ var require_fetch = __commonJS({
                 }
               }
               const onError = this.onError.bind(this);
-              resolve6({
+              resolve7({
                 status,
                 statusText,
                 headersList,
@@ -14424,7 +14424,7 @@ var require_fetch = __commonJS({
               for (let i = 0; i < rawHeaders.length; i += 2) {
                 headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString("latin1"), true);
               }
-              resolve6({
+              resolve7({
                 status,
                 statusText: STATUS_CODES[status],
                 headersList,
@@ -18155,8 +18155,8 @@ var require_util8 = __commonJS({
       return true;
     }
     function delay(ms) {
-      return new Promise((resolve6) => {
-        setTimeout(resolve6, ms).unref();
+      return new Promise((resolve7) => {
+        setTimeout(resolve7, ms).unref();
       });
     }
     module.exports = {
@@ -18960,11 +18960,11 @@ var require_lib = __commonJS({
     })();
     var __awaiter3 = exports && exports.__awaiter || function(thisArg, _arguments, P, generator) {
       function adopt(value) {
-        return value instanceof P ? value : new P(function(resolve6) {
-          resolve6(value);
+        return value instanceof P ? value : new P(function(resolve7) {
+          resolve7(value);
         });
       }
-      return new (P || (P = Promise))(function(resolve6, reject) {
+      return new (P || (P = Promise))(function(resolve7, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -18980,7 +18980,7 @@ var require_lib = __commonJS({
           }
         }
         function step(result) {
-          result.done ? resolve6(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve7(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -19067,26 +19067,26 @@ var require_lib = __commonJS({
       }
       readBody() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve6) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve7) => __awaiter3(this, void 0, void 0, function* () {
             let output = Buffer.alloc(0);
             this.message.on("data", (chunk) => {
               output = Buffer.concat([output, chunk]);
             });
             this.message.on("end", () => {
-              resolve6(output.toString());
+              resolve7(output.toString());
             });
           }));
         });
       }
       readBodyBuffer() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve6) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve7) => __awaiter3(this, void 0, void 0, function* () {
             const chunks = [];
             this.message.on("data", (chunk) => {
               chunks.push(chunk);
             });
             this.message.on("end", () => {
-              resolve6(Buffer.concat(chunks));
+              resolve7(Buffer.concat(chunks));
             });
           }));
         });
@@ -19294,14 +19294,14 @@ var require_lib = __commonJS({
        */
       requestRaw(info2, data) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve6, reject) => {
+          return new Promise((resolve7, reject) => {
             function callbackForResult(err, res) {
               if (err) {
                 reject(err);
               } else if (!res) {
                 reject(new Error("Unknown error"));
               } else {
-                resolve6(res);
+                resolve7(res);
               }
             }
             this.requestRawWithCallback(info2, data, callbackForResult);
@@ -19545,12 +19545,12 @@ var require_lib = __commonJS({
         return __awaiter3(this, void 0, void 0, function* () {
           retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
           const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-          return new Promise((resolve6) => setTimeout(() => resolve6(), ms));
+          return new Promise((resolve7) => setTimeout(() => resolve7(), ms));
         });
       }
       _processResponse(res, options) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve6, reject) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve7, reject) => __awaiter3(this, void 0, void 0, function* () {
             const statusCode = res.message.statusCode || 0;
             const response = {
               statusCode,
@@ -19558,7 +19558,7 @@ var require_lib = __commonJS({
               headers: {}
             };
             if (statusCode === HttpCodes2.NotFound) {
-              resolve6(response);
+              resolve7(response);
             }
             function dateTimeDeserializer(key, value) {
               if (typeof value === "string") {
@@ -19597,7 +19597,7 @@ var require_lib = __commonJS({
               err.result = response.result;
               reject(err);
             } else {
-              resolve6(response);
+              resolve7(response);
             }
           }));
         });
@@ -19619,7 +19619,7 @@ var require_dist = __commonJS({
      */
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.format = format;
-    exports.parse = parse10;
+    exports.parse = parse11;
     var TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
     var TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
     var QUOTE_REGEXP = /[\\"]/g;
@@ -19646,7 +19646,7 @@ var require_dist = __commonJS({
       }
       return result;
     }
-    function parse10(header, options) {
+    function parse11(header, options) {
       const len = header.length;
       let index = skipOWS(header, 0, len);
       const valueStart = index;
@@ -26971,7 +26971,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse10(src, reviver, options) {
+    function parse11(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -27012,7 +27012,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports.parse = parse10;
+    exports.parse = parse11;
     exports.parseAllDocuments = parseAllDocuments;
     exports.parseDocument = parseDocument;
     exports.stringify = stringify;
@@ -27233,11 +27233,11 @@ import { EOL as EOL3 } from "os";
 import { constants, promises } from "fs";
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
-    return value instanceof P ? value : new P(function(resolve6) {
-      resolve6(value);
+    return value instanceof P ? value : new P(function(resolve7) {
+      resolve7(value);
     });
   }
-  return new (P || (P = Promise))(function(resolve6, reject) {
+  return new (P || (P = Promise))(function(resolve7, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -27253,7 +27253,7 @@ var __awaiter = function(thisArg, _arguments, P, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve6(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve7(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -27643,11 +27643,11 @@ var httpClient = __toESM(require_lib(), 1);
 var import_undici2 = __toESM(require_undici(), 1);
 var __awaiter2 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
-    return value instanceof P ? value : new P(function(resolve6) {
-      resolve6(value);
+    return value instanceof P ? value : new P(function(resolve7) {
+      resolve7(value);
     });
   }
-  return new (P || (P = Promise))(function(resolve6, reject) {
+  return new (P || (P = Promise))(function(resolve7, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -27663,7 +27663,7 @@ var __awaiter2 = function(thisArg, _arguments, P, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve6(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve7(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -32433,7 +32433,14 @@ function spelled(entry) {
 }
 
 // src/duties/dependa/model.ts
-var ECOSYSTEMS = ["npm", "github-actions", "cargo", "go", "docker"];
+var ECOSYSTEMS = [
+  "npm",
+  "github-actions",
+  "cargo",
+  "go",
+  "docker",
+  "node-version"
+];
 var UPDATE_TYPES = [
   "major",
   "minor",
@@ -34088,17 +34095,84 @@ function temporarilyUnavailable4(error2) {
   };
 }
 
-// src/duties/dependa/datasources/npm.ts
-var ID5 = "npm";
-var NPM_REGISTRY = "https://registry.npmjs.org";
-function createNpmDatasource() {
+// src/duties/dependa/datasources/node-version.ts
+var ID5 = "node-version";
+var RELEASE_INDEX_URL = "https://nodejs.org/dist/index.json";
+function createNodeVersionDatasource() {
   return {
     id: ID5,
-    ecosystem: "npm",
+    ecosystem: "node-version",
     resolve: resolve5
   };
 }
 async function resolve5(packageName) {
+  if (packageName !== "node") {
+    return { status: "not-found" };
+  }
+  let response;
+  try {
+    response = await fetch(RELEASE_INDEX_URL, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(3e4)
+    });
+  } catch (error2) {
+    return {
+      status: "temporarily-unavailable",
+      reason: `Node release index unreachable: ${error2 instanceof Error ? error2.message : String(error2)}`
+    };
+  }
+  if (response.status === 429 || response.status >= 500) {
+    return {
+      status: "temporarily-unavailable",
+      reason: `Node release index returned ${String(response.status)}`
+    };
+  }
+  if (!response.ok) {
+    return { status: "not-found" };
+  }
+  let index;
+  try {
+    index = await response.json();
+  } catch {
+    return { status: "malformed-metadata", reason: "Node release index is not valid JSON" };
+  }
+  if (!Array.isArray(index)) {
+    return { status: "malformed-metadata", reason: "Node release index is not an array" };
+  }
+  const releases = [];
+  for (const entry of index) {
+    if (typeof entry.version !== "string") continue;
+    const version = entry.version.startsWith("v") ? entry.version.slice(1) : entry.version;
+    if (!/^\d+\.\d+\.\d+$/.test(version)) continue;
+    const releasedAt = typeof entry.date === "string" && !Number.isNaN(Date.parse(entry.date)) ? new Date(entry.date) : null;
+    releases.push({
+      version,
+      releasedAt,
+      deprecated: false,
+      yanked: false,
+      // The index lists releases only; pre-releases live elsewhere.
+      isPrerelease: false,
+      changelogUrl: `https://github.com/nodejs/node/releases/tag/v${version}`,
+      diffUrl: null
+    });
+  }
+  if (releases.length === 0) {
+    return { status: "malformed-metadata", reason: "Node release index listed no versions" };
+  }
+  return { status: "available", releases };
+}
+
+// src/duties/dependa/datasources/npm.ts
+var ID6 = "npm";
+var NPM_REGISTRY = "https://registry.npmjs.org";
+function createNpmDatasource() {
+  return {
+    id: ID6,
+    ecosystem: "npm",
+    resolve: resolve6
+  };
+}
+async function resolve6(packageName) {
   const encodedName = packageName.startsWith("@") ? packageName.replaceAll("/", "%2F") : packageName;
   const url = `${NPM_REGISTRY}/${encodedName}`;
   let response;
@@ -34858,11 +34932,11 @@ function parsePaths(raw) {
 }
 
 // src/duties/dependa/managers/cargo.ts
-var ID6 = "cargo";
+var ID7 = "cargo";
 var MANIFEST_FILENAMES = ["Cargo.toml"];
 function createCargoManager() {
   return {
-    id: ID6,
+    id: ID7,
     ecosystem: "cargo",
     manifestFilenames: MANIFEST_FILENAMES,
     parse: parse4,
@@ -34894,7 +34968,7 @@ function parse4(manifestPath, manifestContent, lockfileContent) {
           currentVersion: "",
           manifestPath,
           dev,
-          manager: ID6
+          manager: ID7
         });
         continue;
       }
@@ -34906,7 +34980,7 @@ function parse4(manifestPath, manifestContent, lockfileContent) {
         currentVersion,
         manifestPath,
         dev,
-        manager: ID6
+        manager: ID7
       });
     }
   }
@@ -35156,11 +35230,11 @@ function escapeRegex(str) {
 }
 
 // src/duties/dependa/managers/docker.ts
-var ID7 = "docker";
+var ID8 = "docker";
 var MANIFEST_FILENAMES2 = ["Dockerfile"];
 function createDockerManager() {
   return {
-    id: ID7,
+    id: ID8,
     ecosystem: "docker",
     manifestFilenames: MANIFEST_FILENAMES2,
     parse: parse5,
@@ -35202,7 +35276,7 @@ function parse5(manifestPath, manifestContent, _lockfileContent) {
       currentVersion: isDigest ? match.digest ?? "" : tag,
       manifestPath,
       dev: false,
-      manager: ID7
+      manager: ID8
     });
   }
   return { manifestPath, dependencies, partial: false };
@@ -35516,7 +35590,7 @@ function isSha(version) {
 }
 
 // src/duties/dependa/managers/github-actions.ts
-var ID8 = "github-actions";
+var ID9 = "github-actions";
 var WORKFLOW_DIR = ".github/workflows";
 var MANIFEST_FILENAMES3 = [
   // These are matched by the registry's `endsWith` check, so we provide
@@ -35530,7 +35604,7 @@ var MANIFEST_FILENAMES3 = [
 ];
 function createGithubActionsManager() {
   return {
-    id: ID8,
+    id: ID9,
     ecosystem: "github-actions",
     manifestFilenames: MANIFEST_FILENAMES3,
     parse: parse7,
@@ -35547,23 +35621,60 @@ function parse7(manifestPath, manifestContent, _lockfileContent) {
   const lines = manifestContent.split("\n");
   for (const line of lines) {
     const match = parseUsesLine(line);
-    if (match === null) continue;
-    const key = `${match.owner}/${match.repo}@${match.ref}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const fullName = `${match.owner}/${match.repo}`;
-    const isDigest = isSha(match.ref);
-    dependencies.push({
-      ecosystem: "github-actions",
-      name: fullName,
-      constraint: isDigest ? null : match.ref,
-      currentVersion: match.ref,
-      manifestPath,
-      dev: false,
-      manager: ID8
-    });
+    if (match !== null) {
+      const key = `${match.owner}/${match.repo}@${match.ref}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const fullName = `${match.owner}/${match.repo}`;
+      const isDigest = isSha(match.ref);
+      dependencies.push({
+        ecosystem: "github-actions",
+        name: fullName,
+        constraint: isDigest ? null : match.ref,
+        currentVersion: match.ref,
+        manifestPath,
+        dev: false,
+        manager: ID9
+      });
+      continue;
+    }
+    const image = parseImageLine(line);
+    if (image !== null) {
+      const key = `image ${image.image}:${image.tag ?? "latest"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const isDigest = image.digest !== null;
+      dependencies.push({
+        ecosystem: "docker",
+        name: image.image,
+        // Same constraint shape as the docker manager's FROM handling: an
+        // explicit tag is the constraint; an untagged, undigested image is
+        // implicitly `latest`; a digest-only reference has no constraint.
+        constraint: image.tag ?? (isDigest ? null : "latest"),
+        currentVersion: isDigest ? image.digest ?? "" : image.tag ?? "latest",
+        manifestPath,
+        dev: false,
+        manager: ID9
+      });
+    }
   }
   return { manifestPath, dependencies, partial: false };
+}
+function parseImageLine(line) {
+  const trimmed = line.trim().replace(/^-\s+/, "");
+  let value = null;
+  if (trimmed.startsWith("image:")) {
+    value = trimmed.slice("image:".length).trim();
+  } else if (trimmed.startsWith("container:")) {
+    value = trimmed.slice("container:".length).trim();
+  }
+  if (value === null || value.length === 0) return null;
+  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
+    value = value.slice(1, -1);
+  }
+  if (value.length === 0 || value.includes("${{")) return null;
+  if (!value.includes(":") && !value.includes("/")) return null;
+  return parseImageRef(value);
 }
 function parseUsesLine(line) {
   const trimmed = line.trim().replace(/^-\s+/, "");
@@ -35588,6 +35699,9 @@ function parseUsesLine(line) {
   return { owner, repo, ref };
 }
 function applyUpdate3(manifestContent, proposal) {
+  if (proposal.dependency.ecosystem === "docker") {
+    return applyImageUpdate(manifestContent, proposal);
+  }
   const fullName = proposal.dependency.name;
   const oldRef = proposal.dependency.currentVersion;
   const newRef = proposal.targetVersion;
@@ -35610,13 +35724,50 @@ function applyUpdate3(manifestContent, proposal) {
   if (!replaced) return null;
   return newLines.join("\n");
 }
+function applyImageUpdate(manifestContent, proposal) {
+  const imageName = proposal.dependency.name;
+  const oldVersion = proposal.currentVersion;
+  const newVersion = proposal.targetVersion;
+  const lines = manifestContent.split("\n");
+  const newLines = [];
+  let replaced = false;
+  for (const line of lines) {
+    if (parseImageLine(line) === null || !line.includes(imageName)) {
+      newLines.push(line);
+      continue;
+    }
+    let modifiedLine = line;
+    if (!oldVersion.startsWith("sha256:") && !newVersion.startsWith("sha256:")) {
+      const tagBoundaryPattern = new RegExp(
+        `${escapeRegex3(imageName)}:${escapeRegex3(oldVersion)}(?=[\\s@"']|$)`
+      );
+      if (tagBoundaryPattern.test(modifiedLine)) {
+        modifiedLine = modifiedLine.replace(tagBoundaryPattern, `${imageName}:${newVersion}`);
+        replaced = true;
+      }
+    }
+    if (oldVersion.startsWith("sha256:") && newVersion.startsWith("sha256:")) {
+      const oldDigest = `@${oldVersion}`;
+      if (modifiedLine.includes(oldDigest)) {
+        modifiedLine = modifiedLine.replace(oldDigest, `@${newVersion}`);
+        replaced = true;
+      }
+    }
+    newLines.push(modifiedLine);
+  }
+  if (!replaced) return null;
+  return newLines.join("\n");
+}
+function escapeRegex3(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // src/duties/dependa/managers/go.ts
-var ID9 = "go";
+var ID10 = "go";
 var MANIFEST_FILENAMES4 = ["go.mod"];
 function createGoManager() {
   return {
-    id: ID9,
+    id: ID10,
     ecosystem: "go",
     manifestFilenames: MANIFEST_FILENAMES4,
     parse: parse8,
@@ -35644,7 +35795,7 @@ function parse8(manifestPath, manifestContent, lockfileContent) {
       manifestPath,
       dev: isIndirect,
       // Use dev flag to mark indirect dependencies
-      manager: ID9
+      manager: ID10
     });
   }
   return { manifestPath, dependencies, partial };
@@ -35727,20 +35878,80 @@ function applyUpdate4(manifestContent, proposal) {
   return newLines.join("\n");
 }
 
-// src/duties/dependa/managers/npm.ts
-var import_yaml2 = __toESM(require_dist2(), 1);
-var ID10 = "npm";
-var MANIFEST_FILENAMES5 = ["package.json"];
-function createNpmManager() {
+// src/duties/dependa/managers/node-version.ts
+var ID11 = "node-version";
+var MANIFEST_FILENAMES5 = [".node-version", ".nvmrc"];
+function createNodeVersionManager() {
   return {
-    id: ID10,
-    ecosystem: "npm",
+    id: ID11,
+    ecosystem: "node-version",
     manifestFilenames: MANIFEST_FILENAMES5,
     parse: parse9,
     applyUpdate: applyUpdate5
   };
 }
-function parse9(manifestPath, manifestContent, lockfileContent) {
+function parse9(manifestPath, manifestContent, _lockfileContent) {
+  const reference = firstReference(manifestContent);
+  if (reference === null) {
+    return { manifestPath, dependencies: [], partial: false };
+  }
+  const bare = stripPrefix(reference);
+  const isFullPin = /^\d+\.\d+\.\d+$/.test(bare);
+  const dependencies = [
+    {
+      ecosystem: "node-version",
+      name: "node",
+      constraint: bare,
+      // Only a full x.y.z pin is a resolved version; a major-only pin or an
+      // nvm alias is a range in spirit, and downstream stages skip what they
+      // cannot classify.
+      currentVersion: isFullPin ? bare : "",
+      manifestPath,
+      dev: false,
+      manager: ID11
+    }
+  ];
+  return { manifestPath, dependencies, partial: false };
+}
+function firstReference(content) {
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    return trimmed;
+  }
+  return null;
+}
+function stripPrefix(reference) {
+  return reference.startsWith("v") ? reference.slice(1) : reference;
+}
+function applyUpdate5(manifestContent, proposal) {
+  const reference = firstReference(manifestContent);
+  if (reference === null) return null;
+  const bare = stripPrefix(reference);
+  if (!/^\d+\.\d+\.\d+$/.test(bare)) return null;
+  if (bare !== proposal.currentVersion) return null;
+  if (!/^\d+\.\d+\.\d+$/.test(proposal.targetVersion)) return null;
+  const prefix = reference.startsWith("v") ? "v" : "";
+  const replacement = `${prefix}${proposal.targetVersion}`;
+  const lines = manifestContent.split("\n");
+  const rewritten = lines.map((line) => line.trim() === reference ? replacement : line);
+  return rewritten.join("\n");
+}
+
+// src/duties/dependa/managers/npm.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
+var ID12 = "npm";
+var MANIFEST_FILENAMES6 = ["package.json"];
+function createNpmManager() {
+  return {
+    id: ID12,
+    ecosystem: "npm",
+    manifestFilenames: MANIFEST_FILENAMES6,
+    parse: parse10,
+    applyUpdate: applyUpdate6
+  };
+}
+function parse10(manifestPath, manifestContent, lockfileContent) {
   const dependencies = [];
   let partial = false;
   let pkg;
@@ -35774,11 +35985,48 @@ function parse9(manifestPath, manifestContent, lockfileContent) {
         currentVersion,
         manifestPath,
         dev,
-        manager: ID10
+        manager: ID12
+      });
+    }
+  }
+  const packageManager = parsePackageManagerField(pkg.packageManager);
+  if (packageManager !== null) {
+    dependencies.push({
+      ecosystem: "npm",
+      name: packageManager.name,
+      constraint: packageManager.version,
+      currentVersion: packageManager.version,
+      manifestPath,
+      dev: true,
+      manager: ID12
+    });
+  }
+  const engines = pkg.engines;
+  if (typeof engines === "object" && engines !== null && !Array.isArray(engines)) {
+    for (const [name, rawConstraint] of Object.entries(engines)) {
+      if (typeof rawConstraint !== "string" || rawConstraint.trim().length === 0) continue;
+      dependencies.push({
+        ecosystem: name === "node" ? "node-version" : "npm",
+        name,
+        constraint: rawConstraint.trim(),
+        currentVersion: extractPinnedVersion2(rawConstraint.trim()),
+        manifestPath,
+        dev: true,
+        manager: ID12
       });
     }
   }
   return { manifestPath, dependencies, partial };
+}
+function parsePackageManagerField(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  const atIdx = trimmed.lastIndexOf("@");
+  if (atIdx <= 0) return null;
+  const name = trimmed.slice(0, atIdx);
+  const version = trimmed.slice(atIdx + 1).split("+")[0] ?? "";
+  if (!/^\d+\.\d+\.\d+/.test(version)) return null;
+  return { name, version };
 }
 function resolveConstraint(name, raw) {
   const trimmed = raw.trim();
@@ -35920,7 +36168,7 @@ function parsePnpmPackageKey(key) {
   }
   return null;
 }
-function applyUpdate5(manifestContent, proposal) {
+function applyUpdate6(manifestContent, proposal) {
   let pkg;
   try {
     pkg = JSON.parse(manifestContent);
@@ -35952,10 +36200,16 @@ function applyUpdate5(manifestContent, proposal) {
       }
     }
   }
-  if (matches.length === 0) {
+  let packageManagerRewritten = false;
+  const pmField = parsePackageManagerField(pkg.packageManager);
+  if (pmField !== null && pmField.name === proposal.dependency.name && pmField.version === proposal.currentVersion && /^\d+\.\d+\.\d+/.test(proposal.targetVersion)) {
+    pkg.packageManager = `${pmField.name}@${proposal.targetVersion}`;
+    packageManagerRewritten = true;
+  }
+  if (matches.length === 0 && !packageManagerRewritten) {
     return null;
   }
-  let anyRewritten = false;
+  let anyRewritten = packageManagerRewritten;
   for (const { section, manifestKey, oldConstraint } of matches) {
     const newConstraint = rewriteConstraint(oldConstraint, proposal.targetVersion);
     if (newConstraint === null) {
@@ -36096,6 +36350,7 @@ function getLockfileNames(managerId) {
       return ["go.sum"];
     case "github-actions":
     case "docker":
+    case "node-version":
       return [];
   }
 }
@@ -37579,7 +37834,8 @@ function createManagerRegistry() {
     createCargoManager(),
     createGoManager(),
     createDockerManager(),
-    createGithubActionsManager()
+    createGithubActionsManager(),
+    createNodeVersionManager()
   ];
   return new ManagerRegistry(managers);
 }
@@ -37589,7 +37845,8 @@ function createDatasourceRegistry(token) {
     createCratesDatasource(),
     createGoProxyDatasource(),
     createDockerRegistryDatasource(),
-    createGithubTagsDatasource(token)
+    createGithubTagsDatasource(token),
+    createNodeVersionDatasource()
   ];
   return new DatasourceRegistry(datasources);
 }

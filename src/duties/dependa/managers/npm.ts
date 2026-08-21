@@ -106,7 +106,68 @@ function parse(
     }
   }
 
+  // `packageManager` pins one package manager to one exact version —
+  // `"pnpm@11.20.0"`, optionally with a corepack integrity hash after `+`.
+  // The pin is a real dependency of the project's toolchain; a manifest that
+  // declares it expects updates to it the same way Renovate proposes them.
+  const packageManager = parsePackageManagerField(pkg.packageManager);
+  if (packageManager !== null) {
+    dependencies.push({
+      ecosystem: "npm",
+      name: packageManager.name,
+      constraint: packageManager.version,
+      currentVersion: packageManager.version,
+      manifestPath,
+      dev: true,
+      manager: ID,
+    });
+  }
+
+  // `engines` declares runtime constraints — `{"node": ">=24", "pnpm": ">=11"}`.
+  // Discovered for parity with what the manifest actually states; ranges like
+  // `>=24` are deliberately never rewritten by `applyUpdate`, so these produce
+  // no proposals until a maintainer pins them. `node` is the runtime itself,
+  // not an npm package — it belongs to the `node-version` ecosystem, where the
+  // Node release index answers for it instead of the npm registry.
+  const engines = pkg.engines;
+  if (typeof engines === "object" && engines !== null && !Array.isArray(engines)) {
+    for (const [name, rawConstraint] of Object.entries(engines as Record<string, unknown>)) {
+      if (typeof rawConstraint !== "string" || rawConstraint.trim().length === 0) continue;
+      dependencies.push({
+        ecosystem: name === "node" ? "node-version" : "npm",
+        name,
+        constraint: rawConstraint.trim(),
+        currentVersion: extractPinnedVersion(rawConstraint.trim()),
+        manifestPath,
+        dev: true,
+        manager: ID,
+      });
+    }
+  }
+
   return { manifestPath, dependencies, partial };
+}
+
+/**
+ * Parse the `packageManager` field — `"name@version"` with an optional
+ * `+integrity-hash` suffix that corepack appends. Returns null when the field
+ * is absent or does not carry an exact version.
+ */
+function parsePackageManagerField(
+  raw: unknown,
+): { readonly name: string; readonly version: string } | null {
+  if (typeof raw !== "string") return null;
+
+  const trimmed = raw.trim();
+  const atIdx = trimmed.lastIndexOf("@");
+  if (atIdx <= 0) return null;
+
+  const name = trimmed.slice(0, atIdx);
+  // Strip the corepack integrity hash: "11.20.0+sha512.abc…" → "11.20.0"
+  const version = trimmed.slice(atIdx + 1).split("+")[0] ?? "";
+  if (!/^\d+\.\d+\.\d+/.test(version)) return null;
+
+  return { name, version };
 }
 
 /**
@@ -452,13 +513,29 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
     }
   }
 
-  if (matches.length === 0) {
+  // `packageManager` is its own location — `"pnpm@11.20.0"`, outside every
+  // dependency section. Rewritten when the pinned name and version match the
+  // proposal; the corepack integrity hash (after `+`) belongs to the old
+  // version and is dropped rather than carried over wrong.
+  let packageManagerRewritten = false;
+  const pmField = parsePackageManagerField(pkg.packageManager);
+  if (
+    pmField !== null &&
+    pmField.name === proposal.dependency.name &&
+    pmField.version === proposal.currentVersion &&
+    /^\d+\.\d+\.\d+/.test(proposal.targetVersion)
+  ) {
+    pkg.packageManager = `${pmField.name}@${proposal.targetVersion}`;
+    packageManagerRewritten = true;
+  }
+
+  if (matches.length === 0 && !packageManagerRewritten) {
     // Dependency not found in any section — cannot apply
     return null;
   }
 
   // Apply updates to all matching sections
-  let anyRewritten = false;
+  let anyRewritten = packageManagerRewritten;
   for (const { section, manifestKey, oldConstraint } of matches) {
     // Determine the new constraint
     const newConstraint = rewriteConstraint(oldConstraint, proposal.targetVersion);

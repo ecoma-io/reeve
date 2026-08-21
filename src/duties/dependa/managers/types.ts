@@ -17,7 +17,7 @@ import type { Ecosystem, Dependency, UpdateProposal } from "../model.js";
  * The stable identifier for a manager. Part of the closed set — a name not
  * registered here is refused the same way an unknown Capability is.
  */
-export type ManagerId = "npm" | "github-actions" | "cargo" | "go" | "docker";
+export type ManagerId = "npm" | "github-actions" | "cargo" | "go" | "docker" | "node-version";
 
 /** What a manager discovered from one manifest file. */
 export interface ManagerResult {

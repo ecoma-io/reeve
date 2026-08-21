@@ -1119,3 +1119,133 @@ describe("npm parse: without a lockfile", () => {
     expect(result.partial).toBe(false);
   });
 });
+
+// ── parse: packageManager and engines ──────────────────────────────────────
+
+describe("npm parse: packageManager", () => {
+  it("discovers the pinned package manager", () => {
+    const content = JSON.stringify({ packageManager: "pnpm@11.20.0" }, null, 2);
+
+    const result = manager.parse("package.json", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("pnpm");
+    expect(result.dependencies[0]?.ecosystem).toBe("npm");
+    expect(result.dependencies[0]?.constraint).toBe("11.20.0");
+    expect(result.dependencies[0]?.currentVersion).toBe("11.20.0");
+    expect(result.dependencies[0]?.dev).toBe(true);
+  });
+
+  it("strips the corepack integrity hash", () => {
+    const content = JSON.stringify({ packageManager: "pnpm@11.20.0+sha512.abcdef" }, null, 2);
+
+    const result = manager.parse("package.json", content, null);
+    expect(result.dependencies[0]?.currentVersion).toBe("11.20.0");
+  });
+
+  it("skips a packageManager without an exact version", () => {
+    const content = JSON.stringify({ packageManager: "pnpm" }, null, 2);
+
+    const result = manager.parse("package.json", content, null);
+    expect(result.dependencies).toHaveLength(0);
+  });
+});
+
+describe("npm parse: engines", () => {
+  it("discovers node under the node-version ecosystem", () => {
+    const content = JSON.stringify({ engines: { node: ">=24" } }, null, 2);
+
+    const result = manager.parse("package.json", content, null);
+    expect(result.dependencies).toHaveLength(1);
+    expect(result.dependencies[0]?.name).toBe("node");
+    expect(result.dependencies[0]?.ecosystem).toBe("node-version");
+    expect(result.dependencies[0]?.constraint).toBe(">=24");
+    expect(result.dependencies[0]?.currentVersion).toBe("");
+  });
+
+  it("discovers pnpm under the npm ecosystem", () => {
+    const content = JSON.stringify({ engines: { pnpm: ">=11" } }, null, 2);
+
+    const result = manager.parse("package.json", content, null);
+    expect(result.dependencies[0]?.name).toBe("pnpm");
+    expect(result.dependencies[0]?.ecosystem).toBe("npm");
+    expect(result.dependencies[0]?.constraint).toBe(">=11");
+  });
+
+  it("skips empty and non-string entries", () => {
+    const content = JSON.stringify({ engines: { node: "", weird: 42 } }, null, 2);
+
+    const result = manager.parse("package.json", content, null);
+    expect(result.dependencies).toHaveLength(0);
+  });
+});
+
+describe("npm applyUpdate: packageManager", () => {
+  const pmProposal = (currentVersion: string, targetVersion: string) => ({
+    dependency: {
+      ecosystem: "npm" as const,
+      name: "pnpm",
+      constraint: currentVersion,
+      currentVersion,
+      manifestPath: "package.json",
+      dev: true,
+      manager: "npm",
+    },
+    currentVersion,
+    targetVersion,
+    updateType: "minor" as const,
+    releases: [],
+    securityAdvisory: null,
+    risk: {
+      facts: {
+        updateType: "minor" as const,
+        majorDistance: 0,
+        minorDistance: 1,
+        patchDistance: 0,
+        daysBetweenReleases: null,
+        currentVersionStale: null,
+        isSecurity: false,
+        hasChangelog: false,
+        isDev: true,
+      },
+      interpretation: null,
+    },
+    evidence: [],
+    edits: [],
+    groupName: null,
+  });
+
+  it("rewrites the packageManager pin", () => {
+    const content = JSON.stringify({ packageManager: "pnpm@11.20.0" }, null, 2) + "\n";
+
+    const result = manager.applyUpdate(content, pmProposal("11.20.0", "11.22.0"));
+    expect(result).not.toBeNull();
+    expect(result).toContain('"packageManager": "pnpm@11.22.0"');
+  });
+
+  it("drops the stale corepack hash rather than carrying it over", () => {
+    const content = JSON.stringify({ packageManager: "pnpm@11.20.0+sha512.abcdef" }, null, 2);
+
+    const result = manager.applyUpdate(content, pmProposal("11.20.0", "11.22.0"));
+    expect(result).toContain('"packageManager": "pnpm@11.22.0"');
+    expect(result).not.toContain("sha512");
+  });
+
+  it("leaves a different package manager alone", () => {
+    const content = JSON.stringify({ packageManager: "yarn@4.0.0" }, null, 2);
+
+    expect(manager.applyUpdate(content, pmProposal("11.20.0", "11.22.0"))).toBeNull();
+  });
+
+  it("updates packageManager and a dependency section together", () => {
+    const content =
+      JSON.stringify(
+        { devDependencies: { pnpm: "11.20.0" }, packageManager: "pnpm@11.20.0" },
+        null,
+        2,
+      ) + "\n";
+
+    const result = manager.applyUpdate(content, pmProposal("11.20.0", "11.22.0"));
+    expect(result).toContain('"pnpm": "11.22.0"');
+    expect(result).toContain('"packageManager": "pnpm@11.22.0"');
+  });
+});
