@@ -138,6 +138,21 @@ inputs:
     required: false
     default: ""
 
+  bootstrap:
+    description: >-
+      Whether missing locale files may be created. When `true`, a source file
+      whose locale variant does not exist yet gets an initial machine
+      translation, opened in the same draft pull request an ordinary sync
+      uses — the reviewer becomes the human in the loop the manual bootstrap
+      used to be. Refused (with a warning, not a failure) when the warrant
+      names no `languages:` of its own: files are only ever created for
+      locales somebody chose on purpose, never from the duty's default list.
+      `edit-file` and `open-pr` still gate the write, exactly as they gate
+      every sync. When `false`, the default, a locale variant must already
+      exist to be discovered — the documented bootstrap contract.
+    required: false
+    default: "false"
+
   dry-run:
     description: >-
       Run the whole pipeline, write every output, and change nothing. The

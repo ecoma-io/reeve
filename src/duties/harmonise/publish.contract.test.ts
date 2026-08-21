@@ -49,7 +49,13 @@ function group(): DocumentGroup {
 }
 
 function result(over: Partial<SyncResult> = {}): SyncResult {
-  return { group: group(), drafts: new Map([["vi", draft()]]), conflicts: [], ...over };
+  return {
+    group: group(),
+    drafts: new Map([["vi", draft()]]),
+    conflicts: [],
+    created: [],
+    ...over,
+  };
 }
 
 /** Everything the stub was asked to do, in order, so a case can assert on it. */

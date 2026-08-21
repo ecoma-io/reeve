@@ -23,6 +23,8 @@ export interface GroupResult {
   readonly conflicts: readonly string[];
   /** Locales that were skipped (no propagation needed). */
   readonly skipped: readonly string[];
+  /** Synced locales whose file did not exist before — bootstrap translations. */
+  readonly created: readonly string[];
 }
 
 /** What a run page needs to render. */
@@ -84,7 +86,9 @@ export function summarize(run: Run): string {
         [
           r.group.id,
           hunkBreakdown(r.hunks, r.classification),
-          r.synced.length > 0 ? r.synced.join(", ") : "—",
+          r.synced.length > 0
+            ? r.synced.map((l) => (r.created.includes(l) ? `${l} (new)` : l)).join(", ")
+            : "—",
           r.conflicts.length > 0 ? r.conflicts.join(", ") : "—",
           r.skipped.length > 0 ? r.skipped.join(", ") : "—",
         ] as const,

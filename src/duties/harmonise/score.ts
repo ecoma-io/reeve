@@ -25,6 +25,13 @@ import type { Language } from "../../core/languages.js";
  *
  * Returns a `Score` — refused for provably wrong drafts, measured for
  * admissible ones. See `core/score.ts` for what admissibility means.
+ *
+ * When the original target is empty — the bootstrap case, where the sync
+ * creates the first translation — the source becomes the anchor instead:
+ * there is no prior translation whose structure could be preserved, but the
+ * source's code blocks, links, structure and glossary terms must all carry
+ * across. Scoring against an empty string would call a draft that dropped
+ * every code block a good one.
  */
 export function scoreDraft(
   draft: string,
@@ -34,13 +41,22 @@ export function scoreDraft(
   targetLanguage: Language,
   languages: readonly Language[],
 ): Score {
+  const initial = original.trim().length === 0;
+  const anchor = initial ? source : original;
+
   // --- Refusal checks (binary, provably wrong) ---
   if (draft.trim().length === 0) return refused("empty draft");
-  if (draft === original) return refused("unchanged from original");
+  if (draft === anchor) {
+    return refused(
+      initial ? "identical to the source — not a translation" : "unchanged from original",
+    );
+  }
   // The same rule `translate` refuses on, from the same shared module — the
   // file the terms came from is shared too, so the two duties must not disagree
-  // about what counts as losing one. See `core/glossary.ts`.
-  const lost = translatedTerm(original, draft, glossaryTerms);
+  // about what counts as losing one. See `core/glossary.ts`. On an initial
+  // translation the anchor is the source, so a term the source carries must
+  // survive into the first draft too.
+  const lost = translatedTerm(anchor, draft, glossaryTerms);
   if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
 
   // Language verification: a draft in the wrong script is refused.
@@ -51,11 +67,11 @@ export function scoreDraft(
 
   // --- Measurements (weighted mean, 0-1) ---
   const checks: Check[] = [
-    { name: "code", weight: 4, value: codeCheck(draft, original), note: "" },
-    { name: "links", weight: 3, value: linkCheck(draft, original), note: "" },
-    { name: "structure", weight: 2, value: structureCheck(draft, original), note: "" },
-    { name: "length", weight: 1, value: lengthCheck(draft, original), note: "" },
-    { name: "glossary", weight: 3, value: glossaryCheck(draft, original, glossaryTerms), note: "" },
+    { name: "code", weight: 4, value: codeCheck(draft, anchor), note: "" },
+    { name: "links", weight: 3, value: linkCheck(draft, anchor), note: "" },
+    { name: "structure", weight: 2, value: structureCheck(draft, anchor), note: "" },
+    { name: "length", weight: 1, value: lengthCheck(draft, anchor), note: "" },
+    { name: "glossary", weight: 3, value: glossaryCheck(draft, anchor, glossaryTerms), note: "" },
   ];
 
   return measured(checks);

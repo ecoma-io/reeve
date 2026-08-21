@@ -157,3 +157,90 @@ describe("unmatchedFilters", () => {
     expect(unmatchedFilters(groups, [])).toEqual([]);
   });
 });
+
+describe("discoverGroups with bootstrap", () => {
+  it("keeps a source-only group and derives the missing locale paths", () => {
+    const groups = discoverGroups(["docs/guide.md"], SOURCE_LANGUAGE, TARGET_LANGUAGES, [], true);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.files.get("en")).toBe("docs/guide.md");
+    expect(groups[0]!.files.get("vi")).toBe("docs/guide.vi.md");
+    expect(groups[0]!.files.get("zh")).toBe("docs/guide.zh.md");
+  });
+
+  it("fills only the missing locales of a partially translated group", () => {
+    const groups = discoverGroups(
+      ["docs/guide.md", "docs/guide.vi.md"],
+      SOURCE_LANGUAGE,
+      TARGET_LANGUAGES,
+      [],
+      true,
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.files.get("vi")).toBe("docs/guide.vi.md");
+    expect(groups[0]!.files.get("zh")).toBe("docs/guide.zh.md");
+  });
+
+  it("derives paths in the locale's own case, matching the suffix convention", () => {
+    const hans = parseLanguages("zh-Hans");
+    const groups = discoverGroups(["docs/guide.md"], SOURCE_LANGUAGE, hans, [], true);
+
+    expect(groups[0]!.files.get("zh-hans")).toBe("docs/guide.zh-Hans.md");
+  });
+
+  it("still requires a source file", () => {
+    const groups = discoverGroups(
+      ["docs/guide.vi.md"],
+      SOURCE_LANGUAGE,
+      TARGET_LANGUAGES,
+      [],
+      true,
+    );
+    expect(groups).toHaveLength(0);
+  });
+
+  it("still honours the paths filter", () => {
+    const groups = discoverGroups(
+      ["docs/guide.md", "README.md"],
+      SOURCE_LANGUAGE,
+      TARGET_LANGUAGES,
+      ["docs/"],
+      true,
+    );
+    expect(groups.map((g) => g.id)).toEqual(["docs/guide"]);
+  });
+
+  it("changes nothing when bootstrap is off — the documented contract", () => {
+    const groups = discoverGroups(["docs/guide.md"], SOURCE_LANGUAGE, TARGET_LANGUAGES, [], false);
+    expect(groups).toHaveLength(0);
+  });
+
+  it("lets a filter entry name a file the sync is about to create", () => {
+    // Derived paths are members before the filter runs — the filter is the
+    // last gate, so scoping by the missing variant's path selects the group.
+    const groups = discoverGroups(
+      ["docs/guide.md"],
+      SOURCE_LANGUAGE,
+      TARGET_LANGUAGES,
+      ["docs/guide.vi.md"],
+      true,
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.files.get("vi")).toBe("docs/guide.vi.md");
+  });
+
+  it("a source-file entry keeps a bootstrap group whole, derived paths included", () => {
+    const groups = discoverGroups(
+      ["docs/guide.md"],
+      SOURCE_LANGUAGE,
+      TARGET_LANGUAGES,
+      ["docs/guide.md"],
+      true,
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.files.get("zh")).toBe("docs/guide.zh.md");
+  });
+});

@@ -22,11 +22,13 @@ error. It is a version-control system for semantic changes across languages,
 not a file translator: it classifies the diff and only propagates what is
 shared meaning, leaving translation quality and local adaptations untouched.
 
-**What it is explicitly not for:** translating entire files from scratch,
-improving translations, or synchronising content that has no cross-locale
-relationship. A repository with one language has no synchronisation problem,
-and a project that needs full retranslation on every change is better served
-by [`translate`](translate.md) on its own.
+**What it is explicitly not for:** improving translations, or synchronising
+content that has no cross-locale relationship. A repository with one language
+has no synchronisation problem, and a project that needs full retranslation
+on every change is better served by [`translate`](translate.md) on its own.
+Translating a file from scratch happens in exactly one place: the opt-in
+[`bootstrap`](#bootstrap) input, which creates a missing locale variant's
+first draft for a reviewer to judge — never as the ordinary sync path.
 
 ## When to use it
 
@@ -86,9 +88,11 @@ duties:
 ```
 
 Without it, the run classifies and reports, writes nothing, and ends green —
-see [the warrant](../../guides/warrant.md). The first time you run a real sync,
+see [the warrant](../../guides/warrant.md). The first time you run a real sync
 also needs the initial translation to already exist — committing the first
-`README.vi.md` / `README.zh.md` yourself is the load-bearing step.
+`README.vi.md` / `README.zh.md` yourself is the load-bearing step, unless you
+opt in to [`bootstrap`](#bootstrap) and review the machine's first draft
+instead.
 
 ## Required permissions
 
@@ -144,6 +148,7 @@ Every input `harmonise/action.yml` declares.
 | `state-branch`    | no       | `reeve/provenance`          | A branch to write provenance state to, instead of the default branch. When set, the state file is committed to this branch and a draft PR is opened for review. `edit-file` and `open-pr` must both be granted. Empty writes directly to the default branch.       |
 | `glossary-dir`    | no       | `.reeve/glossary.yml`       | A glossary of project-specific terms that translations must respect. Overrides = bug.                                                                                                                                                                              |
 | `paths`           | no       | _(empty)_                   | Doc paths to scan for locale variants. Empty scans the whole repository. Comma or newline separated. An entry naming a file scopes in its whole document group; an entry that scopes nothing is warned about by name.                                              |
+| `bootstrap`       | no       | `false`                     | Whether missing locale files may be created — an initial machine translation in the same draft PR an ordinary sync uses. Refused when the warrant names no `languages:` of its own. See [Bootstrap](#bootstrap).                                                   |
 | `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                        |
 | `max-requests`    | no       | `none`                      | How many provider requests — classification, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                                                                            |
 | `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                    |
@@ -202,6 +207,13 @@ keeps plain prefix semantics — it restricts `harmonise` to documentation,
 leaving `README.md` and other root-level files alone. Matching is
 case-sensitive, and an entry that scopes no group at all is warned about by
 name — a misspelled or moved path must never read as "nothing to do".
+
+**`bootstrap` creates missing locale files, on purpose only.** Off by
+default, and refused — with a warning, not a failure — when the warrant
+names no `languages:` key of its own: files are only ever created for
+locales somebody chose deliberately, never from this duty's default list.
+The write is still gated by `edit-file` and `open-pr`, exactly as every
+sync is. See [Bootstrap](#bootstrap) for what a bootstrap run does.
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
@@ -281,18 +293,70 @@ README.vi.md                  ← VI
 
 ## Bootstrap
 
-A locale variant must **already exist** for a document group to be discovered.
-A repository with only `README.md` and no `README.vi.md` / `README.zh.md`
-reports no document groups and ends green having synced nothing — it will not
-create the first translation for you. Commit the initial
-`README.vi.md` / `README.zh.md` yourself (a human first translation is the
-load-bearing step), and the duty takes over keeping them current once the
-source changes.
+By default, a locale variant must **already exist** for a document group to
+be discovered. A repository with only `README.md` and no
+`README.vi.md` / `README.zh.md` reports no document groups and ends green
+having synced nothing — it will not create the first translation for you.
+Commit the initial `README.vi.md` / `README.zh.md` yourself (a human first
+translation is the load-bearing step), and the duty takes over keeping them
+current once the source changes.
+
+**`bootstrap: true` moves the human from first author to first reviewer.**
+When set, a source file whose locale variant is missing still forms a
+document group — the missing locale is filled in at its derived path
+(`docs/guide.md` + `vi` → `docs/guide.vi.md`) and drafted as an initial
+translation of the whole document, in the same draft pull request an
+ordinary sync uses. The PR body marks each created file as an **initial
+translation** needing native-speaker review, so a reviewer knows they are
+reading a machine's first draft rather than an update to human work. The
+human-in-the-loop guarantee is unchanged: nothing merges unreviewed.
+
+Three guards keep bootstrap deliberate:
+
+- **The warrant must name `languages:` itself.** On the duty's default
+  target list (`vi, zh`) the input is refused with a warning — files are
+  only ever created for locales a maintainer chose on purpose.
+- **`edit-file` and `open-pr` still gate the write**, exactly as they gate
+  every sync. Bootstrap widens which files a sync may propose, never what
+  the duty is allowed to do.
+- **A created file becomes human territory the moment a human edits it.**
+  From then on it is an ordinary locale variant: edits since the last sync
+  are conflicts, never overwritten (D3).
+
+No classification request is spent on a missing file — that the whole
+document needs translating is a tautology, and code states tautologies. Each
+missing locale costs `drafts` drafting requests (plus judging when a panel
+is configured), so a large documentation set with several new locales is a
+real spend on the first run: `max-requests` and `limit` bound it, and a
+[`dry-run`](../../guides/dry-run.md) shows what would be created before
+anything is.
 
 The suffix `.<locale-code>.md` before the final `.md` extension marks a
 target locale. Files without a locale suffix are the source. Grouping is by
 base name — `docs/getting-started` is the document group, `vi` is the
 locale within it.
+
+## Link localisation
+
+A translated document that keeps its links pointing at the source-language
+files sends the reader back to a language they just chose to leave. After
+every draft — bootstrap and ordinary sync alike — internal links are
+rewritten deterministically, in code:
+
+```text
+docs/getting-started.md  →  docs/getting-started.vi.md   (inline link target)
+images/flow.png          →  images/flow.vi.png           (image target)
+```
+
+The rule is conservative: a link is rewritten **only when the locale variant
+is known to exist** — already in the repository tree, or created by this
+same sync (the same pull request, so the two land together). A working link
+to the source language beats a broken link to the target. Never touched:
+external URLs and anything with a scheme, pure `#fragment` links, targets
+that already carry a locale suffix (a deliberate cross-locale reference),
+and anything inside code fences, inline code spans, or
+[`ignore`](#configuration)-marked sections. Fragments and titles ride along
+unchanged.
 
 ## Outputs
 
@@ -320,6 +384,7 @@ run where nothing conflicted, never an unset output.
 | No locale could be synced                   | Warning per locale, `synced: []`, **green**                                     |
 | Human edit in target locale since last sync | Conflict reported, that locale not overwritten, **green**                       |
 | Warrant grants `harmonise` nothing          | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
+| `bootstrap: true` but no `languages:` key   | Warning, no files created, the rest of the run proceeds, **green**              |
 | `dry-run: true`                             | Pipeline runs, nothing committed or PR'd, **green**                             |
 | The provenance state file cannot be read    | **Red** — provenance is how the duty knows what changed                         |
 | The configuration is broken                 | **Red**, naming the input                                                       |
@@ -351,7 +416,10 @@ in Reeve shares.
 ## Cost
 
 No change, no cost. A document group whose source has not changed since the
-last sync costs one provenance read and nothing else. Classification runs
+last sync costs one provenance read and nothing else. The one exception is
+deliberate: a [`bootstrap`](#bootstrap) run drafts every missing locale file
+it discovers, whether or not the source moved — that is the point of asking
+for it, and `max-requests` and `limit` bound the first big run. Classification runs
 once per changed source file. Drafting runs once per stale locale per
 document group, multiplied by `drafts`. Judging runs once per locale that
 has drafts to compare — which is why a panel beside the default

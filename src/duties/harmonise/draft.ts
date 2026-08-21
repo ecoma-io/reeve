@@ -83,6 +83,12 @@ export interface DraftSyncRequest {
   readonly chunkChars: number;
   /** Whether to honour `<!-- reeve:ignore-* -->` markers. */
   readonly ignore: boolean;
+  /**
+   * Deterministic post-processing applied to every draft after sanitising and
+   * before ignored blocks are reinserted — link localisation lives here. Runs
+   * before `reinsert` so content a maintainer marked ignore is never touched.
+   */
+  readonly localise?: (text: string) => string;
 }
 
 /**
@@ -109,6 +115,7 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     weather,
     chunkChars,
     ignore,
+    localise,
   } = request;
 
   // Extract ignore markers from source and target. The model sees
@@ -142,6 +149,7 @@ export async function draftSyncs(request: DraftSyncRequest): Promise<DraftResult
     drafts,
     targetSpans,
     ...(weather !== undefined ? { weather } : {}),
+    ...(localise !== undefined ? { localise } : {}),
   });
 }
 
@@ -163,6 +171,7 @@ async function draftWhole(params: DraftWholeParams): Promise<DraftResult> {
     drafts,
     weather,
     targetSpans,
+    localise,
   } = params;
 
   const messages = buildMessages(
@@ -186,6 +195,7 @@ async function draftWhole(params: DraftWholeParams): Promise<DraftResult> {
     drafts,
     targetSpans,
     ...(weather !== undefined ? { weather } : {}),
+    ...(localise !== undefined ? { localise } : {}),
   });
 }
 
@@ -203,6 +213,7 @@ interface DraftWholeParams {
   readonly drafts: number;
   readonly targetSpans: readonly IgnoreSpan[];
   readonly weather?: Weather;
+  readonly localise?: (text: string) => string;
 }
 
 /**
@@ -231,6 +242,7 @@ async function draftChunked(
     weather,
     chunkChars,
     targetSpans,
+    localise,
   } = request;
 
   const sourceChunks = chunks(sourceContent, chunkChars);
@@ -309,8 +321,12 @@ async function draftChunked(
 
   const reassembled = chunkDrafts.join("");
 
+  // Localise links before ignored blocks return: a maintainer-ignored
+  // section is preserved byte for byte, links included.
+  const localised = localise !== undefined ? localise(reassembled) : reassembled;
+
   // Reinsert ignored blocks (replaced by placeholders before chunking).
-  const reinserted = reinsert(reassembled, targetSpans);
+  const reinserted = reinsert(localised, targetSpans);
 
   // Score the full reassembled draft against the full original target.
   const measured = scoreDraft(
@@ -357,6 +373,7 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
     drafts,
     weather,
     targetSpans,
+    localise,
   } = params;
 
   const attempts: Draft[] = [];
@@ -386,8 +403,11 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
     }
 
     const sanitized = sanitize(draftText);
+    // Localise links before ignored blocks return: a maintainer-ignored
+    // section is preserved byte for byte, links included.
+    const localised = localise !== undefined ? localise(sanitized) : sanitized;
     // Reinsert ignored blocks (replaced by placeholders before the model call).
-    const reinserted = reinsert(sanitized, targetSpans);
+    const reinserted = reinsert(localised, targetSpans);
     const measured = scoreDraft(
       reinserted,
       targetContent,
@@ -432,6 +452,7 @@ interface DraftLoopParams {
   readonly drafts: number;
   readonly targetSpans: readonly IgnoreSpan[];
   readonly weather?: Weather;
+  readonly localise?: (text: string) => string;
 }
 
 /**
@@ -493,6 +514,21 @@ Rules:
 8. If a semantic change replaces a heading, update the corresponding heading in the target.
 9. HTML comments of the form \`<!-- reeve-keep-section -->\` mark sections that must be reproduced exactly as they appear in the target. Do not modify, translate, or remove them.`;
 
+/**
+ * The bootstrap prompt: no existing translation to update, so the whole
+ * document is translated from scratch. Telling the update prompt to "only
+ * apply the semantic changes" to an empty document invites the model to
+ * output an empty document.
+ */
+const INITIAL_SYSTEM_PROMPT = `You produce the initial translation of a source document into a target locale.
+
+Rules:
+1. Translate the ENTIRE source document into the target language.
+2. Preserve the source document's Markdown structure exactly — headings, lists, tables, emphasis.
+3. Preserve code blocks, inline code, and URLs byte-for-byte. Do not translate code, commands, identifiers, or link targets.
+4. Respect the glossary — glossary terms must NOT be translated.
+5. Output ONLY the complete translated document. No preamble, no explanation.`;
+
 function buildMessages(
   sourceContent: string,
   targetContent: string,
@@ -502,9 +538,28 @@ function buildMessages(
   glossary: readonly GlossaryEntry[],
 ): readonly { role: "system" | "user"; content: string }[] {
   const glossarySection = formatGlossary(glossary);
-  const changes = semanticHunks.map((h) => `- ${h.description}`).join("\n");
-
   const sourceFence = enclose("untrusted-source", sourceContent);
+
+  // The bootstrap shape: nothing to update, everything to translate.
+  if (targetContent.trim().length === 0) {
+    const userContent = `Source language: ${sourceLanguage.label}
+Target language: ${targetLanguage.label}
+${glossarySection ? `\n${glossarySection}\n` : ""}
+Source document (authoritative):
+${sourceFence.block}
+
+Produce the complete initial ${targetLanguage.label} translation of the source document.`;
+
+    return [
+      {
+        role: "system",
+        content: [INITIAL_SYSTEM_PROMPT, "", sourceFence.rule].join("\n"),
+      },
+      { role: "user", content: userContent },
+    ];
+  }
+
+  const changes = semanticHunks.map((h) => `- ${h.description}`).join("\n");
   const targetFence = enclose("untrusted-target", targetContent);
 
   const userContent = `Source language: ${sourceLanguage.label}

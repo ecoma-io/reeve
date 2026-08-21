@@ -388,3 +388,112 @@ describe("readState", () => {
     expect(getContent).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("findOrCreate folding in newly discovered locales", () => {
+  it("adds a locale the stored entry has never seen", () => {
+    const state: DocumentState[] = [
+      {
+        id: "docs/guide",
+        files: new Map([
+          ["en", "docs/guide.md"],
+          ["vi", "docs/guide.vi.md"],
+        ]),
+        sourceRevision: "rev-1",
+        synced: new Map([["vi", "sha-vi"]]),
+        stale: [],
+        conflicts: [],
+      },
+    ];
+
+    const doc = findOrCreate(
+      state,
+      "docs/guide",
+      new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+        ["zh", "docs/guide.zh.md"],
+      ]),
+    );
+
+    expect(doc.files.get("zh")).toBe("docs/guide.zh.md");
+    expect(doc.synced.get("vi")).toBe("sha-vi");
+  });
+
+  it("keeps the entry unchanged when nothing new was discovered", () => {
+    const files = new Map([["en", "docs/guide.md"]]);
+    const state: DocumentState[] = [
+      {
+        id: "docs/guide",
+        files,
+        sourceRevision: "rev-1",
+        synced: new Map(),
+        stale: [],
+        conflicts: [],
+      },
+    ];
+
+    const doc = findOrCreate(state, "docs/guide", new Map([["en", "docs/guide.md"]]));
+    expect(doc.files).toBe(files);
+  });
+});
+
+describe("markStale on an unchanged source", () => {
+  it("marks a never-synced locale with no file stale — the bootstrap case", () => {
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+        ["zh", "docs/guide.zh.md"],
+      ]),
+      sourceRevision: "rev-1",
+      synced: new Map([["vi", "sha-vi"]]),
+      stale: [],
+      conflicts: [],
+    };
+
+    // Source unchanged; vi exists and is synced; zh has no file and no sync.
+    markStale(doc, "rev-1", new Map([["vi", "sha-vi"]]), "en");
+
+    expect(doc.stale).toEqual(["zh"]);
+    expect(doc.conflicts).toEqual([]);
+  });
+
+  it("does not resurrect a locale that was synced and then deleted", () => {
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+      ]),
+      sourceRevision: "rev-1",
+      synced: new Map([["vi", "sha-vi"]]),
+      stale: [],
+      conflicts: [],
+    };
+
+    // The file is gone from the tree, but its synced entry survives: a
+    // maintainer deleted it, and that decision stands until the source moves.
+    markStale(doc, "rev-1", new Map(), "en");
+
+    expect(doc.stale).toEqual([]);
+  });
+
+  it("does not double-mark a locale already stale", () => {
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["zh", "docs/guide.zh.md"],
+      ]),
+      sourceRevision: "rev-1",
+      synced: new Map(),
+      stale: ["zh"],
+      conflicts: [],
+    };
+
+    markStale(doc, "rev-1", new Map(), "en");
+
+    expect(doc.stale).toEqual(["zh"]);
+  });
+});

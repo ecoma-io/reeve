@@ -106,6 +106,12 @@ export interface SyncResult {
   readonly group: DocumentGroup;
   readonly drafts: ReadonlyMap<string, Draft>;
   readonly conflicts: readonly string[];
+  /**
+   * Locales whose file did not exist before this sync — bootstrap
+   * translations, called out in the PR body so a reviewer knows they are
+   * reading a machine's first draft rather than an update to human work.
+   */
+  readonly created: readonly string[];
 }
 
 /**
@@ -295,7 +301,11 @@ export async function publishSync(
  */
 export function buildPrBody(result: SyncResult): string {
   const updated = [...result.drafts.keys()]
-    .map((locale) => `- \`${locale}\`: translation updated`)
+    .map((locale) =>
+      result.created.includes(locale)
+        ? `- \`${locale}\`: **initial translation created** — a machine first draft, needs native-speaker review`
+        : `- \`${locale}\`: translation updated`,
+    )
     .join("\n");
   const conflictSection =
     result.conflicts.length > 0

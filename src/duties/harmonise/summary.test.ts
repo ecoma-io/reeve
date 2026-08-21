@@ -53,6 +53,7 @@ describe("summarize", () => {
       synced: ["vi"],
       conflicts: [],
       skipped: [],
+      created: [],
     };
 
     const page = summarize({
@@ -90,6 +91,7 @@ describe("summarize", () => {
       synced: ["vi"],
       conflicts: [],
       skipped: [],
+      created: [],
     };
 
     const page = summarize({
@@ -122,6 +124,7 @@ describe("summarize", () => {
       synced: [],
       conflicts: [],
       skipped: [],
+      created: [],
     };
 
     const page = summarize({
@@ -151,5 +154,40 @@ describe("summarize", () => {
     });
 
     expect(page).toContain("Not granted");
+  });
+});
+
+describe("summarize with created locales", () => {
+  it("annotates a bootstrap-created locale as new in the synced column", () => {
+    const group: DocumentGroup = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+        ["zh", "docs/guide.zh.md"],
+      ]),
+    };
+
+    const page = summarize({
+      dryRun: false,
+      results: [
+        {
+          group,
+          classification: "semantic",
+          hunks: [{ description: "Initial translation", classification: "semantic" }],
+          synced: ["vi", "zh"],
+          conflicts: [],
+          skipped: [],
+          created: ["zh"],
+        },
+      ],
+      warrant: ".github/reeve.yml",
+      implicit: false,
+      ungranted: null,
+      spent: [],
+      modelNames: new Map(),
+    });
+
+    expect(page).toContain("vi, zh (new)");
   });
 });
