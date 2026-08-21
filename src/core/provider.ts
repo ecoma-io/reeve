@@ -976,24 +976,33 @@ export function starved(models: readonly string[], weather: Weather): boolean {
  * with nothing in it.
  *
  * Called alongside `starved` at the point a duty knows its roster came back
- * empty. Between them the three cases are covered, and the third one is why
- * this predicate reads `some(not capacity)` rather than `every(protocol)`:
+ * empty. This reads `every(not capacity)` rather than the `every(protocol)` it
+ * used to, which widens it by exactly one kind: an endpoint that refused the
+ * key. `auth` and `protocol` are both configuration, and a roster where every
+ * model failed on one or the other is a roster nobody has configured
+ * correctly.
  *
- *  - every failure is capacity → weather, D12. `starved` warns, the run stays
- *    green, and the `starved` output says so. Unchanged.
- *  - every failure is a configuration error → red. Unchanged.
- *  - **a mixture** → red, and this is the case that used to fall through both.
+ * That closes the multi-endpoint hole. With `endpoints` configured, `reckon`
+ * defers an auth failure to `weather.failAuth`, and `authExhausted` stays
+ * false while any other endpoint still authenticates — so `settleAuth` never
+ * throws. A run that saw an HTTP 401 on one endpoint and a malformed body on
+ * another delivered nothing and exited 0, because `every(protocol)` was false
+ * for the `auth` failure. Now it is red.
  *
- * `every(f => f.kind === "protocol")` was false for a roster where one model
- * answered `429` and the next served HTML, and `starved` was false because not
- * every model was grounded. So nothing warned and nothing failed: the duty
- * wrote `responded=false`, `commented=false`, `starved=false` and exited 0 —
- * byte for byte what a run that correctly decided there was nothing to do
- * writes. A maintainer could not tell the two apart, which is precisely the
- * shape D5 exists to forbid. The multi-endpoint variant was worse: a real
- * `401` on one endpoint alongside a protocol failure on another also exited 0,
- * because `authExhausted` needs *every* endpoint to have refused the key
- * before `settleAuth` throws.
+ * **What this deliberately does NOT cover, and why.** A roster where one model
+ * was rate-limited and another returned HTML satisfies neither this predicate
+ * nor `starved`, so a run that reached no usable answer at all still reports
+ * neither. That hole is real and is written up as a finding — but the fix is
+ * not to widen this to `some(not capacity)`. Every call site of
+ * {@link failIfRosterExhausted} sits inside a per-item loop — per candidate in
+ * `dependa`, per locale in `harmonise`, per chunk in `translate`, per thread in
+ * `respond` — so `some` turns one degraded item into a red run for work that
+ * otherwise fully succeeded. `dependa`'s call guards an opt-in narrative
+ * flourish whose absence the surrounding code explicitly handles; reddening the
+ * whole run over it is worse than the hole. Closing the mixture case honestly
+ * means deciding it once at run level, against what the run actually
+ * delivered, which is a change to five duties' failure accounting rather than
+ * to this predicate.
  *
  * The `failures.length >= models.length` guard is what keeps this about an
  * exhausted roster rather than a rotation that failed once and then succeeded.
@@ -1004,7 +1013,7 @@ export function rosterExhausted(models: readonly string[], failures: readonly Fa
   return (
     models.length > 0 &&
     failures.length >= models.length &&
-    failures.some((f) => f.kind !== "capacity")
+    failures.every((f) => f.kind !== "capacity")
   );
 }
 

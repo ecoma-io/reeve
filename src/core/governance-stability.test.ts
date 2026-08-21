@@ -24,27 +24,67 @@
  * value, not merely that two calls agree.** Agreement is the cheap half; the
  * value is what makes the case fail when the answer changes.
  *
- * ── Why two cases assert an arity ──────────────────────────────────────────
+ * ── Why two cases read a parameter list out of the source ──────────────────
  *
  * Two of the claims here are about a function's *shape* rather than its
  * output: `enforceLabels` and `gateClose` take no model id, no provider, no
  * prompt and no verdict, and that is why nothing the model said can reach
- * them. There is no input to vary that would demonstrate this — the absence
- * of a parameter is the whole property — so the only mechanically checkable
- * form is the parameter count. It is a coarse instrument and deliberately so:
- * adding any parameter to either function turns this file red, which puts the
- * question "what is this new input, and can a model influence it?" in front of
- * a reviewer. That is the entire job. Update the number when the answer to
- * that question is "no"; do not update it to make a suite green.
+ * them. There is no input to vary that would demonstrate it — the absence of a
+ * parameter is the whole property — so the check has to be structural.
+ *
+ * It was `expect(fn).toHaveLength(6)` first, and that was wrong in both
+ * directions. `Function.prototype.length` counts parameters *before the first
+ * defaulted one*, so the most likely way a model id would actually arrive —
+ * `verdict: Verdict | null = null` appended for backward compatibility — left
+ * the count at six and the suite green, which is the one case the check
+ * existed for. And giving an existing parameter a default (`floor = 0`), which
+ * changes nothing about what can reach the function, dropped the count to five
+ * and turned the file red for nothing.
+ *
+ * So the parameter list is read from the declaration instead and asserted by
+ * name. A default does not change a name, so the false red is gone; adding any
+ * parameter does, so the question "what is this new input, and can a model
+ * influence it?" lands in front of a reviewer, which is the entire job.
+ * `capabilities.contract.test.ts` reads source for the same kind of claim and
+ * for the same reason. Update the expected list when the answer to that
+ * question is "no"; do not update it to make a suite green.
  *
  * See `docs/doctrine/north-star.md` for the doctrine these tests verify:
  * the model is intelligence; the warrant is governance; the two never meet.
  */
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
-import { gateClose } from "../duties/triage/outcome.js";
 import { enforceLabels } from "./enforce.js";
 import { parseWarrant, type Warrant } from "./warrant.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The parameter names a named function declares, read off its declaration.
+ *
+ * Every declaration this file asks about is formatted one parameter per line
+ * by Prettier, which is what makes a line-anchored read of the names exact.
+ * The region is bounded by the declaration and by the `)` that closes it at
+ * column zero, so nothing below the signature can be mistaken for a parameter.
+ */
+async function parametersOf(file: string, name: string): Promise<string[]> {
+  const text = await readFile(join(HERE, file), "utf8");
+  const start = text.indexOf(`export function ${name}(`);
+  const asyncStart = text.indexOf(`export async function ${name}(`);
+  const from = start === -1 ? asyncStart : start;
+  expect(from, `${file} no longer declares \`${name}\``).toBeGreaterThan(-1);
+
+  const end = text.indexOf("\n)", from);
+  expect(end, `\`${name}\` in ${file} is not formatted one parameter per line`).toBeGreaterThan(
+    from,
+  );
+
+  return [...text.slice(from, end).matchAll(/^\s+(\w+)\??:/gm)].map((m) => m[1] ?? "");
+}
 
 /** A warrant with a fixed taxonomy, used as a stable baseline. */
 const WARRANT: Warrant = parseWarrant(
@@ -155,23 +195,39 @@ describe("enforceLabels", () => {
     expect(below.refused).toHaveLength(1);
   });
 
-  it("takes no model id, provider, prompt or verdict — six inputs, all governance", () => {
-    // path, taxonomy, proposed, onThread, confidence, floor. See the file's
-    // doc comment for why this is an arity and not a behavioural case.
-    expect(enforceLabels).toHaveLength(6);
+  it("takes no model id, provider, prompt or verdict — every input is governance", async () => {
+    // `confidence` is on this list and belongs there: it is a number the run
+    // carries, and the case above shows the warrant's floor is what decides
+    // against it. What must never appear is anything the model authored.
+    expect(await parametersOf("enforce.ts", "enforceLabels")).toEqual([
+      "path",
+      "taxonomy",
+      "proposed",
+      "onThread",
+      "confidence",
+      "floor",
+    ]);
   });
 });
 
 describe("gateClose", () => {
-  it("takes no model id, confidence or verdict — six inputs, all store and location", () => {
-    // contentsApi, at, path, repo, thread, stateBranch. The gate reads a file
-    // a human wrote and the coordinates of the thread it is being asked
-    // about; there is no seventh input for the model to reach.
+  it("takes no model id, confidence or verdict — every input is store or location", async () => {
+    // The gate reads a file a human wrote and the coordinates of the thread it
+    // is being asked about. There is no seventh input for the model to reach,
+    // and unlike `enforceLabels` there is not even a confidence: a human's
+    // recorded overrule is not weighed against how sure the model was.
     //
-    // The behavioural cases for this function — a matching overruled record,
-    // a record for a different thread, an unparseable line, an unreadable
-    // shard — are in `src/duties/triage/outcome.test.ts`, which is where they
+    // The behavioural cases for this function — a matching overruled record, a
+    // record for a different thread, an unparseable line, an unreadable shard
+    // — are in `src/duties/triage/outcome.test.ts`, which is where they
     // belong. This case pins only the shape.
-    expect(gateClose).toHaveLength(6);
+    expect(await parametersOf("../duties/triage/outcome.ts", "gateClose")).toEqual([
+      "contentsApi",
+      "at",
+      "path",
+      "repo",
+      "thread",
+      "stateBranch",
+    ]);
   });
 });

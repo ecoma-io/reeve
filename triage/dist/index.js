@@ -33526,7 +33526,7 @@ function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
 function rosterExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.some((f) => f.kind !== "capacity");
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind !== "capacity");
 }
 function weatherFailure(model) {
   return {
@@ -35541,8 +35541,7 @@ function removeComments(body) {
   for (; ; ) {
     const opener = body.indexOf(OPENER2, read2);
     if (opener === -1) return out + body.slice(read2);
-    if (opener + OPENER2.length > lastCloser) return out + body.slice(read2);
-    const closer = body.indexOf(CLOSER2, opener + OPENER2.length);
+    const closer = opener + OPENER2.length > lastCloser ? -1 : body.indexOf(CLOSER2, opener + OPENER2.length);
     if (closer === -1) return out + body.slice(read2);
     out += `${body.slice(read2, opener)}
 `;

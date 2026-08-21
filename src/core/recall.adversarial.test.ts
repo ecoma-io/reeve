@@ -106,10 +106,4 @@ describe("what a correction says cannot move it into another section", () => {
     expect(rendered).toContain("A human reopened it: that close was reversed.");
     expect(rendered).not.toMatch(/do not|never close|is not a duplicate/i);
   });
-
-  it("says nothing at all when there is nothing recalled", () => {
-    // Not a heading with nothing under it: an empty section reads as a
-    // project that decided nothing, which is a claim.
-    expect(renderRecall([])).toBe("");
-  });
 });

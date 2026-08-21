@@ -169,10 +169,13 @@ describe("resolveOwnLogin", () => {
 
   // An identity read that SUCCEEDS without a login answers `""`
   // (`timeline.ts:141`), and `""` is also what `readEvents`/`readComments`
-  // answer for an actor GitHub no longer reports — so the two compare equal
-  // and every actorless event is attributed to this duty. See the two todos in
-  // `clock.test.ts` for what that then does. Left as a todo rather than
-  // pinned, because pinning `""` would bless it.
+  // answer for an actor GitHub no longer reports — two different unknowns that
+  // a `===` compared as the same actor, attributing every actorless event to
+  // this duty. That defect is fixed: `isOwnActor` in `clock.ts` never calls an
+  // unreadable identity a match, and the two tests at `clock.test.ts:491` and
+  // `:511` pin the pair of cases it used to get wrong. What is still a todo is
+  // only this end of it — reporting an unreadable identity as unusable instead
+  // of as `""` — left unpinned because pinning `""` would bless it.
   it.todo("reports an unreadable identity as unusable rather than as an empty login");
 });
 

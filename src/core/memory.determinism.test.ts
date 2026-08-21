@@ -240,34 +240,28 @@ describe("recall — store-order invariance", () => {
     ).toEqual([13, 11]);
   });
 
-  it("two records with the same score and the same instant fall back to store order", () => {
-    // ADJUDICATE: `compareAt` answers 0 when two corrections carry the same
-    // `at`, and `topOf`'s sort is stable, so the store's own order decides.
-    // Reachable: `at` is written by whichever duty recorded the decision, two
-    // corrections recorded in the same run share the instant, and a store is a
-    // hand-editable committed file. It is not currently a non-determinism,
-    // because `readStore` sorts the shards and reads each in line order — the
-    // order is fixed, it is just fixed by the file rather than by the record.
-    // Pinned as found rather than fixed: adding `thread` as a final tie-break
-    // would change which example reaches a prompt, which is a decision about
-    // recall, not about a test. Question for adjudication: should `compareAt`
-    // fall through to the thread number so the ranking is total on the record
-    // alone?
-    const same = "2026-05-05T00:00:00.000Z";
-    const a = correction({ thread: 21, at: same, title: "export empty", excerpt: "zero bytes" });
-    const b = correction({ thread: 22, at: same, title: "export empty", excerpt: "zero bytes" });
-
-    expect(
-      createMemory([a, b])
-        .recall("export empty", 2)
-        .map((c) => c.thread),
-    ).toEqual([21, 22]);
-    expect(
-      createMemory([b, a])
-        .recall("export empty", 2)
-        .map((c) => c.thread),
-    ).toEqual([22, 21]);
-  });
+  /**
+   * `compareAt` answers 0 when two corrections carry the same `at`, and
+   * `topOf`'s sort is stable, so the store's own order decides which of them
+   * reaches a prompt as a worked example.
+   *
+   * Reachable: `at` is written by whichever duty recorded the decision, two
+   * corrections recorded in the same run share the instant, and a store is a
+   * hand-editable committed file. It is not a live non-determinism today —
+   * `readStore` sorts the shards and reads each in line order, so the order is
+   * fixed; it is just fixed by the file rather than by the record.
+   *
+   * This was pinned as a passing test first, asserting `[21, 22]` for one store
+   * order and `[22, 21]` for the reverse. That is the wrong shape for a file
+   * called `determinism`: it makes the defect the expected answer, and the
+   * moment `compareAt` gains the `thread` tie-break the comment itself
+   * proposes, both assertions go red for the fix. Stated as a todo instead.
+   *
+   * The question the fix answers, which is a decision about recall rather than
+   * about a test: should `compareAt` fall through to the thread number, so the
+   * ranking is total on the record alone and no store order can reach a prompt?
+   */
+  it.todo("orders two records sharing a score and an instant by the record, not by the store");
 });
 
 // ── The order the queries are asked in ───────────────────────────────────
@@ -381,11 +375,24 @@ describe("tokenise folds case without a locale, so a runner's LANG cannot break 
     );
   });
 
-  it("tokenises the same text the same way for any input, run twice", () => {
-    // Cheap, and it is the assumption every index in this module rests on: the
-    // store is tokenised once per run and the query per thread, so a tokeniser
-    // that read anything outside its argument would produce a corpus and a
-    // query that no longer agree.
+  it("tokenises fixed text into exactly these terms, and the same ones on a second call", () => {
+    // The repeat half is the assumption every index in this module rests on:
+    // the store is tokenised once per run and the query once per thread, so a
+    // tokeniser carrying state between calls would produce a corpus and a
+    // query that no longer agree. `RUN` is a module-scope `/g` regex, which is
+    // exactly the shape that would carry `lastIndex` if it were ever read with
+    // `.exec()` or `.test()` instead of `matchAll`.
+    //
+    // The repeat half cannot stand alone, though — `tokenise` returning `[]`
+    // for everything satisfies it, as it satisfies any claim of the form "two
+    // calls agree". So the values come first: the Latin runs are cased, so
+    // they contribute no bigrams, while the CJK run is not and contributes the
+    // character bigrams that make an unspaced script searchable at all.
+    expect(tokenise("CSV export")).toEqual(["csv", "export"]);
+    expect(tokenise("报表导出")).toEqual(["报表导出", "报表", "表导", "导出"]);
+    expect(tokenise("a")).toEqual(["a"]);
+    expect(tokenise("")).toEqual([]);
+
     fc.assert(
       fc.property(fc.string({ minLength: 0, maxLength: 120, unit: "binary" }), (text) => {
         expect(tokenise(text)).toEqual(tokenise(text));

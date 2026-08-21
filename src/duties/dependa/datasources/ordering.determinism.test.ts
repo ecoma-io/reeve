@@ -210,6 +210,22 @@ describe("what the newest-first order does not read", () => {
     expect(listedPlain).toEqual(listedPadded);
     expect(listedPlain[0]).toBe("1.0");
 
+    // The direction the tie breaks in is the whole of it. Descending byte
+    // order would put `1.0` above `01.0` — fixing the leading-zero spelling —
+    // and `1.00` above `1.0`, guaranteeing the trailing-zero one. Both
+    // paddings are ordinary in Docker tags and git tags, so the tie breaks
+    // toward the shortest spelling, which is the canonical one.
+    const trailing = await dockerOrder(["1.00", "1.0", "0.9"]);
+    const trailingReversed = await dockerOrder(["1.0", "1.00", "0.9"]);
+    expect(trailing).toEqual(trailingReversed);
+    expect(trailing[0]).toBe("1.0");
+    expect(latestAvailable(trailing)).toBe("1.0");
+
+    // Several paddings at once, so the rule is a total order rather than a
+    // pairwise accident.
+    const many = await dockerOrder(["1.000", "01.0", "1.0", "1.00"]);
+    expect(many[0]).toBe("1.0");
+
     // It was a different *proposal*, not just a different array, which is why
     // it mattered. Both tags parse to the same `Semver`, and `main.ts` skips a
     // candidate only on `targetVersion === dep.currentVersion` — a string

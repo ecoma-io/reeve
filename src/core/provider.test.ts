@@ -804,13 +804,26 @@ describe("rotateModels", () => {
       expect(rosterExhausted(["a", "b"], failures)).toBe(true);
     });
 
-    it("reports rosterExhausted when a capacity failure sits beside a protocol one", () => {
-      // The mixture used to satisfy neither this predicate nor `starved`, so a
-      // roster that answered nothing produced a green run indistinguishable
-      // from one that had nothing to do.
-      const failures: Failure[] = [failed("a", "protocol"), failed("b", "capacity")];
+    it("reports rosterExhausted when every model failed on auth, not only on protocol", () => {
+      // The kind this predicate gained. An endpoint refusing the key is
+      // configuration exactly as a body the provider rejected is, and with
+      // several endpoints configured `settleAuth` does not throw for it —
+      // `authExhausted` needs every endpoint to have refused.
+      const failures: Failure[] = [failed("a", "auth"), failed("b", "protocol")];
       expect(rosterExhausted(["a", "b"], failures)).toBe(true);
     });
+
+    it("does not report rosterExhausted when a capacity failure sits beside a protocol one", () => {
+      // Deliberately not covered, and not an oversight — see this predicate's
+      // doc comment. The mixture satisfies neither this nor `starved`, so a
+      // roster that answered nothing is reported by neither; widening to
+      // `some` would redden a run over one degraded item out of a hundred,
+      // because every caller sits inside a per-item loop.
+      const failures: Failure[] = [failed("a", "protocol"), failed("b", "capacity")];
+      expect(rosterExhausted(["a", "b"], failures)).toBe(false);
+    });
+
+    it.todo("reports a roster that answered nothing when its failures are of mixed kinds");
 
     it("does not report rosterExhausted when every failure is capacity — that is `starved`", () => {
       const failures: Failure[] = [failed("a", "capacity"), failed("b", "capacity")];

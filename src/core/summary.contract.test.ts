@@ -51,14 +51,12 @@ describe("failIfRosterExhausted at the duty boundary", () => {
     expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
   });
 
-  it("mixed kinds → red: capacity beside a configuration error is still a run that answered nothing", () => {
-    // The case that used to fall between the two predicates. `starved` is
-    // false because not every model was grounded, and the old
-    // `every(kind === "protocol")` was false because of the two 429s — so a
-    // run that reached no usable answer at all warned about nothing and
-    // exited 0, which a maintainer cannot tell from "there was nothing to do".
-    // One model failing for a reason that is not weather is enough: weather
-    // does not explain the run, so the run does not get to be green.
+  it("mixed kinds → not red: one degraded item must not fail a run that published the rest", () => {
+    // Deliberate, and the reason is the call sites rather than the predicate.
+    // Every caller sits inside a per-item loop — per candidate in `dependa`,
+    // per locale in `harmonise`, per chunk in `translate`, per thread in
+    // `respond` — so a predicate that fired here would redden a whole sweep
+    // because one item's roster hit a rate limit and then a bad body.
     const models = ["a", "b", "c"];
     const failures = [
       failure("a", "capacity", "429"),
@@ -66,16 +64,16 @@ describe("failIfRosterExhausted at the duty boundary", () => {
       failure("c", "capacity", "5xx"),
     ];
 
-    expect(failIfRosterExhausted(models, failures)).toBe(true);
-    expect(vi.mocked(core.setFailed)).toHaveBeenCalledTimes(1);
+    expect(failIfRosterExhausted(models, failures)).toBe(false);
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
   });
 
-  it("mixed kinds → red when the non-capacity failure is an endpoint refusing the key", () => {
-    // The multi-endpoint variant, and the worse half: with `endpoints`
-    // configured, `reckon` defers an auth failure to `weather.failAuth`, and
-    // `authExhausted` stays false while any other endpoint still
-    // authenticates — so `settleAuth` never throws. An HTTP 401 was seen, the
-    // run delivered nothing, and it exited 0.
+  it("all-config → red when an endpoint refused the key rather than rejecting a body", () => {
+    // The multi-endpoint hole this round closed: `reckon` defers an auth
+    // failure to `weather.failAuth`, and `authExhausted` stays false while any
+    // other endpoint still authenticates, so `settleAuth` never throws. The
+    // run saw an HTTP 401, delivered nothing, and used to exit 0 because the
+    // predicate asked for `protocol` specifically.
     const models = ["a@fast", "b"];
     const failures = [failure("a@fast", "auth", "401"), failure("b", "protocol", "html")];
 

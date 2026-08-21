@@ -472,18 +472,18 @@ describe("malformed model output is rejected, never delivered as an answer", () 
     expect(starved(["a", "b"], weather)).toBe(false);
   });
 
-  it("a_mixed_capacity_and_protocol_roster_is_exhaustion_even_though_it_is_not_starvation", async () => {
-    // The false green this round found, driven end to end. One model is rate
-    // limited and the next serves prose where JSON was demanded, so nothing
-    // usable comes back and the roster is spent.
+  it("a_mixed_capacity_and_protocol_roster_is_reported_by_neither_predicate", async () => {
+    // A known hole, driven end to end so it is measured rather than assumed.
+    // One model is rate limited and the next serves prose where JSON was
+    // demanded, so nothing usable comes back — and `starved` is correctly
+    // false (not every model was grounded) while `rosterExhausted` is false
+    // (one failure was capacity). The duty therefore writes what a run with
+    // nothing to do writes.
     //
-    // `starved` is correctly false — not every model was grounded, so a later
-    // stage could still try one. What was wrong was the other half: the
-    // exhaustion predicate asked whether EVERY failure was a protocol error,
-    // which the 429 made false, so the duty warned about nothing and exited 0
-    // with `responded=false`. That is byte for byte what a run that decided
-    // there was nothing to do writes, and D5 does not allow the two to look
-    // alike.
+    // Not closed by widening the predicate: every caller sits inside a
+    // per-item loop, so firing here would fail a whole sweep over one
+    // degraded item. Closing it honestly means deciding once per run against
+    // what the run delivered — see `summary.test.ts`'s todo.
     const weather = createWeather();
     const { rotation } = await run(
       ["a", "b"],
@@ -496,6 +496,24 @@ describe("malformed model output is rejected, never delivered as an answer", () 
 
     expect(rotation.success).toBeNull();
     expect(rotation.failures.map((failure) => failure.kind)).toEqual(["capacity", "protocol"]);
+    expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(false);
+    expect(starved(["a", "b"], weather)).toBe(false);
+  });
+
+  it("an_all_auth_and_protocol_roster_is_exhaustion_though_it_is_not_starvation", async () => {
+    // The half that IS closed: nothing weather-shaped happened at all, so the
+    // run is red rather than green-with-nothing-in-it.
+    const weather = createWeather();
+    const { rotation } = await run(
+      ["a", "b"],
+      {
+        a: () => new Response("not json", { status: 200 }),
+        b: () => new Response("{}", { status: 400 }),
+      },
+      weather,
+    );
+
+    expect(rotation.success).toBeNull();
     expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(true);
     expect(starved(["a", "b"], weather)).toBe(false);
   });

@@ -32108,7 +32108,7 @@ function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
 function rosterExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.some((f) => f.kind !== "capacity");
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind !== "capacity");
 }
 function weatherFailure(model) {
   return {
@@ -33448,7 +33448,8 @@ var DEFAULT_CAPABILITIES = [];
 function byVersionDescending(a, b) {
   const collated = b.version.localeCompare(a.version, "en-US", { numeric: true });
   if (collated !== 0) return collated;
-  return b.version < a.version ? -1 : b.version > a.version ? 1 : 0;
+  if (a.version.length !== b.version.length) return a.version.length - b.version.length;
+  return a.version < b.version ? -1 : a.version > b.version ? 1 : 0;
 }
 
 // src/duties/dependa/datasources/crates.ts

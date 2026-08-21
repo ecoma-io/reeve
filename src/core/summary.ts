@@ -157,9 +157,10 @@ export function warnIfPanelIdle(seats: readonly (readonly string[])[], drafts: n
  * Call this after a rotation returns no usable answer, alongside
  * {@link warnIfStarved} for the all-capacity case. Returns `true` and sets the
  * job failed; returns `false` when the condition does not apply. See
- * {@link rosterExhausted} for why a mixture of capacity and configuration
- * failures belongs on this side of the line rather than falling between the
- * two predicates, which is what it used to do.
+ * {@link rosterExhausted} for what it covers, and for the mixture of capacity
+ * and configuration failures it deliberately still does not — every call site
+ * below is inside a per-item loop, so a predicate that fired on a mixture
+ * would redden a run for one degraded item out of a hundred that published.
  *
  * `names` is the same display map every other reader-facing line consults: a
  * model id is routinely a maintainer's secret, the log of a public repository

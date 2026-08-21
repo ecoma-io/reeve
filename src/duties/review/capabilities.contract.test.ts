@@ -17,8 +17,8 @@
  * **KNOWN LIMITATIONS — read these before trusting a green run here.**
  *
  * The module list is a `readdir` of this directory, so a NEW file cannot slip
- * past by not being on a list somebody forgot to update. One evasion remains
- * open, and it is a confirmed defeat:
+ * past by not being on a list somebody forgot to update. Two evasions remain
+ * open, and both are confirmed defeats:
  *
  * 1. **Dynamic construction defeats the source scan.** The scan is a substring
  *    and regex read of the file's text. `["write", "Contents", "File"].join("")`
@@ -26,13 +26,20 @@
  *    banned strings and passes. Closing this needs the check to move from
  *    source text to the resolved module graph.
  *
- * A second one used to sit beside it and is now closed: the port-shape regex
- * was indentation-sensitive (`/^\s{6}(\w+)\(params/gm` counted methods at
- * exactly six spaces, so a method one level deeper widened a port without
- * moving the count). `portMethods` bounds the search by the interface's own
- * braces instead, which counts a method at any depth. Its doc comment carries
- * the rest of that history, including the two `indexOf` anchors it replaced —
- * one of which was a doc-comment string in the module below the port.
+ * 2. **A port method whose first parameter is not named `params` is invisible.**
+ *    `portMethods` matches `/^\s*(\w+)\s*\(params/gm`, so a method declared as
+ *    `writeFile(input: …)` is not counted and does not move the method list
+ *    below. Every port here happens to use `params`, which is what makes the
+ *    check work at all; nothing enforces that it stays true.
+ *
+ * Half of the second one used to be worse and that half is now closed: the
+ * regex was also indentation-sensitive (`/^\s{6}(\w+)\(params/gm` counted
+ * methods at exactly six spaces, so a method one level deeper widened a port
+ * without moving the count). `portMethods` bounds the search by the
+ * interface's own braces instead, so depth no longer matters — only the
+ * parameter name does. Its doc comment carries the rest of that history,
+ * including the two `indexOf` anchors it replaced — one of which was a
+ * doc-comment string in the module below the port.
  *
  * **And a boundary property no test in this file can change.** These ports are
  * TypeScript interfaces, which are erased at runtime. `main.ts:952` builds one
@@ -100,12 +107,14 @@ async function reviewModules(): Promise<readonly string[]> {
  * has been renamed fails here saying so, rather than failing three lines later
  * about a method list nobody chose.
  *
- * It also closes the second of the two KNOWN LIMITATIONS above. The old regex
- * counted methods at exactly six spaces of indentation — the nesting these
- * ports happen to use — so a method declared one level deeper widened the port
- * without moving the count. Bounding the search by the interface's braces
- * instead of by indentation means every method in the port is counted at
- * whatever depth it is written.
+ * It also narrows the second of the KNOWN LIMITATIONS above without closing
+ * it. The old regex counted methods at exactly six spaces of indentation — the
+ * nesting these ports happen to use — so a method declared one level deeper
+ * widened the port without moving the count. Bounding the search by the
+ * interface's braces instead of by indentation means every method is counted
+ * at whatever depth it is written. What survives is the `(params` anchor: a
+ * method whose first parameter is named anything else is still not seen at
+ * all.
  */
 async function portMethods(file: string, name: string): Promise<string[]> {
   const text = await source(file);

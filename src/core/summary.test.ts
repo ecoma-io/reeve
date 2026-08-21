@@ -313,19 +313,36 @@ describe("failIfRosterExhausted", () => {
     expect(message).toContain("b: invalid request");
   });
 
-  it("fails the run when a capacity failure sits beside one that is not", () => {
-    // Weather explains a model that timed out. It does not explain the one
-    // that answered with something unreadable, and the run reached no usable
-    // answer at all — so it is red rather than a green run with nothing in it,
-    // which is the only other thing it could have looked like.
+  it("fails the run when every model failed on auth or protocol", () => {
+    // Both kinds are configuration: a key an endpoint refused and a body the
+    // provider rejected are equally not weather.
     const failures: Failure[] = [
-      { ok: false, model: "a", reason: "timeout", kind: "capacity" },
+      { ok: false, model: "a", reason: "401", kind: "auth" },
       { ok: false, model: "b", reason: "model not found", kind: "protocol" },
     ];
 
     expect(failIfRosterExhausted(["a", "b"], failures)).toBe(true);
     expect(vi.mocked(core.setFailed)).toHaveBeenCalledTimes(1);
   });
+
+  it("does not fail the run on a mixture of capacity and configuration — see the todo below", () => {
+    const failures: Failure[] = [
+      { ok: false, model: "a", reason: "timeout", kind: "capacity" },
+      { ok: false, model: "b", reason: "model not found", kind: "protocol" },
+    ];
+
+    expect(failIfRosterExhausted(["a", "b"], failures)).toBe(false);
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  // The remaining hole, stated rather than pinned. A roster where one model was
+  // rate-limited and another returned HTML answers nothing and is reported by
+  // neither this nor `starved`, so the run writes what "nothing to do" writes.
+  // Closing it means deciding once per run, against what the run delivered,
+  // rather than at each of the per-item call sites this function has today —
+  // where firing on a mixture would redden a run for one degraded item out of
+  // a hundred that published correctly.
+  it.todo("fails a run that delivered nothing whose roster failed for mixed reasons");
 
   it("does not fail the run when every failure is capacity — that is weather, and `starved` says so", () => {
     const failures: Failure[] = [

@@ -128,59 +128,41 @@ describe("discoverGroups — the groups themselves do not move with the listing"
 
 // ── The half that does not ───────────────────────────────────────────────
 
-describe("ADJUDICATE: the order is the listing's, and two decisions read it", () => {
-  it("returns the groups in the order the tree listed their first member", () => {
-    const asListed = discoverGroups(PATHS, SOURCE, TARGETS, []).map((g) => g.id);
-    const reversed = discoverGroups([...PATHS].reverse(), SOURCE, TARGETS, []).map((g) => g.id);
-
-    expect(asListed).toEqual(["README", "docs/getting-started", "docs/deploy/runbook"]);
-    expect(reversed).toEqual(["docs/deploy/runbook", "docs/getting-started", "README"]);
-    expect(reversed).not.toEqual(asListed);
-
-    // What that costs: `main.ts` breaks out of the walk at `settings.limit`, so
-    // a run capped at one group synchronises `README` from one listing and
-    // `docs/deploy/runbook` from the other — same commit, same warrant.
-    expect(asListed.slice(0, 1)).not.toEqual(reversed.slice(0, 1));
-  });
-
-  it("orders each group's locales by the listing, which is what the classifier's context follows", () => {
-    // `findOrCreate` seeds a fresh provenance record with `new Map(files)`,
-    // `markStale` walks `doc.files` in that order to build `doc.stale`, and
-    // `main.ts` reads `staleWithFile[0]` — so the first target locale here is
-    // the translation whose current text is shown to the classifying model as
-    // the context for the whole document group.
-    const viFirst = discoverGroups(
-      ["README.md", "README.vi.md", "README.zh.md"],
-      SOURCE,
-      TARGETS,
-      [],
-    );
-    const zhFirst = discoverGroups(
-      ["README.md", "README.zh.md", "README.vi.md"],
-      SOURCE,
-      TARGETS,
-      [],
-    );
-
-    expect([...(viFirst[0]?.files.keys() ?? [])]).toEqual(["en", "vi", "zh"]);
-    expect([...(zhFirst[0]?.files.keys() ?? [])]).toEqual(["en", "zh", "vi"]);
-    // The membership is identical; only the walk order differs.
-    expect(contentOf(zhFirst)).toEqual(contentOf(viFirst));
-
-    // Question for adjudication: should `discoverGroups` return its groups in
-    // byte order of `id`, and each group's `files` in the configured language
-    // order (source first, then `languages` as written)? Both are orders the
-    // repository controls; the listing is not.
-  });
-
-  it("bootstrap appends its derived locales after whatever the listing already had", () => {
-    // A newly configured language enters `files` at the end, so it is last in
-    // `doc.stale` too — meaning the locale most likely to be missing entirely
-    // is the one least likely to be the classifier's context. Recorded here
-    // because it is the same ordering rule seen from the other side, not a
-    // second finding.
-    const only = discoverGroups(["README.md", "README.zh.md"], SOURCE, TARGETS, [], true);
-    expect([...(only[0]?.files.keys() ?? [])]).toEqual(["en", "zh", "vi"]);
-    expect(only[0]?.files.get("vi")).toBe("README.vi.md");
-  });
+/**
+ * Three consequences of one unfixed defect: `discoverGroups` returns its groups
+ * in the order the tree listed their first member, and seeds each group's
+ * `files` map in listing order too.
+ *
+ * These were pinned as passing tests first — asserting that `["README", …]`
+ * comes back for one listing and its reverse for the reverse. That was wrong
+ * twice over. It blesses an order GitHub never promised for a git tree, and it
+ * contradicts `harmonise/main.integration.test.ts`, which records the same
+ * defect as a todo and says why: "pinning today's order would bless a listing
+ * order GitHub never promised". The file's own note that "the sort that would
+ * settle both is one line" is the tell — the moment anyone writes that line,
+ * four assertions would have gone red for doing the right thing.
+ *
+ * What the defect costs, measured before it was un-pinned:
+ *
+ *  - `main.ts` breaks out of the walk at `settings.limit`, so a run capped at
+ *    one group synchronised `README` from one listing and `docs/deploy/runbook`
+ *    from the reverse — same commit, same warrant, different work done.
+ *  - `findOrCreate` seeds a fresh provenance record with `new Map(files)`,
+ *    `markStale` walks `doc.files` in that order to build `doc.stale`, and
+ *    `main.ts` reads `staleWithFile[0]` — so the listing decides which
+ *    translation's current text is shown to the classifying model as context
+ *    for the whole group (`en, vi, zh` one way; `en, zh, vi` the other).
+ *  - `bootstrap` appends a newly configured locale at the end of `files`, so
+ *    the locale most likely to be missing entirely is the one least likely to
+ *    be the classifier's context.
+ *
+ * The fix is a decision the repository owns and this file does not: groups in
+ * byte order of `id`, and each group's `files` in the configured language order
+ * (source first, then `languages` as written). Both are orders this repository
+ * controls; the listing is not.
+ */
+describe("the order the listing chose, which is nobody's decision", () => {
+  it.todo("returns its groups in an order that does not come from the tree listing");
+  it.todo("orders each group's locales by the configured language order, not by the listing");
+  it.todo("gives a bootstrapped locale the same position it would have had all along");
 });

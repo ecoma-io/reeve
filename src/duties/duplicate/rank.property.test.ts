@@ -26,9 +26,28 @@
  * The corpus vocabulary is deliberately small and shared, so generated
  * candidates collide on score and the tie-break is exercised rather than
  * skipped past. Every `fc.assert` carries a fixed seed.
+ *
+ * ── The relevance property, and why it is first ────────────────────────────
+ *
+ * Every claim above is an *invariance* claim, and an adversarial review of
+ * this file made the cost of that plain: it replaced `rank` with a scorer that
+ * ignores the queries entirely and returns every candidate with `score: 1`,
+ * and all six properties passed. They had to — a permutation-invariance claim
+ * is true of any function that does not read position, including one that does
+ * not read anything.
+ *
+ * So the file now leads with a property that has the opposite shape: the
+ * output must depend on the query. `lexical`'s BM25 weight carries a `+ 1`
+ * inside its logarithm precisely so a term is never worth zero or less, which
+ * makes the relationship exact rather than approximate — a candidate sharing a
+ * token with some query scores above zero, one sharing none scores exactly
+ * zero, and `rank` drops every candidate at or below zero before it sorts.
+ * That is an iff, and it is what the constant scorer fails on its first case.
  */
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
+
+import { tokenise } from "../../core/memory.js";
 
 import { rank, type Candidate, type Ranked } from "./rank.js";
 
@@ -95,6 +114,66 @@ function withPermutation<T>(
 function shape(ranked: readonly Ranked[]): readonly { number: number; score: number }[] {
   return ranked.map((entry) => ({ number: entry.candidate.number, score: entry.score }));
 }
+
+// ── Relevance: the output depends on the query ───────────────────────────
+
+/** Every distinct token across a candidate's title and body, as `rank` reads them. */
+function tokensOf(candidate: Candidate): Set<string> {
+  return new Set([...tokenise(candidate.title), ...tokenise(candidate.body)]);
+}
+
+/** Whether `candidate` shares at least one token with at least one query. */
+function shares(candidate: Candidate, queries: readonly string[]): boolean {
+  const mine = tokensOf(candidate);
+  return queries.some((query) => tokenise(query).some((term) => mine.has(term)));
+}
+
+describe("the ranking reads the query", () => {
+  it("offers no candidate that shares nothing with any query", () => {
+    // The direction that kills a scorer which ignores its input: a model may
+    // only close a thread as a duplicate of a candidate on this list, so a
+    // candidate the query has nothing to do with must never reach it.
+    fc.assert(
+      fc.property(
+        corpusArb,
+        queriesArb,
+        fc.integer({ min: 1, max: 12 }),
+        (corpus, queries, limit) => {
+          for (const entry of rank(queries, corpus, limit)) {
+            expect({
+              number: entry.candidate.number,
+              shares: shares(entry.candidate, queries),
+            }).toEqual({ number: entry.candidate.number, shares: true });
+            expect(entry.score).toBeGreaterThan(0);
+          }
+          return true;
+        },
+      ),
+      { numRuns: 400, seed: 20_260_821 },
+    );
+  });
+
+  it("offers every candidate that does share, when the limit does not cut it", () => {
+    // The other direction, so the property above cannot be satisfied by
+    // returning nothing at all. With the limit at the corpus size there is no
+    // cut, so the offered set is exactly the sharing set — an iff, which is
+    // what `lexical`'s strictly-positive term weight makes true.
+    fc.assert(
+      fc.property(corpusArb, queriesArb, (corpus, queries) => {
+        const offered = new Set(
+          rank(queries, corpus, corpus.length).map((entry) => entry.candidate.number),
+        );
+        const sharing = new Set(
+          corpus.filter((candidate) => shares(candidate, queries)).map((c) => c.number),
+        );
+
+        expect([...offered].sort((a, b) => a - b)).toEqual([...sharing].sort((a, b) => a - b));
+        return true;
+      }),
+      { numRuns: 400, seed: 20_260_821 },
+    );
+  });
+});
 
 // ── The corpus's own order ───────────────────────────────────────────────
 

@@ -187,23 +187,15 @@ describe("which model the bill names", () => {
     expect(meter.spent()).toMatchObject([{ model: "m@fast", endpoint: "fast", failed: 1 }]);
   });
 
-  it("bills a routing failure that never made a request against the endpoint it named", async () => {
-    // A model whose alias names no configured endpoint fails before any
-    // network call. It still belongs in the ledger as a failed attempt — the
-    // run tried to ask it — and the row has to carry the alias, because
-    // "which endpoint was this meant for" is the whole of the diagnosis.
-    const meter = createMeter();
-    const routed = createRoutedProvider([
-      { alias: "fast", baseUrl: "https://fast.test/v1", apiKey: "k", timeoutMs: 1000 },
-    ]);
-
-    await metered(routed, meter, "judge").complete("m", HELLO);
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(meter.spent()).toMatchObject([
-      { purpose: "judge", model: "m", endpoint: null, requests: 1, failed: 1, unreported: 1 },
-    ]);
-  });
+  // There is deliberately no test here for a routing failure billed against
+  // the alias it named, because that row cannot exist. `createRoutedProvider`
+  // builds `byAlias` from the same endpoint list `aliases` comes from, and
+  // `splitEndpointAlias` returns a non-null `alias` only when `aliases.has` it
+  // — so on the `provider === undefined` branch that emits `endpoint: alias`
+  // and `no endpoint named …`, `alias` is provably `null` every time. The
+  // branch answers for itself in `provider.test.ts` ("fails a model that
+  // routes to no configured endpoint, without calling anything"); a meter test
+  // asserting a non-null endpoint on it would be pinning an unreachable state.
 });
 
 describe("the run's temperature rides with every metered request", () => {

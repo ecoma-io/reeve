@@ -52,6 +52,20 @@ describe("a placeholder value is inserted, never interpreted", () => {
 });
 
 describe("a language code chooses a row and can never be one", () => {
+  /**
+   * The English row, spelled out rather than fetched.
+   *
+   * Comparing a hostile code's rendering against another `chrome` call would
+   * be satisfied by a `chrome` that answered `""` to everything — the two
+   * sides would agree and say nothing. The sentence is pinned once here so
+   * the fallback has something outside the function to be equal to.
+   */
+  const ENGLISH = "Removing the `stale` label also stops this track.";
+
+  it("renders that sentence for the language it is written in", () => {
+    expect(chrome("lifecycleFooterWhenLabel", "en", { label: "stale" })).toBe(ENGLISH);
+  });
+
   it.each([
     ["a code that is not a language", "'; drop table --"],
     ["a code carrying markup", "<script>alert(1)</script>"],
@@ -61,7 +75,7 @@ describe("a language code chooses a row and can never be one", () => {
   ])("renders the English row for %s rather than anything it says", (_case, code) => {
     const rendered = chrome("lifecycleFooterWhenLabel", code, { label: "stale" });
 
-    expect(rendered).toBe(chrome("lifecycleFooterWhenLabel", "en", { label: "stale" }));
+    expect(rendered).toBe(ENGLISH);
   });
 
   it("never echoes the code it was handed into the sentence it publishes", () => {

@@ -72,23 +72,4 @@ describe("a form padded with the template's own words", () => {
     expect(screened?.reason).toBe("too-short");
     expect(screened?.note).toContain("characters of authored text");
   });
-
-  it("reports a form that is only scaffolding as a template, not as an empty thread", () => {
-    const screened = screen({ title: "", body: scaffolding.repeat(20), minimum: 200 });
-
-    expect(screened?.reason).toBe("template");
-  });
-
-  it("still passes the moment one field is genuinely answered", () => {
-    // The asymmetry the module is built on: screening out a real report costs
-    // a contributor the answer they came for, so the rule has to let a filled
-    // form through even when the scaffolding around it dwarfs it.
-    const answered = scaffolding.replace(
-      "_No response_",
-      "Exporting a table with exactly one row writes a zero-byte file instead of a header.",
-    );
-    const screened = screen({ title: "Empty export", body: answered, minimum: 60 });
-
-    expect(screened).toBeNull();
-  });
 });

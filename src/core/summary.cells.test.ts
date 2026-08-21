@@ -57,7 +57,13 @@ describe("cost, on names a workflow file can produce", () => {
       (entry) => ({ a: "one | two", b: "trailing\\", c: "over\ntwo lines" })[entry.model] ?? "",
     );
 
-    const widths = new Set(rows(rendered).map((row) => row.split(/(?<!\\)\|/).length));
+    // The row count first: a `cost` that emitted the header and dropped every
+    // data row also has one distinct width, so uniformity alone is not the
+    // property. Header, rule, three spends and the total.
+    const table = rows(rendered);
+    expect(table).toHaveLength(6);
+
+    const widths = new Set(table.map((row) => row.split(/(?<!\\)\|/).length));
     expect(widths.size).toBe(1);
   });
 
@@ -67,7 +73,12 @@ describe("cost, on names a workflow file can produce", () => {
       () => "Quick | Big",
     );
 
-    const widths = new Set(rows(rendered).map((row) => row.split(/(?<!\\)\|/).length));
+    // Header, rule, two spends and the total — counted before the widths, for
+    // the same reason as above.
+    const table = rows(rendered);
+    expect(table).toHaveLength(5);
+
+    const widths = new Set(table.map((row) => row.split(/(?<!\\)\|/).length));
     expect(widths.size).toBe(1);
   });
 });

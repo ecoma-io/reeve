@@ -32238,7 +32238,7 @@ function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
 function rosterExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.some((f) => f.kind !== "capacity");
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind !== "capacity");
 }
 function weatherFailure(model) {
   return {
@@ -35282,7 +35282,7 @@ ${numbered}`);
 }
 
 // src/duties/translate/engine.ts
-async function translateChunk(to, settings, stages, from, source, weather, onProtocolExhausted) {
+async function translateChunk(to, settings, stages, from, source, weather, onRosterExhausted) {
   const drafted = await translate({
     provider: stages.draft,
     models: settings.models,
@@ -35308,7 +35308,7 @@ async function translateChunk(to, settings, stages, from, source, weather, onPro
     );
   }
   if (drafted.attempts.length === 0) {
-    onProtocolExhausted?.(settings.models, drafted.failures);
+    onRosterExhausted?.(settings.models, drafted.failures);
   }
   const verdict = await judge2({
     provider: stages.judge,
@@ -35339,7 +35339,7 @@ async function translateChunk(to, settings, stages, from, source, weather, onPro
     votes: cast
   };
 }
-async function translateInto(to, settings, stages, from, source, weather, onProtocolExhausted) {
+async function translateInto(to, settings, stages, from, source, weather, onRosterExhausted) {
   const pieces = chunks(source, settings.chunkChars);
   const results = [];
   for (const piece of pieces) {
@@ -35362,7 +35362,7 @@ async function translateInto(to, settings, stages, from, source, weather, onProt
       from,
       piece,
       weather,
-      onProtocolExhausted
+      onRosterExhausted
     );
     if (outcome === null) return null;
     results.push(outcome);
@@ -36219,7 +36219,7 @@ async function publish(thread, marker2, publication2) {
 function nothing(what, note) {
   return { what, from: null, posted: [], skipped: [], budgetSkipped: [], note, published: false };
 }
-async function translateText(what, body, thread, branding, settings, stages, weather, meter, budget, onProtocolExhausted) {
+async function translateText(what, body, thread, branding, settings, stages, weather, meter, budget, onRosterExhausted) {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     info(`${what} has an empty body \u2014 nothing to translate.`);
@@ -36272,7 +36272,7 @@ async function translateText(what, body, thread, branding, settings, stages, wea
       detection.language,
       source,
       weather,
-      onProtocolExhausted
+      onRosterExhausted
     );
     if (translated2 === null) {
       warning(`${what} ${to.code}: no model produced a translation this run.`);
@@ -36354,7 +36354,7 @@ ${assemble(official, marker, would)}`
     published: outcome.action === "published"
   };
 }
-async function translateReplies(api, at, settings, stages, looked, weather, meter, budget, onProtocolExhausted) {
+async function translateReplies(api, at, settings, stages, looked, weather, meter, budget, onRosterExhausted) {
   const { replies, more } = await listReplies(api, at, {
     max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
     order: "newest"
@@ -36386,14 +36386,14 @@ async function translateReplies(api, at, settings, stages, looked, weather, mete
       weather,
       meter,
       budget,
-      onProtocolExhausted
+      onRosterExhausted
     );
     looked.push(translated);
     if (translated.published) published += 1;
   }
   return published;
 }
-async function processThread(api, at, body, settings, stages, weather, meter, budget, onProtocolExhausted) {
+async function processThread(api, at, body, settings, stages, weather, meter, budget, onRosterExhausted) {
   const thread = createThread(api, at);
   const translated = await translateText(
     `#${String(at.number)}`,
@@ -36407,7 +36407,7 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
     weather,
     meter,
     budget,
-    onProtocolExhausted
+    onRosterExhausted
   );
   const looked = [translated];
   const replies = settings.replies ? await translateReplies(
@@ -36419,7 +36419,7 @@ async function processThread(api, at, body, settings, stages, weather, meter, bu
     weather,
     meter,
     budget,
-    onProtocolExhausted
+    onRosterExhausted
   ) : 0;
   return { looked, translated, replies, ungranted: null };
 }

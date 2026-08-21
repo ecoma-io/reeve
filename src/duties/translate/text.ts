@@ -27,7 +27,7 @@ import { assemble, publish } from "../../core/publish.js";
 import { type Meter } from "../../core/meter.js";
 
 import { budgetExhausted, type Budget } from "./budget.js";
-import { translateInto, type Stages, type ProtocolCheck } from "./engine.js";
+import { translateInto, type Stages, type RosterCheck } from "./engine.js";
 import { readBody, targets } from "./inputs.js";
 import { type Looked } from "./summary.js";
 import {
@@ -82,7 +82,7 @@ export async function translateText(
   weather: Weather,
   meter: Meter,
   budget: Budget,
-  onProtocolExhausted?: ProtocolCheck,
+  onRosterExhausted?: RosterCheck,
 ): Promise<Report> {
   const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
@@ -173,7 +173,7 @@ export async function translateText(
       detection.language,
       source,
       weather,
-      onProtocolExhausted,
+      onRosterExhausted,
     );
     if (translated === null) {
       core.warning(`${what} ${to.code}: no model produced a translation this run.`);
@@ -313,7 +313,7 @@ export async function translateReplies(
   weather: Weather,
   meter: Meter,
   budget: Budget,
-  onProtocolExhausted?: ProtocolCheck,
+  onRosterExhausted?: RosterCheck,
 ): Promise<number> {
   const { replies, more } = await listReplies(api, at, {
     max: settings.maxReplies ?? Number.MAX_SAFE_INTEGER,
@@ -353,7 +353,7 @@ export async function translateReplies(
       weather,
       meter,
       budget,
-      onProtocolExhausted,
+      onRosterExhausted,
     );
     looked.push(translated);
     if (translated.published) published += 1;
@@ -392,7 +392,7 @@ export async function processThread(
   weather: Weather,
   meter: Meter,
   budget: Budget,
-  onProtocolExhausted?: ProtocolCheck,
+  onRosterExhausted?: RosterCheck,
 ): Promise<ThreadResult> {
   const thread = createThread(api, at);
   const translated = await translateText(
@@ -407,7 +407,7 @@ export async function processThread(
     weather,
     meter,
     budget,
-    onProtocolExhausted,
+    onRosterExhausted,
   );
   const looked: Looked[] = [translated];
 
@@ -421,7 +421,7 @@ export async function processThread(
         weather,
         meter,
         budget,
-        onProtocolExhausted,
+        onRosterExhausted,
       )
     : 0;
 

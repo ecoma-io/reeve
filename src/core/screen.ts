@@ -166,11 +166,13 @@ function removeComments(body: string): string {
     const opener = body.indexOf(OPENER, read);
     if (opener === -1) return out + body.slice(read);
 
-    // Past the last closer in the body, so nothing after this opener can close
-    // it and nothing after it can be a comment either.
-    if (opener + OPENER.length > lastCloser) return out + body.slice(read);
-
-    const closer = body.indexOf(CLOSER, opener + OPENER.length);
+    // Folded into the expression rather than checked as its own branch, the
+    // way `defangComments` does it: written as two `if`s, the second is
+    // unreachable — passing the first means `lastCloser >= opener + 4`, so the
+    // search must find at least `lastCloser` — and an unreachable branch is a
+    // mutant that survives for ever.
+    const closer =
+      opener + OPENER.length > lastCloser ? -1 : body.indexOf(CLOSER, opener + OPENER.length);
     if (closer === -1) return out + body.slice(read);
 
     out += `${body.slice(read, opener)}\n`;

@@ -32907,7 +32907,7 @@ function starved(models, weather) {
   return models.length > 0 && models.every((model) => weather.grounded(model));
 }
 function rosterExhausted(models, failures) {
-  return models.length > 0 && failures.length >= models.length && failures.some((f) => f.kind !== "capacity");
+  return models.length > 0 && failures.length >= models.length && failures.every((f) => f.kind !== "capacity");
 }
 function weatherFailure(model) {
   return {
