@@ -273,3 +273,29 @@ function findClosingRun(text: string, from: number, runLength: number): number {
   }
   return -1;
 }
+
+/**
+ * The contents of an answer that is one fenced block and nothing else.
+ *
+ * A model asked for JSON hands back ```` ```json ```` around it often enough
+ * that refusing the answer would be refusing the model rather than the content.
+ * This is the only reshaping done before parsing, and it is safe in a way a
+ * "find the first `{`" scan is not: it accepts an answer that is one fenced
+ * block and **nothing else**, so an answer carrying prose beside the JSON is
+ * still unreadable — which is what an answer carrying prose beside the JSON is.
+ *
+ * It lived four times over as a private `unwrapped()` in `triage/verdict.ts`,
+ * `duplicate/verdict.ts`, `respond/draft.ts` and `review/verdict.ts`, all four
+ * functionally identical and three of the four carrying a doc comment pointing
+ * at one of the others ("the same indulgence `triage/verdict.ts` makes"). The
+ * code was already admitting it belonged in one place. It belongs here, beside
+ * `segments`, which is what does the actual work.
+ */
+export function unfenced(answer: string): string {
+  const parts = segments(answer.trim());
+  const [only] = parts;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer;
+
+  const lines = only.text.split("\n");
+  return lines.slice(1, -1).join("\n");
+}

@@ -23,7 +23,7 @@
  * nothing in this file reaches a network or a model.
  */
 import { spawn, execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -2554,26 +2554,5 @@ describe("the action contract", () => {
     const text = await readFile(join(DUTY, "action.yml"), "utf8");
 
     expect(text).toContain("main: dist/index.js");
-  });
-
-  it("keeps every source file reviewable as text", async () => {
-    // Shared with every other duty's suite, and repeated here rather than
-    // trusted to run elsewhere: a control character in a source file is not a
-    // style question, and this duty's own files are exactly the ones this
-    // brief added. See `translate/main.integration.test.ts`'s identical case
-    // for the full rationale.
-    const offenders: string[] = [];
-    for (const file of await readdir(join(ROOT, "src", "duties", "review"))) {
-      if (!file.endsWith(".ts")) continue;
-      const text = await readFile(join(ROOT, "src", "duties", "review", file), "utf8");
-      // eslint-disable-next-line no-control-regex -- finding one is the point
-      const found = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.exec(text);
-      if (found !== null) {
-        const at = found[0].codePointAt(0) ?? 0;
-        offenders.push(`${file} holds U+${at.toString(16).padStart(4, "0").toUpperCase()}`);
-      }
-    }
-
-    expect(offenders).toEqual([]);
   });
 });

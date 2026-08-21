@@ -14,7 +14,7 @@
  * (The pass engine that builds those prompts and rotates past failed models
  * lives in `passes.ts`; this module only reads what came back.)
  */
-import { segments } from "../../core/markdown.js";
+import { unfenced } from "../../core/markdown.js";
 import type { RawFinding } from "./findings.js";
 import type { ShownFile } from "./pr.js";
 
@@ -30,7 +30,7 @@ export interface Verdict {
 export function parseVerdict(answer: string, files: readonly ShownFile[]): Verdict | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(unwrapped(answer));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -92,14 +92,4 @@ export function parseFinding(raw: unknown, files: readonly ShownFile[]): RawFind
     body: body.trim(),
     snippet: snippet.slice(0, 120),
   };
-}
-
-/** A whole answer wrapped in one fence, unwrapped — the same indulgence duplicate makes. */
-function unwrapped(answer: string): string {
-  const parts = segments(answer.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer;
-
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }

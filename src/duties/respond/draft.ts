@@ -25,7 +25,7 @@
  * remaining draft rather than paid for again.
  */
 import { enclose } from "../../core/enclose.js";
-import { segments } from "../../core/markdown.js";
+import { unfenced } from "../../core/markdown.js";
 import type { Correction } from "../../core/memory.js";
 import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { askWhole } from "../../core/provider.js";
@@ -148,7 +148,7 @@ function remaining(
 export function parseAttempt(answer: string): { text: string; confidence: number } | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(unwrapped(answer));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -163,16 +163,6 @@ export function parseAttempt(answer: string): { text: string; confidence: number
   if (confidence < 0 || confidence > 1) return null;
 
   return { text: text.trim(), confidence };
-}
-
-/** A whole answer wrapped in one fence, unwrapped. See `triage/verdict.ts`'s `unwrapped`. */
-function unwrapped(text: string): string {
-  const parts = segments(text.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return text;
-
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }
 
 export function prompt(request: DraftRequest): Message[] {

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Language } from "./languages.js";
+import type * as ProviderModule from "./provider.js";
 import type { Completion, Failure, Provider } from "./provider.js";
 import { rotateModels } from "./provider.js";
 import { sanitize } from "./sanitize.js";
@@ -15,7 +16,7 @@ import { translateToPivot, type PivotRequest } from "./pivot.js";
 // rotation, but the callback it hands the rotation is `askWhole`, which
 // is real code and must stay real for the stub to exercise it.
 vi.mock("./provider.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./provider.js")>()),
+  ...(await importOriginal<typeof ProviderModule>()),
   rotateModels: vi.fn(),
 }));
 vi.mock("./sanitize.js", () => ({ sanitize: vi.fn() }));

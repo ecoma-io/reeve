@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Language } from "../../core/languages.js";
 import { segments, type Segment } from "../../core/markdown.js";
+import type * as ProviderModule from "../../core/provider.js";
 import type { Completion, Failure, Message, Provider } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
@@ -22,7 +23,7 @@ vi.mock("../../core/markdown.js", () => ({ segments: vi.fn() }));
 // rotation, but the callback it hands the rotation is `askWhole`, which
 // is real code and must stay real for the stub to exercise it.
 vi.mock("../../core/provider.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../core/provider.js")>()),
+  ...(await importOriginal<typeof ProviderModule>()),
   rotateModels: vi.fn(),
 }));
 vi.mock("../../core/sanitize.js", () => ({ sanitize: vi.fn() }));

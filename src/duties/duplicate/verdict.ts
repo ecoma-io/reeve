@@ -26,7 +26,7 @@
  * outage do not clear inside one run.
  */
 import { enclose } from "../../core/enclose.js";
-import { segments } from "../../core/markdown.js";
+import { unfenced } from "../../core/markdown.js";
 import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
@@ -129,7 +129,7 @@ export async function judge(request: JudgeRequest): Promise<Judged> {
 export function parseVerdict(answer: string, candidates: readonly Candidate[]): Verdict | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(unwrapped(answer));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -154,21 +154,6 @@ export function parseVerdict(answer: string, candidates: readonly Candidate[]): 
     confidence,
     rationale: rationale.trim(),
   };
-}
-
-/**
- * A whole answer wrapped in one fence, unwrapped — the same indulgence
- * `triage/verdict.ts` makes and for the same reason: a model asked for JSON
- * hands back ```` ```json ```` around it often enough that refusing the
- * answer would be refusing the model rather than the content.
- */
-function unwrapped(answer: string): string {
-  const parts = segments(answer.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer;
-
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }
 
 /**

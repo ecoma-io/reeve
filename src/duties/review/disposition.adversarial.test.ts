@@ -278,21 +278,38 @@ describe("merging the thread against the mirror", () => {
   };
   const mirror: Disposition = { ...fresh, value: "wont-fix", replyId: 11 };
 
+  const other = dispositionKey(previous({ path: "src/other.ts", line: 12 }));
+
   it("the_thread_wins_over_the_mirror_because_the_thread_is_the_durable_home", () => {
-    const merged = mergeDispositions(new Map([[key, fresh]]), new Map([[key, mirror]]));
-    expect(merged.get(key)).toEqual(fresh);
+    // Both maps carry `key`; only the mirror carries `other`. Asserting the
+    // union in ONE merge is what rules out a merge that returns whichever map
+    // happened to be non-empty — that mutant satisfies each half separately.
+    const merged = mergeDispositions(
+      new Map([[key, fresh]]),
+      new Map([
+        [key, mirror],
+        [other, mirror],
+      ]),
+    );
+    // `toBe`, not `toEqual`: merging hands back the very disposition objects
+    // it was given rather than clones of them.
+    expect(merged.get(key)).toBe(fresh);
+    expect(merged.get(other)).toBe(mirror);
+    expect(merged.size).toBe(2);
   });
 
   it("the_mirror_fills_a_gap_the_thread_no_longer_shows", () => {
     const merged = mergeDispositions(new Map(), new Map([[key, mirror]]));
-    expect(merged.get(key)).toEqual(mirror);
+    expect(merged.get(key)).toBe(mirror);
   });
 
   it("merging_never_mutates_either_input", () => {
     const a = new Map([[key, fresh]]);
-    const b = new Map([[key, mirror]]);
+    const b = new Map([[other, mirror]]);
     mergeDispositions(a, b);
     expect(a.get(key)).toEqual(fresh);
-    expect(b.get(key)).toEqual(mirror);
+    expect(a.size).toBe(1);
+    expect(b.get(other)).toEqual(mirror);
+    expect(b.size).toBe(1);
   });
 });

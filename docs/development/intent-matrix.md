@@ -98,38 +98,55 @@ could not read`).
 - **Tests:** `provider.test.ts` 1161-1211 (`assembleClient` seeds), 1192
   (grounded models never re-asked).
 
-### A5 — Starvation (all-capacity) delivery vs roster exhaustion (any-config)
+### A5 — Starvation (all-capacity) delivery vs roster exhaustion (all-config)
 
-- **Intent:** “every model is out of capacity” and “the roster answered nothing
-  and something other than weather is why” are different failures with
-  different run colours.
-- **Invariant:** `starved()` (all roster models grounded) → duty warns and
-  stays green, delivering what it finished; `rosterExhausted()` (`failures.length
-  > = models.length`AND at least one failure is not`capacity`) →
-`failIfRosterExhausted` sets the job red naming each reason. Empty roster →
-  > neither (a duty that asked no model has not starved).
+- **Intent:** "every model is out of capacity" and "the roster answered nothing
+  and nothing about that was weather" are different failures with different run
+  colours.
+- **Invariant:** `starved()` (all roster models grounded) → duty warns and stays
+  green, delivering what it finished; `rosterExhausted()`
+  (`failures.length >= models.length` AND **every** failure is not `capacity`) →
+  `failIfRosterExhausted` sets the job red naming each reason. Empty roster →
+  neither (a duty that asked no model has not starved).
 - **Scope:** all model-asking duties (call sites `triage/main.ts`,
   `respond/main.ts`, `duplicate/main.ts`, `translate/main.ts`,
   `harmonise/main.ts`, `review/main.ts`, `dependa/main.ts`).
-- **Required:** capacity-only exhaustion ends green with a named “every model
-  failed” note and `starved` output true; **any** non-capacity failure on a
-  roster that produced nothing usable ends red.
+- **Required:** capacity-only exhaustion ends green with a named "every model
+  failed" note and `starved` output true; a roster that produced nothing usable
+  and failed entirely for non-capacity reasons ends red.
 - **Forbidden:** red-failing a 429-only run; a malformed-answer run reported as
-  clean “nothing to do”; **a mixed roster reported as neither.**
-- **Note (round 2):** the predicate read `every(kind === "protocol")` until this
-  round, which left a hole exactly between the two: one model rate-limited and
-  the next serving HTML satisfied neither `starved` nor exhaustion, so a run
-  that reached no answer at all warned about nothing and exited 0 with
-  `responded=false` — byte for byte what a run with nothing to do writes, which
-  is the shape D5 forbids. The multi-endpoint variant was worse, because
-  `authExhausted` needs _every_ endpoint to refuse the key before `settleAuth`
-  throws, so a real 401 beside a protocol failure also exited 0.
-- **Tests:** `provider.test.ts` (`starved`/`rosterExhausted`);
-  `provider.contract.test.ts` (`a_mixed_capacity_and_protocol_roster_is_exhaustion…`
-  and its all-capacity companion); `summary.test.ts` and
-  `summary.contract.test.ts` `failIfRosterExhausted` blocks;
-  `triage/main.integration.test.ts` (stays green when every model failed on
-  capacity).
+  clean "nothing to do".
+- **Note (round 2), including what was tried and reverted:** the predicate read
+  `every(kind === "protocol")` before this round, which missed the case where
+  every model failed but one of them failed on `auth`. With `endpoints`
+  configured, `reckon` defers an auth failure to `weather.failAuth` and
+  `authExhausted` stays false while any other endpoint still authenticates, so
+  `settleAuth` never throws — a run that saw an HTTP 401 and delivered nothing
+  exited 0. Widening to `every(kind !== "capacity")` closes that.
+  It was first widened further, to `some(kind !== "capacity")`, to close the
+  mixed case as well — one model rate-limited and the next serving HTML
+  satisfies neither predicate, so a run that reached no answer at all is
+  reported by neither. **That was reverted**: every call site of
+  `failIfRosterExhausted` sits inside a per-item loop — per candidate in
+  `dependa`, per locale in `harmonise`, per chunk in `translate`, per thread in
+  `respond` — so `some` turned one degraded item into a red run for work that
+  otherwise fully succeeded, and `dependa`'s call guards an opt-in narrative
+  flourish whose absence the surrounding code explicitly handles.
+- **[GAP] The mixed case is still reported by neither predicate.** Closing it
+  honestly means deciding once per run, against what the run actually
+  delivered, rather than at each per-item call site — a change to five duties'
+  failure accounting rather than to this predicate. Stated as a todo in
+  `summary.test.ts` and `provider.test.ts` rather than pinned, so no test
+  blesses it.
+- **Tests:** `provider.test.ts` (`starved`/`rosterExhausted`, including the
+  explicit "does not report rosterExhausted when a capacity failure sits beside
+  a protocol one" and the todo beside it);
+  `provider.contract.test.ts`
+  (`a_mixed_capacity_and_protocol_roster_is_reported_by_neither_predicate` and
+  `an_all_auth_and_protocol_roster_is_exhaustion_though_it_is_not_starvation`);
+  `summary.test.ts` and `summary.contract.test.ts` `failIfRosterExhausted`
+  blocks; `triage/main.integration.test.ts` (stays green when every model failed
+  on capacity).
 
 ### A6 — screen-models: the cheap roster, with a documented fallback
 
@@ -532,7 +549,10 @@ verified` tally that only means anything if unverified findings are
 - **F3 repository context and evidence verification:** context reads bounded and
   only inside the workspace, never reads a secret file, never emits the review
   fence itself, and drops context sections under cap without half-showing one.
-  - Tests: `review/context.security.test.ts` (75-169), integration 1811-1867, 1839.
+  - Tests: `review/context.adversarial.test.ts`, `review/context.test.ts`, and
+    `review/main.integration.test.ts`. (`context.security.test.ts` was folded into
+    `context.adversarial.test.ts`, which already asserted more on every case it
+    shared; line numbers dropped because they went stale faster than they helped.)
 - **F4 deduplication/contradiction:** merged/corroborated same-position findings;
   two passes claiming different rules at one line are annotated, never silently
   resolved to the louder one.
@@ -573,7 +593,7 @@ not a prompt instruction (`docs/doctrine/north-star.md#d8---every-thread-is-host
   traversal by segment, NUL, `.env`/credential denylist, source-extension
   exemption, and never surfaces a secret file; never emits the review fence
   itself.
-  - Tests: `review/context.security.test.ts` 75-169.
+  - Tests: `review/context.adversarial.test.ts` and `review/context.test.ts`.
 - **G4 README, commit messages, branch names, filenames:** treated as hostile
   content, subject to the same fences and caps; nothing in them forms a
   capability grant.

@@ -12,7 +12,7 @@
  *
  * The real one now lives in `main.integration.test.ts` and drives the bundle.
  */
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -113,32 +113,5 @@ describe("the action contract", () => {
     // written is always empty, and a consumer reading it sees nothing — without
     // this test, nothing else would notice.
     expect([...(await writtenOutputs())].sort()).toEqual([...(await declaredOutputs())].sort());
-  });
-
-  it("keeps every source file reviewable as text", async () => {
-    // A control character in a source file is not a style question. Git
-    // classifies a file holding a NUL as binary, so a pull request touching it
-    // renders `Bin 12990 -> 16484 bytes` where the diff belongs — and a module
-    // nobody can read a diff of is a module nobody reviewed, however carefully
-    // they meant to. It reached `publish.ts` once, as the separator
-    // `fingerprint` hashes with, and survived two pull requests over exactly
-    // the code that decides what gets written into a public thread.
-    //
-    // The escape `\u0000` hashes the identical byte and leaves the file text,
-    // so this costs the code nothing. Tab, newline and carriage return are
-    // ordinary; the rest of C0 is not.
-    const offenders: string[] = [];
-    for (const file of await readdir(join(ROOT, "src"), { recursive: true })) {
-      if (!file.endsWith(".ts")) continue;
-      const text = await readFile(join(ROOT, "src", file), "utf8");
-      // eslint-disable-next-line no-control-regex -- finding one is the point
-      const found = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.exec(text);
-      if (found !== null) {
-        const at = found[0].codePointAt(0) ?? 0;
-        offenders.push(`${file} holds U+${at.toString(16).padStart(4, "0").toUpperCase()}`);
-      }
-    }
-
-    expect(offenders).toEqual([]);
   });
 });
