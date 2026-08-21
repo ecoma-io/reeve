@@ -31885,14 +31885,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -34738,7 +34738,7 @@ Produce the complete updated target translation incorporating only the semantic 
 
 // src/duties/harmonise/inputs.ts
 function parsePaths(raw) {
-  return parseList(raw).filter((p) => p.length > 0);
+  return parseList(raw);
 }
 
 // src/duties/harmonise/links.ts
@@ -35356,6 +35356,38 @@ async function ensureBranch(api, at, branchName) {
     throw error2;
   }
 }
+async function openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody) {
+  const { data: existing } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${branchName}`,
+    per_page: 1
+  });
+  const existingPr = existing[0];
+  if (existingPr !== void 0) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr.number,
+      title: prTitle,
+      body: prBody
+    });
+    info(`state-branch: updated PR #${String(existingPr.number)}`);
+    return { pr: existingPr.number };
+  }
+  const { data: pr } = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title: prTitle,
+    head: branchName,
+    base: defaultBranch,
+    body: prBody,
+    draft: true
+  });
+  info(`state-branch: opened PR #${String(pr.number)}`);
+  return { pr: pr.number };
+}
 async function publishState(api, at, branchName, files, prTitle, prBody, dryRun) {
   if (files.length === 0) return null;
   if (dryRun) {
@@ -35396,36 +35428,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
       written += 1;
       info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
-    const { data: existing } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1
-    });
-    const existingPr = existing[0];
-    if (existingPr !== void 0) {
-      await api.rest.pulls.update({
-        owner: at.owner,
-        repo: at.repo,
-        pull_number: existingPr.number,
-        title: prTitle,
-        body: prBody
-      });
-      info(`state-branch: updated PR #${String(existingPr.number)}`);
-      return { pr: existingPr.number };
-    }
-    const { data: pr } = await api.rest.pulls.create({
-      owner: at.owner,
-      repo: at.repo,
-      title: prTitle,
-      head: branchName,
-      base: defaultBranch,
-      body: prBody,
-      draft: true
-    });
-    info(`state-branch: opened PR #${String(pr.number)}`);
-    return { pr: pr.number };
+    return await openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody);
   } catch (error2) {
     if (isCapacityError(error2)) {
       warning(
@@ -35492,10 +35495,10 @@ function readSettings() {
     stateBranch: getInput("state-branch"),
     glossaryDir: getInput("glossary-dir", { required: true }),
     paths: parsePaths(getInput("paths")),
-    bootstrap: getInput("bootstrap") === "true",
+    bootstrap: getBooleanInput("bootstrap"),
     maxRequests: bounded("max-requests", getInput("max-requests")),
     chunkChars: counted("chunk-chars", getInput("chunk-chars")),
-    ignore: getInput("ignore") !== "false"
+    ignore: getBooleanInput("ignore")
   };
 }
 function notGranted(warrant) {

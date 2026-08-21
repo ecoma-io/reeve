@@ -12,5 +12,5 @@ import { parseList } from "../../core/list.js";
  * Empty means scan the whole repository. Comma or newline separated.
  */
 export function parsePaths(raw: string): readonly string[] {
-  return parseList(raw).filter((p) => p.length > 0);
+  return parseList(raw);
 }

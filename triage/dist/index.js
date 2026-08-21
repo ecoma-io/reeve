@@ -33215,14 +33215,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -33928,14 +33928,10 @@ function dutyLanguages(warrant, denied, fallback) {
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
-function resolvePivot(warrant, languages) {
+function pivotOrNone(warrant, languages) {
   const first = languages[0];
-  if (warrant.pivot === null) {
-    if (first === void 0) {
-      throw new Error("pivot: no languages are configured to choose one from.");
-    }
-    return first;
-  }
+  if (first === void 0) return null;
+  if (warrant.pivot === null) return first;
   const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
@@ -33944,17 +33940,12 @@ function resolvePivot(warrant, languages) {
   }
   return found;
 }
-function pivotOrNone(warrant, languages) {
-  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
-}
 function resolveAbout(warrant, rawInput) {
-  if (warrant.about !== null) {
-    return {
-      about: warrant.about,
-      notice: `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input \u2014 the file is the whole answer once that key is written.`
-    };
-  }
-  return { about: rawInput.trim(), notice: null };
+  if (warrant.about === null) return rawInput.trim();
+  notice(
+    `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input \u2014 the file is the whole answer once that key is written.`
+  );
+  return warrant.about;
 }
 function load(path, source) {
   let document2;
@@ -35676,6 +35667,38 @@ async function ensureBranch(api, at, branchName) {
     throw error2;
   }
 }
+async function openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody) {
+  const { data: existing } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${branchName}`,
+    per_page: 1
+  });
+  const existingPr = existing[0];
+  if (existingPr !== void 0) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr.number,
+      title: prTitle,
+      body: prBody
+    });
+    info(`state-branch: updated PR #${String(existingPr.number)}`);
+    return { pr: existingPr.number };
+  }
+  const { data: pr } = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title: prTitle,
+    head: branchName,
+    base: defaultBranch,
+    body: prBody,
+    draft: true
+  });
+  info(`state-branch: opened PR #${String(pr.number)}`);
+  return { pr: pr.number };
+}
 async function publishStatePr(api, at, branchName, prTitle, prBody, dryRun) {
   if (dryRun) {
     info(`dry-run: would open PR on \`${branchName}\``);
@@ -35684,36 +35707,7 @@ async function publishStatePr(api, at, branchName, prTitle, prBody, dryRun) {
   try {
     const { data: repo } = await api.rest.repos.get({ owner: at.owner, repo: at.repo });
     const defaultBranch = repo.default_branch ?? "main";
-    const { data: existing } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1
-    });
-    const existingPr = existing[0];
-    if (existingPr !== void 0) {
-      await api.rest.pulls.update({
-        owner: at.owner,
-        repo: at.repo,
-        pull_number: existingPr.number,
-        title: prTitle,
-        body: prBody
-      });
-      info(`state-branch: updated PR #${String(existingPr.number)}`);
-      return { pr: existingPr.number };
-    }
-    const { data: pr } = await api.rest.pulls.create({
-      owner: at.owner,
-      repo: at.repo,
-      title: prTitle,
-      head: branchName,
-      base: defaultBranch,
-      body: prBody,
-      draft: true
-    });
-    info(`state-branch: opened PR #${String(pr.number)}`);
-    return { pr: pr.number };
+    return await openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody);
   } catch (error2) {
     if (isCapacityError(error2)) {
       warning(`state-branch: could not open PR on \`${branchName}\` \u2014 capacity error.`);
@@ -36670,7 +36664,6 @@ var BRANCH = "reeve/propose";
 var MARKER = markerFor("propose");
 var LABEL_NAME_MAX = 50;
 var LIST_PAGES = 10;
-var WRITE_ATTEMPTS2 = 3;
 var SCOPE_PREFIX = /^@[^/]+\//;
 function packageSlug(name) {
   return name.replace(SCOPE_PREFIX, "").toLowerCase();
@@ -37014,24 +37007,13 @@ function renderBody(path, entries, fp) {
   lines.push(MARKER.render(fp));
   return lines.join("\n");
 }
-function isShaConflict2(error2) {
-  if (typeof error2 !== "object" || error2 === null || !("status" in error2)) return false;
-  const status = error2.status;
-  if (status === 409) return true;
-  if (status === 422) {
-    const raw = error2.message;
-    const message = error2 instanceof Error ? error2.message : typeof raw === "string" ? raw : "";
-    return message.toLowerCase().includes("sha");
-  }
-  return false;
-}
 var isWeather = isCapacityError;
 async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
   const expected = expectedLabelNames(
     warrant.labels.map((label) => label.name),
     entries
   );
-  for (let attempt = 1; attempt <= WRITE_ATTEMPTS2; attempt += 1) {
+  for (let attempt = 1; attempt <= WRITE_ATTEMPTS; attempt += 1) {
     const { data } = await api.rest.repos.getContent({
       owner: at.owner,
       repo: at.repo,
@@ -37063,7 +37045,7 @@ async function writeProposal(api, at, warrant, entries, fp, existingPr, base) {
       });
       break;
     } catch (error2) {
-      if (isShaConflict2(error2) && attempt < WRITE_ATTEMPTS2) continue;
+      if (isShaConflict(error2) && attempt < WRITE_ATTEMPTS) continue;
       throw error2;
     }
   }
@@ -37578,12 +37560,11 @@ async function run() {
     const { authority: authority2, denied } = await openAuthority(base.warrant, api, context2.repo, "triage");
     const languages = dutyLanguages(authority2.warrant, denied, DEFAULT_LANGUAGES);
     const about = resolveAbout(authority2.warrant, base.about);
-    if (about.notice !== null) notice(about.notice);
     const taxonomy = denied ? [] : resolveTaxonomy(authority2.warrant, getInput("labels"));
     settings = {
       ...base,
       languages,
-      about: about.about,
+      about,
       taxonomy
     };
     if (settings.sweep) {

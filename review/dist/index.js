@@ -32599,14 +32599,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -34414,6 +34414,13 @@ function bounded(name, raw) {
     throw new Error(
       `${name}: expected a whole number of 1 or more, or \`none\` for no bound, got \`${raw}\`.`
     );
+  }
+  return value;
+}
+function fraction(name, raw) {
+  const value = Number(raw.trim());
+  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${name}: expected a number between 0 and 1, got \`${raw}\`.`);
   }
   return value;
 }
@@ -38377,7 +38384,7 @@ function synthesize(results) {
   for (const result of results) {
     if (result.verdict === null) continue;
     for (const raw of result.verdict.findings) {
-      findings.push(toReviewFinding(raw, result.pass, result.verdict.findings.length));
+      findings.push(toReviewFinding(raw, result.pass));
     }
   }
   const deduped = dedup(findings);
@@ -38411,17 +38418,8 @@ function synthesize(results) {
   }
   return { findings: ranked, confidence, measured, passes, failedPasses };
 }
-function toReviewFinding(raw, pass, _passFindings) {
+function toReviewFinding(raw, pass) {
   const line = raw.line;
-  const evidence = [
-    {
-      kind: "patch",
-      source: line === null ? raw.path : `${raw.path}:${String(line)}`,
-      content: raw.snippet
-    },
-    { kind: "rule", source: raw.rule, content: "" },
-    { kind: "pass", source: pass.id, content: pass.name }
-  ];
   return {
     id: `${raw.rule}:${raw.path}:${String(line ?? 0)}`,
     ruleId: raw.rule,
@@ -38431,9 +38429,7 @@ function toReviewFinding(raw, pass, _passFindings) {
     body: raw.body,
     snippet: raw.snippet,
     passId: pass.id,
-    passName: pass.name,
-    corroboratedBy: [pass.id],
-    evidence
+    corroboratedBy: [pass.id]
   };
 }
 function dedup(findings) {
@@ -38456,22 +38452,7 @@ function merge2(a, b) {
   const aWins = SEVERITY_ORDER[a.severity] <= SEVERITY_ORDER[b.severity] || a.severity === b.severity && a.corroboratedBy.length >= b.corroboratedBy.length;
   const primary = aWins ? a : b;
   const corroboratedBy = a.corroboratedBy.includes(b.passId) ? [...a.corroboratedBy] : [...a.corroboratedBy, b.passId];
-  return {
-    ...primary,
-    corroboratedBy,
-    evidence: mergeEvidence([...a.evidence, ...b.evidence])
-  };
-}
-function mergeEvidence(all) {
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const evidence of all) {
-    const key = `${evidence.kind}:${evidence.source}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(evidence);
-  }
-  return out;
+  return { ...primary, corroboratedBy };
 }
 function detectContradictions(findings) {
   const out = [];
@@ -38497,8 +38478,7 @@ function applyContradictions(findings, contradictions) {
   for (const contradiction of contradictions) {
     for (const finding of contradiction.findings) {
       const other = contradiction.findings.filter((f) => f.ruleId !== finding.ruleId).map((f) => f.ruleId).join(", ");
-      const key = finding.id;
-      others.set(key, `${others.get(key) ?? ""}${other}`.trim());
+      others.set(finding.id, other);
     }
   }
   return findings.map((finding) => {
@@ -38932,7 +38912,7 @@ function readSettings() {
     trigger: getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", getInput("max-diff-chars")),
     maxContextChars: bounded("max-context-chars", getInput("max-context-chars")),
-    confidence: parseConfidence(getInput("confidence")),
+    confidence: fraction("confidence", getInput("confidence")),
     reviewMode: parseReviewMode(getInput("review-mode"))
   };
 }
@@ -38941,13 +38921,6 @@ function parseReviewMode(raw) {
   if (trimmed.length === 0 || trimmed === "assembled") return "assembled";
   if (trimmed === "agentic") return "agentic";
   throw new Error(`review-mode: expected \`assembled\` or \`agentic\`, got \`${raw}\`.`);
-}
-function parseConfidence(raw) {
-  const value = Number(raw.trim());
-  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`confidence: expected a number between 0 and 1, got \`${raw}\`.`);
-  }
-  return value;
 }
 var STAGE_PURPOSES = ["review", "detect"];
 function resolveRulesPath(settings) {
@@ -39024,8 +38997,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     permitted,
     ...over
   });
-  const prApi = wrapPr(api);
-  const pr = await readPr(prApi, at);
+  const pr = await readPr(api, at);
   const settledBase = { headSha: pr.headSha };
   if (isReeveProposalPr({ isPullRequest: true, body: pr.body })) {
     return settled({
@@ -39054,7 +39026,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
     }
   }
   const budget = settings.reviewMode === "agentic" ? Number.MAX_SAFE_INTEGER : settings.maxDiffChars ?? Number.MAX_SAFE_INTEGER;
-  const snapshot = classify(await listPrFiles(prApi, at), {
+  const snapshot = classify(await listPrFiles(api, at), {
     ignoreFiles: [],
     ignorePaths: [],
     generatedExtensions: DEFAULT_GENERATED,
@@ -39387,9 +39359,6 @@ ${would}`);
     passes: synthesis.passes
   });
 }
-function wrapPr(api) {
-  return api;
-}
 async function readEnvelope(api, at) {
   const { marked, replies, uncertain } = await readThread(api, at);
   const payload = marked?.payload ?? null;
@@ -39457,7 +39426,7 @@ async function runTestmap(bounded2, rules) {
     warning(
       "review: the tests: section is enabled but the checkout is unavailable \u2014 test evidence skipped."
     );
-    return { findings: [], evidence: "", readTests: null };
+    return TESTMAP_OFF;
   }
   if (discovery.capped) {
     warning("review: test discovery hit a budget \u2014 evidence truncated.");

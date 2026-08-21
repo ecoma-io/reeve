@@ -32596,14 +32596,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -34171,14 +34171,10 @@ function dutyLanguages(warrant, denied, fallback) {
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
-function resolvePivot(warrant, languages) {
+function pivotOrNone(warrant, languages) {
   const first = languages[0];
-  if (warrant.pivot === null) {
-    if (first === void 0) {
-      throw new Error("pivot: no languages are configured to choose one from.");
-    }
-    return first;
-  }
+  if (first === void 0) return null;
+  if (warrant.pivot === null) return first;
   const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
@@ -34187,17 +34183,12 @@ function resolvePivot(warrant, languages) {
   }
   return found;
 }
-function pivotOrNone(warrant, languages) {
-  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
-}
 function resolveAbout(warrant, rawInput) {
-  if (warrant.about !== null) {
-    return {
-      about: warrant.about,
-      notice: `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input \u2014 the file is the whole answer once that key is written.`
-    };
-  }
-  return { about: rawInput.trim(), notice: null };
+  if (warrant.about === null) return rawInput.trim();
+  notice(
+    `about: read from \`${warrant.path}\`'s \`about:\` key, not the \`about\` input \u2014 the file is the whole answer once that key is written.`
+  );
+  return warrant.about;
 }
 function load(path, source) {
   let document2;
@@ -35993,7 +35984,7 @@ var DEFAULT_LANGUAGES = parseLanguages("en, vi, zh");
 function readSettings() {
   const base = readCore();
   const panel = parseSeats(getInput("judge-models"));
-  const cheap = parseModels(getInput("screen-models"));
+  const cheap = parseModels(getInput("screen-models"), "screen-models");
   return {
     ...base,
     number: threadNumber(),
@@ -36267,8 +36258,7 @@ async function run() {
       settings = { ...base, languages };
     } else {
       const about = resolveAbout(authority2.warrant, base.about);
-      if (about.notice !== null) notice(about.notice);
-      settings = { ...base, languages, about: about.about };
+      settings = { ...base, languages, about };
       const at = { ...context2.repo, number: settings.number };
       outcome2 = await decide(api, at, authority2.warrant, settings, stages, weather);
     }

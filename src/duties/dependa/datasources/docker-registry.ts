@@ -18,7 +18,13 @@
  */
 import * as core from "@actions/core";
 import type { Release, ResolutionResult } from "../model.js";
-import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
+import {
+  byVersionDescending,
+  parseDate,
+  temporarilyUnavailable,
+  type Datasource,
+  type DatasourceId,
+} from "./types.js";
 
 /** The Docker registry datasource identifier. */
 const ID: DatasourceId = "docker-registry";
@@ -100,7 +106,7 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
         );
         return parseDockerHubResponse(allResults);
       }
-      return temporarilyUnavailable(error);
+      return temporarilyUnavailable("Docker registry", error);
     }
 
     if (response.status === 404) {
@@ -403,28 +409,4 @@ function isPrereleaseTag(tag: string): boolean {
   return (
     /[-.]rc\d/i.test(tag) || /[-.]beta/i.test(tag) || /[-.]alpha/i.test(tag) || /[-.]pre/i.test(tag)
   );
-}
-
-/**
- * Parse a date string from the Docker Hub API.
- */
-function parseDate(value: string): Date | null {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-    // Not a valid date
-  }
-  return null;
-}
-
-/**
- * Convert a fetch error to a `temporarily-unavailable` result.
- */
-function temporarilyUnavailable(error: unknown): ResolutionResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    status: "temporarily-unavailable",
-    reason: `Docker registry unreachable: ${message}`,
-  };
 }

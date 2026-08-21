@@ -7,6 +7,7 @@
 import * as core from "@actions/core";
 
 import { bounded, readCore, type ApiKeySpec, type EndpointSpec } from "../../core/inputs.js";
+import { parseList } from "../../core/list.js";
 import type { Capability } from "../../core/warrant.js";
 import type { Names } from "../../core/provider.js";
 import type { Ecosystem } from "./model.js";
@@ -49,7 +50,6 @@ export function readSettings(): Omit<Settings, "permitted"> {
     warrant: core.getInput("warrant", { required: true }),
     ecosystems: parseEcosystems(core.getInput("ecosystems")),
     riskInterpretation: core.getBooleanInput("risk-interpretation"),
-    dryRun: core.getBooleanInput("dry-run"),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     paths: parsePaths(core.getInput("paths")),
   };
@@ -60,18 +60,8 @@ export function readSettings(): Omit<Settings, "permitted"> {
  * Empty means all known ecosystems. Unknown names are refused.
  */
 function parseEcosystems(raw: string): readonly Ecosystem[] {
-  const trimmed = raw.trim();
-  if (trimmed === "") return [];
-
-  const entries = trimmed
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-  if (entries.length === 0) return [];
-
   const ecosystems: Ecosystem[] = [];
-  for (const entry of entries) {
+  for (const entry of parseList(raw)) {
     const eco = ECOSYSTEMS.find((e) => e === entry);
     if (eco === undefined) {
       throw new Error(
@@ -89,11 +79,5 @@ function parseEcosystems(raw: string): readonly Ecosystem[] {
  * Empty means scan the whole repository.
  */
 function parsePaths(raw: string): readonly string[] {
-  const trimmed = raw.trim();
-  if (trimmed === "") return [];
-
-  return trimmed
-    .split(/[\n,]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
+  return parseList(raw);
 }

@@ -227,6 +227,14 @@ describe("parseAttribution", () => {
       /expected `none`, `model` or `detail`, got `detailed`/,
     );
   });
+
+  it("quotes back what the workflow wrote, not what this normalised it into", () => {
+    // Every sibling parser quotes `raw`. Quoting the folded value sends a
+    // maintainer looking for `detai` in a file that says `Detai`.
+    expect(() => parseAttribution("  Detai ")).toThrow(
+      "show-attribution: expected `none`, `model` or `detail`, got `  Detai `.",
+    );
+  });
 });
 
 describe("parseSince", () => {

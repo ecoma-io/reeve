@@ -167,7 +167,7 @@ function readSettings(): Omit<Settings, "languages"> {
   // duty adds on top of it can fail and get quoted into a log.
   const base = readCore();
   const panel = parseSeats(core.getInput("judge-models"));
-  const cheap = parseModels(core.getInput("screen-models"));
+  const cheap = parseModels(core.getInput("screen-models"), "screen-models");
 
   return {
     ...base,

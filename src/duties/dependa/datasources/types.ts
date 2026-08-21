@@ -66,6 +66,48 @@ export function byVersionDescending(a: Release, b: Release): number {
 }
 
 /**
+ * Parse a release date out of whatever a registry put in its date field.
+ *
+ * Every datasource needs this and every datasource spelled it the same way:
+ * `new Date(value)`, rejected when it comes out `Invalid Date`. The `unknown`
+ * parameter and the `typeof` guard are npm's — a registry response is parsed
+ * JSON, so a field the schema says is a string can arrive as a number, a null
+ * or an object, and `new Date(null)` is the epoch rather than a failure. The
+ * guard is the safe superset: for a string it does nothing at all, so the four
+ * datasources that hand-checked the type before calling get the same answer.
+ *
+ * Returns `null` when the value is not a date, never a `Date` that lies.
+ */
+export function parseDate(value: unknown): Date | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) return date;
+  } catch {
+    // Not a valid date
+  }
+
+  return null;
+}
+
+/**
+ * Convert a fetch error to a `temporarily-unavailable` result.
+ *
+ * D12: capacity is weather. A registry that cannot be reached is a degraded
+ * result carrying the reason, not a thrown error — the run continues and says
+ * what it could not see. `source` names the registry in the reason, which is
+ * the only thing that ever differed between the five copies of this.
+ */
+export function temporarilyUnavailable(source: string, error: unknown): ResolutionResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    status: "temporarily-unavailable",
+    reason: `${source} unreachable: ${message}`,
+  };
+}
+
+/**
  * The stable identifier for a datasource. Part of the closed set — a name
  * not registered here is refused.
  */

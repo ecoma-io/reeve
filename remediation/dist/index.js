@@ -33043,9 +33043,6 @@ async function decide(api, at, warrant, dryRun) {
   }
   return { proposals, note: "" };
 }
-function wrapApi(api) {
-  return api;
-}
 async function run() {
   const weather = createWeather();
   let settings = null;
@@ -33064,7 +33061,7 @@ async function run() {
       };
     } else {
       outcome = await decide(
-        wrapApi(api),
+        api,
         { ...context2.repo, number: read.number },
         authority.warrant,
         read.dryRun

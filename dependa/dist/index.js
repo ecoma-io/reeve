@@ -31802,14 +31802,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -33448,6 +33448,22 @@ function byVersionDescending(a, b) {
   if (a.version.length !== b.version.length) return a.version.length - b.version.length;
   return a.version < b.version ? -1 : a.version > b.version ? 1 : 0;
 }
+function parseDate(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) return date;
+  } catch {
+  }
+  return null;
+}
+function temporarilyUnavailable(source, error2) {
+  const message = error2 instanceof Error ? error2.message : String(error2);
+  return {
+    status: "temporarily-unavailable",
+    reason: `${source} unreachable: ${message}`
+  };
+}
 
 // src/duties/dependa/datasources/crates.ts
 var ID = "crates";
@@ -33472,7 +33488,7 @@ async function resolve(packageName) {
       signal: AbortSignal.timeout(3e4)
     });
   } catch (error2) {
-    return temporarilyUnavailable(error2);
+    return temporarilyUnavailable("crates.io", error2);
   }
   if (response.status === 404) {
     return { status: "not-found" };
@@ -33551,14 +33567,6 @@ function isPrereleaseVersion(version) {
   const afterCore = version.slice(coreMatch[0].length);
   return afterCore.startsWith("-");
 }
-function parseDate(value) {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-  }
-  return null;
-}
 function extractGithubUrl(repository, homepage) {
   for (const url of [repository, homepage]) {
     if (url === null) continue;
@@ -33568,13 +33576,6 @@ function extractGithubUrl(repository, homepage) {
     }
   }
   return null;
-}
-function temporarilyUnavailable(error2) {
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return {
-    status: "temporarily-unavailable",
-    reason: `crates.io unreachable: ${message}`
-  };
 }
 
 // src/duties/dependa/datasources/docker-registry.ts
@@ -33624,7 +33625,7 @@ async function resolve2(packageName) {
         );
         return parseDockerHubResponse(allResults);
       }
-      return temporarilyUnavailable2(error2);
+      return temporarilyUnavailable("Docker registry", error2);
     }
     if (response.status === 404) {
       return { status: "not-found" };
@@ -33710,7 +33711,7 @@ function parseDockerHubResponse(results) {
     if (name === "latest") continue;
     const isPrerelease = isPrereleaseTag(name);
     const lastUpdated = tag.last_updated;
-    const releasedAt = typeof lastUpdated === "string" ? parseDate2(lastUpdated) : null;
+    const releasedAt = typeof lastUpdated === "string" ? parseDate(lastUpdated) : null;
     releases.push({
       version: name,
       releasedAt,
@@ -33812,21 +33813,6 @@ function parseImageName(name) {
 function isPrereleaseTag(tag) {
   return /[-.]rc\d/i.test(tag) || /[-.]beta/i.test(tag) || /[-.]alpha/i.test(tag) || /[-.]pre/i.test(tag);
 }
-function parseDate2(value) {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-  }
-  return null;
-}
-function temporarilyUnavailable2(error2) {
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return {
-    status: "temporarily-unavailable",
-    reason: `Docker registry unreachable: ${message}`
-  };
-}
 
 // src/duties/dependa/datasources/github-tags.ts
 var ID3 = "github-tags";
@@ -33856,7 +33842,7 @@ async function resolve3(token, packageName) {
       signal: AbortSignal.timeout(3e4)
     });
   } catch (error2) {
-    return temporarilyUnavailable3(error2);
+    return temporarilyUnavailable("GitHub API", error2);
   }
   if (tagsResponse.status === 404) {
     return { status: "not-found" };
@@ -33923,7 +33909,7 @@ async function resolve3(token, packageName) {
     if (typeof name !== "string" || name.length === 0) continue;
     const releaseInfo = releasesMap.get(name);
     const isPrerelease = releaseInfo?.prerelease ?? false;
-    const releasedAt = releaseInfo !== void 0 && releaseInfo.createdAt.length > 0 ? parseDate3(releaseInfo.createdAt) : null;
+    const releasedAt = releaseInfo !== void 0 && releaseInfo.createdAt.length > 0 ? parseDate(releaseInfo.createdAt) : null;
     const changelogUrl = releaseInfo !== void 0 ? `https://github.com/${owner ?? ""}/${repo}/releases/tag/${name}` : null;
     const diffUrl = `https://github.com/${owner ?? ""}/${repo}/compare/${name}`;
     releases.push({
@@ -33941,21 +33927,6 @@ async function resolve3(token, packageName) {
   }
   releases.sort(byVersionDescending);
   return { status: "available", releases };
-}
-function parseDate3(value) {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-  }
-  return null;
-}
-function temporarilyUnavailable3(error2) {
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return {
-    status: "temporarily-unavailable",
-    reason: `GitHub API unreachable: ${message}`
-  };
 }
 
 // src/duties/dependa/datasources/go-proxy.ts
@@ -33980,7 +33951,7 @@ async function resolve4(packageName) {
       signal: AbortSignal.timeout(3e4)
     });
   } catch (error2) {
-    return temporarilyUnavailable4(error2);
+    return temporarilyUnavailable("Go proxy", error2);
   }
   if (listResponse.status === 404) {
     return { status: "not-found" };
@@ -34038,7 +34009,7 @@ async function resolve4(packageName) {
           const info2 = await infoResponse.json();
           const time = info2.Time;
           if (typeof time === "string") {
-            const releasedAt = parseDate4(time);
+            const releasedAt = parseDate(time);
             if (releasedAt !== null && releases[0] !== void 0) {
               releases[0] = { ...releases[0], releasedAt };
             }
@@ -34078,21 +34049,6 @@ function buildDiffUrl(modulePath, version) {
     }
   }
   return null;
-}
-function parseDate4(value) {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-  }
-  return null;
-}
-function temporarilyUnavailable4(error2) {
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return {
-    status: "temporarily-unavailable",
-    reason: `Go proxy unreachable: ${message}`
-  };
 }
 
 // src/duties/dependa/datasources/node-version.ts
@@ -34185,7 +34141,7 @@ async function resolve6(packageName) {
       // 30s timeout
     });
   } catch (error2) {
-    return temporarilyUnavailable5(error2);
+    return temporarilyUnavailable("npm registry", error2);
   }
   if (response.status === 404) {
     return { status: "not-found" };
@@ -34229,7 +34185,7 @@ function parseRegistryResponse(body) {
     const isDeprecated = info2.deprecated !== void 0 && info2.deprecated !== false;
     const isPrerelease = isPrereleaseVersion3(version);
     const timeEntry = time[version];
-    const releasedAt = parseDate5(timeEntry);
+    const releasedAt = parseDate(timeEntry);
     const repository = info2.repository;
     const homepage = info2.homepage;
     const changelogUrl = extractChangelogUrl(repository, homepage, version);
@@ -34256,15 +34212,6 @@ function isPrereleaseVersion3(version) {
   if (coreMatch === null) return false;
   const afterCore = version.slice(coreMatch[0].length);
   return afterCore.startsWith("-");
-}
-function parseDate5(value) {
-  if (typeof value !== "string") return null;
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-  }
-  return null;
 }
 function extractChangelogUrl(repository, homepage, _version) {
   if (typeof repository === "object" && repository !== null) {
@@ -34314,13 +34261,6 @@ function extractGithubUrl2(raw) {
     return `https://github.com/${shorthandMatch[1] ?? ""}`;
   }
   return null;
-}
-function temporarilyUnavailable5(error2) {
-  const message = error2 instanceof Error ? error2.message : String(error2);
-  return {
-    status: "temporarily-unavailable",
-    reason: `npm registry unreachable: ${message}`
-  };
 }
 
 // src/duties/dependa/datasources/registry.ts
@@ -34685,7 +34625,7 @@ function fromChangelog(url, content, deterministic) {
   return {
     kind: "changelog",
     source: url,
-    content: cap(sanitise(content)),
+    content: cap(sanitize(content)),
     deterministic
   };
 }
@@ -34753,9 +34693,6 @@ ${sections.join("\n\n")}`;
 }
 function escapeMarkdown(text2) {
   return text2.replace(/!\[([^\]]*)\]\[([^\]]*)\]/g, "$1 [$2]").replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\(([^)]*)\)/g, "$1 ($2)").replace(/\[([^\]]*)\]\[([^\]]*)\]/g, "$1 [$2]").replace(/^\s*\[([^\]]+)\]\s*:\s*.+$/gm, "[$1]").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-function sanitise(text2) {
-  return sanitize(text2);
 }
 function cap(text2) {
   if (text2.length <= MAX_EVIDENCE_CHARS) return text2;
@@ -34901,18 +34838,13 @@ function readSettings() {
     warrant: getInput("warrant", { required: true }),
     ecosystems: parseEcosystems(getInput("ecosystems")),
     riskInterpretation: getBooleanInput("risk-interpretation"),
-    dryRun: getBooleanInput("dry-run"),
     maxRequests: bounded("max-requests", getInput("max-requests")),
     paths: parsePaths(getInput("paths"))
   };
 }
 function parseEcosystems(raw) {
-  const trimmed = raw.trim();
-  if (trimmed === "") return [];
-  const entries = trimmed.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-  if (entries.length === 0) return [];
   const ecosystems = [];
-  for (const entry of entries) {
+  for (const entry of parseList(raw)) {
     const eco = ECOSYSTEMS.find((e) => e === entry);
     if (eco === void 0) {
       throw new Error(
@@ -34924,9 +34856,7 @@ function parseEcosystems(raw) {
   return ecosystems;
 }
 function parsePaths(raw) {
-  const trimmed = raw.trim();
-  if (trimmed === "") return [];
-  return trimmed.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  return parseList(raw);
 }
 
 // src/duties/dependa/managers/cargo.ts
@@ -36986,10 +36916,10 @@ function factsOnly(fields) {
     interpretation: null
   };
 }
-function interpretationPrompt(proposal, facts, enclosedEvidence, enclosedRule) {
+function interpretationPrompt(name, currentVersion, targetVersion, facts, enclosedEvidence, enclosedRule) {
   const ruleSection = enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
-    `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
+    `You are assessing the risk of updating \`${sanitizeForPrompt(name)}\` from \`${sanitizeForPrompt(currentVersion)}\` to \`${sanitizeForPrompt(targetVersion)}\`.`,
     "",
     ...ruleSection,
     "Risk facts (deterministic, from version metadata):",
@@ -37432,18 +37362,9 @@ async function run() {
         if (settings.riskInterpretation && settings.models.length > 0) {
           const enclosed = encloseEvidence(evidence);
           const prompt = interpretationPrompt(
-            {
-              dependency: dep,
-              currentVersion: dep.currentVersion,
-              targetVersion,
-              updateType,
-              releases: relevantReleases,
-              securityAdvisory,
-              risk: riskFacts,
-              evidence,
-              edits: [],
-              groupName: null
-            },
+            dep.name,
+            dep.currentVersion,
+            targetVersion,
             riskFacts.facts,
             enclosed?.block ?? "",
             enclosed?.rule ?? ""

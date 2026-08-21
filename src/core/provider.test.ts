@@ -135,6 +135,17 @@ describe("parseModels", () => {
     expect(() => parseModels("a|b,c")).toThrow(/`models` is a single fallback chain/);
   });
 
+  it("names the input it was actually reading, not always `models`", () => {
+    // `respond` and `triage` parse `screen-models` through here. A refusal that
+    // says `models` sends a consumer to edit a line that was never the problem.
+    expect(() => parseModels("a|b", "screen-models")).toThrow(
+      "screen-models: `|` separates judge seats",
+    );
+    expect(() => parseModels("a|b", "screen-models")).toThrow(
+      /`screen-models` is a single fallback chain/,
+    );
+  });
+
   it("takes the name after `=` and leaves the id without it", () => {
     const roster = parseModels("openai/gpt-4o = Careful,b");
     expect(roster.models).toEqual(["openai/gpt-4o", "b"]);

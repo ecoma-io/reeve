@@ -174,4 +174,46 @@ describe("providerConfig", () => {
 
     expect(core.setSecret).toHaveBeenCalledWith("probe-key");
   });
+
+  it("refuses an `api-keys` alias `endpoints` never declared — the check every duty runs", () => {
+    // `readCore` refuses this configuration before a single request, so a
+    // doctor report that called it clean would be reporting on a run that
+    // cannot happen.
+    vi.mocked(core.getInput).mockImplementation((name: string) =>
+      name === "base-url"
+        ? "http://provider.test/v1"
+        : name === "models"
+          ? "probe-model"
+          : name === "endpoints"
+            ? "spare = http://spare.test/v1"
+            : name === "api-keys"
+              ? "spair = k"
+              : "",
+    );
+
+    expect(() => providerConfig()).toThrow("api-keys: `spair` is not declared in `endpoints`.");
+  });
+
+  it("reports that refusal through runDoctor's setFailed rather than a clean report", async () => {
+    vi.mocked(core.getInput).mockImplementation((name: string) =>
+      name === "github-token"
+        ? "token"
+        : name === "warrant"
+          ? ".github/reeve.yml"
+          : name === "base-url"
+            ? "http://provider.test/v1"
+            : name === "models"
+              ? "probe-model"
+              : name === "api-keys"
+                ? "spare = k"
+                : "",
+    );
+
+    await runDoctor();
+
+    expect(core.setFailed).toHaveBeenCalledWith(
+      "api-keys: `spare` is not declared in `endpoints`.",
+    );
+    expect(diagnose).not.toHaveBeenCalled();
+  });
 });

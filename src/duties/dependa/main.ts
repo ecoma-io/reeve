@@ -364,18 +364,9 @@ export async function run(): Promise<void> {
         if (settings.riskInterpretation && settings.models.length > 0) {
           const enclosed = encloseEvidence(evidence);
           const prompt = interpretationPrompt(
-            {
-              dependency: dep,
-              currentVersion: dep.currentVersion,
-              targetVersion,
-              updateType,
-              releases: relevantReleases,
-              securityAdvisory,
-              risk: riskFacts,
-              evidence,
-              edits: [],
-              groupName: null,
-            },
+            dep.name,
+            dep.currentVersion,
+            targetVersion,
             riskFacts.facts,
             enclosed?.block ?? "",
             enclosed?.rule ?? "",

@@ -32596,14 +32596,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -33217,9 +33217,7 @@ function readShared(options = {}) {
 function parseAttribution(raw) {
   const value = raw.trim().toLowerCase();
   if (value === "none" || value === "model" || value === "detail") return value;
-  throw new Error(
-    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`
-  );
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
@@ -33893,14 +33891,10 @@ function dutyLanguages(warrant, denied, fallback) {
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
-function resolvePivot(warrant, languages) {
+function pivotOrNone(warrant, languages) {
   const first = languages[0];
-  if (warrant.pivot === null) {
-    if (first === void 0) {
-      throw new Error("pivot: no languages are configured to choose one from.");
-    }
-    return first;
-  }
+  if (first === void 0) return null;
+  if (warrant.pivot === null) return first;
   const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
@@ -33908,9 +33902,6 @@ function resolvePivot(warrant, languages) {
     );
   }
   return found;
-}
-function pivotOrNone(warrant, languages) {
-  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
 }
 function load(path, source) {
   let document2;

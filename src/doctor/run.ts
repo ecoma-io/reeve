@@ -17,7 +17,12 @@ import { writeSummary } from "../core/summary.js";
 import { DEFAULT_WARRANT_PATH } from "../core/warrant.js";
 import { normalise } from "../refusal.js";
 import { parseModels } from "../core/provider.js";
-import { parseApiKeys, parseEndpoints, parseTimeout } from "../core/inputs.js";
+import {
+  checkApiKeysDeclared,
+  parseApiKeys,
+  parseEndpoints,
+  parseTimeout,
+} from "../core/inputs.js";
 
 /** The one default `parseTimeout` must not assume but doctor can: nothing declared is 120s, the duty default. */
 const DEFAULT_REQUEST_TIMEOUT = "120s";
@@ -57,6 +62,13 @@ export function providerConfig(): ProviderProbe | undefined {
   }
 
   const timeoutRaw = core.getInput("request-timeout");
+  const endpoints = parseEndpoints(core.getInput("endpoints"));
+  const apiKeys = parseApiKeys(core.getInput("api-keys"));
+  // The same check every duty's `readCore` runs. Without it doctor would call a
+  // roster clean that every duty refuses on its first request — which is the
+  // one class of thing doctor exists to catch.
+  checkApiKeysDeclared(endpoints, apiKeys);
+
   return {
     baseUrl,
     apiKey,
@@ -66,8 +78,8 @@ export function providerConfig(): ProviderProbe | undefined {
     ),
     models: roster.models,
     modelNames: roster.names,
-    endpoints: parseEndpoints(core.getInput("endpoints")),
-    apiKeys: parseApiKeys(core.getInput("api-keys")),
+    endpoints,
+    apiKeys,
   };
 }
 

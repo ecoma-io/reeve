@@ -165,13 +165,6 @@ export function readCore(options?: { modelsOptional?: boolean }): Core {
 }
 
 /**
- * {@link readCore}, plus the three inputs only a sweeping duty declares.
- *
- * The `sweep`/`number` conflict is checked first, ahead of any parsing: it is
- * a workflow that asked for two different runs at once, and no amount of
- * reading the rest tells anyone which one was meant.
- */
-/**
  * Reads `sweep` and `number` together, refusing their combination up front.
  *
  * The `sweep`/`number` conflict is checked before any other parsing: it is a
@@ -242,9 +235,7 @@ export type Attribution = "none" | "model" | "detail";
 export function parseAttribution(raw: string): Attribution {
   const value = raw.trim().toLowerCase();
   if (value === "none" || value === "model" || value === "detail") return value;
-  throw new Error(
-    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`,
-  );
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
 
 /**
@@ -338,7 +329,7 @@ export function parseApiKeys(raw: string): readonly ApiKeySpec[] {
  * declared — a key with nowhere to route is a typo, and the honest place to
  * catch it is before either list reaches `resolveEndpoints`.
  */
-function checkApiKeysDeclared(
+export function checkApiKeysDeclared(
   endpoints: readonly EndpointSpec[],
   apiKeys: readonly ApiKeySpec[],
 ): void {

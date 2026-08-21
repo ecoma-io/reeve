@@ -264,8 +264,14 @@ export interface Panel {
  * expecting a panel here, which is a misunderstanding worth stopping on the
  * first run rather than one whose only symptom is that the ids all ran
  * together into one that no provider has.
+ *
+ * `inputName` is the input the raw text came from, quoted back in that
+ * refusal. It defaults to `models` because that is what most callers read, but
+ * `respond` and `triage` also parse `screen-models` through here, and a message
+ * naming the wrong input sends a consumer to edit a line that was never the
+ * problem.
  */
-export function parseModels(raw: string): Roster {
+export function parseModels(raw: string, inputName = "models"): Roster {
   const models: string[] = [];
   const names = new Map<string, string>();
 
@@ -273,8 +279,8 @@ export function parseModels(raw: string): Roster {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        "models: `|` separates judge seats — one more voter, one more request — and " +
-          "means nothing here. `models` is a single fallback chain, so separate its " +
+        `${inputName}: \`|\` separates judge seats — one more voter, one more request — and ` +
+          `means nothing here. \`${inputName}\` is a single fallback chain, so separate its ` +
           `ids with \`,\`. Got \`${ids.trim()}\`.`,
       );
     }

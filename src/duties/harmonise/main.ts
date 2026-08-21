@@ -148,10 +148,10 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     stateBranch: core.getInput("state-branch"),
     glossaryDir: core.getInput("glossary-dir", { required: true }),
     paths: parsePaths(core.getInput("paths")),
-    bootstrap: core.getInput("bootstrap") === "true",
+    bootstrap: core.getBooleanInput("bootstrap"),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     chunkChars: counted("chunk-chars", core.getInput("chunk-chars")),
-    ignore: core.getInput("ignore") !== "false",
+    ignore: core.getBooleanInput("ignore"),
   };
 }
 

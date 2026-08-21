@@ -42,20 +42,8 @@ export function fromChangelog(url: string, content: string, deterministic: boole
   return {
     kind: "changelog",
     source: url,
-    content: cap(sanitise(content)),
+    content: cap(sanitize(content)),
     deterministic,
-  };
-}
-
-/**
- * Build evidence from a GitHub release.
- */
-export function fromGithubRelease(url: string, content: string): Evidence {
-  return {
-    kind: "github-release",
-    source: url,
-    content: cap(sanitise(content)),
-    deterministic: true,
   };
 }
 
@@ -73,18 +61,6 @@ export function fromSecurityAdvisory(advisory: SecurityAdvisory): Evidence {
       `[${advisory.id}] ${advisory.severity.toUpperCase()}: ${advisory.summary}` +
         (advisory.patchedVersions !== null ? `\nPatched in: ${advisory.patchedVersions}` : ""),
     ),
-    deterministic: true,
-  };
-}
-
-/**
- * Build evidence from a commit log (list of commits between versions).
- */
-export function fromCommitLog(compareUrl: string, content: string): Evidence {
-  return {
-    kind: "commit-log",
-    source: compareUrl,
-    content: cap(sanitise(content)),
     deterministic: true,
   };
 }
@@ -209,11 +185,6 @@ export function escapeMarkdown(text: string): string {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
   );
-}
-
-/** Sanitise evidence text — defang references and empty HTML comments. */
-function sanitise(text: string): string {
-  return sanitize(text);
 }
 
 /** Cap evidence text to `MAX_EVIDENCE_CHARS`, with a truncation marker. */

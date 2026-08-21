@@ -32,8 +32,13 @@ import { formatCorrection, parseCorrection, type Correction } from "../../core/m
  * `sha` — the read-modify-write sequence run again from the top, not just the
  * final write, because a concurrent commit can have changed which shard holds
  * this thread as easily as it changed one shard's contents.
+ *
+ * `propose` retries its own read-modify-write against the same Contents API
+ * for the same reason, so it reads the budget from here rather than declaring
+ * a second one: two `3`s in one duty are a number that can be raised in one
+ * place and left behind in the other.
  */
-const WRITE_ATTEMPTS = 3;
+export const WRITE_ATTEMPTS = 3;
 
 /**
  * Commits `correction` to the store at `path` — replacing the line for this

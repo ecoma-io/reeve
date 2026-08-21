@@ -15,7 +15,13 @@
  * **External metadata is evidence, never authority.**
  */
 import type { Release, ResolutionResult } from "../model.js";
-import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
+import {
+  byVersionDescending,
+  parseDate,
+  temporarilyUnavailable,
+  type Datasource,
+  type DatasourceId,
+} from "./types.js";
 
 /** The GitHub tags datasource identifier. */
 const ID: DatasourceId = "github-tags";
@@ -58,7 +64,7 @@ async function resolve(token: string, packageName: string): Promise<ResolutionRe
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
-    return temporarilyUnavailable(error);
+    return temporarilyUnavailable("GitHub API", error);
   }
 
   if (tagsResponse.status === 404) {
@@ -188,28 +194,4 @@ async function resolve(token: string, packageName: string): Promise<ResolutionRe
   releases.sort(byVersionDescending);
 
   return { status: "available", releases };
-}
-
-/**
- * Parse a date string from the GitHub API.
- */
-function parseDate(value: string): Date | null {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-    // Not a valid date
-  }
-  return null;
-}
-
-/**
- * Convert a fetch error to a `temporarily-unavailable` result.
- */
-function temporarilyUnavailable(error: unknown): ResolutionResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    status: "temporarily-unavailable",
-    reason: `GitHub API unreachable: ${message}`,
-  };
 }

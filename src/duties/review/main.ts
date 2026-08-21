@@ -55,7 +55,7 @@ import {
   type Capability,
   type Warrant,
 } from "../../core/warrant.js";
-import { bounded, readCore, threadNumber, type Core } from "../../core/inputs.js";
+import { bounded, fraction, readCore, threadNumber, type Core } from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
 
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
@@ -90,7 +90,7 @@ import {
   substantiatedDispositions,
   dispositionKey,
 } from "./disposition.js";
-import { classify, listPrFiles, readPr, type PrApi } from "./pr.js";
+import { classify, listPrFiles, readPr } from "./pr.js";
 import {
   assessRisk,
   describeRisk,
@@ -169,7 +169,7 @@ function readSettings(): Omit<Settings, "languages"> {
     trigger: core.getInput("trigger"),
     maxDiffChars: bounded("max-diff-chars", core.getInput("max-diff-chars")),
     maxContextChars: bounded("max-context-chars", core.getInput("max-context-chars")),
-    confidence: parseConfidence(core.getInput("confidence")),
+    confidence: fraction("confidence", core.getInput("confidence")),
     reviewMode: parseReviewMode(core.getInput("review-mode")),
   };
 }
@@ -180,14 +180,6 @@ function parseReviewMode(raw: string): "assembled" | "agentic" {
   if (trimmed.length === 0 || trimmed === "assembled") return "assembled";
   if (trimmed === "agentic") return "agentic";
   throw new Error(`review-mode: expected \`assembled\` or \`agentic\`, got \`${raw}\`.`);
-}
-
-function parseConfidence(raw: string): number {
-  const value = Number(raw.trim());
-  if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw new Error(`confidence: expected a number between 0 and 1, got \`${raw}\`.`);
-  }
-  return value;
 }
 
 const STAGE_PURPOSES = ["review", "detect"] as const;
@@ -363,8 +355,7 @@ async function decide(
     ...over,
   });
 
-  const prApi = wrapPr(api);
-  const pr = await readPr(prApi, at);
+  const pr = await readPr(api, at);
   const settledBase: Settled = { headSha: pr.headSha };
 
   if (isReeveProposalPr({ isPullRequest: true, body: pr.body })) {
@@ -409,7 +400,7 @@ async function decide(
     settings.reviewMode === "agentic"
       ? Number.MAX_SAFE_INTEGER
       : (settings.maxDiffChars ?? Number.MAX_SAFE_INTEGER);
-  const snapshot = classify(await listPrFiles(prApi, at), {
+  const snapshot = classify(await listPrFiles(api, at), {
     ignoreFiles: [],
     ignorePaths: [],
     generatedExtensions: DEFAULT_GENERATED,
@@ -916,11 +907,6 @@ async function decide(
   });
 }
 
-/** A real Octokit client satisfies the structural `PrApi` port directly. */
-function wrapPr(api: ReturnType<typeof getOctokit>): PrApi {
-  return api;
-}
-
 /**
  * Reads the previous run's memory: the envelope on this run's own comment, and
  * the thread it sits in.
@@ -1036,7 +1022,7 @@ async function runTestmap(
     core.warning(
       "review: the tests: section is enabled but the checkout is unavailable — test evidence skipped.",
     );
-    return { findings: [], evidence: "", readTests: null };
+    return TESTMAP_OFF;
   }
   if (discovery.capped) {
     core.warning("review: test discovery hit a budget — evidence truncated.");

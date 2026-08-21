@@ -513,7 +513,7 @@ function describeOutcome(outcome: Outcome, done: Done): string {
  */
 function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
   const shared = readShared();
-  const cheap = parseModels(core.getInput("screen-models"));
+  const cheap = parseModels(core.getInput("screen-models"), "screen-models");
 
   return {
     ...shared,

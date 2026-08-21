@@ -12,7 +12,13 @@
  * dependa to skip it — the policy decides.
  */
 import type { Release, ResolutionResult } from "../model.js";
-import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
+import {
+  byVersionDescending,
+  parseDate,
+  temporarilyUnavailable,
+  type Datasource,
+  type DatasourceId,
+} from "./types.js";
 
 /** The crates.io datasource identifier. */
 const ID: DatasourceId = "crates";
@@ -48,7 +54,7 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
-    return temporarilyUnavailable(error);
+    return temporarilyUnavailable("crates.io", error);
   }
 
   if (response.status === 404) {
@@ -164,19 +170,6 @@ function isPrereleaseVersion(version: string): boolean {
 }
 
 /**
- * Parse a date string from the crates.io API.
- */
-function parseDate(value: string): Date | null {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-    // Not a valid date
-  }
-  return null;
-}
-
-/**
  * Extract a GitHub URL from repository/homepage fields.
  */
 function extractGithubUrl(repository: string | null, homepage: string | null): string | null {
@@ -190,15 +183,4 @@ function extractGithubUrl(repository: string | null, homepage: string | null): s
   }
 
   return null;
-}
-
-/**
- * Convert a fetch error to a `temporarily-unavailable` result.
- */
-function temporarilyUnavailable(error: unknown): ResolutionResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    status: "temporarily-unavailable",
-    reason: `crates.io unreachable: ${message}`,
-  };
 }
