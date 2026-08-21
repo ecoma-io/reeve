@@ -263,7 +263,7 @@ export interface Warrant {
   /**
    * The `pivot:` key: the language corrections are bridged through for
    * cross-language recall, as written — not yet resolved against the final
-   * `languages` list, which is `resolvePivot`'s job once that list exists.
+   * `languages` list, which is `pivotOrNone`'s job once that list exists.
    * `null` when the file never named one, which leaves the first-listed
    * language the pivot, exactly as before this key existed.
    */
@@ -1018,7 +1018,7 @@ function readLanguages(path: string, raw: unknown): readonly Language[] | null {
  * Not resolved against the final `languages` list here — that list may come
  * from the warrant's own `languages:` key or from each duty's documented
  * default, and `readWarrant` runs before any duty has decided which.
- * `resolvePivot` does that once the caller has the real list in hand.
+ * `pivotOrNone` does that once the caller has the real list in hand.
  *
  * `pivot:` with nothing under it parses as YAML `null`, which is refused
  * rather than read as absence — the same distinction `readLanguages` draws:

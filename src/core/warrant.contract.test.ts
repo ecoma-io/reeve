@@ -159,7 +159,7 @@ const CLASSES: readonly (readonly [name: string, source: string, expected: RegEx
   [
     "conflicting config — a pivot outside the configured languages",
     "version: 1\nlanguages: [en]\npivot: vi\n",
-    null, // Deferred to `resolvePivot`, which has the final list — see below.
+    null, // Deferred to `pivotOrNone`, which has the final list — see below.
   ],
   ["missing required field — no version at all", "labels: []\n", /declares version absent/],
   [

@@ -684,6 +684,19 @@ describe("pivotOrNone", () => {
     expect(pivotOrNone(warrant(`${MINIMAL}pivot: vi\n`), [EN, VI])).toBe(VI);
   });
 
+  it("reads an empty list as nothing to bridge even when the warrant named a pivot", () => {
+    // The empty-list guard, pinned rather than assumed. Folding the old
+    // `pivotOrNone` wrapper into `resolvePivot` turned a structural guarantee —
+    // the wrapper checked the list was non-empty before calling at all — into
+    // one `if` inside the merged function. Reordering the two guards is
+    // harmless (both still answer null), but *dropping* the empty check lets a
+    // named pivot reach `findLanguage` against an empty list and throw, which
+    // is a run that fails on a repository configured for one language and a
+    // pivot it never needed. Verified by deleting the guard: this case is the
+    // only one in the file that goes red.
+    expect(pivotOrNone(warrant(`${MINIMAL}pivot: zh\n`), [])).toBeNull();
+  });
+
   it("reads an empty list as nothing to bridge, rather than as a fault", () => {
     // A single-language project recalls in its own language and never spends
     // a request on a translation — that is not a misconfiguration to refuse.

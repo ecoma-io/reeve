@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as MarkdownModule from "./markdown.js";
 import { mapProse } from "./markdown.js";
 import { sanitize } from "./sanitize.js";
 
@@ -8,7 +9,11 @@ import { sanitize } from "./sanitize.js";
 // is prose — so a case that passes cannot be passing because the stub happened
 // to classify something the way the real segmenter would. The two cases that
 // are *about* the code boundary set their own implementation.
-vi.mock("./markdown.js", () => ({
+// `importOriginal` rather than a bare factory: a module gains exports over
+// time, and a factory that replaces the whole module goes red the moment the
+// code under test uses one it does not list.
+vi.mock("./markdown.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof MarkdownModule>()),
   mapProse: vi.fn((markdown: string, rewrite: (prose: string) => string) => rewrite(markdown)),
 }));
 

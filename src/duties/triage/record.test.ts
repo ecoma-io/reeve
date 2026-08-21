@@ -243,7 +243,7 @@ function settingsOf(over: Partial<Settings> = {}): Settings {
     screenNames: new Map(),
     // Empty on purpose: `detectLanguage` and `computePivot` both short-circuit
     // without ever calling a model when the allowed-language list is empty
-    // (see `detect.ts`/`resolvePivot`'s own callers), which is what lets
+    // (see `detect.ts`/`pivotOrNone`'s own callers), which is what lets
     // `stagesOf` below hand back throwing stubs instead of a working model.
     languages: [],
     warrant: ".github/reeve.yml",

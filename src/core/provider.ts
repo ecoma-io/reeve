@@ -1098,19 +1098,24 @@ export function settleAuth(weather: Weather): void {
  *
  * ── Why this is in the core ────────────────────────────────────────────────
  *
- * It was written out six times: `translate/draft.ts`, `duplicate/verdict.ts`,
- * `respond/draft.ts`, `harmonise/draft.ts`, `review/passes.ts` and
- * `core/pivot.ts`, five of them byte-identical. That is the provider
- * protocol's own semantics, not any duty's policy about its own work, and
- * `architecture.md` puts model rotation on the core's side of the boundary
- * precisely so a duty never has to remember a rule like this.
+ * It was written out as a private `answer()` six times: `translate/draft.ts`,
+ * `duplicate/verdict.ts`, `respond/draft.ts`, `harmonise/draft.ts`,
+ * `review/passes.ts` and `core/pivot.ts`, five of them byte-identical. That is
+ * the provider protocol's own semantics, not any duty's policy about its own
+ * work, and `architecture.md` puts model rotation on the core's side of the
+ * boundary precisely so a duty never has to remember a rule like this.
  *
- * Six copies is also how two call sites ended up without it. `triage/verdict.ts`
- * and `dependa/main.ts` call `provider.complete` directly, so a truncated
- * answer there is accepted as a rotation *success*, fails its parser, and
- * becomes a no-verdict — where every other duty would have rotated to the next
- * model. Those two are deliberately NOT changed here: giving them the guard
- * changes what a run does, which is a decision of its own and not a
+ * A seventh site applies the same rule inline rather than through a wrapper:
+ * `review/agentic.ts` checks `finishReason` inside its tool-call loop, where
+ * the completion is one turn of a conversation rather than a whole answer, so
+ * it cannot call this and is left alone.
+ *
+ * Copying a rule around is also how two call sites ended up without it.
+ * `triage/verdict.ts` and `dependa/main.ts` call `provider.complete` directly,
+ * so a truncated answer there is accepted as a rotation *success*, fails its
+ * parser, and becomes a no-verdict — where every other duty would have rotated
+ * to the next model. Those two are deliberately NOT changed here: giving them
+ * the guard changes what a run does, which is a decision of its own and not a
  * deduplication. They are the argument for this function existing.
  *
  * `noun` names the thing that was cut off, for the reason string a maintainer

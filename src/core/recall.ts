@@ -170,7 +170,7 @@ export interface Bridge {
   readonly rosters: Rosters;
   readonly title: string;
   readonly body: string;
-  /** The pivot language to bridge into — see `resolvePivot`. */
+  /** The pivot language to bridge into — see `pivotOrNone`. */
   readonly to: Language;
   readonly weather: Weather;
 }

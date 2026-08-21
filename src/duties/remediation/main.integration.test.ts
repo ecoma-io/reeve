@@ -471,6 +471,23 @@ describe("the action contract", () => {
    * bundled into the duties to read a warrant at runtime, and reaching for it
    * here would make this suite agree with itself about a file it is checking.
    */
+  /**
+   * Source text with block comments removed, so a scan sees code and only code.
+   *
+   * These audits prove "every declared input is read" by regex over raw source,
+   * which means a doc comment that *mentions* a reader call is indistinguishable
+   * from one. That is not hypothetical: a comment in `core/inputs.ts` explaining
+   * why an input is parsed a particular way credited three duties with an input
+   * only `harmonise` declares, and turned three suites red for a change that
+   * altered no behaviour at all.
+   *
+   * A scan whose verdict can be flipped by prose is a scan people edit around.
+   * Stripping the comments first costs one line and removes the whole class.
+   */
+  function code(text: string): string {
+    return text.replace(/\/\*[\s\S]*?\*\//g, "");
+  }
+
   async function declaredInputs(): Promise<string[]> {
     const text = await readFile(join(DUTY, "action.yml"), "utf8");
     const block = /\ninputs:\n([\s\S]*?)\noutputs:\n/.exec(text)?.[1] ?? "";
@@ -491,7 +508,7 @@ describe("the action contract", () => {
     const threadNumberFn = /export function threadNumber\(\)[^]*?\n}/.exec(shared)?.[0] ?? "";
     return [
       ...new Set(
-        [...`${own}\n${threadNumberFn}`.matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
+        [...code(`${own}\n${threadNumberFn}`).matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
           ([, name]) => name ?? "",
         ),
       ),

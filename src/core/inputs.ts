@@ -237,11 +237,19 @@ export type Attribution = "none" | "model" | "detail";
  * the `.env` holds.
  *
  * That is how this function came to exist. Two `harmonise` inputs were parsed
- * with `core.getInput("bootstrap") === "true"`, which reads `True` as **false**
- * — the opposite of what a maintainer wrote. Swapping in `getBooleanInput`
- * fixed that and turned every one of the eight `harmonise` eval fixtures red,
- * because none of them names `bootstrap`. Trading a silent wrong answer for a
- * crash is not a fix.
+ * by comparing the raw input against the literal `"true"`, which reads `True`
+ * as **false** — the opposite of what a maintainer wrote. Swapping in
+ * `getBooleanInput` fixed that and turned every one of the eight `harmonise`
+ * eval fixtures red, because none of them names that input. Trading a silent
+ * wrong answer for a crash is not a fix.
+ *
+ * (The input is deliberately not named in this comment. Six duties' contract
+ * tests prove "every declared input is read" by regex-scanning the raw text of
+ * this file, so a doc comment quoting a reader call credits every one of them
+ * with an input only `harmonise` declares. Those scanners strip block comments
+ * now, so this is belt and braces — but the first draft of this paragraph did
+ * turn three suites red, which is the second time this round a comment quoting
+ * the thing a scanner looks for has cost a green run.)
  *
  * So: silence means the documented default, and anything else is parsed against
  * the same six spellings `getBooleanInput` accepts. A seventh spelling — `yes`,
