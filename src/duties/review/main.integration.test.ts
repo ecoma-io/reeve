@@ -1592,7 +1592,12 @@ describe("the action", () => {
     expect(run.summary).toContain("| Risk | low — low — no risk signals fired |");
   });
 
-  it("prices a dependency change medium with two passes", async () => {
+  it("prices a lockfile change medium while the generated defaults keep it out of the prompt", async () => {
+    // Both halves of the lockfile default in one run: the model is never
+    // shown eight thousand lines of hashes (the lockfile is generated-skipped,
+    // and a generated-only PR posts the empty chrome as a real answer), while
+    // the dependency signal still prices the change medium — skipping a
+    // lockfile from the prompt must not also silence the risk it carries.
     stub.pull.files = [
       {
         filename: "package-lock.json",
@@ -1606,23 +1611,6 @@ describe("the action", () => {
     stub.answer = stageAnswer({
       review: () => {
         reviewAsks += 1;
-        if (reviewAsks === 1) {
-          return saying(
-            JSON.stringify({
-              findings: [
-                {
-                  rule: "dedup",
-                  severity: "info",
-                  path: "package-lock.json",
-                  line: 1,
-                  snippet: '"version": "1.2.3",',
-                  body: "A named constant is worth considering.",
-                },
-              ],
-              confidence: 0.8,
-            }),
-          );
-        }
         return saying(JSON.stringify({ findings: [], confidence: 0.7 }));
       },
     });
@@ -1631,9 +1619,11 @@ describe("the action", () => {
 
     expect(run.code).toBe(0);
     expect(run.outputs.risk).toBe("medium");
-    expect(reviewAsks).toBe(2);
-    expect(run.outputs.findings).toBe("1");
-    expect(stub.comments[0]?.body).toContain("New findings (1)");
+    expect(reviewAsks).toBe(0);
+    expect(run.outputs.findings).toBe("0");
+    expect(stub.comments[0]?.body).toContain("No issues to report");
+    expect(run.summary).toContain("generated");
+    expect(run.summary).toContain("package-lock.json");
   });
 
   it("withholds a high-risk all-clear when its adversarial pass fails", async () => {

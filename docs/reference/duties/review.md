@@ -291,8 +291,17 @@ The repository rules file carries four deterministic pre-checks that fire
 before a model is asked anything, each _always-right by construction_:
 
 - **`ignore.files` / `ignore.paths`** — files that never reach the model.
-- **`generated`** — suffixes (default `.min.js`, `.min.css`, `.map`) skipped
-  as generated before the diff is shown.
+- **`generated`** — machine-written patterns skipped before the diff is
+  shown, read by shape: a suffix (`.min.js`), an exact lockfile name at any
+  depth (`pnpm-lock.yaml`), or a whole-path glob (`dist/**`). The default
+  list covers minified bundles and source maps, snapshot files, every
+  lockfile the risk engine knows, and the conventional build-output and
+  vendored directories (`dist`, `build`, `out`, `vendor`, `node_modules`,
+  `coverage`, `.next`) — so an unconfigured repository never spends its
+  diff budget on a lockfile before the first human-written file is shown.
+  Skipped is not silenced: the coverage table names every skipped file, and
+  a lockfile's change still prices the dependency-risk signal. Writing your
+  own `generated:` list replaces the whole default.
 - **`blocked`** — phrases the diff must not contain, reported once per line
   per phrase (capped at 40 per phrase) with the printed line number — the
   only reason a deterministic check can report a line a model was never
@@ -319,7 +328,7 @@ version: 1
 ignore:
   files: [docs/legacy.md]
   paths: ["vendor/**"]
-generated: [".min.js", ".min.css", ".map"]
+generated: [".min.js", ".min.css", ".map", ".pb.go"] # replaces the whole default list
 blocked:
   - phrase: "TODO-FIXME"
     severity: critical

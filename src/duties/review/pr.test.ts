@@ -213,6 +213,27 @@ describe("isGenerated", () => {
     expect(isGenerated("a.min.js", [".min.js"])).toBe(true);
     expect(isGenerated("a.js", [".min.js"])).toBe(false);
   });
+
+  it("matches a bare name as an exact basename at any depth, never a substring", () => {
+    expect(isGenerated("pnpm-lock.yaml", ["pnpm-lock.yaml"])).toBe(true);
+    expect(isGenerated("packages/app/pnpm-lock.yaml", ["pnpm-lock.yaml"])).toBe(true);
+    // A substring is not a lockfile: the segment has to match whole.
+    expect(isGenerated("xpackage-lock.json", ["package-lock.json"])).toBe(false);
+    expect(isGenerated("package-lock.json.orig", ["package-lock.json"])).toBe(false);
+  });
+
+  it("matches a separator-carrying name as an exact whole path", () => {
+    expect(isGenerated("vendor/modules.txt", ["vendor/modules.txt"])).toBe(true);
+    // The basename alone is not the pattern: `modules.txt` elsewhere stays reviewable.
+    expect(isGenerated("docs/modules.txt", ["vendor/modules.txt"])).toBe(false);
+  });
+
+  it("matches a wildcard pattern as a whole-path glob", () => {
+    expect(isGenerated("dist/index.js", ["dist/**"])).toBe(true);
+    expect(isGenerated("packages/app/dist/index.js", ["**/dist/**"])).toBe(true);
+    // Anchored: a directory merely named around `dist` is not build output.
+    expect(isGenerated("redistribute/a.js", ["dist/**"])).toBe(false);
+  });
 });
 
 describe("lineNumbers", () => {

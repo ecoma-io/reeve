@@ -29,6 +29,7 @@ import * as core from "@actions/core";
 import { readFile } from "node:fs/promises";
 import { parse, YAMLParseError } from "yaml";
 
+import { HUMAN_MANIFESTS, LOCKFILES } from "./manifests.js";
 import { matchesGlob, isGenerated, type PrFile } from "./pr.js";
 import type { Rules } from "./rules.js";
 
@@ -217,31 +218,12 @@ export const BUILTIN_PATHS: Readonly<Record<RiskSignalName, readonly string[]>> 
   generated_code: [],
 };
 
-/** Dependency manifests — the signal fires on these exact paths. */
-export const DEPENDENCY_FILES: ReadonlySet<string> = new Set([
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "bun.lock",
-  "bun.lockb",
-  "go.mod",
-  "go.sum",
-  "Gopkg.lock",
-  "Cargo.toml",
-  "Cargo.lock",
-  "requirements.txt",
-  "Pipfile",
-  "Pipfile.lock",
-  "poetry.lock",
-  "pyproject.toml",
-  "uv.lock",
-  "Gemfile",
-  "Gemfile.lock",
-  "gems.locked",
-  "vendor/modules.txt",
-]);
+/**
+ * Dependency manifests — the signal fires on these exact paths. The names
+ * live in `manifests.ts`, the same list `rules.ts` draws its lockfile skip
+ * defaults from, so the skip and the signal can never drift apart.
+ */
+export const DEPENDENCY_FILES: ReadonlySet<string> = new Set([...HUMAN_MANIFESTS, ...LOCKFILES]);
 
 /** Text that marks a patch as carrying credential or access-control material. */
 export const SECURITY_PHRASES: readonly string[] = [
@@ -541,7 +523,12 @@ export function assessRisk(
     });
   }
 
-  const deps = nonGenerated.filter((f) => DEPENDENCY_FILES.has(f.path));
+  // From `allFiles`, not `nonGenerated`: every lockfile is generated-skipped
+  // from the prompt by default (`rules.ts`'s `DEFAULT_GENERATED`), but its
+  // change is still the dependency signal — a supply-chain edit hides in
+  // exactly the file nobody reads, and skipping it from the prompt must not
+  // also silence the risk it prices.
+  const deps = allFiles.filter((f) => DEPENDENCY_FILES.has(f.path));
   if (deps.length > 0) {
     signals.push({
       signal: "dependency_changes",

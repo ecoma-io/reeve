@@ -98,7 +98,7 @@ import {
   type RiskAssessment,
   type RiskTier,
 } from "./risk.js";
-import { preflight, readPackedRules } from "./rules.js";
+import { DEFAULT_GENERATED, preflight, readPackedRules } from "./rules.js";
 import {
   adversarialPass,
   correctnessPass,
@@ -947,8 +947,6 @@ async function runTestmap(
   const readTests = `${String(discovery.tests.length)} test file(s), ${String(findings.length)} gap finding(s)`;
   return { findings, evidence, readTests };
 }
-
-const DEFAULT_GENERATED = [".min.js", ".min.css", ".map"];
 
 function notGranted(warrant: Warrant): string {
   return (

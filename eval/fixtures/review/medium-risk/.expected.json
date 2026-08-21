@@ -1,5 +1,5 @@
 {
-  "description": "A dependency manifest change prices the review medium — two model passes, one posted finding.",
+  "description": "A lockfile change prices the review medium while the generated defaults keep it out of the prompt — no model pass is spent, the empty chrome posts as a real answer, and the dependency signal still sets the tier.",
   "warrant": "version: 1\nlanguages:\n  - en\nduties:\n  review: [comment]\n",
   "files": [
     {
@@ -11,21 +11,6 @@
     }
   ],
   "risk": "version: 1\n",
-  "review-passes": [
-    {
-      "findings": [
-        {
-          "rule": "dedup",
-          "severity": "info",
-          "path": "package-lock.json",
-          "line": 1,
-          "snippet": "\"version\": \"1.2.3\",",
-          "body": "A named constant is worth considering."
-        }
-      ],
-      "confidence": 0.8
-    },
-    { "findings": [], "confidence": 0.7 }
-  ],
-  "expected": { "commented": "true", "findings": "1", "head-sha": "abc123", "risk": "medium" }
+  "review-passes": [],
+  "expected": { "commented": "true", "findings": "0", "head-sha": "abc123", "risk": "medium" }
 }

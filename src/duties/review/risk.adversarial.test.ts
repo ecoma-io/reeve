@@ -228,8 +228,12 @@ describe("assessRisk — the tier a diff earns", () => {
   });
 
   it("a_repository_path_list_extends_the_built_in_globs_rather_than_replacing_them", () => {
-    const profile = parseRiskProfile("version: 1\npaths:\n  sensitive:\n    - 'vendor/**'\n");
-    const extended = assessRisk([file({ path: "vendor/thing.ts" })], rules(), profile);
+    // `closed/**`, not `vendor/**`: the generated defaults now skip vendored
+    // directories outright, and a path signal reads only non-generated files —
+    // a repository that wants a generated-by-default directory priced as
+    // sensitive also writes its own `generated:` list.
+    const profile = parseRiskProfile("version: 1\npaths:\n  sensitive:\n    - 'closed/**'\n");
+    const extended = assessRisk([file({ path: "closed/thing.ts" })], rules(), profile);
     expect(extended.signals.map((s) => s.signal)).toContain("sensitive_path");
     const builtin = assessRisk([file({ path: "src/auth/token.ts" })], rules(), profile);
     expect(builtin.tier).toBe("high");

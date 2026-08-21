@@ -34597,8 +34597,13 @@ function classify(files, bounds) {
     capped: skipped.some((entry) => entry.reason === "capped")
   };
 }
-function isGenerated(path, extensions) {
-  return extensions.some((extension) => path.endsWith(extension));
+function isGenerated(path, patterns) {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  return patterns.some((pattern) => {
+    if (pattern.includes("*") || pattern.includes("?")) return matchesGlob(pattern, path);
+    if (pattern.startsWith(".") && !pattern.includes("/")) return path.endsWith(pattern);
+    return base === pattern || path === pattern;
+  });
 }
 function lineNumbers(patch) {
   const lines = /* @__PURE__ */ new Map();
@@ -36153,6 +36158,36 @@ function mergeDispositions(fresh, substantiated) {
 // src/duties/review/risk.ts
 var import_yaml2 = __toESM(require_dist2(), 1);
 import { readFile as readFile3 } from "node:fs/promises";
+
+// src/duties/review/manifests.ts
+var HUMAN_MANIFESTS = [
+  "package.json",
+  "go.mod",
+  "Cargo.toml",
+  "requirements.txt",
+  "Pipfile",
+  "pyproject.toml",
+  "Gemfile"
+];
+var LOCKFILES = [
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "go.sum",
+  "Gopkg.lock",
+  "Cargo.lock",
+  "Pipfile.lock",
+  "poetry.lock",
+  "uv.lock",
+  "Gemfile.lock",
+  "gems.locked",
+  "vendor/modules.txt"
+];
+
+// src/duties/review/risk.ts
 var UnreadableRiskProfile = class extends Error {
   warnings;
   constructor(warnings) {
@@ -36272,30 +36307,7 @@ var BUILTIN_PATHS = {
   changed_files: [],
   generated_code: []
 };
-var DEPENDENCY_FILES = /* @__PURE__ */ new Set([
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "bun.lock",
-  "bun.lockb",
-  "go.mod",
-  "go.sum",
-  "Gopkg.lock",
-  "Cargo.toml",
-  "Cargo.lock",
-  "requirements.txt",
-  "Pipfile",
-  "Pipfile.lock",
-  "poetry.lock",
-  "pyproject.toml",
-  "uv.lock",
-  "Gemfile",
-  "Gemfile.lock",
-  "gems.locked",
-  "vendor/modules.txt"
-]);
+var DEPENDENCY_FILES = /* @__PURE__ */ new Set([...HUMAN_MANIFESTS, ...LOCKFILES]);
 var SECURITY_PHRASES = [
   "password",
   "api_key",
@@ -36538,7 +36550,7 @@ function assessRisk(allFiles, rules, profile) {
       escalates: POLICY_HIGH.has(signal)
     });
   }
-  const deps = nonGenerated.filter((f) => DEPENDENCY_FILES.has(f.path));
+  const deps = allFiles.filter((f) => DEPENDENCY_FILES.has(f.path));
   if (deps.length > 0) {
     signals.push({
       signal: "dependency_changes",
@@ -37146,7 +37158,26 @@ var UnreadableRules = class extends Error {
   }
 };
 var SEVERITY3 = /* @__PURE__ */ new Set(["info", "warning", "critical"]);
-var DEFAULT_GENERATED = [".min.js", ".min.css", ".map"];
+var DEFAULT_GENERATED = [
+  ".min.js",
+  ".min.css",
+  ".map",
+  ".snap",
+  ...LOCKFILES,
+  "dist/**",
+  "**/dist/**",
+  "build/**",
+  "**/build/**",
+  "out/**",
+  "**/out/**",
+  "vendor/**",
+  "**/vendor/**",
+  "node_modules/**",
+  "**/node_modules/**",
+  "coverage/**",
+  "**/coverage/**",
+  ".next/**"
+];
 var DEFAULT_RULES = [
   {
     id: "dedup",
@@ -37322,7 +37353,7 @@ function readStringList(raw, key, warnings) {
 }
 function readGenerated(raw, warnings) {
   const list = readStringList(raw, "generated", warnings);
-  return list.length > 0 ? list : DEFAULT_GENERATED;
+  return list.length > 0 ? list : [...DEFAULT_GENERATED];
 }
 function readBlocked(raw, warnings) {
   if (raw === void 0 || raw === null) return [];
@@ -38582,7 +38613,7 @@ async function decide(api, at, warrant, settings, stages, weather) {
   const snapshot = classify(await listPrFiles(prApi, at), {
     ignoreFiles: [],
     ignorePaths: [],
-    generatedExtensions: DEFAULT_GENERATED2,
+    generatedExtensions: DEFAULT_GENERATED,
     maxDiffChars: budget
   });
   const rules = await readPackedRules(resolveRulesPath(settings), resolvePacksPath(settings));
@@ -38955,7 +38986,6 @@ async function runTestmap(bounded2, rules) {
   const readTests = `${String(discovery.tests.length)} test file(s), ${String(findings.length)} gap finding(s)`;
   return { findings, evidence, readTests };
 }
-var DEFAULT_GENERATED2 = [".min.js", ".min.css", ".map"];
 function notGranted(warrant) {
   return `\`${warrant.path}\`'s \`duties:\` block does not name \`review\`; once that block exists it is the whole answer, so add \`review: [comment]\` to it to grant a review comment, or remove the block to return to defaults, which is still nothing \u2014 see \`DEFAULT_CAPABILITIES\`.`;
 }

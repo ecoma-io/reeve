@@ -22,6 +22,7 @@ import {
   type EdgeRule,
   type LayerName,
 } from "./architecture.js";
+import { LOCKFILES } from "./manifests.js";
 import { isGenerated } from "./pr.js";
 import { MAX_PACK_CHARS, UnreadablePacks, parsePack, type Pack } from "./packs.js";
 import { DEFAULT_TESTS, parseTests, type TestsSection } from "./testmap.js";
@@ -50,7 +51,7 @@ export interface Rule {
 export interface Rules {
   readonly version: number;
   readonly rules: readonly Rule[];
-  /** Files and path globs that never reach the model, and generated suffixes skipped the same way. */
+  /** Files and path globs that never reach the model, and generated patterns (suffixes, lockfile names, directory globs) skipped the same way. */
   readonly ignoreFiles: readonly string[];
   readonly ignorePaths: readonly string[];
   readonly generatedExtensions: readonly string[];
@@ -83,7 +84,37 @@ export class UnreadableRules extends Error {
 
 const SEVERITY: Readonly<Set<string>> = new Set(["info", "warning", "critical"]);
 
-const DEFAULT_GENERATED = [".min.js", ".min.css", ".map"];
+/**
+ * The machine-written shapes skipped from the prompt when a repository has
+ * not said otherwise: minified bundles and their maps, snapshot files, every
+ * lockfile `manifests.ts` names, and the conventional build-output and
+ * vendored directories at the root or any depth. Skipped is not silenced —
+ * a `generated` skip is the flagged silence (`pr.ts`'s `classify`): every
+ * file lands in the coverage table with its reason, and a lockfile's change
+ * still prices the dependency-risk signal (`risk.ts`). A rules file that
+ * writes its own `generated:` list replaces this whole default, which is the
+ * one override the format already has — see `readGenerated`.
+ */
+export const DEFAULT_GENERATED: readonly string[] = [
+  ".min.js",
+  ".min.css",
+  ".map",
+  ".snap",
+  ...LOCKFILES,
+  "dist/**",
+  "**/dist/**",
+  "build/**",
+  "**/build/**",
+  "out/**",
+  "**/out/**",
+  "vendor/**",
+  "**/vendor/**",
+  "node_modules/**",
+  "**/node_modules/**",
+  "coverage/**",
+  "**/coverage/**",
+  ".next/**",
+];
 const DEFAULT_RULES: readonly Rule[] = [
   {
     id: "dedup",
@@ -345,7 +376,7 @@ function readStringList(raw: unknown, key: string, warnings: string[]): string[]
 
 function readGenerated(raw: unknown, warnings: string[]): string[] {
   const list = readStringList(raw, "generated", warnings);
-  return list.length > 0 ? list : DEFAULT_GENERATED;
+  return list.length > 0 ? list : [...DEFAULT_GENERATED];
 }
 
 function readBlocked(raw: unknown, warnings: string[]): Rules["blocked"] {
