@@ -38,12 +38,13 @@ import { budgetExhausted, createBudget, type Budget } from "../../core/budget.js
 import { isCapacityError, readBlob, type Location, readContentsFile } from "../../core/forge.js";
 import { loadGlossary, type GlossaryEntry } from "../../core/glossary.js";
 import {
+  type ApiKeySpec,
+  booleanInput,
   bounded,
   counted,
+  type EndpointSpec,
   readShared,
   whole,
-  type ApiKeySpec,
-  type EndpointSpec,
 } from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
 import { createMeter, type Meter } from "../../core/meter.js";
@@ -148,10 +149,10 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     stateBranch: core.getInput("state-branch"),
     glossaryDir: core.getInput("glossary-dir", { required: true }),
     paths: parsePaths(core.getInput("paths")),
-    bootstrap: core.getBooleanInput("bootstrap"),
+    bootstrap: booleanInput("bootstrap", false),
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     chunkChars: counted("chunk-chars", core.getInput("chunk-chars")),
-    ignore: core.getBooleanInput("ignore"),
+    ignore: booleanInput("ignore", true),
   };
 }
 

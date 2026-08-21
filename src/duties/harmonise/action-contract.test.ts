@@ -54,11 +54,17 @@ describe("the action contract", () => {
     // A set, not a list: `models` is read twice — once in `inputs.ts`, once
     // in `readSettings` via `readShared` — and that duplication is harmless
     // plumbing rather than a second, different input.
+    // `booleanInput` is counted alongside the two `@actions/core` readers
+    // because it *is* one: its body is `core.getInput(name)` plus a strict
+    // parse and the manifest's default for silence. A duty that reads an input
+    // through it has read that input, and a scan that missed it would report
+    // drift where there is none — which is how a guard like this gets edited
+    // away rather than believed.
     return [
       ...new Set(
-        [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
-          ([, name]) => name ?? "",
-        ),
+        [
+          ...sources.join("\n").matchAll(/(?:get(?:Boolean)?Input|booleanInput)\(\s*"([^"]+)"/g),
+        ].map(([, name]) => name ?? ""),
       ),
     ];
   }

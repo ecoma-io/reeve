@@ -32360,6 +32360,15 @@ function readShared(options = {}) {
     limit: bounded("limit", getInput("limit"))
   };
 }
+function booleanInput(name, fallback) {
+  const raw = getInput(name).trim();
+  if (raw.length === 0) return fallback;
+  if (raw === "true" || raw === "True" || raw === "TRUE") return true;
+  if (raw === "false" || raw === "False" || raw === "FALSE") return false;
+  throw new Error(
+    `${name}: expected \`true\` or \`false\` (or their \`True\`/\`TRUE\` spellings), got \`${raw}\`.`
+  );
+}
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
   return parseList(raw).map((entry) => {
@@ -35495,10 +35504,10 @@ function readSettings() {
     stateBranch: getInput("state-branch"),
     glossaryDir: getInput("glossary-dir", { required: true }),
     paths: parsePaths(getInput("paths")),
-    bootstrap: getBooleanInput("bootstrap"),
+    bootstrap: booleanInput("bootstrap", false),
     maxRequests: bounded("max-requests", getInput("max-requests")),
     chunkChars: counted("chunk-chars", getInput("chunk-chars")),
-    ignore: getBooleanInput("ignore")
+    ignore: booleanInput("ignore", true)
   };
 }
 function notGranted(warrant) {

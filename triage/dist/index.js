@@ -37525,7 +37525,7 @@ function describeOutcome(outcome, done) {
 }
 function readSettings() {
   const shared = readShared();
-  const cheap = parseModels(getInput("screen-models"));
+  const cheap = parseModels(getInput("screen-models"), "screen-models");
   return {
     ...shared,
     screenModels: cheap.models,

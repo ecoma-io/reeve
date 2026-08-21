@@ -226,6 +226,40 @@ export function readShared(options: ReadSharedOptions = {}): Shared {
 export type Attribution = "none" | "model" | "detail";
 
 /**
+ * A boolean input, strictly parsed, with the manifest's default for silence.
+ *
+ * `core.getBooleanInput` is the obvious thing to reach for and it **throws on
+ * an unset or empty input** — including the empty string, which is what
+ * `core.getInput` returns for an input nobody set. On a real runner that never
+ * happens, because GitHub populates `INPUT_*` from `action.yml`'s `default:`
+ * before the action starts. Everywhere else it does: the eval runner drives a
+ * bundle with only the inputs a fixture names, and `pnpm try` sets only what
+ * the `.env` holds.
+ *
+ * That is how this function came to exist. Two `harmonise` inputs were parsed
+ * with `core.getInput("bootstrap") === "true"`, which reads `True` as **false**
+ * — the opposite of what a maintainer wrote. Swapping in `getBooleanInput`
+ * fixed that and turned every one of the eight `harmonise` eval fixtures red,
+ * because none of them names `bootstrap`. Trading a silent wrong answer for a
+ * crash is not a fix.
+ *
+ * So: silence means the documented default, and anything else is parsed against
+ * the same six spellings `getBooleanInput` accepts. A seventh spelling — `yes`,
+ * `1`, `on` — is refused by name rather than quietly read as false, because an
+ * input a maintainer took the trouble to write should never mean its opposite.
+ */
+export function booleanInput(name: string, fallback: boolean): boolean {
+  const raw = core.getInput(name).trim();
+  if (raw.length === 0) return fallback;
+  if (raw === "true" || raw === "True" || raw === "TRUE") return true;
+  if (raw === "false" || raw === "False" || raw === "FALSE") return false;
+
+  throw new Error(
+    `${name}: expected \`true\` or \`false\` (or their \`True\`/\`TRUE\` spellings), got \`${raw}\`.`,
+  );
+}
+
+/**
  * Validates a raw `show-attribution` value against the three spellings.
  *
  * @throws Error naming the offending spelling, so a workflow typo fails on the
