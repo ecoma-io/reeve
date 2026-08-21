@@ -237,7 +237,7 @@ describe("capacity failures are weather", () => {
     expect(rotation.success?.model).toBe("b");
     expect(rotation.failures[0]?.kind).toBe("capacity");
     expect(weather.grounded("a")).toBe(true);
-    // Capacity is never a protocol exhaustion, whatever else went wrong.
+    // Capacity is never a roster exhaustion, whatever else went wrong.
     expect(rosterExhausted(["a", "b"], rotation.failures)).toBe(false);
   });
 

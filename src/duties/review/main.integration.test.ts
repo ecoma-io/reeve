@@ -1523,8 +1523,8 @@ describe("the action", () => {
     expect(run.log).not.toContain("failed with a protocol error");
   });
 
-  it("stays green when at least one pass read the diff, even if another was protocol-exhausted", async () => {
-    // A high-risk diff costs three passes. Two are protocol-exhausted and one
+  it("stays green when at least one pass read the diff, even if another's roster was exhausted", async () => {
+    // A high-risk diff costs three passes. Two have exhausted rosters and one
     // reads readably — the roster was NOT wholly exhausted by protocol
     // errors, so the run stays green; the unreadable adversarial pass merely
     // withholds the all-clear.

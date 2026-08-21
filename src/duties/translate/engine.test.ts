@@ -242,7 +242,7 @@ describe("translateChunk", () => {
     expect(core.warning).toHaveBeenCalledWith("vi: judge Panel — quota exceeded");
   });
 
-  it("invokes the protocol-exhaustion callback with the exact models and failures when no draft survives", async () => {
+  it("invokes the roster-exhaustion callback with the exact models and failures when no draft survives", async () => {
     const failures: Failure[] = [
       { ok: false, model: "model-a", kind: "protocol", reason: "bad model id" },
       { ok: false, model: "model-b", kind: "protocol", reason: "bad model id" },
@@ -261,7 +261,7 @@ describe("translateChunk", () => {
     expect(callback).toHaveBeenCalledWith(settings.models, failures);
   });
 
-  it("does not invoke the protocol-exhaustion callback when at least one draft survives", async () => {
+  it("does not invoke the roster-exhaustion callback when at least one draft survives", async () => {
     mockedTranslate.mockResolvedValue(translation());
     mockedJudge.mockResolvedValue({
       winner: { model: "model-a", text: "bản dịch", score: perfectScore },

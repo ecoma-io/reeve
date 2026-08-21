@@ -1152,7 +1152,7 @@ function readErrorMessage(payload: unknown): string | null {
   // already tolerated here; `{"message": ""}`, `{"message": "   "}` and
   // `{"code": null}` were not, and each of them is the same absence wearing a
   // field name. A gateway that stamps one of those on every response — several
-  // do — turned the whole roster protocol-exhausted and ended a run red on a
+  // do — exhausted the whole roster and ended a run red on a
   // provider that was answering perfectly well, which is the failure this
   // paragraph of the doc comment above exists to prevent.
   const carries = Object.values(reported).some(
