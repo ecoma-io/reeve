@@ -561,3 +561,42 @@ describe("the state-branch write gate", () => {
     expect(stub.writes.find((write) => write.path.endsWith("state.json"))).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The `paths` filter — group scoping, driven end to end.
+//
+// The dogfood workflow writes `paths: "README.md"` — an entry that names the
+// source FILE. The raw string-prefix filter this suite's bundle used to carry
+// dropped `README.vi.md` (not a prefix match), dissolved the whole document
+// group, and ended green having synced nothing — for months. These cases pin
+// the corrected contract from the runner's side: naming a file scopes in its
+// whole document group, and an entry that scopes nothing is said out loud.
+// ---------------------------------------------------------------------------
+
+describe("the paths filter", () => {
+  it("an entry naming the source file still syncs its locale variants", async () => {
+    const run = await runAction({ paths: "docs/start.md" });
+
+    expect(run.code).toBe(0);
+    expect(stub.writes.map((write) => write.path)).toContain("docs/start.vi.md");
+    expect(stub.pulls).toHaveLength(1);
+  });
+
+  it("warns, per entry, when a paths entry matches no document group", async () => {
+    const run = await runAction({ paths: "docs/start.md, docs/missing.md" });
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("`docs/missing.md` matched no document group");
+    // The live entry still synced — a dead sibling narrows nothing.
+    expect(stub.writes.map((write) => write.path)).toContain("docs/start.vi.md");
+  });
+
+  it("stays green with the warning when every entry is dead", async () => {
+    const run = await runAction({ paths: "docs/missing.md" });
+
+    expect(run.code).toBe(0);
+    expect(run.log).toContain("matched no document group");
+    expect(stub.writes).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+  });
+});

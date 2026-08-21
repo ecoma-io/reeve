@@ -129,7 +129,12 @@ inputs:
   paths:
     description: >-
       Doc paths to scan for locale variants, comma or newline separated. Empty
-      scans the whole repository.
+      scans the whole repository. The filter scopes DOCUMENT GROUPS, not raw
+      files: an entry that names a file (`README.md`) keeps that file's whole
+      group — the source and every locale variant. A directory entry
+      (`docs/`) keeps plain prefix semantics. Matching is case-sensitive, and
+      an entry that scopes no group is warned about by name rather than left
+      a silent zero.
     required: false
     default: ""
 

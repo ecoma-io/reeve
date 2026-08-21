@@ -44,8 +44,14 @@ const LOCALE_SUFFIX = /^(.+)\.([a-z]{2,3}(?:-[A-Z][a-zA-Z]+)?)\.md$/;
  *   documentation files are written in.
  * @param targetLanguages - The target languages — the locale-suffixed files
  *   that get synchronised against the source.
- * @param pathsFilter - If non-empty, only files under these prefixes are
- *   considered.
+ * @param pathsFilter - If non-empty, only document groups with a member under
+ *   these prefixes are considered. The filter scopes GROUPS, not raw files: an
+ *   entry that names a file (`README.md`) keeps that file's whole document
+ *   group — source and every locale variant — because `README.vi.md` is not a
+ *   string-prefix of `README.md`, and a group with its variants silently
+ *   filtered away is the confirmed silent-green failure this rule exists to
+ *   prevent. A directory entry (`docs/`) behaves exactly as before by
+ *   construction, since every member of a group shares its base prefix.
  */
 export function discoverGroups(
   paths: readonly string[],
@@ -55,13 +61,11 @@ export function discoverGroups(
 ): readonly DocumentGroup[] {
   const sourceCode = sourceLanguage.code.toLowerCase();
   const targetCodes = new Set(targetLanguages.map((lang) => lang.code.toLowerCase()));
-  const scoped =
-    pathsFilter.length > 0 ? paths.filter((p) => pathsFilter.some((f) => p.startsWith(f))) : paths;
 
   // base name → locale code → file path
   const groups = new Map<string, Map<string, string>>();
 
-  for (const path of scoped) {
+  for (const path of paths) {
     if (!path.endsWith(".md")) continue;
 
     const suffixMatch = LOCALE_SUFFIX.exec(path);
@@ -104,8 +108,50 @@ export function discoverGroups(
       }
     }
     if (!hasTarget) continue;
+
+    // The paths filter is the LAST gate, evaluated over the group's whole
+    // member set — never over raw paths before grouping. Any future member
+    // derivation (a bootstrapped locale path, say) must happen above this
+    // line, so a filter entry can select the group by any of its members.
+    if (!matchesFilter(files, pathsFilter)) continue;
+
     result.push({ id, files });
   }
 
   return result;
+}
+
+/**
+ * Whether any filter entry is a prefix of (or equal to) any member of the
+ * group. An empty filter matches everything. Matching stays a plain
+ * case-sensitive `startsWith` per member — deliberately not a derived-base
+ * comparison, which would re-open the over-match class this gate closes
+ * (`docs/guide.md` must not select the `docs/guide.notes` group).
+ */
+function matchesFilter(
+  files: ReadonlyMap<string, string>,
+  pathsFilter: readonly string[],
+): boolean {
+  if (pathsFilter.length === 0) return true;
+  for (const path of files.values()) {
+    if (pathsFilter.some((f) => path.startsWith(f))) return true;
+  }
+  return false;
+}
+
+/**
+ * The filter entries that selected no discovered group — a case mismatch, a
+ * moved file, or a repository whose locale variants do not exist yet.
+ *
+ * Exposed so the caller can say so out loud: an entry that scopes nothing is
+ * the exact shape that once left this duty green while translations went
+ * stale, and a silent zero is indistinguishable from "nothing to do".
+ */
+export function unmatchedFilters(
+  groups: readonly DocumentGroup[],
+  pathsFilter: readonly string[],
+): readonly string[] {
+  return pathsFilter.filter(
+    (f) => !groups.some((group) => [...group.files.values()].some((path) => path.startsWith(f))),
+  );
 }

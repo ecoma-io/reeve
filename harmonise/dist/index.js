@@ -33928,9 +33928,8 @@ var LOCALE_SUFFIX = /^(.+)\.([a-z]{2,3}(?:-[A-Z][a-zA-Z]+)?)\.md$/;
 function discoverGroups(paths, sourceLanguage, targetLanguages, pathsFilter) {
   const sourceCode = sourceLanguage.code.toLowerCase();
   const targetCodes = new Set(targetLanguages.map((lang) => lang.code.toLowerCase()));
-  const scoped = pathsFilter.length > 0 ? paths.filter((p) => pathsFilter.some((f) => p.startsWith(f))) : paths;
   const groups = /* @__PURE__ */ new Map();
-  for (const path of scoped) {
+  for (const path of paths) {
     if (!path.endsWith(".md")) continue;
     const suffixMatch = LOCALE_SUFFIX.exec(path);
     if (suffixMatch !== null) {
@@ -33965,9 +33964,22 @@ function discoverGroups(paths, sourceLanguage, targetLanguages, pathsFilter) {
       }
     }
     if (!hasTarget) continue;
+    if (!matchesFilter(files, pathsFilter)) continue;
     result.push({ id, files });
   }
   return result;
+}
+function matchesFilter(files, pathsFilter) {
+  if (pathsFilter.length === 0) return true;
+  for (const path of files.values()) {
+    if (pathsFilter.some((f) => path.startsWith(f))) return true;
+  }
+  return false;
+}
+function unmatchedFilters(groups, pathsFilter) {
+  return pathsFilter.filter(
+    (f) => !groups.some((group) => [...group.files.values()].some((path) => path.startsWith(f)))
+  );
 }
 
 // src/core/markdown.ts
@@ -35415,6 +35427,11 @@ async function run() {
     const allFiles = await listMarkdownFiles(api, context2.repo);
     const groups = discoverGroups(allFiles, sourceLanguage, targetLanguages, settings.paths);
     acc.candidates = groups.length;
+    for (const entry of unmatchedFilters(groups, settings.paths)) {
+      warning(
+        `harmonise: \`paths\` entry \`${entry}\` matched no document group \u2014 check the spelling (matching is case-sensitive) and whether the locale variants exist.`
+      );
+    }
     if (groups.length === 0) {
       info("harmonise: no document groups found with locale variants.");
       settleAuth(weather);
