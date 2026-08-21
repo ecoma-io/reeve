@@ -75,7 +75,7 @@ import { budgetExhausted, createBudget, type Budget } from "./budget.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 import { classifyDiff, type ClassificationResult } from "./classify.js";
 import { computeSourceDiff, formatInitialSync } from "./diff.js";
-import { discoverGroups, type DocumentGroup } from "./discover.js";
+import { discoverGroups, unmatchedFilters, type DocumentGroup } from "./discover.js";
 import { draftSyncs, type Draft } from "./draft.js";
 import { parsePaths } from "./inputs.js";
 import { judge as judgePanel, type Verdict } from "./judge.js";
@@ -271,6 +271,16 @@ export async function run(): Promise<void> {
     const allFiles = await listMarkdownFiles(api, context.repo);
     const groups = discoverGroups(allFiles, sourceLanguage, targetLanguages, settings.paths);
     acc.candidates = groups.length;
+
+    // A `paths` entry that scoped nothing is said out loud, per entry: a case
+    // mismatch or a moved file once left this duty green for months while the
+    // translations went stale, and a silent zero reads as "nothing to do".
+    for (const entry of unmatchedFilters(groups, settings.paths)) {
+      core.warning(
+        `harmonise: \`paths\` entry \`${entry}\` matched no document group — check the ` +
+          "spelling (matching is case-sensitive) and whether the locale variants exist.",
+      );
+    }
 
     if (groups.length === 0) {
       core.info("harmonise: no document groups found with locale variants.");

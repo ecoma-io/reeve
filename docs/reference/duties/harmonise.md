@@ -143,7 +143,7 @@ Every input `harmonise/action.yml` declares.
 | `provenance-dir`  | no       | `.reeve/provenance`         | Directory for provenance state — per-document sync status and source revision tracking. The state file lives at `${provenance-dir}/state.json`.                                                                                                                    |
 | `state-branch`    | no       | `reeve/provenance`          | A branch to write provenance state to, instead of the default branch. When set, the state file is committed to this branch and a draft PR is opened for review. `edit-file` and `open-pr` must both be granted. Empty writes directly to the default branch.       |
 | `glossary-dir`    | no       | `.reeve/glossary.yml`       | A glossary of project-specific terms that translations must respect. Overrides = bug.                                                                                                                                                                              |
-| `paths`           | no       | _(empty)_                   | Doc paths to scan for locale variants. Empty scans the whole repository. Comma or newline separated.                                                                                                                                                               |
+| `paths`           | no       | _(empty)_                   | Doc paths to scan for locale variants. Empty scans the whole repository. Comma or newline separated. An entry naming a file scopes in its whole document group; an entry that scopes nothing is warned about by name.                                              |
 | `dry-run`         | no       | `false`                     | Run the whole pipeline, write every output, change nothing.                                                                                                                                                                                                        |
 | `max-requests`    | no       | `none`                      | How many provider requests — classification, drafting and judging combined — one run may spend before it stops asking for more, or `none` for no bound.                                                                                                            |
 | `endpoints`       | no       | _(empty)_                   | Extra `alias = url` endpoints beyond `base-url`, each with an optional `timeout=`. A model id routes to one with `model@alias`.                                                                                                                                    |
@@ -191,10 +191,17 @@ with [`translate`](translate.md), which reads the same path under the same
 input name and refuses a draft on the same rule — one list, so a term that
 stays English in a committed `README.vi.md` stays English in an issue body too.
 
-**`paths` scopes the scan.** When empty, the entire repository is scanned
-for the suffix pattern. When set, only files under the named paths are
-considered — `docs/` would restrict `harmonise` to documentation, leaving
-`README.md` and other root-level files alone.
+**`paths` scopes document groups, not raw files.** When empty, the entire
+repository is scanned for the suffix pattern. When set, a document group is
+considered when **any of its member files** — the source or any locale
+variant — falls under a named path. Naming a file keeps its whole group:
+`README.md` scopes in `README.vi.md` and `README.zh.md` too, because a group
+cannot be half-synced (restricting which locales sync is the warrant's
+`languages:` key's job, not this input's). A directory entry like `docs/`
+keeps plain prefix semantics — it restricts `harmonise` to documentation,
+leaving `README.md` and other root-level files alone. Matching is
+case-sensitive, and an entry that scopes no group at all is warned about by
+name — a misspelled or moved path must never read as "nothing to do".
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
