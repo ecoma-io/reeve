@@ -31879,11 +31879,22 @@ function createProvider(config) {
   if (config.apiKey.length > 0) headers.authorization = `Bearer ${config.apiKey}`;
   return {
     async complete(model, messages, options) {
+      const tools = options?.tools ?? [];
       const body = JSON.stringify({
         model,
-        messages,
+        messages: messages.map(wireMessage),
         stream: false,
-        ...options?.temperature === void 0 ? {} : { temperature: options.temperature }
+        ...options?.temperature === void 0 ? {} : { temperature: options.temperature },
+        ...tools.length === 0 ? {} : {
+          tools: tools.map((tool) => ({
+            type: "function",
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters
+            }
+          }))
+        }
       });
       let response;
       try {
@@ -31915,7 +31926,7 @@ function createProvider(config) {
           reason: `HTTP ${String(response.status)}: response body could not be read (${describeRequestError(error2, timeoutMs)})`
         };
       }
-      return readCompletion(model, response.status, text2);
+      return readCompletion(model, response.status, text2, tools.length > 0);
     }
   };
 }
@@ -31993,7 +32004,36 @@ function assembleClient(shared2, meter, purposes, extraRosters = []) {
     )
   };
 }
-function readCompletion(model, status, text2) {
+function wireMessage(message) {
+  const base = { role: message.role, content: message.content };
+  if (message.toolCalls !== void 0 && message.toolCalls.length > 0) {
+    base.tool_calls = message.toolCalls.map((call) => ({
+      id: call.id,
+      type: "function",
+      function: { name: call.name, arguments: call.arguments }
+    }));
+  }
+  if (message.toolCallId !== void 0) base.tool_call_id = message.toolCallId;
+  return base;
+}
+function readToolCalls(raw) {
+  const list = asArray(raw);
+  if (list === null) return null;
+  const out = [];
+  for (const entry of list) {
+    const record = asRecord(entry);
+    const fn = asRecord(record?.function);
+    const id = record?.id;
+    const name = fn?.name;
+    const args = fn?.arguments;
+    if (typeof id !== "string" || typeof name !== "string" || typeof args !== "string") {
+      return null;
+    }
+    out.push({ id, name, arguments: args });
+  }
+  return out;
+}
+function readCompletion(model, status, text2, toolsRequested = false) {
   const at = `HTTP ${String(status)}`;
   const kind = classifyStatus(status);
   let payload;
@@ -32025,6 +32065,32 @@ function readCompletion(model, status, text2) {
     };
   }
   const content = asRecord(choice.message)?.content;
+  if (toolsRequested) {
+    const rawCalls = asRecord(choice.message)?.tool_calls;
+    if (rawCalls !== void 0 && rawCalls !== null) {
+      const calls = readToolCalls(rawCalls);
+      if (calls === null) {
+        return {
+          ok: false,
+          model,
+          usage,
+          kind,
+          reason: `${at}: the tool_calls array was not readable`
+        };
+      }
+      if (calls.length > 0) {
+        const finishReason2 = choice.finish_reason;
+        return {
+          ok: true,
+          model,
+          usage,
+          content: typeof content === "string" ? content : "",
+          toolCalls: calls,
+          finishReason: typeof finishReason2 === "string" ? finishReason2 : null
+        };
+      }
+    }
+  }
   if (typeof content !== "string") {
     return { ok: false, model, usage, kind, reason: `${at}: message content was not a string` };
   }

@@ -464,6 +464,35 @@ patch proves (`parseFinding` enforces this) — a file the context mentions
 but the diff never showed cannot authorise a finding about itself. The
 single model pass and the single owned summary comment are unchanged.
 
+## Agentic mode: the diff served by tools
+
+`review-mode: agentic` turns the evidence gathering into the bounded tool
+loop [the doctrine admits](../../development/agent-runtime.md#bounded-tool-loops-inside-a-duty):
+instead of receiving the diff embedded under `max-diff-chars`, the model is
+offered three read-only tools — `list_changed_files`, `read_diff` (paged, the
+only source of line numbers a finding may cite), and `read_file` (base-branch
+context) — and pages through what it judges worth reading. `max-diff-chars`
+prices nothing on this path and no file is ever skipped as `capped`; the
+`ignore:` and `generated` skips hold exactly as before, and a skipped file's
+diff is refused by the tool too — a skip the model could read around would
+not be a skip.
+
+What bounds it, since the character caps no longer do: a round budget per
+pass, a per-round call cap, a per-result size cap, and a whole-run pull
+budget — all internal constants, deliberately not workflow inputs. A loop
+that dies mid-read is a failed pass (D5), never a partial verdict. Every
+tool answer enters the conversation fenced under its own fresh nonce, every
+call is logged and the summary's `Tool calls` row carries the aggregate, and
+a finding still has to cite a diff file and a proven line — the admission
+gate does not move.
+
+The assembled path stays the floor (D7): a pass whose every agentic attempt
+failed on protocol — a model that rejects the `tools` field or answers
+unreadably around it — runs once more with the diff embedded, exactly as
+`assembled` mode always has. Capacity weather does not trigger the fallback:
+a starved roster retried assembled would only be billed twice for the same
+storm. Nothing in either mode changes what the warrant grants.
+
 ## Risk-based review depth
 
 A small diff and a diff that rewires an auth boundary are not the same review.

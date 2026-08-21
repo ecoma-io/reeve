@@ -60,6 +60,8 @@ export interface Run {
   readonly threads: ThreadSync | null;
   /** The test-aware pass's summary line, when the rules file enabled it. */
   readonly readTests: string | null;
+  /** The agentic aggregate for the Tool calls row - null outside agentic mode. */
+  readonly toolCalls: string | null;
 }
 
 export function summarize(run: Run): string {
@@ -147,6 +149,9 @@ function verdict(run: Run): string {
   }
   if (run.readTests !== null) {
     rows.push(["Tests", cell(run.readTests)]);
+  }
+  if (run.toolCalls !== null) {
+    rows.push(["Tool calls", cell(run.toolCalls)]);
   }
   if (run.previousSha.length > 0 && run.previousSha !== run.headSha) {
     rows.push(["Previously", `reviewed at \`${run.previousSha}\``]);

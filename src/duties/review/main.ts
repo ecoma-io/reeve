@@ -100,7 +100,9 @@ import {
 } from "./risk.js";
 import { DEFAULT_GENERATED, preflight, readPackedRules } from "./rules.js";
 import { emitSarif } from "./sarif.js";
+import { DEFAULT_TOOL_BUDGET, createToolExecutor } from "./tools.js";
 import {
+  type AgenticSupport,
   adversarialPass,
   correctnessPass,
   runPasses,
@@ -145,6 +147,13 @@ interface Settings extends Core {
   readonly maxContextChars: number | null;
   /** The confidence at which a finding is reported — kept below in training only. */
   readonly confidence: number;
+  /**
+   * How the diff reaches the model: `assembled` embeds it under the character
+   * budgets as this duty always has; `agentic` serves it through the bounded
+   * tool loop (`agentic.ts`), with the assembled path as the per-pass
+   * fallback when a roster cannot speak tools.
+   */
+  readonly reviewMode: "assembled" | "agentic";
 }
 
 /** Reads the inputs exactly as `action.yml` declares them — the contract test audits this file. */
@@ -161,7 +170,16 @@ function readSettings(): Omit<Settings, "languages"> {
     maxDiffChars: bounded("max-diff-chars", core.getInput("max-diff-chars")),
     maxContextChars: bounded("max-context-chars", core.getInput("max-context-chars")),
     confidence: parseConfidence(core.getInput("confidence")),
+    reviewMode: parseReviewMode(core.getInput("review-mode")),
   };
+}
+
+/** `review-mode`, refused rather than guessed: an unknown mode is a typo, not a default. */
+function parseReviewMode(raw: string): "assembled" | "agentic" {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed === "assembled") return "assembled";
+  if (trimmed === "agentic") return "agentic";
+  throw new Error(`review-mode: expected \`assembled\` or \`agentic\`, got \`${raw}\`.`);
 }
 
 function parseConfidence(raw: string): number {
@@ -194,6 +212,8 @@ interface Outcome {
   readonly threads: ThreadSync | null;
   /** Where this run's SARIF rendering landed, or null when the write was withheld. */
   readonly sarifPath: string | null;
+  /** The agentic run's aggregate tool trace, or null outside agentic mode. */
+  readonly toolCalls: string | null;
   /** A short summary line for the page: test file count and gap findings, or null when the section is off/unavailable. */
   readonly readTests: string | null;
   /** What this run's comment memory carried in — for the page's "reviewed at" row. */
@@ -224,6 +244,7 @@ type Settled = Partial<
     | "contextReadFiles"
     | "threads"
     | "sarifPath"
+    | "toolCalls"
     | "readTests"
     | "previous"
     | "memoryNote"
@@ -331,6 +352,7 @@ async function decide(
     contextReadFiles: 0,
     threads: null,
     sarifPath: null,
+    toolCalls: null,
     readTests: null,
     previous: null,
     memoryNote: null,
@@ -380,8 +402,13 @@ async function decide(
 
   // The diff bound: `none` (from `bounded`) means no cap at all, which the
   // classifier spells as an effectively infinite budget rather than a second
-  // shape of its bounds type.
-  const budget = settings.maxDiffChars ?? Number.MAX_SAFE_INTEGER;
+  // shape of its bounds type. Agentic mode retires the cap outright — the
+  // model pages through the diff by tool, so no file is ever `capped`, and
+  // `max-diff-chars` prices nothing on that path.
+  const budget =
+    settings.reviewMode === "agentic"
+      ? Number.MAX_SAFE_INTEGER
+      : (settings.maxDiffChars ?? Number.MAX_SAFE_INTEGER);
   const snapshot = classify(await listPrFiles(prApi, at), {
     ignoreFiles: [],
     ignorePaths: [],
@@ -541,12 +568,52 @@ async function decide(
     // The bounded TEST EVIDENCE block, only when the `tests:` section enabled
     // it and the checkout was readable — an empty block adds nothing.
     ...(testmap.evidence.length > 0 ? { tests: testmap.evidence } : {}),
+    ...(settings.reviewMode === "agentic" ? { agentic: true } : {}),
   };
+  // The agentic support the pass engine threads through rotation: a fresh
+  // executor per model attempt (one conversation, one budget), the loop's
+  // fixed bounds, and the trace hook — every call answered is logged here and
+  // aggregated for the summary's "Tool calls" row, so a run can always answer
+  // what it looked at.
+  const toolStats = { calls: 0, chars: 0, refused: 0 };
+  const agenticSupport: AgenticSupport | undefined =
+    settings.reviewMode !== "agentic"
+      ? undefined
+      : {
+          makeExecutor: () =>
+            createToolExecutor(
+              bounded.allFiles,
+              new Map(bounded.skipped.map((entry) => [entry.path, entry.reason])),
+              workspaceRoot.length === 0 ? null : fsSource(workspaceRoot),
+              DEFAULT_TOOL_BUDGET,
+            ),
+          budget: DEFAULT_TOOL_BUDGET,
+          report: (passId, model, executor) => {
+            const trace = executor.trace();
+            for (const entry of trace) {
+              core.info(
+                `review: agentic ${passId} (${shown(settings.modelNames, model)}) — ` +
+                  `${entry.ok ? "served" : "refused"} ${entry.name}: ${entry.note} ` +
+                  `(${String(entry.chars)} chars)`,
+              );
+            }
+            toolStats.calls += trace.length;
+            toolStats.chars += executor.pulled();
+            toolStats.refused += trace.filter((entry) => !entry.ok).length;
+          },
+        };
   const passResults: PassResult[] = [];
   if (bounded.shown.length > 0) {
     const prior: RawFinding[] = [];
     for (const pass of planPasses(risk.tier, prior)) {
-      const results = await runPasses(stages.review, [pass], settings.models, passContext, weather);
+      const results = await runPasses(
+        stages.review,
+        [pass],
+        settings.models,
+        passContext,
+        weather,
+        agenticSupport,
+      );
       passResults.push(...results);
       // The next pass is told what the earlier ones found — adversarial ground,
       // and the same untrusted material every later pass should see.
@@ -560,6 +627,17 @@ async function decide(
       core.warning(`review: ${shown(settings.modelNames, failure.model)} — ${failure.reason}`);
     }
   }
+  // The aggregate the summary's "Tool calls" row reports — null outside
+  // agentic mode, and null on an agentic run that never called (a model that
+  // answered directly is a valid run, and "0 answered" would read as a bug).
+  const withMemoryAndTools: Settled = {
+    ...withMemory,
+    toolCalls:
+      settings.reviewMode === "agentic" && toolStats.calls > 0
+        ? `${String(toolStats.calls)} answered · ${String(toolStats.chars)} chars pulled` +
+          (toolStats.refused > 0 ? ` · ${String(toolStats.refused)} refused` : "")
+        : null,
+  };
   const synthesis: ReviewSynthesis = synthesize(passResults);
   if (synthesis.failedPasses.length > 0) {
     core.warning(
@@ -673,7 +751,7 @@ async function decide(
       `#${String(at.number)}: \`comment\` is not granted, so this run's review was not posted.`,
     );
     return settled({
-      ...withMemory,
+      ...withMemoryAndTools,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -693,7 +771,7 @@ async function decide(
         `${settings.confidence.toFixed(2)} floor, so this run's review was not posted.`,
     );
     return settled({
-      ...withMemory,
+      ...withMemoryAndTools,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -713,7 +791,7 @@ async function decide(
         "nothing was posted, so a diff nobody reviewed is not stamped all-clear.",
     );
     return settled({
-      ...withMemory,
+      ...withMemoryAndTools,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -734,7 +812,7 @@ async function decide(
         "The coverage table names each file and why.",
     );
     return settled({
-      ...withMemory,
+      ...withMemoryAndTools,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -773,7 +851,7 @@ async function decide(
       `Dry run — #${String(at.number)} thread sync would create ${String(rehearsal.created)} and update ${String(rehearsal.updated)}.`,
     );
     return settled({
-      ...withMemory,
+      ...withMemoryAndTools,
       language: language?.code ?? null,
       findings: final,
       confidence,
@@ -818,7 +896,7 @@ async function decide(
   const posted = await postOrReplace(api, at, publication);
   core.info(`#${String(at.number)}: review comment ${posted}.`);
   return settled({
-    ...withMemory,
+    ...withMemoryAndTools,
     language: language?.code ?? null,
     findings: final,
     confidence,
@@ -1074,6 +1152,7 @@ function page(
     threads: outcome?.threads ?? null,
     contextReadFiles: outcome?.contextReadFiles ?? 0,
     readTests: outcome?.readTests ?? null,
+    toolCalls: outcome?.toolCalls ?? null,
   });
 }
 
