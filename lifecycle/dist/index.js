@@ -34769,8 +34769,12 @@ async function readComments(api, at) {
   return out;
 }
 async function resolveOwnLogin(api) {
-  const { data } = await api.rest.users.getAuthenticated();
-  return data.login ?? "";
+  try {
+    const { data } = await api.rest.users.getAuthenticated();
+    return data.login ?? "";
+  } catch {
+    return "";
+  }
 }
 async function isDraftPr(api, at) {
   const { data } = await api.rest.pulls.get({
@@ -35043,6 +35047,12 @@ async function run() {
     }
     const permitted = granted;
     const ownLogin = await resolveOwnLogin(api);
+    if (ownLogin === "") {
+      notice(
+        "This token cannot name itself (`GET /user` is not available to a `GITHUB_TOKEN`), so nothing on a thread can be attributed to this duty \u2014 neither a label it applied nor a marker it posted. This run therefore reports what it would do and writes nothing. Pass a personal access token as `github-token` to let it act."
+      );
+      settings = { ...settings, dryRun: true };
+    }
     const ctx = { permitted, ownLogin };
     if (settings.sweep) {
       ranSweep = true;

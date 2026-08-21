@@ -518,7 +518,31 @@ export async function run(): Promise<void> {
     // un-staling decision reads needs to know who "our own actor" is before
     // it can tell a label we applied from one a human, or a different bot,
     // did.
+    //
+    // `""` is the ordinary answer under the default `GITHUB_TOKEN`, which is
+    // an installation token `GET /user` refuses (see `resolveOwnLogin`). That
+    // is not a failure — the run continues — but it is not a run that may
+    // WRITE either, and the two halves of the clock say why in opposite
+    // directions. `isOwnActor` refuses to match an unknown identity, so
+    // un-staling correctly retracts nothing; but the same refusal means no
+    // marker is ever recognised as this duty's own, so every talking step
+    // reads as unfired and would be posted again on the next run, and the
+    // one after that. Acting on evidence this run cannot read is the worse
+    // of the two, so it does not act at all: the whole pipeline runs, the
+    // would-do ledger lands on the job summary exactly as a dry run's does,
+    // and nothing reaches a thread. A PAT restores the identity and with it
+    // the writes.
     const ownLogin = await resolveOwnLogin(api);
+    if (ownLogin === "") {
+      core.notice(
+        "This token cannot name itself (`GET /user` is not available to a " +
+          "`GITHUB_TOKEN`), so nothing on a thread can be attributed to this " +
+          "duty — neither a label it applied nor a marker it posted. This run " +
+          "therefore reports what it would do and writes nothing. Pass a " +
+          "personal access token as `github-token` to let it act.",
+      );
+      settings = { ...settings, dryRun: true };
+    }
     const ctx: RunContext = { permitted, ownLogin };
 
     if (settings.sweep) {

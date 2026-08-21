@@ -135,10 +135,33 @@ export async function readComments(
  * exception reads (see `clock.ts`'s `isOwnApplied`) needs to know who "our
  * own actor" is before it can tell a label we applied from one a human, or
  * a different bot, did.
+ *
+ * `""` when the token cannot answer for itself, which `clock.ts`'s
+ * `isOwnActor` already reads as "unknown, and unknown is never a match".
+ * Two different failures reach that same answer, and neither is exotic:
+ *
+ *   - a 200 carrying no `login`, which the `??` below has always covered;
+ *   - the request FAILING, which it did not. `GITHUB_TOKEN` is a GitHub App
+ *     installation token, and `GET /user` answers 403 "Resource not
+ *     accessible by integration" for every one of those — the same wall
+ *     `review`'s own adversarial notes record. Only a PAT resolves here.
+ *     Letting that 403 propagate failed the whole duty on every run in
+ *     every repository that had not configured a PAT: a scheduled sweep
+ *     that died before reading its first thread, observed on this
+ *     repository's own nightly dogfood and on run 48.
+ *
+ * Catching it converts a dead run into an identified state the clock can
+ * read. What that state COSTS is decided one level up, in `main.ts`: with
+ * no identity there is no attribution, and a duty that cannot attribute
+ * does not write — see the observe-only fallback there.
  */
 export async function resolveOwnLogin(api: LifecycleApi): Promise<string> {
-  const { data } = await api.rest.users.getAuthenticated();
-  return data.login ?? "";
+  try {
+    const { data } = await api.rest.users.getAuthenticated();
+    return data.login ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /**
