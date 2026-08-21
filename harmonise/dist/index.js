@@ -2097,9 +2097,9 @@ var require_dispatcher_base = __commonJS({
       }
       close(callback) {
         if (callback === void 0) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve2, reject) => {
             this.close((err, data) => {
-              return err ? reject(err) : resolve(data);
+              return err ? reject(err) : resolve2(data);
             });
           });
         }
@@ -2137,12 +2137,12 @@ var require_dispatcher_base = __commonJS({
           err = null;
         }
         if (callback === void 0) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve2, reject) => {
             this.destroy(err, (err2, data) => {
               return err2 ? (
                 /* istanbul ignore next: should never error */
                 reject(err2)
-              ) : resolve(data);
+              ) : resolve2(data);
             });
           });
         }
@@ -4409,8 +4409,8 @@ var require_util2 = __commonJS({
     function createDeferredPromise() {
       let res;
       let rej;
-      const promise = new Promise((resolve, reject) => {
-        res = resolve;
+      const promise = new Promise((resolve2, reject) => {
+        res = resolve2;
         rej = reject;
       });
       return { promise, resolve: res, reject: rej };
@@ -6657,12 +6657,12 @@ upgrade: ${upgrade}\r
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve, reject) => {
+      const waitForDrain = () => new Promise((resolve2, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve;
+          callback = resolve2;
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
@@ -7299,12 +7299,12 @@ var require_client_h2 = __commonJS({
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve, reject) => {
+      const waitForDrain = () => new Promise((resolve2, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve;
+          callback = resolve2;
         }
       });
       h2stream.on("close", onDrain).on("drain", onDrain);
@@ -7782,16 +7782,16 @@ var require_client = __commonJS({
         return this[kNeedDrain] < 2;
       }
       async [kClose]() {
-        return new Promise((resolve) => {
+        return new Promise((resolve2) => {
           if (this[kSize]) {
-            this[kClosedResolve] = resolve;
+            this[kClosedResolve] = resolve2;
           } else {
-            resolve(null);
+            resolve2(null);
           }
         });
       }
       async [kDestroy](err) {
-        return new Promise((resolve) => {
+        return new Promise((resolve2) => {
           const requests = this[kQueue].splice(this[kPendingIdx]);
           for (let i = 0; i < requests.length; i++) {
             const request2 = requests[i];
@@ -7802,7 +7802,7 @@ var require_client = __commonJS({
               this[kClosedResolve]();
               this[kClosedResolve] = null;
             }
-            resolve(null);
+            resolve2(null);
           };
           if (this[kHTTPContext]) {
             this[kHTTPContext].destroy(err, callback);
@@ -7853,7 +7853,7 @@ var require_client = __commonJS({
         });
       }
       try {
-        const socket = await new Promise((resolve, reject) => {
+        const socket = await new Promise((resolve2, reject) => {
           client[kConnector]({
             host,
             hostname,
@@ -7865,7 +7865,7 @@ var require_client = __commonJS({
             if (err) {
               reject(err);
             } else {
-              resolve(socket2);
+              resolve2(socket2);
             }
           });
         });
@@ -8201,8 +8201,8 @@ var require_pool_base = __commonJS({
         if (this[kQueue].isEmpty()) {
           await Promise.all(this[kClients].map((c) => c.close()));
         } else {
-          await new Promise((resolve) => {
-            this[kClosedResolve] = resolve;
+          await new Promise((resolve2) => {
+            this[kClosedResolve] = resolve2;
           });
         }
       }
@@ -9445,7 +9445,7 @@ var require_readable = __commonJS({
         if (this._readableState.closeEmitted) {
           return null;
         }
-        return await new Promise((resolve, reject) => {
+        return await new Promise((resolve2, reject) => {
           if (this[kContentLength] > limit) {
             this.destroy(new AbortError());
           }
@@ -9458,7 +9458,7 @@ var require_readable = __commonJS({
             if (signal?.aborted) {
               reject(signal.reason ?? new AbortError());
             } else {
-              resolve(null);
+              resolve2(null);
             }
           }).on("error", noop3).on("data", function(chunk) {
             limit -= chunk.length;
@@ -9477,7 +9477,7 @@ var require_readable = __commonJS({
     }
     async function consume(stream, type) {
       assert(!stream[kConsume]);
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve2, reject) => {
         if (isUnusable(stream)) {
           const rState = stream._readableState;
           if (rState.destroyed && rState.closeEmitted === false) {
@@ -9494,7 +9494,7 @@ var require_readable = __commonJS({
             stream[kConsume] = {
               type,
               stream,
-              resolve,
+              resolve: resolve2,
               reject,
               length: 0,
               body: []
@@ -9564,18 +9564,18 @@ var require_readable = __commonJS({
       return buffer;
     }
     function consumeEnd(consume2) {
-      const { type, body, resolve, stream, length } = consume2;
+      const { type, body, resolve: resolve2, stream, length } = consume2;
       try {
         if (type === "text") {
-          resolve(chunksDecode(body, length));
+          resolve2(chunksDecode(body, length));
         } else if (type === "json") {
-          resolve(JSON.parse(chunksDecode(body, length)));
+          resolve2(JSON.parse(chunksDecode(body, length)));
         } else if (type === "arrayBuffer") {
-          resolve(chunksConcat(body, length).buffer);
+          resolve2(chunksConcat(body, length).buffer);
         } else if (type === "blob") {
-          resolve(new Blob(body, { type: stream[kContentType] }));
+          resolve2(new Blob(body, { type: stream[kContentType] }));
         } else if (type === "bytes") {
-          resolve(chunksConcat(body, length));
+          resolve2(chunksConcat(body, length));
         }
         consumeFinish(consume2);
       } catch (err) {
@@ -9832,9 +9832,9 @@ var require_api_request = __commonJS({
     };
     function request2(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           request2.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -10057,9 +10057,9 @@ var require_api_stream = __commonJS({
     };
     function stream(opts, factory, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           stream.call(this, opts, factory, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -10344,9 +10344,9 @@ var require_api_upgrade = __commonJS({
     };
     function upgrade(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           upgrade.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -10438,9 +10438,9 @@ var require_api_connect = __commonJS({
     };
     function connect(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve2, reject) => {
           connect.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve2(data);
           });
         });
       }
@@ -14302,7 +14302,7 @@ var require_fetch = __commonJS({
       function dispatch({ body }) {
         const url = requestCurrentURL(request2);
         const agent = fetchParams.controller.dispatcher;
-        return new Promise((resolve, reject) => agent.dispatch(
+        return new Promise((resolve2, reject) => agent.dispatch(
           {
             path: url.pathname + url.search,
             origin: url.origin,
@@ -14378,7 +14378,7 @@ var require_fetch = __commonJS({
                 }
               }
               const onError = this.onError.bind(this);
-              resolve({
+              resolve2({
                 status,
                 statusText,
                 headersList,
@@ -14424,7 +14424,7 @@ var require_fetch = __commonJS({
               for (let i = 0; i < rawHeaders.length; i += 2) {
                 headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString("latin1"), true);
               }
-              resolve({
+              resolve2({
                 status,
                 statusText: STATUS_CODES[status],
                 headersList,
@@ -18155,8 +18155,8 @@ var require_util8 = __commonJS({
       return true;
     }
     function delay(ms) {
-      return new Promise((resolve) => {
-        setTimeout(resolve, ms).unref();
+      return new Promise((resolve2) => {
+        setTimeout(resolve2, ms).unref();
       });
     }
     module.exports = {
@@ -18960,11 +18960,11 @@ var require_lib = __commonJS({
     })();
     var __awaiter3 = exports && exports.__awaiter || function(thisArg, _arguments, P, generator) {
       function adopt(value) {
-        return value instanceof P ? value : new P(function(resolve) {
-          resolve(value);
+        return value instanceof P ? value : new P(function(resolve2) {
+          resolve2(value);
         });
       }
-      return new (P || (P = Promise))(function(resolve, reject) {
+      return new (P || (P = Promise))(function(resolve2, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -18980,7 +18980,7 @@ var require_lib = __commonJS({
           }
         }
         function step(result) {
-          result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve2(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -19067,26 +19067,26 @@ var require_lib = __commonJS({
       }
       readBody() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve2) => __awaiter3(this, void 0, void 0, function* () {
             let output = Buffer.alloc(0);
             this.message.on("data", (chunk) => {
               output = Buffer.concat([output, chunk]);
             });
             this.message.on("end", () => {
-              resolve(output.toString());
+              resolve2(output.toString());
             });
           }));
         });
       }
       readBodyBuffer() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve2) => __awaiter3(this, void 0, void 0, function* () {
             const chunks2 = [];
             this.message.on("data", (chunk) => {
               chunks2.push(chunk);
             });
             this.message.on("end", () => {
-              resolve(Buffer.concat(chunks2));
+              resolve2(Buffer.concat(chunks2));
             });
           }));
         });
@@ -19294,14 +19294,14 @@ var require_lib = __commonJS({
        */
       requestRaw(info2, data) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve2, reject) => {
             function callbackForResult(err, res) {
               if (err) {
                 reject(err);
               } else if (!res) {
                 reject(new Error("Unknown error"));
               } else {
-                resolve(res);
+                resolve2(res);
               }
             }
             this.requestRawWithCallback(info2, data, callbackForResult);
@@ -19545,12 +19545,12 @@ var require_lib = __commonJS({
         return __awaiter3(this, void 0, void 0, function* () {
           retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
           const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-          return new Promise((resolve) => setTimeout(() => resolve(), ms));
+          return new Promise((resolve2) => setTimeout(() => resolve2(), ms));
         });
       }
       _processResponse(res, options) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve, reject) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve2, reject) => __awaiter3(this, void 0, void 0, function* () {
             const statusCode = res.message.statusCode || 0;
             const response = {
               statusCode,
@@ -19558,7 +19558,7 @@ var require_lib = __commonJS({
               headers: {}
             };
             if (statusCode === HttpCodes2.NotFound) {
-              resolve(response);
+              resolve2(response);
             }
             function dateTimeDeserializer(key, value) {
               if (typeof value === "string") {
@@ -19597,7 +19597,7 @@ var require_lib = __commonJS({
               err.result = response.result;
               reject(err);
             } else {
-              resolve(response);
+              resolve2(response);
             }
           }));
         });
@@ -27233,11 +27233,11 @@ import { EOL as EOL3 } from "os";
 import { constants, promises } from "fs";
 var __awaiter = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
-    return value instanceof P ? value : new P(function(resolve) {
-      resolve(value);
+    return value instanceof P ? value : new P(function(resolve2) {
+      resolve2(value);
     });
   }
-  return new (P || (P = Promise))(function(resolve, reject) {
+  return new (P || (P = Promise))(function(resolve2, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -27253,7 +27253,7 @@ var __awaiter = function(thisArg, _arguments, P, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve2(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -27643,11 +27643,11 @@ var httpClient = __toESM(require_lib(), 1);
 var import_undici2 = __toESM(require_undici(), 1);
 var __awaiter2 = function(thisArg, _arguments, P, generator) {
   function adopt(value) {
-    return value instanceof P ? value : new P(function(resolve) {
-      resolve(value);
+    return value instanceof P ? value : new P(function(resolve2) {
+      resolve2(value);
     });
   }
-  return new (P || (P = Promise))(function(resolve, reject) {
+  return new (P || (P = Promise))(function(resolve2, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -27663,7 +27663,7 @@ var __awaiter2 = function(thisArg, _arguments, P, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve2(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -33925,7 +33925,7 @@ ${content}`;
 
 // src/duties/harmonise/discover.ts
 var LOCALE_SUFFIX = /^(.+)\.([a-z]{2,3}(?:-[A-Z][a-zA-Z]+)?)\.md$/;
-function discoverGroups(paths, sourceLanguage, targetLanguages, pathsFilter) {
+function discoverGroups(paths, sourceLanguage, targetLanguages, pathsFilter, bootstrap = false) {
   const sourceCode = sourceLanguage.code.toLowerCase();
   const targetCodes = new Set(targetLanguages.map((lang) => lang.code.toLowerCase()));
   const groups = /* @__PURE__ */ new Map();
@@ -33956,6 +33956,12 @@ function discoverGroups(paths, sourceLanguage, targetLanguages, pathsFilter) {
   const result = [];
   for (const [id, files] of groups) {
     if (!files.has(sourceCode)) continue;
+    if (bootstrap) {
+      for (const language of targetLanguages) {
+        const locale = language.code.toLowerCase();
+        if (!files.has(locale)) files.set(locale, `${id}.${language.code}.md`);
+      }
+    }
     let hasTarget = false;
     for (const locale of files.keys()) {
       if (locale !== sourceCode && targetCodes.has(locale)) {
@@ -34282,20 +34288,26 @@ function measured(checks) {
 
 // src/duties/harmonise/score.ts
 function scoreDraft(draft, original, glossaryTerms, source, targetLanguage, languages) {
+  const initial = original.trim().length === 0;
+  const anchor = initial ? source : original;
   if (draft.trim().length === 0) return refused("empty draft");
-  if (draft === original) return refused("unchanged from original");
-  const lost = translatedTerm(original, draft, glossaryTerms);
+  if (draft === anchor) {
+    return refused(
+      initial ? "identical to the source \u2014 not a translation" : "unchanged from original"
+    );
+  }
+  const lost = translatedTerm(anchor, draft, glossaryTerms);
   if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
   const script = foreignScript(source, draft, targetLanguage, languages);
   if (script !== null) {
     return refused(`draft contains \`${script}\` script not in source or target language`);
   }
   const checks = [
-    { name: "code", weight: 4, value: codeCheck(draft, original), note: "" },
-    { name: "links", weight: 3, value: linkCheck(draft, original), note: "" },
-    { name: "structure", weight: 2, value: structureCheck(draft, original), note: "" },
-    { name: "length", weight: 1, value: lengthCheck(draft, original), note: "" },
-    { name: "glossary", weight: 3, value: glossaryCheck(draft, original, glossaryTerms), note: "" }
+    { name: "code", weight: 4, value: codeCheck(draft, anchor), note: "" },
+    { name: "links", weight: 3, value: linkCheck(draft, anchor), note: "" },
+    { name: "structure", weight: 2, value: structureCheck(draft, anchor), note: "" },
+    { name: "length", weight: 1, value: lengthCheck(draft, anchor), note: "" },
+    { name: "glossary", weight: 3, value: glossaryCheck(draft, anchor, glossaryTerms), note: "" }
   ];
   return measured(checks);
 }
@@ -34384,6 +34396,7 @@ async function draftSyncs(request2) {
     chunkChars,
     ignore
   } = request2;
+  const localise = request2.localise ?? ((text2) => text2);
   const sourceResult = ignore ? extract(sourceContent) : void 0;
   const targetResult = ignore ? extract(targetContent) : void 0;
   const maskedSource = sourceResult?.content ?? sourceContent;
@@ -34394,7 +34407,8 @@ async function draftSyncs(request2) {
       ...request2,
       sourceContent: maskedSource,
       targetContent: maskedTarget,
-      targetSpans
+      targetSpans,
+      localise
     });
   }
   return draftWhole({
@@ -34409,6 +34423,7 @@ async function draftSyncs(request2) {
     glossary,
     drafts,
     targetSpans,
+    localise,
     ...weather !== void 0 ? { weather } : {}
   });
 }
@@ -34425,7 +34440,8 @@ async function draftWhole(params) {
     glossary,
     drafts,
     weather,
-    targetSpans
+    targetSpans,
+    localise
   } = params;
   const messages = buildMessages(
     sourceContent,
@@ -34446,6 +34462,7 @@ async function draftWhole(params) {
     glossaryTerms: glossary.map((g) => g.term),
     drafts,
     targetSpans,
+    localise,
     ...weather !== void 0 ? { weather } : {}
   });
 }
@@ -34463,7 +34480,8 @@ async function draftChunked(request2) {
     drafts,
     weather,
     chunkChars,
-    targetSpans
+    targetSpans,
+    localise
   } = request2;
   const sourceChunks = chunks(sourceContent, chunkChars);
   const targetChunks = chunks(targetContent, chunkChars);
@@ -34520,7 +34538,8 @@ async function draftChunked(request2) {
     }
   }
   const reassembled = chunkDrafts.join("");
-  const reinserted = reinsert(reassembled, targetSpans);
+  const localised = localise(reassembled);
+  const reinserted = reinsert(localised, targetSpans);
   const measured2 = scoreDraft(
     reinserted,
     targetContent,
@@ -34556,7 +34575,8 @@ async function draftLoop(params) {
     glossaryTerms,
     drafts,
     weather,
-    targetSpans
+    targetSpans,
+    localise
   } = params;
   const attempts = [];
   const refused2 = [];
@@ -34581,7 +34601,8 @@ async function draftLoop(params) {
       continue;
     }
     const sanitized = sanitize(draftText);
-    const reinserted = reinsert(sanitized, targetSpans);
+    const localised = localise(sanitized);
+    const reinserted = reinsert(localised, targetSpans);
     const measured2 = scoreDraft(
       reinserted,
       targetContent,
@@ -34646,10 +34667,36 @@ Rules:
 7. Do NOT add content that exists only in the source as locale-specific.
 8. If a semantic change replaces a heading, update the corresponding heading in the target.
 9. HTML comments of the form \`<!-- reeve-keep-section -->\` mark sections that must be reproduced exactly as they appear in the target. Do not modify, translate, or remove them.`;
+var INITIAL_SYSTEM_PROMPT = `You produce the initial translation of a source document into a target locale.
+
+Rules:
+1. Translate the ENTIRE source document into the target language.
+2. Preserve the source document's Markdown structure exactly \u2014 headings, lists, tables, emphasis.
+3. Preserve code blocks, inline code, and URLs byte-for-byte. Do not translate code, commands, identifiers, or link targets.
+4. Respect the glossary \u2014 glossary terms must NOT be translated.
+5. Output ONLY the complete translated document. No preamble, no explanation.`;
 function buildMessages(sourceContent, targetContent, semanticHunks, sourceLanguage, targetLanguage, glossary) {
   const glossarySection = formatGlossary(glossary);
-  const changes = semanticHunks.map((h) => `- ${h.description}`).join("\n");
   const sourceFence = enclose("untrusted-source", sourceContent);
+  if (targetContent.trim().length === 0) {
+    const userContent2 = `Source language: ${sourceLanguage.label}
+Target language: ${targetLanguage.label}
+${glossarySection ? `
+${glossarySection}
+` : ""}
+Source document (authoritative):
+${sourceFence.block}
+
+Produce the complete initial ${targetLanguage.label} translation of the source document.`;
+    return [
+      {
+        role: "system",
+        content: [INITIAL_SYSTEM_PROMPT, "", sourceFence.rule].join("\n")
+      },
+      { role: "user", content: userContent2 }
+    ];
+  }
+  const changes = semanticHunks.map((h) => `- ${h.description}`).join("\n");
   const targetFence = enclose("untrusted-target", targetContent);
   const userContent = `Source language: ${sourceLanguage.label}
 Target language: ${targetLanguage.label}
@@ -34678,6 +34725,77 @@ Produce the complete updated target translation incorporating only the semantic 
 // src/duties/harmonise/inputs.ts
 function parsePaths(raw) {
   return parseList(raw).filter((p) => p.length > 0);
+}
+
+// src/duties/harmonise/links.ts
+var LOCALE_SUFFIX2 = /\.[a-z]{2,3}(?:-[A-Z][a-zA-Z]+)?\.[a-zA-Z0-9]+$/;
+var IMAGE_EXT = /\.(?:png|jpe?g|gif|svg|webp)$/i;
+var INLINE_LINK = /(!?\[[^\]]*\]\()\s*(<[^>]*>|[^)\s]+)((?:\s+"[^"]*")?\s*\))/g;
+var REFERENCE_DEF = /^(\s{0,3}\[[^\]]+\]:\s*)(<[^>]*>|\S+)(.*)$/gm;
+function localiseLinks(markdown, context3) {
+  return segments(markdown).map(
+    (segment) => segment.kind === "prose" ? rewriteProse(segment.text, context3) : segment.text
+  ).join("");
+}
+function rewriteProse(prose, context3) {
+  const rewritten = prose.replace(
+    INLINE_LINK,
+    (whole2, open2, target, close) => {
+      const next = rewriteTarget(target, context3);
+      return next === null ? whole2 : `${open2}${next}${close}`;
+    }
+  );
+  return rewritten.replace(REFERENCE_DEF, (whole2, open2, target, rest) => {
+    const next = rewriteTarget(target, context3);
+    return next === null ? whole2 : `${open2}${next}${rest}`;
+  });
+}
+function rewriteTarget(target, context3) {
+  const bracketed = target.startsWith("<") && target.endsWith(">");
+  const inner = bracketed ? target.slice(1, -1) : target;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(inner)) return null;
+  if (inner.startsWith("//")) return null;
+  if (inner.startsWith("#") || inner.length === 0) return null;
+  const hash = inner.indexOf("#");
+  const path = hash === -1 ? inner : inner.slice(0, hash);
+  const fragment = hash === -1 ? "" : inner.slice(hash);
+  if (path.length === 0) return null;
+  if (LOCALE_SUFFIX2.test(path)) return null;
+  const candidate = localeVariant(path, context3.locale);
+  if (candidate === null) return null;
+  const resolved = resolve(directoryOf(context3.docPath), candidate);
+  if (resolved === null || !context3.exists(resolved)) return null;
+  const next = `${candidate}${fragment}`;
+  return bracketed ? `<${next}>` : next;
+}
+function localeVariant(path, locale) {
+  if (path.endsWith(".md")) {
+    return `${path.slice(0, -".md".length)}.${locale}.md`;
+  }
+  const image = IMAGE_EXT.exec(path);
+  if (image !== null) {
+    const stem = path.slice(0, path.length - image[0].length);
+    return `${stem}.${locale}${image[0]}`;
+  }
+  return null;
+}
+function directoryOf(docPath) {
+  const slash = docPath.lastIndexOf("/");
+  return slash === -1 ? "" : docPath.slice(0, slash);
+}
+function resolve(baseDir, target) {
+  const joined = target.startsWith("/") ? target.slice(1) : `${baseDir}/${target}`;
+  const parts = [];
+  for (const part of joined.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (parts.length === 0) return null;
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/");
 }
 
 // src/core/judge.ts
@@ -34918,7 +35036,18 @@ async function writeState(api, at, path, state, sha) {
 }
 function findOrCreate(state, id, files) {
   const existing = state.find((doc2) => doc2.id === id);
-  if (existing !== void 0) return existing;
+  if (existing !== void 0) {
+    const merged = new Map(existing.files);
+    let changed = false;
+    for (const [locale, path] of files) {
+      if (merged.get(locale) !== path) {
+        merged.set(locale, path);
+        changed = true;
+      }
+    }
+    if (changed) existing.files = merged;
+    return existing;
+  }
   const doc = {
     id,
     files: new Map(files),
@@ -34931,7 +35060,15 @@ function findOrCreate(state, id, files) {
   return doc;
 }
 function markStale(doc, currentSourceSha, currentTargetShas, sourceLocale) {
-  if (doc.sourceRevision === currentSourceSha && doc.sourceRevision !== "") return;
+  if (doc.sourceRevision === currentSourceSha && doc.sourceRevision !== "") {
+    for (const [locale] of doc.files) {
+      if (locale === sourceLocale) continue;
+      if (doc.synced.has(locale)) continue;
+      if (currentTargetShas.has(locale)) continue;
+      if (!doc.stale.includes(locale)) doc.stale = [...doc.stale, locale];
+    }
+    return;
+  }
   const stale = [];
   const conflicts = [];
   for (const [locale] of doc.files) {
@@ -35117,7 +35254,9 @@ async function publishSync(api, at, result, dryRun) {
   return { pr: pr.number, shas };
 }
 function buildPrBody(result) {
-  const updated = [...result.drafts.keys()].map((locale) => `- \`${locale}\`: translation updated`).join("\n");
+  const updated = [...result.drafts.keys()].map(
+    (locale) => result.created.includes(locale) ? `- \`${locale}\`: **initial translation created** \u2014 a machine first draft, needs native-speaker review` : `- \`${locale}\`: translation updated`
+  ).join("\n");
   const conflictSection = result.conflicts.length > 0 ? `
 
 ### Conflicts (not overwritten)
@@ -35311,7 +35450,7 @@ function summarize(run2) {
       (r) => [
         r.group.id,
         hunkBreakdown(r.hunks, r.classification),
-        r.synced.length > 0 ? r.synced.join(", ") : "\u2014",
+        r.synced.length > 0 ? r.synced.map((l) => r.created.includes(l) ? `${l} (new)` : l).join(", ") : "\u2014",
         r.conflicts.length > 0 ? r.conflicts.join(", ") : "\u2014",
         r.skipped.length > 0 ? r.skipped.join(", ") : "\u2014"
       ]
@@ -35339,6 +35478,7 @@ function readSettings() {
     stateBranch: getInput("state-branch"),
     glossaryDir: getInput("glossary-dir", { required: true }),
     paths: parsePaths(getInput("paths")),
+    bootstrap: getInput("bootstrap") === "true",
     maxRequests: bounded("max-requests", getInput("max-requests")),
     chunkChars: counted("chunk-chars", getInput("chunk-chars")),
     ignore: getInput("ignore") !== "false"
@@ -35397,6 +35537,13 @@ async function run() {
       );
     }
     const permitted = authority.warrant.granted("harmonise", DEFAULT_CAPABILITIES);
+    let bootstrap = base.bootstrap;
+    if (bootstrap && !denied && authority.warrant.languages === null) {
+      warning(
+        "harmonise: `bootstrap` is on but the warrant names no `languages:` \u2014 refusing to create locale files from the default (`vi, zh`). Write `languages:` in the warrant to choose the bootstrap locales on purpose."
+      );
+      bootstrap = false;
+    }
     const fallbackSource = parseLanguages("en")[0];
     if (fallbackSource === void 0) {
       throw new Error("source-language: could not parse default 'en'.");
@@ -35405,7 +35552,8 @@ async function run() {
       ...base,
       sourceLanguage: sourceLanguage ?? fallbackSource,
       languages: targetLanguages,
-      permitted
+      permitted,
+      bootstrap
     };
     if (authority.warrant.unnamed("harmonise")) {
       notice(notGranted(authority.warrant));
@@ -35424,8 +35572,15 @@ async function run() {
       settleAuth(weather);
       return;
     }
-    const allFiles = await listMarkdownFiles(api, context2.repo);
-    const groups = discoverGroups(allFiles, sourceLanguage, targetLanguages, settings.paths);
+    const allFiles = await listRepositoryFiles(api, context2.repo);
+    const fileSet = new Set(allFiles);
+    const groups = discoverGroups(
+      allFiles,
+      sourceLanguage,
+      targetLanguages,
+      settings.paths,
+      settings.bootstrap
+    );
     acc.candidates = groups.length;
     for (const entry of unmatchedFilters(groups, settings.paths)) {
       warning(
@@ -35479,7 +35634,8 @@ async function run() {
         client.stages.judge,
         meter,
         budget,
-        weather
+        weather,
+        fileSet
       );
       acc.results.push(result);
     }
@@ -35597,15 +35753,19 @@ async function run() {
     }
   }
 }
-async function processGroup(group, state, targetLanguages, sourceLanguage, glossary, api, at, settings, classifier, drafter, judger, meter, budget, weather) {
+var INITIAL_TRANSLATION_HUNK = {
+  description: "Initial translation of the whole document",
+  classification: "semantic"
+};
+async function processGroup(group, state, targetLanguages, sourceLanguage, glossary, api, at, settings, classifier, drafter, judger, meter, budget, weather, fileSet) {
   const sourcePath = group.files.get(sourceLanguage.code.toLowerCase());
   if (sourcePath === void 0) {
-    return { group, classification: "none", hunks: [], synced: [], conflicts: [], skipped: [] };
+    return none(group, [], []);
   }
   const sourceFile = await readContentsFile(api, at, sourcePath);
   if (sourceFile === null) {
     warning(`harmonise: source file \`${sourcePath}\` not found \u2014 skipping ${group.id}`);
-    return { group, classification: "none", hunks: [], synced: [], conflicts: [], skipped: [] };
+    return none(group, [], []);
   }
   const doc = findOrCreate(state, group.id, group.files);
   const targetShas = /* @__PURE__ */ new Map();
@@ -35616,36 +35776,31 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
   }
   markStale(doc, sourceFile.sha, targetShas, sourceLanguage.code.toLowerCase());
   if (doc.stale.length === 0 && doc.conflicts.length === 0) {
-    return { group, classification: "none", hunks: [], synced: [], conflicts: [], skipped: [] };
+    return none(group, [], []);
   }
   const conflicts = [...doc.conflicts];
   const synced = [];
   const skipped = [];
-  let diffDescription;
-  if (doc.sourceRevision === "") {
-    diffDescription = formatInitialSync(sourceFile.text);
-  } else {
-    const previousContent = await readBlob(api, at, doc.sourceRevision);
-    if (previousContent === null) {
-      warning(
-        `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} for ${group.id} \u2014 skipping. The blob SHA may no longer be reachable.`
-      );
-      return {
-        group,
-        classification: "none",
-        hunks: [],
-        synced: [],
-        conflicts,
-        skipped: doc.stale
-      };
-    }
-    diffDescription = computeSourceDiff(previousContent, sourceFile.text);
-  }
+  const created = [];
+  const staleWithFile = doc.stale.filter((locale) => targetShas.has(locale));
   let classification;
-  if (doc.stale.length > 0) {
-    const firstStaleLocale = doc.stale[0];
+  if (staleWithFile.length > 0) {
+    let diffDescription;
+    if (doc.sourceRevision === "" || doc.sourceRevision === sourceFile.sha) {
+      diffDescription = formatInitialSync(sourceFile.text);
+    } else {
+      const previousContent = await readBlob(api, at, doc.sourceRevision);
+      if (previousContent === null) {
+        warning(
+          `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} for ${group.id} \u2014 skipping. The blob SHA may no longer be reachable.`
+        );
+        return none(group, conflicts, doc.stale);
+      }
+      diffDescription = computeSourceDiff(previousContent, sourceFile.text);
+    }
+    const firstStaleLocale = staleWithFile[0];
     if (firstStaleLocale === void 0) {
-      return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: [] };
+      return none(group, conflicts, []);
     }
     const firstStalePath = group.files.get(firstStaleLocale);
     const firstStaleFile = firstStalePath !== void 0 ? await readContentsFile(api, at, firstStalePath) : null;
@@ -35662,19 +35817,13 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     } catch (error2) {
       const message = error2 instanceof Error ? error2.message : String(error2);
       warning(`harmonise: classification failed for ${group.id} \u2014 ${message}`);
-      return {
-        group,
-        classification: "none",
-        hunks: [],
-        synced: [],
-        conflicts,
-        skipped: doc.stale
-      };
+      return none(group, conflicts, doc.stale);
     }
   } else {
     classification = { hunks: [], hasSemantic: false };
   }
-  if (!classification.hasSemantic) {
+  const missingStale = doc.stale.filter((locale) => !targetShas.has(locale));
+  if (!classification.hasSemantic && missingStale.length === 0) {
     const firstHunk = classification.hunks[0];
     return {
       group,
@@ -35682,9 +35831,12 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       hunks: classification.hunks,
       synced: [],
       conflicts,
-      skipped: doc.stale
+      skipped: doc.stale,
+      created: []
     };
   }
+  const linkTargets = new Set(fileSet);
+  for (const path of group.files.values()) linkTargets.add(path);
   const bestDrafts = /* @__PURE__ */ new Map();
   for (const locale of doc.stale) {
     if (budgetExhausted(settings, meter, budget)) {
@@ -35707,12 +35859,17 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     }
     const targetFile = await readContentsFile(api, at, targetPath);
     const targetContent = targetFile?.text ?? "";
+    const isMissingFile = targetFile === null;
+    if (!isMissingFile && !classification.hasSemantic) {
+      skipped.push(locale);
+      continue;
+    }
     const result = await draftSyncs({
       provider: drafter,
       models: settings.models,
       sourceContent: sourceFile.text,
       targetContent,
-      semanticHunks: classification.hunks.filter((h) => h.classification === "semantic"),
+      semanticHunks: isMissingFile ? [INITIAL_TRANSLATION_HUNK] : classification.hunks.filter((h) => h.classification === "semantic"),
       sourceLanguage,
       targetLanguage: targetLang,
       languages: settings.languages,
@@ -35720,7 +35877,12 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       drafts: settings.drafts,
       weather,
       chunkChars: settings.chunkChars,
-      ignore: settings.ignore
+      ignore: settings.ignore,
+      localise: (text2) => localiseLinks(text2, {
+        locale: targetLang.code,
+        docPath: targetPath,
+        exists: (path) => linkTargets.has(path)
+      })
     });
     for (const failure of result.failures) {
       warning(
@@ -35751,6 +35913,7 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     bestDrafts.set(locale, winner);
     markSynced(doc, locale, "pending");
     synced.push(locale);
+    if (isMissingFile) created.push(locale);
   }
   const canPublish = settings.permitted.includes("edit-file") && settings.permitted.includes("open-pr");
   if (!canPublish) {
@@ -35761,7 +35924,8 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     const syncResult = {
       group,
       drafts: bestDrafts,
-      conflicts
+      conflicts,
+      created
     };
     const publishApi = api;
     const pr = await publishSync(publishApi, at, syncResult, settings.dryRun);
@@ -35775,10 +35939,22 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
   return {
     group,
     classification: "semantic",
-    hunks: classification.hunks,
+    hunks: classification.hunks.length > 0 ? classification.hunks : created.length > 0 ? [INITIAL_TRANSLATION_HUNK] : [],
     synced,
     conflicts,
-    skipped
+    skipped,
+    created
+  };
+}
+function none(group, conflicts, skipped) {
+  return {
+    group,
+    classification: "none",
+    hunks: [],
+    synced: [],
+    conflicts,
+    skipped,
+    created: []
   };
 }
 async function pickWinner(attempts, targetContent, targetLanguage, judges, judger, weather) {
@@ -35796,7 +35972,7 @@ async function pickWinner(attempts, targetContent, targetLanguage, judges, judge
   });
   return verdict.winner;
 }
-async function listMarkdownFiles(api, at) {
+async function listRepositoryFiles(api, at) {
   const files = [];
   try {
     const { data: ref } = await api.rest.git.getRef({
@@ -35811,7 +35987,7 @@ async function listMarkdownFiles(api, at) {
       recursive: "true"
     });
     for (const entry of tree.tree) {
-      if (entry.path.endsWith(".md") && entry.type === "blob") {
+      if (entry.type === "blob") {
         files.push(entry.path);
       }
     }

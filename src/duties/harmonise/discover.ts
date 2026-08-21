@@ -52,12 +52,21 @@ const LOCALE_SUFFIX = /^(.+)\.([a-z]{2,3}(?:-[A-Z][a-zA-Z]+)?)\.md$/;
  *   filtered away is the confirmed silent-green failure this rule exists to
  *   prevent. A directory entry (`docs/`) behaves exactly as before by
  *   construction, since every member of a group shares its base prefix.
+ *   Bootstrap-derived paths count as members too, so a filter entry can name
+ *   a file this sync is about to create.
+ * @param bootstrap - When true, a source file whose locale variants are
+ *   missing still forms a document group: each missing target locale is
+ *   filled in with its derived path (`<base>.<locale>.md`), so the sync can
+ *   create the first translation. When false (the default), a locale variant
+ *   must already exist for a group to be discovered — the documented
+ *   bootstrap contract.
  */
 export function discoverGroups(
   paths: readonly string[],
   sourceLanguage: Language,
   targetLanguages: readonly Language[],
   pathsFilter: readonly string[],
+  bootstrap = false,
 ): readonly DocumentGroup[] {
   const sourceCode = sourceLanguage.code.toLowerCase();
   const targetCodes = new Set(targetLanguages.map((lang) => lang.code.toLowerCase()));
@@ -98,6 +107,17 @@ export function discoverGroups(
   for (const [id, files] of groups) {
     // A group must have a source file to be valid
     if (!files.has(sourceCode)) continue;
+
+    // Bootstrap: every configured target locale belongs to the group, the
+    // missing ones under their derived path — that path is what the sync
+    // creates. The suffix convention is the same one the matcher above reads.
+    if (bootstrap) {
+      for (const language of targetLanguages) {
+        const locale = language.code.toLowerCase();
+        if (!files.has(locale)) files.set(locale, `${id}.${language.code}.md`);
+      }
+    }
+
     // A group must have at least one target locale — no target locales means
     // no synchronisation work to do
     let hasTarget = false;

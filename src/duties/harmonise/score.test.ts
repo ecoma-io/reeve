@@ -136,3 +136,63 @@ describe("scoreDraft", () => {
     expect(score.admissible).toBe(true);
   });
 });
+
+describe("scoreDraft on an initial translation (empty original)", () => {
+  const source = [
+    "# Getting Started",
+    "",
+    "This guide helps you set up Reeve.",
+    "",
+    "```bash",
+    "npm install reeve",
+    "```",
+    "",
+    "See [docs](https://reeve.dev) for more.",
+  ].join("\n");
+
+  it("anchors against the source: a faithful translation scores high", () => {
+    const draft = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "```bash",
+      "npm install reeve",
+      "```",
+      "",
+      "Xem [tài liệu](https://reeve.dev) để biết thêm.",
+    ].join("\n");
+
+    const score = scoreDraft(draft, "", [], source, VI, LANGUAGES);
+    expect(score.admissible).toBe(true);
+    expect(score.value).toBeGreaterThan(0.9);
+  });
+
+  it("penalises an initial draft that drops the source's code block", () => {
+    const draft = "# Bắt đầu\n\nHướng dẫn này giúp bạn thiết lập Reeve.";
+    const score = scoreDraft(draft, "", [], source, VI, LANGUAGES);
+    expect(score.admissible).toBe(true);
+    const full = scoreDraft(
+      source.replace("Getting Started", "Bắt đầu"),
+      "",
+      [],
+      source,
+      VI,
+      LANGUAGES,
+    );
+    expect(score.value).toBeLessThan(full.value);
+  });
+
+  it("refuses an initial draft identical to the source — not a translation", () => {
+    const score = scoreDraft(source, "", [], source, VI, LANGUAGES);
+    expect(score.admissible).toBe(false);
+    expect(score.reason).toContain("identical to the source");
+  });
+
+  it("refuses an initial draft that translated a glossary term the source carries", () => {
+    const draft = "# Bắt đầu\n\nHướng dẫn này giúp bạn thiết lập Quản Gia.";
+    const score = scoreDraft(draft, "", ["Reeve"], source, VI, LANGUAGES);
+    expect(score.admissible).toBe(false);
+    expect(score.reason).toContain("glossary term");
+  });
+});

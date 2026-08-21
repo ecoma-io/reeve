@@ -20,8 +20,12 @@ import {
 export interface DocumentState {
   /** The document group's base name — e.g. `docs/getting-started`. */
   readonly id: string;
-  /** Locale code → file path. */
-  readonly files: ReadonlyMap<string, string>;
+  /**
+   * Locale code → file path. Not `readonly`: `findOrCreate` folds newly
+   * discovered locales (a language added to the warrant, a bootstrap path)
+   * into an existing entry, so `markStale` can see them.
+   */
+  files: ReadonlyMap<string, string>;
   /** The git SHA of the source file at the time of the last sync. */
   sourceRevision: string;
   /** Locale code → the git SHA of the target file at the time it was last synced. */
@@ -205,6 +209,12 @@ export async function writeState(
 
 /**
  * Finds or creates a DocumentState for the given group id.
+ *
+ * An existing entry has the discovered files folded in: a locale the state
+ * file has never seen (a language newly added to the warrant, or a bootstrap
+ * path for a file that does not exist yet) must reach `markStale`, which
+ * walks `doc.files` — an entry frozen at first sight would silently pin the
+ * group to the locales it had back then.
  */
 export function findOrCreate(
   state: DocumentState[],
@@ -212,7 +222,18 @@ export function findOrCreate(
   files: ReadonlyMap<string, string>,
 ): DocumentState {
   const existing = state.find((doc) => doc.id === id);
-  if (existing !== undefined) return existing;
+  if (existing !== undefined) {
+    const merged = new Map(existing.files);
+    let changed = false;
+    for (const [locale, path] of files) {
+      if (merged.get(locale) !== path) {
+        merged.set(locale, path);
+        changed = true;
+      }
+    }
+    if (changed) existing.files = merged;
+    return existing;
+  }
 
   const doc: DocumentState = {
     id,
@@ -241,8 +262,21 @@ export function markStale(
   currentTargetShas: ReadonlyMap<string, string>,
   sourceLocale: string,
 ): void {
-  // No change since last sync — nothing to do
-  if (doc.sourceRevision === currentSourceSha && doc.sourceRevision !== "") return;
+  // No change since last sync — nothing to do, except for a locale that has
+  // never been synced and has no file in the tree: a bootstrap path (or a
+  // language newly added to the warrant) whose first translation has never
+  // happened. Waiting for the next source edit would leave it missing for an
+  // unbounded time; a locale that was synced and then deleted is not this
+  // case (its `synced` entry survives), and stays a maintainer's decision.
+  if (doc.sourceRevision === currentSourceSha && doc.sourceRevision !== "") {
+    for (const [locale] of doc.files) {
+      if (locale === sourceLocale) continue;
+      if (doc.synced.has(locale)) continue;
+      if (currentTargetShas.has(locale)) continue;
+      if (!doc.stale.includes(locale)) doc.stale = [...doc.stale, locale];
+    }
+    return;
+  }
 
   const stale: string[] = [];
   const conflicts: string[] = [];

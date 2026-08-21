@@ -305,6 +305,7 @@ function baseInputs(): Record<string, string> {
     "request-timeout": "120s",
     "chunk-chars": "0",
     ignore: "false",
+    bootstrap: "false",
     temperature: "",
     sweep: "false",
     number: "",
@@ -598,5 +599,95 @@ describe("the paths filter", () => {
     expect(run.log).toContain("matched no document group");
     expect(stub.writes).toEqual([]);
     expect(stub.pulls).toEqual([]);
+  });
+});
+
+// `bootstrap` — creating the first translation, behind its own opt-in.
+//
+// The contract has three sides, and each needs to be observable from this
+// tier: (1) on, with the warrant naming `languages:` on purpose, a missing
+// locale file is created — from the initial-translation prompt, without
+// spending a classification request; (2) on, with the warrant silent about
+// `languages:`, nothing is created and the run says why; (3) off — the
+// default — a source-only document group stays undiscovered, exactly as
+// documented under "Bootstrap" in the reference.
+// ---------------------------------------------------------------------------
+
+describe("the bootstrap opt-in", () => {
+  /** A faithful Vietnamese translation of SOURCE_DOC, links kept as written. */
+  const VI_INITIAL =
+    "# Bắt đầu\n\nHướng dẫn này giải thích cách thiết lập Reeve trong một kho lưu trữ.\n";
+
+  beforeEach(() => {
+    // A repository with no Vietnamese translation at all.
+    stub.files.clear();
+    stub.files.set("docs/start.md", SOURCE_DOC);
+    stub.answer = () => saying(VI_INITIAL);
+  });
+
+  it("creates the missing locale file and opens the sync PR", async () => {
+    const run = await runAction({ bootstrap: "true" });
+
+    expect(run.code).toBe(0);
+    const write = stub.writes.find((w) => w.path === "docs/start.vi.md");
+    expect(write).toBeDefined();
+    expect(write?.content).toContain("Bắt đầu");
+    expect(stub.pulls).toHaveLength(1);
+    expect(run.outputs.synced).toContain("docs/start");
+  });
+
+  it("spends no classification request — the whole document is the change", async () => {
+    await runAction({ bootstrap: "true" });
+
+    expect(stub.asked).toHaveLength(1);
+    expect(stub.asked[0]?.system).toContain("initial translation");
+    expect(stub.asked[0]?.system).not.toContain("untrusted-diff");
+  });
+
+  it("creates nothing when the warrant names no `languages:`, and says why", async () => {
+    await writeFile(warrantPath, GRANTED.replace("languages: [en, vi]\n", ""));
+
+    const run = await runAction({ bootstrap: "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.writes).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+    expect(run.log).toContain("refusing to");
+    expect(run.log).toContain("languages");
+  });
+
+  it("creates nothing when bootstrap is off — the default contract", async () => {
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    expect(stub.writes).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+    expect(run.log).toContain("no document groups");
+  });
+
+  it("still needs `edit-file` and `open-pr` — bootstrap widens no authority", async () => {
+    await writeFile(warrantPath, GRANTED.replace("[edit-file, open-pr]", "[none]"));
+
+    const run = await runAction({ bootstrap: "true" });
+
+    expect(run.code).toBe(0);
+    expect(stub.writes).toEqual([]);
+    expect(stub.pulls).toEqual([]);
+  });
+
+  it("localises an internal link when the locale variant exists in the tree", async () => {
+    stub.files.set(
+      "docs/start.md",
+      "# Getting started\n\nSee the [guide](guide.md) to set Reeve up.\n",
+    );
+    stub.files.set("docs/guide.md", "# Guide\n");
+    stub.files.set("docs/guide.vi.md", "# Hướng dẫn\n");
+    stub.answer = () => saying("# Bắt đầu\n\nXem [hướng dẫn](guide.md) để thiết lập Reeve.\n");
+
+    const run = await runAction({ bootstrap: "true" });
+
+    expect(run.code).toBe(0);
+    const write = stub.writes.find((w) => w.path === "docs/start.vi.md");
+    expect(write?.content).toContain("(guide.vi.md)");
   });
 });

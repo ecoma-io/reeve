@@ -73,11 +73,12 @@ import {
 
 import { budgetExhausted, createBudget, type Budget } from "./budget.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
-import { classifyDiff, type ClassificationResult } from "./classify.js";
+import { classifyDiff, type ClassificationResult, type ClassifiedHunk } from "./classify.js";
 import { computeSourceDiff, formatInitialSync } from "./diff.js";
 import { discoverGroups, unmatchedFilters, type DocumentGroup } from "./discover.js";
 import { draftSyncs, type Draft } from "./draft.js";
 import { parsePaths } from "./inputs.js";
+import { localiseLinks } from "./links.js";
 import { judge as judgePanel, type Verdict } from "./judge.js";
 import {
   findOrCreate,
@@ -113,6 +114,12 @@ export interface Settings {
   readonly stateBranch: string;
   readonly glossaryDir: string;
   readonly paths: readonly string[];
+  /**
+   * Whether missing locale files may be created — the bootstrap opt-in.
+   * Effective only when the warrant names `languages:` explicitly; creating
+   * files from the duty's own default target list is refused.
+   */
+  readonly bootstrap: boolean;
   readonly dryRun: boolean;
   readonly maxRequests: number | null;
   readonly baseUrl: string;
@@ -141,6 +148,7 @@ function readSettings(): Omit<Settings, "sourceLanguage" | "languages" | "permit
     stateBranch: core.getInput("state-branch"),
     glossaryDir: core.getInput("glossary-dir", { required: true }),
     paths: parsePaths(core.getInput("paths")),
+    bootstrap: core.getInput("bootstrap") === "true",
     maxRequests: bounded("max-requests", core.getInput("max-requests")),
     chunkChars: counted("chunk-chars", core.getInput("chunk-chars")),
     ignore: core.getInput("ignore") !== "false",
@@ -235,6 +243,20 @@ export async function run(): Promise<void> {
 
     const permitted = authority.warrant.granted("harmonise", DEFAULT_CAPABILITIES);
 
+    // Bootstrap only ever creates files for locales somebody chose on
+    // purpose. On the default target list, nobody has: refusing here is what
+    // keeps a zero-config repository from waking up to machine translations
+    // in languages no maintainer asked for.
+    let bootstrap = base.bootstrap;
+    if (bootstrap && !denied && authority.warrant.languages === null) {
+      core.warning(
+        "harmonise: `bootstrap` is on but the warrant names no `languages:` — refusing to " +
+          "create locale files from the default (`vi, zh`). Write `languages:` in the warrant " +
+          "to choose the bootstrap locales on purpose.",
+      );
+      bootstrap = false;
+    }
+
     const fallbackSource = parseLanguages("en")[0];
     if (fallbackSource === undefined) {
       throw new Error("source-language: could not parse default 'en'.");
@@ -244,6 +266,7 @@ export async function run(): Promise<void> {
       sourceLanguage: sourceLanguage ?? fallbackSource,
       languages: targetLanguages,
       permitted,
+      bootstrap,
     };
 
     // If the warrant doesn't name harmonise, stop here
@@ -267,9 +290,18 @@ export async function run(): Promise<void> {
       return;
     }
 
-    // Discover document groups
-    const allFiles = await listMarkdownFiles(api, context.repo);
-    const groups = discoverGroups(allFiles, sourceLanguage, targetLanguages, settings.paths);
+    // Discover document groups. The full tree is listed (not just Markdown):
+    // link localisation needs to know whether a locale variant of an image
+    // exists before it rewrites a reference to it.
+    const allFiles = await listRepositoryFiles(api, context.repo);
+    const fileSet: ReadonlySet<string> = new Set(allFiles);
+    const groups = discoverGroups(
+      allFiles,
+      sourceLanguage,
+      targetLanguages,
+      settings.paths,
+      settings.bootstrap,
+    );
     acc.candidates = groups.length;
 
     // A `paths` entry that scoped nothing is said out loud, per entry: a case
@@ -350,6 +382,7 @@ export async function run(): Promise<void> {
         meter,
         budget,
         weather,
+        fileSet,
       );
       acc.results.push(result);
     }
@@ -498,6 +531,16 @@ export async function run(): Promise<void> {
 }
 
 /**
+ * The synthetic hunk a missing locale file is drafted from. No model call is
+ * spent deciding that a translation which does not exist needs all of the
+ * source — that classification is a tautology, and code states tautologies.
+ */
+const INITIAL_TRANSLATION_HUNK: ClassifiedHunk = {
+  description: "Initial translation of the whole document",
+  classification: "semantic",
+};
+
+/**
  * Processes one document group: classify, draft, score, judge.
  */
 async function processGroup(
@@ -515,17 +558,18 @@ async function processGroup(
   meter: Meter,
   budget: Budget,
   weather: Weather,
+  fileSet: ReadonlySet<string>,
 ): Promise<GroupResult> {
   const sourcePath = group.files.get(sourceLanguage.code.toLowerCase());
   if (sourcePath === undefined) {
-    return { group, classification: "none", hunks: [], synced: [], conflicts: [], skipped: [] };
+    return none(group, [], []);
   }
 
   // Read source and target files
   const sourceFile = await readContentsFile(api, at, sourcePath);
   if (sourceFile === null) {
     core.warning(`harmonise: source file \`${sourcePath}\` not found — skipping ${group.id}`);
-    return { group, classification: "none", hunks: [], synced: [], conflicts: [], skipped: [] };
+    return none(group, [], []);
   }
 
   // Find or create provenance entry
@@ -543,45 +587,47 @@ async function processGroup(
   markStale(doc, sourceFile.sha, targetShas, sourceLanguage.code.toLowerCase());
 
   if (doc.stale.length === 0 && doc.conflicts.length === 0) {
-    return { group, classification: "none", hunks: [], synced: [], conflicts: [], skipped: [] };
+    return none(group, [], []);
   }
 
   const conflicts = [...doc.conflicts];
   const synced: string[] = [];
   const skipped: string[] = [];
+  const created: string[] = [];
 
-  // Compute the diff: resolve the historical source content from the
-  // stored sourceRevision blob SHA, then diff it against the current content.
-  // On first run (sourceRevision is empty), everything is considered new.
-  let diffDescription: string;
-  if (doc.sourceRevision === "") {
-    diffDescription = formatInitialSync(sourceFile.text);
-  } else {
-    const previousContent = await readBlob(api, at, doc.sourceRevision);
-    if (previousContent === null) {
-      core.warning(
-        `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} ` +
-          `for ${group.id} — skipping. The blob SHA may no longer be reachable.`,
-      );
-      return {
-        group,
-        classification: "none",
-        hunks: [],
-        synced: [],
-        conflicts,
-        skipped: doc.stale,
-      };
-    }
-    diffDescription = computeSourceDiff(previousContent, sourceFile.text);
-  }
+  // Stale locales split by whether their file exists. A missing file is the
+  // bootstrap case — nothing to diff against, nothing to classify: the whole
+  // document is the change. Only locales with an existing translation need
+  // the classifier to decide what propagates.
+  const staleWithFile = doc.stale.filter((locale) => targetShas.has(locale));
 
-  // Classify the diff
+  // Classify the diff — only when a locale with an existing translation is
+  // stale. A group whose only stale locales are missing files spends no
+  // classification request.
   let classification: ClassificationResult;
-  if (doc.stale.length > 0) {
+  if (staleWithFile.length > 0) {
+    // Compute the diff: resolve the historical source content from the
+    // stored sourceRevision blob SHA, then diff it against the current
+    // content. On first run (sourceRevision is empty), everything is new.
+    let diffDescription: string;
+    if (doc.sourceRevision === "" || doc.sourceRevision === sourceFile.sha) {
+      diffDescription = formatInitialSync(sourceFile.text);
+    } else {
+      const previousContent = await readBlob(api, at, doc.sourceRevision);
+      if (previousContent === null) {
+        core.warning(
+          `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} ` +
+            `for ${group.id} — skipping. The blob SHA may no longer be reachable.`,
+        );
+        return none(group, conflicts, doc.stale);
+      }
+      diffDescription = computeSourceDiff(previousContent, sourceFile.text);
+    }
+
     // We need the first stale locale's content for classification context
-    const firstStaleLocale = doc.stale[0];
+    const firstStaleLocale = staleWithFile[0];
     if (firstStaleLocale === undefined) {
-      return { group, classification: "none", hunks: [], synced: [], conflicts, skipped: [] };
+      return none(group, conflicts, []);
     }
     const firstStalePath = group.files.get(firstStaleLocale);
     const firstStaleFile =
@@ -603,20 +649,14 @@ async function processGroup(
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       core.warning(`harmonise: classification failed for ${group.id} — ${message}`);
-      return {
-        group,
-        classification: "none",
-        hunks: [],
-        synced: [],
-        conflicts,
-        skipped: doc.stale,
-      };
+      return none(group, conflicts, doc.stale);
     }
   } else {
     classification = { hunks: [], hasSemantic: false };
   }
 
-  if (!classification.hasSemantic) {
+  const missingStale = doc.stale.filter((locale) => !targetShas.has(locale));
+  if (!classification.hasSemantic && missingStale.length === 0) {
     // No semantic changes — nothing to propagate
     const firstHunk = classification.hunks[0];
     return {
@@ -626,8 +666,14 @@ async function processGroup(
       synced: [],
       conflicts,
       skipped: doc.stale,
+      created: [],
     };
   }
+
+  // What a rewritten relative link may point at: everything in the tree, plus
+  // the files this same sync writes — they land in the same pull request.
+  const linkTargets = new Set(fileSet);
+  for (const path of group.files.values()) linkTargets.add(path);
 
   // Draft and judge for each stale locale
   const bestDrafts = new Map<string, Draft>();
@@ -660,6 +706,15 @@ async function processGroup(
 
     const targetFile = await readContentsFile(api, at, targetPath);
     const targetContent = targetFile?.text ?? "";
+    const isMissingFile = targetFile === null;
+
+    // A locale with an existing translation only redrafts for semantic
+    // changes; a missing file is drafted from the whole document, whatever
+    // the classifier said about the locales that do exist.
+    if (!isMissingFile && !classification.hasSemantic) {
+      skipped.push(locale);
+      continue;
+    }
 
     // Run the multi-draft loop
     const result = await draftSyncs({
@@ -667,7 +722,9 @@ async function processGroup(
       models: settings.models,
       sourceContent: sourceFile.text,
       targetContent,
-      semanticHunks: classification.hunks.filter((h) => h.classification === "semantic"),
+      semanticHunks: isMissingFile
+        ? [INITIAL_TRANSLATION_HUNK]
+        : classification.hunks.filter((h) => h.classification === "semantic"),
       sourceLanguage,
       targetLanguage: targetLang,
       languages: settings.languages,
@@ -676,6 +733,12 @@ async function processGroup(
       weather,
       chunkChars: settings.chunkChars,
       ignore: settings.ignore,
+      localise: (text) =>
+        localiseLinks(text, {
+          locale: targetLang.code,
+          docPath: targetPath,
+          exists: (path) => linkTargets.has(path),
+        }),
     });
 
     for (const failure of result.failures) {
@@ -718,6 +781,7 @@ async function processGroup(
     // now keeps the state honest if the run dies before the write.
     markSynced(doc, locale, "pending");
     synced.push(locale);
+    if (isMissingFile) created.push(locale);
   }
 
   // Check if we have permission to publish
@@ -735,6 +799,7 @@ async function processGroup(
       group,
       drafts: bestDrafts,
       conflicts,
+      created,
     };
 
     const publishApi = api as unknown as PublishApi;
@@ -756,10 +821,33 @@ async function processGroup(
   return {
     group,
     classification: "semantic",
-    hunks: classification.hunks,
+    hunks:
+      classification.hunks.length > 0
+        ? classification.hunks
+        : created.length > 0
+          ? [INITIAL_TRANSLATION_HUNK]
+          : [],
     synced,
     conflicts,
     skipped,
+    created,
+  };
+}
+
+/** The empty outcome every early exit from `processGroup` shares. */
+function none(
+  group: DocumentGroup,
+  conflicts: readonly string[],
+  skipped: readonly string[],
+): GroupResult {
+  return {
+    group,
+    classification: "none",
+    hunks: [],
+    synced: [],
+    conflicts,
+    skipped,
+    created: [],
   };
 }
 
@@ -800,19 +888,19 @@ async function pickWinner(
 }
 
 /**
- * Lists all Markdown files in the repository.
+ * Lists every file in the repository tree.
  *
- * Uses `git ls-tree` via the Contents API to walk the tree.
- * For now, a simplified approach that reads the tree at the default branch.
+ * Uses `git ls-tree` via the Git data API to walk the tree recursively.
+ * The whole tree rather than just Markdown: discovery filters for `.md`
+ * itself, and link localisation needs to know whether a locale variant of an
+ * image (`images/flow.vi.png`) exists before rewriting a reference to it.
  */
-async function listMarkdownFiles(
+async function listRepositoryFiles(
   api: ReturnType<typeof getOctokit>,
   at: Pick<Location, "owner" | "repo">,
 ): Promise<string[]> {
   const files: string[] = [];
 
-  // Walk the repository tree to find .md files
-  // This uses the Git data API to get the tree recursively
   try {
     const { data: ref } = await api.rest.git.getRef({
       owner: at.owner,
@@ -828,7 +916,7 @@ async function listMarkdownFiles(
     });
 
     for (const entry of tree.tree) {
-      if (entry.path.endsWith(".md") && entry.type === "blob") {
+      if (entry.type === "blob") {
         files.push(entry.path);
       }
     }

@@ -388,3 +388,141 @@ describe("draftSyncs chunking", () => {
     expect(result.refused[0]?.score.reason).toBe("unchanged from original");
   });
 });
+
+describe("draftSyncs on an initial translation (empty target)", () => {
+  it("asks with the initial-translation prompt, not the update prompt", async () => {
+    const seen: { system: string; user: string }[] = [];
+    const provider: Provider = {
+      complete(model, messages) {
+        seen.push({
+          system: messages.find((m) => m.role === "system")?.content ?? "",
+          user: messages.find((m) => m.role === "user")?.content ?? "",
+        });
+        return Promise.resolve({
+          ok: true,
+          model,
+          content: "# Bắt đầu\n\nHướng dẫn này giúp bạn thiết lập Reeve.",
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const result = await draftSyncs({
+      provider,
+      models: ["model-a"],
+      sourceContent: SOURCE,
+      targetContent: "",
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 0,
+      ignore: true,
+    });
+
+    expect(result.attempts).toHaveLength(1);
+    const ask = seen[0]!;
+    expect(ask.system).toContain("initial translation");
+    expect(ask.system).not.toContain("only apply the semantic changes");
+    // No target fence: there is no target document to fence.
+    expect(ask.system).not.toContain("untrusted-target");
+    expect(ask.user).toContain("complete initial");
+  });
+
+  it("still fences the source document", async () => {
+    const seen: string[] = [];
+    const provider: Provider = {
+      complete(model, messages) {
+        seen.push(messages.find((m) => m.role === "system")?.content ?? "");
+        return Promise.resolve({
+          ok: true,
+          model,
+          content: "# Bắt đầu\n\nNội dung.",
+          finishReason: "stop",
+        });
+      },
+    };
+
+    await draftSyncs({
+      provider,
+      models: ["model-a"],
+      sourceContent: SOURCE,
+      targetContent: "",
+      semanticHunks: [],
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 0,
+      ignore: true,
+    });
+
+    expect(seen[0]).toMatch(/<untrusted-source id="[a-f0-9]+">/);
+  });
+});
+
+describe("draftSyncs link localisation", () => {
+  it("applies `localise` to the draft before scoring and returning", async () => {
+    const draft = "# Bắt đầu\n\nXem [hướng dẫn](docs/guide.md).";
+    const result = await draftSyncs({
+      provider: scripted({ "model-a": draft }),
+      models: ["model-a"],
+      sourceContent: "# Getting Started\n\nSee the [guide](docs/guide.md).",
+      targetContent: "# Bắt đầu\n\nXem [hướng dẫn](docs/guide.md) cũ.",
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 0,
+      ignore: true,
+      localise: (text) => text.replaceAll("docs/guide.md", "docs/guide.vi.md"),
+    });
+
+    expect(result.attempts[0]?.text).toContain("docs/guide.vi.md");
+  });
+
+  it("never localises inside a maintainer-ignored section", async () => {
+    const target = [
+      "# Bắt đầu",
+      "",
+      "<!-- reeve:ignore-start -->",
+      "Xem [hướng dẫn](docs/guide.md).",
+      "<!-- reeve:ignore-end -->",
+      "",
+      "Đoạn cũ.",
+    ].join("\n");
+    const draft = [
+      "# Bắt đầu",
+      "",
+      "<!-- reeve-keep-section -->",
+      "",
+      "Đoạn mới có [liên kết](docs/other.md).",
+    ].join("\n");
+
+    const result = await draftSyncs({
+      provider: scripted({ "model-a": draft }),
+      models: ["model-a"],
+      sourceContent: SOURCE,
+      targetContent: target,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 0,
+      ignore: true,
+      localise: (text) => text.replaceAll(".md", ".vi.md"),
+    });
+
+    const text = result.attempts[0]?.text ?? result.refused[0]?.text ?? "";
+    // The ignored block came back verbatim; only content outside it was localised.
+    expect(text).toContain("[hướng dẫn](docs/guide.md)");
+    expect(text).toContain("[liên kết](docs/other.vi.md)");
+  });
+});

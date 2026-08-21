@@ -24,6 +24,7 @@ function settingsWith(maxRequests: number | null): Settings {
     stateBranch: "reeve/provenance",
     glossaryDir: ".reeve/glossary.yml",
     paths: [],
+    bootstrap: false,
     maxRequests,
     dryRun: false,
     baseUrl: "https://example.invalid",

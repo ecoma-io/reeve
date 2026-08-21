@@ -73,17 +73,32 @@ describe("buildPrBody", () => {
   }
 
   it("includes the document group id", () => {
-    const body = buildPrBody({ group, drafts: new Map([["vi", draft()]]), conflicts: [] });
+    const body = buildPrBody({
+      group,
+      drafts: new Map([["vi", draft()]]),
+      conflicts: [],
+      created: [],
+    });
     expect(body).toContain("`docs/getting-started`");
   });
 
   it("lists each updated locale", () => {
-    const body = buildPrBody({ group, drafts: new Map([["vi", draft()]]), conflicts: [] });
+    const body = buildPrBody({
+      group,
+      drafts: new Map([["vi", draft()]]),
+      conflicts: [],
+      created: [],
+    });
     expect(body).toContain("`vi`: translation updated");
   });
 
   it("omits the conflicts section when there are none", () => {
-    const body = buildPrBody({ group, drafts: new Map([["vi", draft()]]), conflicts: [] });
+    const body = buildPrBody({
+      group,
+      drafts: new Map([["vi", draft()]]),
+      conflicts: [],
+      created: [],
+    });
     expect(body).not.toContain("Conflicts");
   });
 
@@ -92,13 +107,34 @@ describe("buildPrBody", () => {
       group,
       drafts: new Map([["vi", draft()]]),
       conflicts: ["zh"],
+      created: [],
     });
     expect(body).toContain("Conflicts (not overwritten)");
     expect(body).toContain("`zh`: human edit since last sync");
   });
 
+  it("calls out a created locale as an initial translation needing review", () => {
+    const body = buildPrBody({
+      group,
+      drafts: new Map([
+        ["vi", draft()],
+        ["zh", draft()],
+      ]),
+      conflicts: [],
+      created: ["zh"],
+    });
+    expect(body).toContain("`vi`: translation updated");
+    expect(body).toContain("`zh`: **initial translation created**");
+    expect(body).toContain("needs native-speaker review");
+  });
+
   it("includes the marker for idempotency", () => {
-    const body = buildPrBody({ group, drafts: new Map([["vi", draft()]]), conflicts: [] });
+    const body = buildPrBody({
+      group,
+      drafts: new Map([["vi", draft()]]),
+      conflicts: [],
+      created: [],
+    });
     // The marker is a comment: <!-- reeve:harmonise source=... -->
     expect(body).toContain("reeve:harmonise");
   });
