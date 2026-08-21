@@ -69,7 +69,13 @@ name: Reeve
 # for prompt scaffolding and the answer where the output is short (triage,
 # respond, duplicate, review). From that:
 #
-#   review     — 1.8M chars of input, split 2:1 across diff and context.
+#   review     — runs in AGENTIC mode, where the sizing question changes
+#                shape: the diff is served by tool, bounded by the loop's own
+#                round and pull budgets rather than by a character cap, so
+#                `max-diff-chars` prices nothing here (it is kept only as the
+#                value a flip back to assembled would need). What this number
+#                still governs is the assembled context beside the diff:
+#                600k chars.
 #   triage,    — 1.5M chars of body; the verdict itself is a handful of tokens.
 #   respond
 #   duplicate  — 150k chars PER BODY, deliberately a fraction of the others:
@@ -632,6 +638,14 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
+          # The first duty dogfooded in agentic mode: the diff is served by
+          # read-only tools rather than embedded, so the model pages through
+          # what this diff makes worth reading instead of spending one budget
+          # in listing order. `max-diff-chars` prices nothing on this path and
+          # is kept only so flipping the mode back does not silently starve
+          # the review down to the 12k default. `max-context-chars` still
+          # bounds the assembled sections, which agentic mode does not replace.
+          review-mode: agentic
           max-diff-chars: "1200000"
           max-context-chars: "600000"
 
