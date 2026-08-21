@@ -25,6 +25,7 @@ import {
   type Provider,
   type RoutedEndpoint,
   type Success,
+  type ToolDefinition,
 } from "./provider.js";
 
 // `fetch` is the platform, not a collaborator of this project, so it is
@@ -1229,5 +1230,148 @@ describe("assembleClient", () => {
     await stages.draft.complete("a", []);
 
     expect(lastRequest().body).not.toHaveProperty("temperature");
+  });
+});
+
+describe("tool calling", () => {
+  const TOOLS: readonly ToolDefinition[] = [
+    {
+      name: "read_diff",
+      description: "Read one changed file's patch.",
+      parameters: { type: "object", properties: { path: { type: "string" } } },
+    },
+  ];
+
+  function calling(
+    calls: readonly { id: string; name: string; arguments: string }[],
+    content: string | null = null,
+  ): Response {
+    return json({
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content,
+            tool_calls: calls.map((call) => ({
+              id: call.id,
+              type: "function",
+              function: { name: call.name, arguments: call.arguments },
+            })),
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    });
+  }
+
+  it("sends the tools under the wire's function wrapper, only when offered", async () => {
+    fetchMock.mockResolvedValue(answering("hi"));
+    await subject().complete("m", HELLO, { tools: TOOLS });
+    expect(lastRequest().body.tools).toEqual([
+      {
+        type: "function",
+        function: {
+          name: "read_diff",
+          description: "Read one changed file's patch.",
+          parameters: { type: "object", properties: { path: { type: "string" } } },
+        },
+      },
+    ]);
+
+    await subject().complete("m", HELLO);
+    expect(lastRequest().body).not.toHaveProperty("tools");
+
+    await subject().complete("m", HELLO, { tools: [] });
+    expect(lastRequest().body).not.toHaveProperty("tools");
+  });
+
+  it("wires assistant tool calls and tool results under their snake_case names", async () => {
+    fetchMock.mockResolvedValue(answering("done"));
+    await subject().complete(
+      "m",
+      [
+        { role: "user", content: "review this" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "c1", name: "read_diff", arguments: '{"path":"a.ts"}' }],
+        },
+        { role: "tool", content: "the patch", toolCallId: "c1" },
+      ],
+      { tools: TOOLS },
+    );
+    const messages = lastRequest().body.messages as Record<string, unknown>[];
+    expect(messages[1]).toEqual({
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "c1",
+          type: "function",
+          function: { name: "read_diff", arguments: '{"path":"a.ts"}' },
+        },
+      ],
+    });
+    expect(messages[2]).toEqual({ role: "tool", content: "the patch", tool_call_id: "c1" });
+    // A plain message stays the exact two-key shape this provider always sent.
+    expect(messages[0]).toEqual({ role: "user", content: "review this" });
+  });
+
+  it("reads a tool-calling answer with null content as a success, not a protocol failure", async () => {
+    fetchMock.mockResolvedValue(
+      calling([{ id: "c1", name: "read_diff", arguments: '{"path":"a.ts"}' }]),
+    );
+    const success = expectSuccess(await subject().complete("m", HELLO, { tools: TOOLS }));
+    expect(success.toolCalls).toEqual([
+      { id: "c1", name: "read_diff", arguments: '{"path":"a.ts"}' },
+    ]);
+    expect(success.content).toBe("");
+    expect(success.finishReason).toBe("tool_calls");
+  });
+
+  it("refuses a tool-calling answer on a request that never offered tools", async () => {
+    // Without tools in the request, the parser stays byte-identical to what it
+    // always was: null content is a protocol failure, whatever else the
+    // provider stuffed into the message.
+    fetchMock.mockResolvedValue(calling([{ id: "c1", name: "read_diff", arguments: "{}" }]));
+    const failure = expectFailure(await subject().complete("m", HELLO));
+    expect(failure.kind).toBe("protocol");
+    expect(failure.reason).toContain("not a string");
+  });
+
+  it("refuses a half-readable tool_calls array whole", async () => {
+    fetchMock.mockResolvedValue(
+      json({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "c1", type: "function", function: { name: 42 } }],
+            },
+          },
+        ],
+      }),
+    );
+    const failure = expectFailure(await subject().complete("m", HELLO, { tools: TOOLS }));
+    expect(failure.kind).toBe("protocol");
+    expect(failure.reason).toContain("tool_calls");
+  });
+
+  it("reads a direct content answer on a tools request as the model declining to call", async () => {
+    fetchMock.mockResolvedValue(answering('{"findings": [], "confidence": 0.9}'));
+    const success = expectSuccess(await subject().complete("m", HELLO, { tools: TOOLS }));
+    expect(success.toolCalls).toBeUndefined();
+    expect(success.content).toBe('{"findings": [], "confidence": 0.9}');
+  });
+
+  it("an empty tool_calls array falls through to the ordinary content checks", async () => {
+    fetchMock.mockResolvedValue(
+      json({
+        choices: [{ message: { role: "assistant", content: null, tool_calls: [] } }],
+      }),
+    );
+    const failure = expectFailure(await subject().complete("m", HELLO, { tools: TOOLS }));
+    expect(failure.kind).toBe("protocol");
   });
 });

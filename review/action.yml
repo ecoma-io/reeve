@@ -142,6 +142,24 @@ inputs:
     required: false
     default: pr
 
+  review-mode:
+    description: >-
+      How the diff reaches the model. `assembled` — the default — embeds it
+      under the character budgets exactly as this duty always has, and is the
+      only mode a model without tool support can serve. `agentic` serves the
+      diff through three read-only tools instead: the model lists the changed
+      files, pages through the patches it judges worth reading, and reads
+      base-branch context on demand — so `max-diff-chars` prices nothing and
+      no file is ever skipped as capped. The loop is bounded (rounds, calls
+      per round, a whole-run pull budget), every tool answer is fenced and
+      traced, a loop that dies mid-read is a failed pass rather than a
+      partial verdict, and a roster that cannot speak tools falls back to the
+      assembled prompt per pass. Tools are reads through the same containment
+      and secret gates every context read passes; no mode changes what the
+      warrant grants.
+    required: false
+    default: assembled
+
   max-diff-chars:
     description: >-
       The whole-run budget of diff text one review may carry to the model, in

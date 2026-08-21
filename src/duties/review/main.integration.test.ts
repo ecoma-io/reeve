@@ -1648,6 +1648,126 @@ describe("the action", () => {
     expect(run.summary).toContain("package-lock.json");
   });
 
+  it("agentic mode serves the diff by tool and posts a diff-proven finding", async () => {
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        if (reviewAsks === 1) {
+          // The model asks for the diff instead of receiving it embedded.
+          return {
+            status: 200,
+            payload: {
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [
+                      {
+                        id: "c1",
+                        type: "function",
+                        function: {
+                          name: "read_diff",
+                          arguments: JSON.stringify({ path: "src/a.ts" }),
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+              usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+            },
+          };
+        }
+        return saying(
+          JSON.stringify({
+            findings: [
+              {
+                rule: "dedup",
+                severity: "warning",
+                path: "src/a.ts",
+                line: 13,
+                snippet: "const two = 2;",
+                body: "This repeats the constant above.",
+              },
+            ],
+            confidence: 0.9,
+          }),
+        );
+      },
+    });
+
+    const run = await runAction(stub, { "review-mode": "agentic" });
+
+    expect(run.code).toBe(0);
+    expect(reviewAsks).toBe(2);
+    expect(run.outputs.findings).toBe("1");
+    expect(stub.comments[0]?.body).toContain("New findings (1)");
+    // The prompt carried no patch — the tool briefing replaced the diff block —
+    // and the finding still had to cite a line read_diff proved.
+    const agenticAsk = stub.asked.find((ask) => ask.system.includes("served by your tools"));
+    expect(agenticAsk).toBeDefined();
+    expect(agenticAsk?.user).not.toContain("const two = 2;");
+    // The run can answer what it looked at: the log names the served call and
+    // the summary carries the aggregate row.
+    expect(run.log).toContain("served read_diff");
+    expect(run.summary).toContain("Tool calls");
+  });
+
+  it("agentic mode falls back to the assembled prompt when the roster cannot speak tools", async () => {
+    let reviewAsks = 0;
+    stub.answer = stageAnswer({
+      review: () => {
+        reviewAsks += 1;
+        if (reviewAsks === 1) {
+          // A model that cannot speak tools: no tool_calls and no readable
+          // content — a protocol failure, which is what arms the fallback.
+          return {
+            status: 200,
+            payload: {
+              choices: [{ message: { role: "assistant", content: null } }],
+              usage: { prompt_tokens: 10, completion_tokens: 0, total_tokens: 10 },
+            },
+          };
+        }
+        return saying(
+          JSON.stringify({
+            findings: [
+              {
+                rule: "dedup",
+                severity: "warning",
+                path: "src/a.ts",
+                line: 13,
+                snippet: "const two = 2;",
+                body: "This repeats the constant above.",
+              },
+            ],
+            confidence: 0.9,
+          }),
+        );
+      },
+    });
+
+    const run = await runAction(stub, { "review-mode": "agentic" });
+
+    expect(run.code).toBe(0);
+    expect(reviewAsks).toBe(2);
+    expect(run.outputs.findings).toBe("1");
+    expect(stub.comments[0]?.body).toContain("New findings (1)");
+    // The retry embedded the diff the way the assembled path always has.
+    const assembledAsk = stub.asked.find((ask) => ask.system.includes("whole universe"));
+    expect(assembledAsk).toBeDefined();
+    expect(assembledAsk?.user).toContain("const two = 2;");
+  });
+
+  it("refuses an unknown review-mode red rather than guessing", async () => {
+    const run = await runAction(stub, { "review-mode": "turbo" });
+    expect(run.code).not.toBe(0);
+    expect(run.log).toContain("review-mode");
+  });
+
   it("withholds a high-risk all-clear when its adversarial pass fails", async () => {
     stub.pull.files = [
       {

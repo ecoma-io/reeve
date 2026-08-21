@@ -34,6 +34,8 @@
 import { enclose } from "../../core/enclose.js";
 import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
+import { agenticAnswer } from "./agentic.js";
+import type { ToolBudget, ToolExecutor } from "./tools.js";
 import type { RawFinding } from "./findings.js";
 import type { ShownFile } from "./pr.js";
 import type { Rule } from "./rules.js";
@@ -65,6 +67,13 @@ export interface PassContext {
    * awareness only — a finding must still name a diff file and a proven line.
    */
   readonly tests?: string;
+  /**
+   * True when this run serves the diff through tools instead of embedding it:
+   * the prompt then carries a file listing and the tool briefing, and the
+   * loop in `agentic.ts` pages the patches on demand. The parse contract is
+   * unchanged — a finding still has to cite a file and a proven line.
+   */
+  readonly agentic?: boolean;
 }
 
 /** One named, independently configurable review stage. */
@@ -167,6 +176,18 @@ const SEVERITY_ORDER: Record<ReviewFinding["severity"], number> = {
 };
 
 /**
+ * What an agentic run threads into `runPasses`: a fresh executor per model
+ * attempt (one model, one conversation, one budget — no attempt inherits
+ * another's spend), the loop bounds, and the report hook the caller uses to
+ * trace what each attempt read.
+ */
+export interface AgenticSupport {
+  makeExecutor(): ToolExecutor;
+  readonly budget: ToolBudget;
+  report(passId: string, model: string, executor: ToolExecutor): void;
+}
+
+/**
  * Runs every pass in order, each against its own roster rotation.
  *
  * A pass whose roster is exhausted, or whose one readable answer does not
@@ -180,15 +201,50 @@ export async function runPasses(
   models: readonly string[],
   context: PassContext,
   weather?: Weather,
+  agentic?: AgenticSupport,
 ): Promise<PassResult[]> {
   const results: PassResult[] = [];
   for (const pass of passes) {
     const roster = pass.models.length > 0 ? pass.models : models;
-    const rotation = await rotateModels(
+    let rotation = await rotateModels(
       roster,
-      (model) => answer(provider, model, pass.prompt(context)),
+      (model) => {
+        if (agentic === undefined) return answer(provider, model, pass.prompt(context));
+        const executor = agentic.makeExecutor();
+        return agenticAnswer(provider, model, pass.prompt(context), executor, agentic.budget).then(
+          (completion) => {
+            agentic.report(pass.id, model, executor);
+            return completion;
+          },
+        );
+      },
       weather,
     );
+    let parseContext = context;
+    // The assembled fallback the doctrine promises: when every agentic attempt
+    // failed on PROTOCOL — a model that rejects the tools field, answers
+    // unreadably around them, or burns its rounds — the same pass runs once
+    // more the way it always has, diff embedded, no tools. Capacity failures
+    // deliberately do not trigger it: weather is weather on both paths, and a
+    // starved roster retried assembled would only be billed twice for the
+    // same storm.
+    if (
+      agentic !== undefined &&
+      !rotation.success &&
+      rotation.failures.length > 0 &&
+      rotation.failures.every((failure) => failure.kind === "protocol")
+    ) {
+      const assembled: PassContext = { ...context, agentic: false };
+      const retry = await rotateModels(
+        roster,
+        (model) => answer(provider, model, pass.prompt(assembled)),
+        weather,
+      );
+      if (retry.success) {
+        rotation = retry;
+        parseContext = assembled;
+      }
+    }
     if (!rotation.success) {
       results.push({
         pass,
@@ -199,7 +255,7 @@ export async function runPasses(
       });
       continue;
     }
-    const verdict = pass.parse(rotation.success.content, context.files);
+    const verdict = pass.parse(rotation.success.content, parseContext.files);
     results.push({
       pass,
       // An unreadable answer stays null — never dressed up as a readable
@@ -302,15 +358,28 @@ function material(
       `TITLE: ${prTitle}`,
       prBody.length === 0 ? "" : `BODY:\n${prBody}`,
       "",
-      "--- DIFF (new-file lines proven; every line number a finding cites must be one of these) ---",
-      ...files.map(
-        (file) =>
-          `### ${file.path} (${file.status})\n` +
-          (file.additions + file.deletions === 0
-            ? ""
-            : `+${String(file.additions)} -${String(file.deletions)}\n`) +
-          patchExcerpt(file.patch),
-      ),
+      ...(context.agentic === true
+        ? [
+            "--- CHANGED FILES (diffs served by your tools; call list_changed_files, then read_diff) ---",
+            ...files.map(
+              (file) =>
+                `${file.path} (${file.status})` +
+                (file.additions + file.deletions === 0
+                  ? ""
+                  : ` +${String(file.additions)} -${String(file.deletions)}`),
+            ),
+          ]
+        : [
+            "--- DIFF (new-file lines proven; every line number a finding cites must be one of these) ---",
+            ...files.map(
+              (file) =>
+                `### ${file.path} (${file.status})\n` +
+                (file.additions + file.deletions === 0
+                  ? ""
+                  : `+${String(file.additions)} -${String(file.deletions)}\n`) +
+                patchExcerpt(file.patch),
+            ),
+          ]),
       ...(prior !== undefined && prior.length > 0
         ? [
             "",
@@ -351,8 +420,17 @@ function material(
           ? "The pull request's language could not be identified from the languages this project reads."
           : `The pull request, its threads and your findings should be written in ${language}.`,
         "",
-        `The diff below is the whole universe of this review — every finding must name one of its ` +
-          `files and one of its proven new-file line numbers.`,
+        context.agentic === true
+          ? [
+              "The diff is served by your tools: `list_changed_files` names every changed file,",
+              "`read_diff` pages through one file's patch — the only source of line numbers a",
+              "finding may cite — and `read_file` reads base-branch context as evidence. Read",
+              "what you need before answering, then answer with the JSON object alone. Every",
+              "tool result arrives fenced the same way as the block below, each under its own",
+              "fresh id — the same boundary rules apply to every such fence.",
+            ].join("\n")
+          : `The diff below is the whole universe of this review — every finding must name one of its ` +
+            `files and one of its proven new-file line numbers.`,
         "",
         "The repository's own review rules are:",
         ...rules.flatMap((rule) => [

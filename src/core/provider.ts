@@ -40,8 +40,38 @@ import { metered, type Meter, type Purpose } from "./meter.js";
 
 /** A chat message, in the only two roles Reeve sends. */
 export interface Message {
-  readonly role: "system" | "user";
+  readonly role: "system" | "user" | "assistant" | "tool";
   readonly content: string;
+  /**
+   * Set on an assistant message that carried tool calls, replayed verbatim on
+   * the next request so the conversation the provider sees stays valid. Absent
+   * everywhere else — a plain message wires exactly as it always has.
+   */
+  readonly toolCalls?: readonly ToolCall[];
+  /** Set on a `tool` message: which of the assistant's calls this result answers. */
+  readonly toolCallId?: string;
+}
+
+/**
+ * One tool a caller offers the model — the chat-completions function shape
+ * minus its `{type: "function"}` wrapper, which `complete` adds at the wire.
+ */
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema for the arguments object, sent verbatim. */
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * One call the model asked for. `arguments` stays the raw string the model
+ * wrote: parsing it is the caller's job, done strictly, so a malformed
+ * argument fails one tool result rather than the whole completion.
+ */
+export interface ToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
 }
 
 /**
@@ -75,6 +105,14 @@ export interface Success {
    */
   readonly usage?: Usage | null;
   readonly content: string;
+  /**
+   * The calls the model asked for, present only when the request offered
+   * tools and the answer carried a readable `tool_calls` array. `content` is
+   * then whatever string came alongside, or "" when the provider sent none —
+   * a tool-calling answer with no prose is the ordinary case, not a protocol
+   * failure.
+   */
+  readonly toolCalls?: readonly ToolCall[];
   /**
    * The provider's `finish_reason`, verbatim, or null when it sent none.
    *
@@ -136,6 +174,15 @@ export interface CompletionOptions {
    * default at all.
    */
   readonly temperature?: number;
+  /**
+   * Tools offered to the model, sent only when non-empty — a request without
+   * them is byte-identical to what this provider has always sent, so a model
+   * that rejects the `tools` field is only ever asked for it by a caller that
+   * chose to. A model that ignores the field and answers with content anyway
+   * is a valid answer, not a failure — the caller reads `toolCalls` absence
+   * as "the model answered directly".
+   */
+  readonly tools?: readonly ToolDefinition[];
 }
 
 export interface Provider {
@@ -329,11 +376,24 @@ export function createProvider(config: ProviderConfig): Provider {
 
   return {
     async complete(model, messages, options) {
+      const tools = options?.tools ?? [];
       const body = JSON.stringify({
         model,
-        messages,
+        messages: messages.map(wireMessage),
         stream: false,
         ...(options?.temperature === undefined ? {} : { temperature: options.temperature }),
+        ...(tools.length === 0
+          ? {}
+          : {
+              tools: tools.map((tool) => ({
+                type: "function",
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.parameters,
+                },
+              })),
+            }),
       });
 
       let response: Response;
@@ -380,7 +440,7 @@ export function createProvider(config: ProviderConfig): Provider {
         };
       }
 
-      return readCompletion(model, response.status, text);
+      return readCompletion(model, response.status, text, tools.length > 0);
     },
   };
 }
@@ -560,7 +620,56 @@ export function assembleClient<P extends Purpose>(
  * Turns a response body into a verdict. Separate from the request so the order
  * of the checks — body before status — is testable on its own.
  */
-function readCompletion(model: string, status: number, text: string): Completion {
+/**
+ * One message as the wire wants it. A plain system/user message maps to the
+ * exact `{role, content}` shape this provider has always sent; the assistant
+ * and tool roles carry their chat-completions extras under the wire's own
+ * snake_case names, which is why the mapping exists at all — serialising a
+ * `Message` directly would leak this codebase's camelCase into the protocol.
+ */
+function wireMessage(message: Message): Record<string, unknown> {
+  const base: Record<string, unknown> = { role: message.role, content: message.content };
+  if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
+    base.tool_calls = message.toolCalls.map((call) => ({
+      id: call.id,
+      type: "function",
+      function: { name: call.name, arguments: call.arguments },
+    }));
+  }
+  if (message.toolCallId !== undefined) base.tool_call_id = message.toolCallId;
+  return base;
+}
+
+/**
+ * The `tool_calls` array of a message, strictly read: every entry has to
+ * carry a string id, a string function name and string arguments, or the
+ * whole array is refused as unreadable — a half-parsed call list would have
+ * the caller answering calls the model never made.
+ */
+function readToolCalls(raw: unknown): readonly ToolCall[] | null {
+  const list = asArray(raw);
+  if (list === null) return null;
+  const out: ToolCall[] = [];
+  for (const entry of list) {
+    const record = asRecord(entry);
+    const fn = asRecord(record?.function);
+    const id = record?.id;
+    const name = fn?.name;
+    const args = fn?.arguments;
+    if (typeof id !== "string" || typeof name !== "string" || typeof args !== "string") {
+      return null;
+    }
+    out.push({ id, name, arguments: args });
+  }
+  return out;
+}
+
+function readCompletion(
+  model: string,
+  status: number,
+  text: string,
+  toolsRequested = false,
+): Completion {
   const at = `HTTP ${String(status)}`;
   const kind = classifyStatus(status);
 
@@ -601,6 +710,38 @@ function readCompletion(model: string, status: number, text: string): Completion
   }
 
   const content = asRecord(choice.message)?.content;
+
+  // The tool-calling answer, admitted only on a request that offered tools:
+  // `content` is routinely null then, and refusing it as "not a string" would
+  // make every tool call a protocol failure. On a request that offered no
+  // tools this branch never runs, so every existing path reads byte-identical.
+  if (toolsRequested) {
+    const rawCalls = asRecord(choice.message)?.tool_calls;
+    if (rawCalls !== undefined && rawCalls !== null) {
+      const calls = readToolCalls(rawCalls);
+      if (calls === null) {
+        return {
+          ok: false,
+          model,
+          usage,
+          kind,
+          reason: `${at}: the tool_calls array was not readable`,
+        };
+      }
+      if (calls.length > 0) {
+        const finishReason = choice.finish_reason;
+        return {
+          ok: true,
+          model,
+          usage,
+          content: typeof content === "string" ? content : "",
+          toolCalls: calls,
+          finishReason: typeof finishReason === "string" ? finishReason : null,
+        };
+      }
+    }
+  }
+
   if (typeof content !== "string") {
     // A provider whose `content` is an array of parts, or a reasoning model
     // that put everything in `reasoning_content` and left this empty. Both are
