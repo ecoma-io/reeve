@@ -35332,51 +35332,40 @@ function applyUpdate2(manifestContent, proposal) {
   const newLines = [];
   let replaced = false;
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (!/^FROM\s/i.test(trimmed)) {
+    if (!/^FROM\s/i.test(line.trim())) {
       newLines.push(line);
       continue;
     }
-    if (!line.includes(imageName)) {
+    const rewritten = rewriteImageVersion(line, imageName, oldVersion, newVersion);
+    if (rewritten !== null) {
+      newLines.push(rewritten);
+      replaced = true;
+    } else {
       newLines.push(line);
-      continue;
     }
-    let modifiedLine = line;
-    if (!oldVersion.startsWith("sha256:") && !newVersion.startsWith("sha256:")) {
-      const tagBoundaryPattern = new RegExp(
-        `${escapeRegex2(imageName)}:${escapeRegex2(oldVersion)}(?=[\\s@]|$|[Aa][Ss]\\s)`
-      );
-      const newRef = `${imageName}:${newVersion}`;
-      if (tagBoundaryPattern.test(modifiedLine)) {
-        modifiedLine = modifiedLine.replace(tagBoundaryPattern, newRef);
-        replaced = true;
-      }
-    }
-    if (oldVersion.startsWith("sha256:") && newVersion.startsWith("sha256:")) {
-      const oldRef = `${imageName}@${oldVersion}`;
-      const newRef = `${imageName}@${newVersion}`;
-      if (modifiedLine.includes(oldRef)) {
-        modifiedLine = modifiedLine.replace(oldRef, newRef);
-        replaced = true;
-      }
-    }
-    if (modifiedLine.includes(imageName)) {
-      const tagDigestMatch = new RegExp(`${escapeRegex2(imageName)}:[^@\\s]+@sha256:[a-f0-9]+`).exec(
-        modifiedLine
-      );
-      if (tagDigestMatch !== null && oldVersion.startsWith("sha256:")) {
-        const oldDigest = `@${oldVersion}`;
-        const newDigest = `@${newVersion}`;
-        if (modifiedLine.includes(oldDigest)) {
-          modifiedLine = modifiedLine.replace(oldDigest, newDigest);
-          replaced = true;
-        }
-      }
-    }
-    newLines.push(modifiedLine);
   }
   if (!replaced) return null;
   return newLines.join("\n");
+}
+function rewriteImageVersion(line, imageName, oldVersion, newVersion) {
+  if (!line.includes(imageName)) return null;
+  const oldIsDigest = oldVersion.startsWith("sha256:");
+  const newIsDigest = newVersion.startsWith("sha256:");
+  if (!oldIsDigest && !newIsDigest) {
+    const tagBoundaryPattern = new RegExp(
+      `${escapeRegex2(imageName)}:${escapeRegex2(oldVersion)}(?=[\\s@"']|$|[Aa][Ss]\\s)`
+    );
+    if (!tagBoundaryPattern.test(line)) return null;
+    return line.replace(tagBoundaryPattern, `${imageName}:${newVersion}`);
+  }
+  if (oldIsDigest && newIsDigest) {
+    const oldDigest = `@${oldVersion}`;
+    if (!line.includes(oldDigest)) return null;
+    const digestBelongsToImage = line.includes(`${imageName}${oldDigest}`) || new RegExp(`${escapeRegex2(imageName)}:[^@\\s]+${escapeRegex2(oldDigest)}`).test(line);
+    if (!digestBelongsToImage) return null;
+    return line.replace(oldDigest, `@${newVersion}`);
+  }
+  return null;
 }
 function escapeRegex2(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -35732,34 +35721,20 @@ function applyImageUpdate(manifestContent, proposal) {
   const newLines = [];
   let replaced = false;
   for (const line of lines) {
-    if (parseImageLine(line) === null || !line.includes(imageName)) {
+    if (parseImageLine(line) === null) {
       newLines.push(line);
       continue;
     }
-    let modifiedLine = line;
-    if (!oldVersion.startsWith("sha256:") && !newVersion.startsWith("sha256:")) {
-      const tagBoundaryPattern = new RegExp(
-        `${escapeRegex3(imageName)}:${escapeRegex3(oldVersion)}(?=[\\s@"']|$)`
-      );
-      if (tagBoundaryPattern.test(modifiedLine)) {
-        modifiedLine = modifiedLine.replace(tagBoundaryPattern, `${imageName}:${newVersion}`);
-        replaced = true;
-      }
+    const rewritten = rewriteImageVersion(line, imageName, oldVersion, newVersion);
+    if (rewritten !== null) {
+      newLines.push(rewritten);
+      replaced = true;
+    } else {
+      newLines.push(line);
     }
-    if (oldVersion.startsWith("sha256:") && newVersion.startsWith("sha256:")) {
-      const oldDigest = `@${oldVersion}`;
-      if (modifiedLine.includes(oldDigest)) {
-        modifiedLine = modifiedLine.replace(oldDigest, `@${newVersion}`);
-        replaced = true;
-      }
-    }
-    newLines.push(modifiedLine);
   }
   if (!replaced) return null;
   return newLines.join("\n");
-}
-function escapeRegex3(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // src/duties/dependa/managers/go.ts

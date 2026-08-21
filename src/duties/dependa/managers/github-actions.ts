@@ -19,7 +19,7 @@
  */
 import type { Dependency, UpdateProposal } from "../model.js";
 import { isSha } from "../semver.js";
-import { parseImageRef } from "./docker.js";
+import { parseImageRef, rewriteImageVersion } from "./docker.js";
 import type { Manager, ManagerId, ManagerResult } from "./types.js";
 
 /** The GitHub Actions manager identifier. */
@@ -289,10 +289,10 @@ function applyUpdate(manifestContent: string, proposal: UpdateProposal): string 
 /**
  * Apply an update to a workflow's `image:`/`container:` line.
  *
- * For tag references: replaces `image:old-tag` with `image:new-tag`, with a
- * boundary check so `node:20` never matches inside `node:20-slim`.
- * For digest references: replaces `@sha256:old` with `@sha256:new` on the
- * matching image's line.
+ * The rewrite grammar (boundary-aware tags, digest-only and tag+digest
+ * forms) lives in `docker.ts`'s `rewriteImageVersion` — one home for the
+ * reference grammar, whichever manifest carries it. This function only
+ * decides which lines are image lines.
  *
  * Returns null when the old reference is not found on any image line.
  */
@@ -306,44 +306,23 @@ function applyImageUpdate(manifestContent: string, proposal: UpdateProposal): st
   let replaced = false;
 
   for (const line of lines) {
-    if (parseImageLine(line) === null || !line.includes(imageName)) {
+    if (parseImageLine(line) === null) {
       newLines.push(line);
       continue;
     }
 
-    let modifiedLine = line;
-
-    // Tag reference: image:old-tag → image:new-tag
-    if (!oldVersion.startsWith("sha256:") && !newVersion.startsWith("sha256:")) {
-      const tagBoundaryPattern = new RegExp(
-        `${escapeRegex(imageName)}:${escapeRegex(oldVersion)}(?=[\\s@"']|$)`,
-      );
-      if (tagBoundaryPattern.test(modifiedLine)) {
-        modifiedLine = modifiedLine.replace(tagBoundaryPattern, `${imageName}:${newVersion}`);
-        replaced = true;
-      }
+    const rewritten = rewriteImageVersion(line, imageName, oldVersion, newVersion);
+    if (rewritten !== null) {
+      newLines.push(rewritten);
+      replaced = true;
+    } else {
+      newLines.push(line);
     }
-
-    // Digest reference: @sha256:old → @sha256:new
-    if (oldVersion.startsWith("sha256:") && newVersion.startsWith("sha256:")) {
-      const oldDigest = `@${oldVersion}`;
-      if (modifiedLine.includes(oldDigest)) {
-        modifiedLine = modifiedLine.replace(oldDigest, `@${newVersion}`);
-        replaced = true;
-      }
-    }
-
-    newLines.push(modifiedLine);
   }
 
   if (!replaced) return null;
 
   return newLines.join("\n");
-}
-
-/** Escape special regex characters in a string. */
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
