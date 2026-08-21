@@ -1,0 +1,22 @@
+# Terms a translation must carry through unchanged — this project's own
+# glossary, read by `harmonise` from this default path (`glossary-dir`).
+#
+# Each key is a term; the value is a note the model sees next to it. A draft
+# that loses a term present in the source is refused outright, so every entry
+# here is a promise: this word stays English in every language we publish.
+# The bar for adding one is that translating it makes the docs *harder* to
+# read — the reader cannot map the translated word back to the identifier,
+# input name, or doctrine term the code and reference pages actually use.
+#
+# README.vi.md and README.zh.md already keep these terms untranslated; this
+# file turns that convention from a habit into a check.
+
+Reeve: The product name. Never translated, never transliterated.
+warrant: The authority file (`.github/reeve.yml`) as a concept. Keep the English term; readers must be able to find it in the reference docs.
+duty: A workload on the runtime (triage, translate, …). Keep the English term wherever it names Reeve's own concept.
+capability: A named effect a warrant grants (`label`, `edit-body`, …). Keep the English term.
+sweep: The backlog-walking mode every sweeping duty shares. Keep the English term — it names an input.
+marker: The idempotency marker a duty publishes into a thread. Keep the English term.
+dry-run: The rehearse-everything-write-nothing mode. Keep the English term — it names an input.
+weather: Provider capacity failure as a category (doctrine D12). Keep the English term; it is a term of art here, not the sky.
+pivot: The language corrections bridge through for cross-language recall. Keep the English term — it names a warrant key.

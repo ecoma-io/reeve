@@ -13,6 +13,15 @@
 
 version: 1
 
+# Chosen on purpose rather than left to each duty's documented default — the
+# same three languages the default would have picked, written down so the
+# runtime stops noticing that nobody decided. The READMEs this repository
+# maintains are exactly these three, so the set is already lived with.
+languages:
+  - en
+  - vi
+  - zh
+
 # Labels and body edits act; comments are granted and not yet taken. This
 # file is the whole authority — the one place a duty is told what it may do,
 # and the workflows below run whatever this block grants, narrowed only by
