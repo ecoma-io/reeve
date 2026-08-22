@@ -131,7 +131,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * deliberate and visible rather than silent — which is the whole difference
  * between a gate that failed and a gate that was never asked.
  */
-const TABLE_FLOOR = 90;
+const TABLE_FLOOR = 93;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -1148,6 +1148,36 @@ export const MUTATIONS = [
     stage: "fast",
     owner: "TL4",
     note: "`ruleName` IS model prose whenever the claimed rule id names no declared rule, so a model that answers with a mention for a rule id and an empty body reaches the rendered alert through the fallback \u2014 past the sanitize the body rung applies.",
+  },
+  {
+    name: "a forged import inside a multi-line construct becomes an edge",
+    file: "src/duties/review/architecture.ts",
+    from: "    carry = scan.carry;",
+    to: "    carry = null;",
+    targets: ["src/duties/review/architecture.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "The scanner restarts at every line again, so a prompt template or a mid-line `/*` comment quoting an import publishes a deterministic finding about an import that does not exist \u2014 a forged edge, on somebody else's pull request.",
+  },
+  {
+    name: "a template literal stops carrying across lines",
+    file: "src/duties/review/architecture.ts",
+    from: '      if (!closed && quote === "`") return { ranges, carry: "template" };',
+    to: '      if (!closed && quote === "\'") return { ranges, carry: "template" };',
+    targets: ["src/duties/review/architecture.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "Only the block-comment half of the carry survives. Every prompt, SQL statement and HTML fragment in this codebase is a template literal, and each one can quote an import that is not one.",
+  },
+  {
+    name: "every architecture breach in a file shares one identity again",
+    file: "src/duties/review/architecture.ts",
+    from: "  const ruleId = `review-arch:${String(violation.ruleIndex)}`;",
+    to: '  const ruleId = "review-arch";',
+    targets: ["src/duties/review/architecture.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "A disposition is keyed to (ruleId, path) and `sameIntention` compares the same pair, so one id for every rule makes every breach in a file one claim: a `wont-fix` on one silences the rest, a new breach of another rule reads as the accepted one having moved, and one thread and one code-scanning alert serve them all.",
   },
 ];
 // ── argv ────────────────────────────────────────────────────────────────────
