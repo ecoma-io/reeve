@@ -131,7 +131,7 @@ const VITEST = join(ROOT, "node_modules", ".bin", "vitest");
  * deliberate and visible rather than silent — which is the whole difference
  * between a gate that failed and a gate that was never asked.
  */
-const TABLE_FLOOR = 81;
+const TABLE_FLOOR = 90;
 
 /**
  * One mutation: the file it edits, the match it replaces, its replacement, the
@@ -1050,6 +1050,104 @@ export const MUTATIONS = [
     stage: "full",
     owner: "TL2",
     note: "A run that cannot read its own login labels, says and closes anyway — and since no marker it posts is recognisable as its own next run, it says the same thing again every run after that.",
+  },
+  // ── the architecture seam, and the two surfaces that carry its findings ──
+  //
+  // These three files are the ones an external architecture tool plugs into
+  // (`ArchEvidence` in `architecture.ts`, and the finding lifecycle and the
+  // code-scanning upload that carry whatever it produces). Every row below
+  // names a regression that leaves a green run and a well-formed comment
+  // behind it: a fabricated finding, a dropped one, an alert that never
+  // closes, or prose that reaches a rendered surface unescorted.
+  {
+    name: "an architecture rule fires in both directions",
+    file: "src/duties/review/architecture.ts",
+    from: "if (!fromOk || !toOk) continue;",
+    to: "if (!fromOk && !toOk) continue;",
+    targets: ["src/duties/review/architecture.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "Direction stops being part of the rule: a `domain \u2192 infrastructure` rule fires on the infrastructure\u2192domain import too, so the reviewer is told the dependency they were told to write is forbidden.",
+  },
+  {
+    name: "a forged import inside a string literal becomes a real edge",
+    file: "src/duties/review/architecture.ts",
+    from: "if (opaque.some((range) => candidate.index >= range.start && candidate.index < range.end)) {",
+    to: "if (opaque.some((range) => candidate.index >= range.start && candidate.index > range.end)) {",
+    targets: ["src/duties/review/architecture.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: 'The injection surface the module doc names: a contributor writes `import x from "../infra/db"` inside a comment or a dependency-injection string and the run publishes a deterministic finding about an import that does not exist.',
+  },
+  {
+    name: "the architecture finding cap drops violations in silence",
+    file: "src/duties/review/architecture.ts",
+    from: "  if (capped) {",
+    to: "  if (!capped) {",
+    targets: ["src/duties/review/architecture.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "D5 inverted at the cap: the run that DID truncate says nothing, and the run that reported everything warns that it did not. A reviewer reading a capped review cannot tell it is partial.",
+  },
+  {
+    name: "a critical architecture rule reports as info",
+    file: "src/duties/review/architecture.ts",
+    from: 'severity: rule?.severity ?? "warning",',
+    to: 'severity: "info",',
+    targets: ["src/duties/review/architecture.test.ts"],
+    stage: "full",
+    owner: "TL4",
+    note: "The rule's declared severity is discarded, so the finding a maintainer marked critical arrives as a note \u2014 below every floor that decides whether the review speaks at all.",
+  },
+  {
+    name: "a finding resolves on model omission alone",
+    file: "src/duties/review/findings.ts",
+    from: "    if (doesNotStand(old)) {",
+    to: "    if (true) {",
+    targets: ["src/duties/review/findings.test.ts", "src/duties/review/findings.lifecycle.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "The churn the reconcile doc spends a paragraph forbidding: a claim the model simply did not re-cite is called resolved, so identical synchronize events walk the same finding through created \u2192 resolved \u2192 reopened with zero code moved.",
+  },
+  {
+    name: "a disposition carries across files",
+    file: "src/duties/review/findings.ts",
+    from: "return a.ruleId === b.ruleId && a.path === b.path;",
+    to: "return a.ruleId === b.ruleId;",
+    targets: ["src/duties/review/findings.test.ts", "src/duties/review/disposition.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "Intention loses the file, so a `wont-fix` a maintainer granted one finding silences the same rule everywhere in the pull request \u2014 an accepted risk in one file becomes an accepted risk in every file.",
+  },
+  {
+    name: "a resolved finding stays in the SARIF upload",
+    file: "src/duties/review/sarif.ts",
+    from: '.filter((entry) => entry.status !== "resolved")',
+    to: ".filter(() => true)",
+    targets: ["src/duties/review/sarif.test.ts", "src/duties/review/sarif.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "Absence IS the resolved rung here \u2014 code scanning closes an alert missing from the newest upload. Keep the resolved finding in and the alert never closes, so the fixed defect stays red forever with no second state machine to blame.",
+  },
+  {
+    name: "model prose reaches code scanning unsanitised",
+    file: "src/duties/review/sarif.ts",
+    from: "    const prose = sanitize(finding.body).trim();",
+    to: "    const prose = finding.body.trim();",
+    targets: ["src/duties/review/sarif.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "The SARIF message is rendered in GitHub's own UI, so it is one more surface an injected diff would love to reach \u2014 mentions, links and directives ride the model's body straight into it.",
+  },
+  {
+    name: "the message's fallback rung ships the model's rule id raw",
+    file: "src/duties/review/sarif.ts",
+    from: "    const named = sanitize(finding.ruleName).trim();",
+    to: "    const named = finding.ruleName.trim();",
+    targets: ["src/duties/review/sarif.adversarial.test.ts"],
+    stage: "fast",
+    owner: "TL4",
+    note: "`ruleName` IS model prose whenever the claimed rule id names no declared rule, so a model that answers with a mention for a rule id and an empty body reaches the rendered alert through the fallback \u2014 past the sanitize the body rung applies.",
   },
 ];
 // ── argv ────────────────────────────────────────────────────────────────────
