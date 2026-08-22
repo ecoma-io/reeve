@@ -12,22 +12,12 @@ import type { Language } from "../../core/languages.js";
 import type { Completion, Provider } from "../../core/provider.js";
 import { draftSyncs } from "./draft.js";
 import type { ClassifiedHunk } from "./classify.js";
+import { scored } from "./checks.testing.js";
 
 const vietnamese: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
 const english: Language = { code: "en", label: "English", scripts: ["Latn"] };
 const chinese: Language = { code: "zh", label: "中文", scripts: ["Han"] };
 const CONFIGURED = [vietnamese, english, chinese];
-
-/** One named check's value off an attempt, so a case can name the measurement. */
-function namedCheck(
-  attempt:
-    { readonly score: { readonly checks: readonly { name: string; value: number }[] } } | undefined,
-  name: string,
-): number {
-  const found = attempt?.score.checks.find((candidate) => candidate.name === name);
-  if (!found) throw new Error(`no ${name} check was reported`);
-  return found.value;
-}
 
 /** An endpoint whose models answer with whatever the case scripted for them. */
 function scripted(answers: Record<string, string | Completion>): Provider {
@@ -123,7 +113,7 @@ describe("draftSyncs", () => {
     });
 
     expect(result.refused).toEqual([]);
-    expect(namedCheck(result.attempts[0], "glossary")).toBe(0);
+    expect(scored(result.attempts[0], "glossary")).toBe(0);
   });
 
   it("admits a faithful draft with glossary terms preserved", async () => {
@@ -189,7 +179,7 @@ describe("draftSyncs", () => {
     });
 
     expect(result.refused).toEqual([]);
-    expect(namedCheck(result.attempts[0], "script")).toBe(0);
+    expect(scored(result.attempts[0], "script")).toBe(0);
   });
 });
 

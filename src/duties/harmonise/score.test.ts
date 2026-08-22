@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Language } from "../../core/languages.js";
 import { scoreDraft } from "./score.js";
+import { scored } from "./checks.testing.js";
 
 /** A Vietnamese language object for test use. */
 const VI: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
@@ -14,16 +15,6 @@ const EN: Language = { code: "en", label: "English", scripts: ["Latn"] };
 const ZH: Language = { code: "zh", label: "中文", scripts: ["Han"] };
 /** All test languages. */
 const LANGUAGES: readonly Language[] = [EN, VI, ZH];
-
-/** One named check's value, so a case can say which measurement it is about. */
-function valueOf(
-  score: { readonly checks: readonly { name: string; value: number }[] },
-  name: string,
-): number {
-  const check = score.checks.find((candidate) => candidate.name === name);
-  if (!check) throw new Error(`no ${name} check was reported`);
-  return check.value;
-}
 
 describe("scoreDraft", () => {
   const original = [
@@ -59,7 +50,7 @@ describe("scoreDraft", () => {
     const draft = original.replace("Reeve", "Quan trị");
     const score = scoreDraft(draft, original, ["Reeve"], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
-    expect(valueOf(score, "glossary")).toBe(0);
+    expect(scored({ score }, "glossary")).toBe(0);
   });
 
   it("scores a draft wholly in the wrong script at zero without refusing it", () => {
@@ -69,7 +60,7 @@ describe("scoreDraft", () => {
     const draft = "# 开始使用\n\n本指南帮助您设置 Reeve。";
     const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
-    expect(valueOf(score, "script")).toBe(0);
+    expect(scored({ score }, "script")).toBe(0);
   });
 
   it("barely moves the rank for a draft that leaked two characters", () => {
@@ -79,7 +70,7 @@ describe("scoreDraft", () => {
     const draft = original.replace("set up Reeve", "thiết lập 等到 Reeve");
     const score = scoreDraft(draft, original, [], original, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
-    expect(valueOf(score, "script")).toBeGreaterThan(0.9);
+    expect(scored({ score }, "script")).toBeGreaterThan(0.9);
   });
 
   it("admits a draft with minor changes", () => {
@@ -223,6 +214,6 @@ describe("scoreDraft on an initial translation (empty original)", () => {
     const draft = "# Bắt đầu\n\nHướng dẫn này giúp bạn thiết lập Quản Gia.";
     const score = scoreDraft(draft, "", ["Reeve"], source, VI, LANGUAGES);
     expect(score.admissible).toBe(true);
-    expect(valueOf(score, "glossary")).toBe(0);
+    expect(scored({ score }, "glossary")).toBe(0);
   });
 });
