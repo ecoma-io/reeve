@@ -190,11 +190,14 @@ in a notice, so state may go stale until the pair is configured. Set
 
 **`glossary-dir` enforces project terms.** `.reeve/glossary.yml` lists terms
 that must not be translated — proper nouns, technical jargon, brand names.
-A draft that replaces a glossary term is a bug, not a creative choice. The
-file is read before every translation, not cached between runs. It is shared
-with [`translate`](translate.md), which reads the same path under the same
-input name and refuses a draft on the same rule — one list, so a term that
-stays English in a committed `README.vi.md` stays English in an issue body too.
+A draft that replaces a glossary term is a bug, not a creative choice, and it
+is ranked down for it — a weighted check, not a refusal, because with one draft
+configured a refusal costs the whole locale rather than one candidate. The file
+is read before every translation, not cached between runs. It is shared with
+[`translate`](translate.md), which reads the same path under the same input
+name and measures a draft on the same rule with the same weight — one list, so
+a term that stays English in a committed `README.vi.md` stays English in an
+issue body too.
 
 **`paths` scopes document groups, not raw files.** When empty, the entire
 repository is scanned for the suffix pattern. When set, a document group is

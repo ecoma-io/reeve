@@ -31861,12 +31861,6 @@ async function loadGlossary(api, at, path, duty) {
     return [];
   }
 }
-function translatedTerm(source, draft, terms) {
-  for (const term of terms) {
-    if (source.includes(term) && !draft.includes(term)) return term;
-  }
-  return null;
-}
 function termsPreserved(source, draft, terms) {
   const relevant = terms.filter((term) => source.includes(term));
   if (relevant.length === 0) return { relevant: 0, preserved: 0, value: 1 };
@@ -32528,17 +32522,17 @@ function bounded(name, raw) {
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
 var matchers = /* @__PURE__ */ new Map();
-function matcher(script, exempt) {
+function matcher(script, exempt, every = false) {
   const names = [script, ...exempt];
   if (!names.every((name) => SCRIPT_NAME.test(name))) return null;
-  const key = names.join(" ");
+  const key = `${every ? "g " : ""}${names.join(" ")}`;
   const cached = matchers.get(key);
   if (cached !== void 0) return cached;
   let compiled;
   try {
     const excluded = exempt.map((name) => `\\p{Script=${name}}`).join("");
     const guard = excluded.length === 0 ? "" : `(?![${excluded}])`;
-    compiled = new RegExp(`${guard}\\p{Script=${script}}`, "u");
+    compiled = new RegExp(`${guard}\\p{Script=${script}}`, every ? "gu" : "u");
   } catch {
     compiled = null;
   }
@@ -32550,6 +32544,23 @@ function isScriptName(script) {
 }
 function containsScript(text2, script, exempt = []) {
   return matcher(script, exempt)?.test(text2) ?? false;
+}
+function countScript(text2, script, exempt = []) {
+  const compiled = matcher(script, exempt, true);
+  if (compiled === null) return 0;
+  let count2 = 0;
+  for (const _ of text2.matchAll(compiled)) count2 += 1;
+  return count2;
+}
+function scriptLeak(source, draft, targetScripts, languages) {
+  for (const language of languages) {
+    for (const script of language.scripts) {
+      if (!containsScript(draft, script, targetScripts)) continue;
+      if (containsScript(source, script, targetScripts)) continue;
+      return { script, chars: countScript(draft, script, targetScripts) };
+    }
+  }
+  return null;
 }
 
 // src/core/languages.ts
@@ -34331,31 +34342,32 @@ function scoreDraft(draft, original, glossaryTerms, source, targetLanguage, lang
       initial ? "identical to the source \u2014 not a translation" : "unchanged from original"
     );
   }
-  const lost = translatedTerm(anchor, draft, glossaryTerms);
-  if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
-  const script = foreignScript(source, draft, targetLanguage, languages);
-  if (script !== null) {
-    return refused(`draft contains \`${script}\` script not in source or target language`);
-  }
   const checks = [
     { name: "code", weight: 4, value: codeCheck(draft, anchor), note: "" },
     { name: "links", weight: 3, value: linkCheck(draft, anchor), note: "" },
     { name: "structure", weight: 2, value: structureCheck(draft, anchor), note: "" },
     { name: "length", weight: 1, value: lengthCheck(draft, anchor), note: "" },
+    // On an initial translation the anchor is the source, so a term the source
+    // carries is one the first draft is measured on too.
     { name: "glossary", weight: 3, value: glossaryCheck(draft, anchor, glossaryTerms), note: "" }
   ];
+  const script = scriptCheck(draft, source, targetLanguage, languages);
+  if (script !== null) checks.push(script);
   return measured(checks);
 }
-function foreignScript(source, draft, to, languages) {
-  for (const language of languages) {
-    for (const script of language.scripts) {
-      if (!containsScript(draft, script, to.scripts)) continue;
-      if (containsScript(source, script, to.scripts)) continue;
-      return script;
-    }
-  }
-  return null;
+function scriptCheck(draft, source, targetLanguage, languages) {
+  const leak = scriptLeak(source, draft, targetLanguage.scripts, languages);
+  if (leak === null) return null;
+  const length = draft.trim().length;
+  const share = length === 0 ? 1 : leak.chars / length;
+  return {
+    name: "script",
+    weight: 3,
+    value: Math.max(0, Math.min(1, 1 - share / WHOLLY_FOREIGN)),
+    note: `${String(leak.chars)} of ${String(length)} characters are ${leak.script}, a script neither the source nor ${targetLanguage.label} uses`
+  };
 }
+var WHOLLY_FOREIGN = 0.25;
 function codeCheck(draft, original) {
   const originalSegs = segments(original).filter((s) => s.kind === "fence" || s.kind === "code");
   const draftSegs = segments(draft).filter((s) => s.kind === "fence" || s.kind === "code");

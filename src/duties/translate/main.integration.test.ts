@@ -1727,21 +1727,29 @@ describe("the glossary", () => {
     stub.files.set(".reeve/glossary.yml", GLOSSARY);
   });
 
-  it("refuses a draft that translated a term, and publishes nothing for that language", async () => {
-    // The whole point of the file: this draft is fluent, keeps the structure,
-    // keeps the length, and is wrong in the one way a reader cannot recover
-    // from — `the authority file` appears nowhere else in this repository, so
-    // nobody reading it can find `warrant:` in the reference docs.
+  it("publishes a draft that translated a term, ranked down rather than refused", async () => {
+    // This draft is fluent, keeps the structure, keeps the length, and is
+    // wrong in the one way a reader cannot recover from — `the authority file`
+    // appears nowhere else in this repository, so nobody reading it can find
+    // `warrant:` in the reference docs.
+    //
+    // It used to be refused for that, and this case used to assert the
+    // consequence in its own name: *publishes nothing for that language*. That
+    // is the trade this change reverses. A refusal only means "take the better
+    // draft" when there is another draft; with one configured it means the
+    // language is absent from the thread, and a reader who gets no Vietnamese
+    // at all is worse off than one who gets Vietnamese saying `tệp thẩm
+    // quyền`. The rank carries the loss now — see `score.ts`.
     stub.answer = translating({ en: LOSING });
 
     const run = await runAction(stub);
 
     expect(run.code).toBe(0);
-    expect(run.log).toContain("was refused — glossary term `Reeve` was translated");
-    expect(run.log).toContain("::warning::#42 en: no model produced a translation this run.");
-    expect(run.outputs.translated).toBe(JSON.stringify([]));
-    expect(run.outputs.skipped).toBe(JSON.stringify(["en"]));
-    expect(stub.body).not.toContain("the authority file");
+    expect(run.log).not.toContain("was refused");
+    expect(run.log).not.toContain("no model produced a translation this run.");
+    expect(run.outputs.translated).toBe(JSON.stringify(["en"]));
+    expect(run.outputs.skipped).toBe(JSON.stringify([]));
+    expect(stub.body).toContain("the authority file");
   });
 
   it("names each term, with its note, in the system message and nowhere else", async () => {

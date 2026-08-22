@@ -208,9 +208,12 @@ Reeve anchors on. The length is kept rather than the bytes deleted, so two runs
 cannot disagree about where the code fences are.
 
 **A draft was thrown out and the log said "still in the source language".** A
-cheap endpoint's most common failure is returning the input, or leaking a phrase
-of a third script into the answer. Both score perfectly on everything else, so
-they are refused outright rather than ranked.
+cheap endpoint's most common failure is returning the input unchanged, which
+scores perfectly on everything else — so it is refused outright rather than
+ranked. Leaking a phrase of a third script into an otherwise sound answer is
+_not_ in that tier: it lowers the `script` check in proportion to how much
+leaked, so a stray proper noun barely moves the rank and a draft written wholly
+in the wrong script scores zero and loses to anything else.
 
 **The label did not trigger my other workflow.** A label applied by
 `GITHUB_TOKEN` does not start a workflow listening on `issues: [labeled]`. GitHub

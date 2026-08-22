@@ -31888,12 +31888,6 @@ async function loadGlossary(api, at, path, duty) {
     return [];
   }
 }
-function translatedTerm(source, draft, terms2) {
-  for (const term of terms2) {
-    if (source.includes(term) && !draft.includes(term)) return term;
-  }
-  return null;
-}
 function termsPreserved(source, draft, terms2) {
   const relevant = terms2.filter((term) => source.includes(term));
   if (relevant.length === 0) return { relevant: 0, preserved: 0, value: 1 };
@@ -32544,17 +32538,17 @@ function bounded(name, raw) {
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
 var matchers = /* @__PURE__ */ new Map();
-function matcher(script, exempt) {
+function matcher(script, exempt, every = false) {
   const names = [script, ...exempt];
   if (!names.every((name) => SCRIPT_NAME.test(name))) return null;
-  const key = names.join(" ");
+  const key = `${every ? "g " : ""}${names.join(" ")}`;
   const cached = matchers.get(key);
   if (cached !== void 0) return cached;
   let compiled;
   try {
     const excluded = exempt.map((name) => `\\p{Script=${name}}`).join("");
     const guard = excluded.length === 0 ? "" : `(?![${excluded}])`;
-    compiled = new RegExp(`${guard}\\p{Script=${script}}`, "u");
+    compiled = new RegExp(`${guard}\\p{Script=${script}}`, every ? "gu" : "u");
   } catch {
     compiled = null;
   }
@@ -32566,6 +32560,23 @@ function isScriptName(script) {
 }
 function containsScript(text2, script, exempt = []) {
   return matcher(script, exempt)?.test(text2) ?? false;
+}
+function countScript(text2, script, exempt = []) {
+  const compiled = matcher(script, exempt, true);
+  if (compiled === null) return 0;
+  let count2 = 0;
+  for (const _ of text2.matchAll(compiled)) count2 += 1;
+  return count2;
+}
+function scriptLeak(source, draft, targetScripts, languages) {
+  for (const language of languages) {
+    for (const script of language.scripts) {
+      if (!containsScript(draft, script, targetScripts)) continue;
+      if (containsScript(source, script, targetScripts)) continue;
+      return { script, chars: countScript(draft, script, targetScripts) };
+    }
+  }
+  return null;
 }
 
 // src/core/languages.ts
@@ -34883,8 +34894,10 @@ var WEIGHTS = {
   links: 3,
   structure: 2,
   length: 1,
-  glossary: 3
+  glossary: 3,
+  script: 3
 };
+var WHOLLY_FOREIGN = 0.25;
 var PLAUSIBLE_LENGTH = {
   shortest: 0.5,
   longest: 2,
@@ -34894,7 +34907,7 @@ var PLAUSIBLE_LENGTH = {
 async function score(request2) {
   const before = outline(request2.source);
   const after = outline(request2.draft);
-  const refusal = await refuse(request2, before, after);
+  const refusal = await refuse(request2, after);
   if (refusal) return refused(refusal);
   const checks = [
     codeCheck(before, after),
@@ -34904,22 +34917,20 @@ async function score(request2) {
   ];
   const glossary = glossaryCheck(request2);
   if (glossary !== null) checks.push(glossary);
+  const script = scriptCheck(request2, before, after);
+  if (script !== null) checks.push(script);
   return measured(checks);
 }
 function terms({ glossary }) {
   return (glossary ?? []).map((entry) => entry.term);
 }
-async function refuse(request2, before, after) {
-  const { source, draft, from, to, languages } = request2;
+async function refuse(request2, after) {
+  const { source, draft, from, to } = request2;
   if (draft.trim().length === 0) return "the draft is empty";
   if (draft.trim() === source.trim()) return "the draft is the source, unchanged";
-  const translated = translatedTerm(source, draft, terms(request2));
-  if (translated !== null) return `glossary term \`${translated}\` was translated`;
   if (closesUnopenedSection(after.prose)) {
     return "the draft closes a `<details>` section it never opened";
   }
-  const leaked = foreignScript(before.prose, after.prose, to, languages);
-  if (leaked !== null) return `the draft carries ${leaked} letters the source never had`;
   if (!from || from.code.toLowerCase() === to.code.toLowerCase()) return null;
   const { language } = await detectLanguage(draft, [from, to]);
   return language?.code === from.code ? `the draft is still in ${from.label}` : null;
@@ -34932,16 +34943,6 @@ function closesUnopenedSection(prose) {
     if (depth < 0) return true;
   }
   return false;
-}
-function foreignScript(source, draft, to, languages) {
-  for (const language of languages) {
-    for (const script of language.scripts) {
-      if (!containsScript(draft, script, to.scripts)) continue;
-      if (containsScript(source, script, to.scripts)) continue;
-      return script;
-    }
-  }
-  return null;
 }
 function outline(markdown) {
   const code = [];
@@ -35023,6 +35024,19 @@ function glossaryCheck(request2) {
     weight: WEIGHTS.glossary,
     value,
     note: `${String(preserved)} of ${String(relevant)} glossary terms carried through unchanged`
+  };
+}
+function scriptCheck(request2, before, after) {
+  const { to, languages } = request2;
+  const leak = scriptLeak(before.prose, after.prose, to.scripts, languages);
+  if (leak === null) return null;
+  const prose = after.prose.trim().length;
+  const share = prose === 0 ? 1 : leak.chars / prose;
+  return {
+    name: "script",
+    weight: WEIGHTS.script,
+    value: Math.max(0, Math.min(1, 1 - share / WHOLLY_FOREIGN)),
+    note: `${String(leak.chars)} of ${String(prose)} characters of prose are ${leak.script}, a script neither the source nor ${to.label} uses`
   };
 }
 var COUNTED = ["headings", "listItems", "tableRows", "blocks"];

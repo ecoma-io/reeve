@@ -18,6 +18,17 @@ const english: Language = { code: "en", label: "English", scripts: ["Latn"] };
 const chinese: Language = { code: "zh", label: "中文", scripts: ["Han"] };
 const CONFIGURED = [vietnamese, english, chinese];
 
+/** One named check's value off an attempt, so a case can name the measurement. */
+function namedCheck(
+  attempt:
+    { readonly score: { readonly checks: readonly { name: string; value: number }[] } } | undefined,
+  name: string,
+): number {
+  const found = attempt?.score.checks.find((candidate) => candidate.name === name);
+  if (!found) throw new Error(`no ${name} check was reported`);
+  return found.value;
+}
+
 /** An endpoint whose models answer with whatever the case scripted for them. */
 function scripted(answers: Record<string, string | Completion>): Provider {
   return {
@@ -92,7 +103,8 @@ describe("draftSyncs", () => {
   it("includes glossary terms in the prompt when provided", async () => {
     // The scripted provider always returns the same text regardless of prompt
     // content, but we can verify the draft was processed correctly when a
-    // glossary is present — a draft that translates a glossary term is refused.
+    // glossary is present — a draft that translates a glossary term is
+    // admitted and scored zero on the glossary check.
     const draftThatTranslatesGlossary = TARGET.replace("Reeve", "Quan trị");
 
     const result = await draftSyncs({
@@ -110,8 +122,8 @@ describe("draftSyncs", () => {
       ignore: true,
     });
 
-    expect(result.attempts).toEqual([]);
-    expect(result.refused[0]?.score.reason).toContain("Reeve");
+    expect(result.refused).toEqual([]);
+    expect(namedCheck(result.attempts[0], "glossary")).toBe(0);
   });
 
   it("admits a faithful draft with glossary terms preserved", async () => {
@@ -158,7 +170,7 @@ describe("draftSyncs", () => {
     expect(result.attempts[0]?.model).toBe("model-a");
   });
 
-  it("refuses a draft in the wrong script for the target", async () => {
+  it("scores a draft in the wrong script for the target at zero, without refusing", async () => {
     const chineseDraft = "# 开始使用\n\n本指南帮助您设置 Reeve。";
 
     const result = await draftSyncs({
@@ -176,8 +188,8 @@ describe("draftSyncs", () => {
       ignore: true,
     });
 
-    expect(result.attempts).toEqual([]);
-    expect(result.refused[0]?.score.reason).toContain("script");
+    expect(result.refused).toEqual([]);
+    expect(namedCheck(result.attempts[0], "script")).toBe(0);
   });
 });
 

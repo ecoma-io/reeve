@@ -180,11 +180,14 @@ appears nowhere else in the repository for a reader to map it back to.
 
 Every draft is asked to carry these terms through unchanged, and then checked
 for it rather than trusted. A draft whose source used a term and whose answer
-does not is **refused** — inadmissible, out of the ranking entirely, the same
-tier as a draft that came back in the source language — and what survives is
-measured as its own weighted check beside code, links, structure and length.
-Matching is a case-sensitive literal substring, so `Reeve` and `reeve` are two
-terms and a glossary that means both says both.
+does not is **ranked down** for it — its own weighted check beside code, links,
+structure, length and script — rather than refused. That is a deliberate
+narrowing: it used to be inadmissible, and with `drafts: 1` an inadmissible
+draft is not a candidate replaced by a better one, it is the language missing
+from the thread. A translation that renders `capability` as an ordinary word is
+worse than one that does not, and much better than nothing. Matching is a
+case-sensitive literal substring, so `Reeve` and `reeve` are two terms and a
+glossary that means both says both.
 
 The check runs **per chunk, against that chunk's own source**, because each
 chunk is drafted and scored on its own: a term that appears in the third chunk
@@ -197,8 +200,8 @@ triggered the workflow, and a missing file is not an error: it means this
 project has no protected terms, which is the common case, and nothing about a
 glossary reaches the prompt at all. It is the same file
 [`harmonise`](harmonise.md) reads — same default path, same grammar, same
-refusal — so a term that stays English in a committed `README.vi.md` stays
-English in the issue body beside it.
+check and same weight — so a term that stays English in a committed
+`README.vi.md` stays English in the issue body beside it.
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
