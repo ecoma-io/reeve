@@ -249,6 +249,94 @@ on a diff. Filtering the report to files the pull request touched is the obvious
 answer and it is a decision, because a boundary broken elsewhere by this branch's
 rename is precisely the finding a diff-scoped filter drops.
 
+## What the exercise found in Lattice itself
+
+Three findings, each reproduced on a workspace of four files rather than on this
+one, so each stands without reading Reeve. Lattice is `0.11.1` throughout.
+They are recorded here because they bound what axis A can promise: the first
+one decides whether a green `lattice check` means anything in a repository
+shaped like this one.
+
+### 1. A suppression removes the checks that would have followed it
+
+Two projects, `core` tagged `layer:core` and `feature` tagged `layer:feature`,
+one rule — `layer:core` may only depend on `layer:core` — and one forbidden
+import, `libs/core/index.ts` reaching into `libs/feature`. Three runs over the
+same tree:
+
+| run | how the import is spelled | suppressions                                     | verdict                                              |
+| --- | ------------------------- | ------------------------------------------------ | ---------------------------------------------------- |
+| 1   | `"../feature/index.js"`   | none                                             | `noRelativeOrAbsoluteImportsAcrossLibraries`, exit 1 |
+| 2   | `"../feature/index.js"`   | that one message id, `path: "**"`, with a reason | **`✔ no boundary violations`, exit 0**               |
+| 3   | `"@acme/feature"`         | none                                             | `onlyTagsConstraintViolation`, exit 1                |
+
+Run 3 proves the edge really is forbidden. Run 2 is the same edge, still in the
+tree, still counted by the run (`1 import in 2 files across 2 projects`), and
+the envelope says `coverage.complete: true` with `blindSpots: []`.
+
+The ordering itself is documented and deliberate — path spelling is judged
+before the constraint table, and the reference page tells you that fixing the
+reported problem makes the next id appear at the same line. The gap is that a
+**suppression does not behave like a fix.** The policy schema says a suppression
+"removes a verdict, never a failure" and that the file "is still fully
+analyzed"; empirically it removes the verdict _and_ every check the site had
+not reached yet. `waivers` cannot see the difference either — it reports the
+row as "hiding 1 violation", when what the row actually costs is the whole
+constraint table for every cross-project edge in the workspace.
+
+For a repository that spells cross-project imports relatively — any
+single-package repository, this one included — the documented, validated,
+reason-bearing move is the one that turns the gate off in silence.
+
+Either behaviour would close it: let a suppressed site fall through to the
+checks below it, or record the skipped evaluations so `coverage.complete`
+cannot read `true` while a declared rule went unevaluated.
+
+### 2. A dead waiver is exit 3 in one form and silent in the other
+
+A `coverage.exempt` row matching nothing refuses the run outright, and says
+exactly why:
+
+```text
+lattice: lattice.json describes a workspace that does not match the tree:
+  coverage.exempt: 'src/gone/**' matches no unclaimed file — either the files it
+  covered are now owned by a project, or the path was never right
+```
+
+A `boundarySuppressions` row matching nothing does not reach `check` at all.
+Only `waivers` — a descriptive command that never exits non-zero, and so never
+runs in a gate — names it, as "covers nothing right now".
+
+Both rows are the same kind of declaration: an accepted breach, written down
+with a reason. The one that hides a verdict gets the weaker treatment. The
+`messageId` field on the same row is already validated to the letter (a typo is
+exit 3, listing all fifteen valid ids), so the shape of a suppression is
+checked far more strictly than its effect.
+
+### 3. A file `coverage.exempt` legitimises cannot be imported
+
+`coverage.exempt` is the documented answer for a tracked, analyzable file that
+sits outside every project root — the getting-started walkthrough uses it for
+the boundary config itself. Exempt such a file and import it from a project,
+and the run fails:
+
+```text
+libs/core/index.ts:1:25  noRelativeOrAbsoluteExternals
+    External resources cannot be imported using a relative or absolute path
+  import      "../version.js" (static)  core → (unresolved)
+```
+
+The file is tracked, inside the workspace, and named in `lattice.json`; calling
+it an external resource is the one description that is not true of it. Nor is
+there a configuration that makes the import legal: declaring a parent project
+to own it is accepted — nested roots are allowed — but only converts the
+finding into `noRelativeOrAbsoluteImportsAcrossLibraries`, which is finding 1's
+wall from the other side. So the feature that answers the coverage question
+creates a boundary question with no answer but a suppression.
+
+This is not hypothetical here: `src/refusal.ts` holds the duty roster that
+`src/core` and `src/doctor` both read, and it produced five of these.
+
 ## What this note does not decide
 
 - Whether the ~500-import alias refactor is worth its review cost, and whether
