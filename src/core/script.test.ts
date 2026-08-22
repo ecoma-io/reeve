@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { containsScript, isScriptName } from "./script.js";
+import { containsScript, countScript, isScriptName, scriptLeak } from "./script.js";
 
 describe("isScriptName", () => {
   it("accepts Unicode script long names and their four-letter aliases", () => {
@@ -122,5 +122,72 @@ describe("containsScript", () => {
     expect(containsScript(japanese, "Hiragana")).toBe(true);
     expect(containsScript(chinese, "Hiragana")).toBe(false);
     expect(containsScript(chinese, "Han")).toBe(true);
+  });
+});
+
+describe("countScript", () => {
+  it("counts the characters of a script rather than answering whether there are any", () => {
+    // The whole reason it exists beside `containsScript`: "a stray character"
+    // and "the wrong language" both answer true to that one, and they are not
+    // the same defect. A rule that cannot tell them apart has to treat the
+    // first as the second.
+    expect(countScript("Fix the 构建 failure", "Han", ["Latin"])).toBe(2);
+    expect(countScript("路径中包含空格时构建失败", "Han", ["Latin"])).toBe(12);
+  });
+
+  it("counts nothing for a script the text does not use", () => {
+    expect(countScript("An ordinary sentence.", "Han", ["Latin"])).toBe(0);
+  });
+
+  it("counts nothing for a name Unicode does not know, rather than throwing", () => {
+    expect(countScript("Fix the 构建 failure", "Klingon")).toBe(0);
+  });
+
+  it("does not carry a match position from one call into the next", () => {
+    // The global matcher is cached, and a cached global expression that were
+    // advanced by one call would start the next one mid-string. `matchAll`
+    // clones rather than advances; this is the case that would catch it if
+    // that ever stopped being true.
+    const text = "构建 failure 构建";
+    expect(countScript(text, "Han", ["Latin"])).toBe(4);
+    expect(countScript(text, "Han", ["Latin"])).toBe(4);
+  });
+});
+
+describe("scriptLeak", () => {
+  const vietnamese = { scripts: ["Latin"] };
+  const english = { scripts: ["Latin"] };
+  const chinese = { scripts: ["Han"] };
+  const configured = [vietnamese, english, chinese];
+
+  it("names the script a draft carries that neither the target nor the source has", () => {
+    const leak = scriptLeak("Có lỗi khi tải", "An error 等到 while loading", ["Latin"], configured);
+
+    expect(leak).toEqual({ script: "Han", chars: 2 });
+  });
+
+  it("reports nothing for a script the source already used", () => {
+    // A thread quoting a Chinese error message wants that message carried
+    // across intact, and reporting it would charge the draft for the correct
+    // answer.
+    const leak = scriptLeak("Có lỗi 等到", "An error 等到 while loading", ["Latin"], configured);
+
+    expect(leak).toBeNull();
+  });
+
+  it("exempts the target's own scripts per character rather than by name", () => {
+    // A workflow that spelled the same script `Latn` for one language and
+    // `Latin` for another still gets one answer.
+    const leak = scriptLeak("Có lỗi", "An error", ["Latin"], [{ scripts: ["Latn"] }, english]);
+
+    expect(leak).toBeNull();
+  });
+
+  it("looks for no script the caller did not configure", () => {
+    // There is no table of scripts in this project and there must not become
+    // one. Han is right there in the draft, and nothing asked about Han.
+    const leak = scriptLeak("Có lỗi", "An error 等到", ["Latin"], [vietnamese, english]);
+
+    expect(leak).toBeNull();
   });
 });

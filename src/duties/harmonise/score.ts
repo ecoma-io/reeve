@@ -7,15 +7,23 @@
  * incorporating the semantic changes.
  *
  * Checks:
- * - Language: draft is in the target language (script check)
  * - Code fidelity: fenced blocks and inline spans carried across unchanged
  * - Link fidelity: URLs unchanged
  * - Structure: heading and list structure preserved
  * - Length: prose length falls within plausible range
  * - Glossary: glossary terms respected
+ * - Script: how much of the draft is in a script nobody configured for it
+ *
+ * **The glossary and the script leak rank rather than refuse**, and they do so
+ * on the same reasoning and the same shared helpers as `translate` — see that
+ * duty's `score.ts` for the argument in full. The short of it: both were
+ * provable and neither was total, and with one draft configured a refusal is
+ * not "take the other candidate", it is the locale left un-synced. Ranking them
+ * keeps a slightly worse translation instead of keeping none, and a draft that
+ * is wholly in the wrong script still scores zero on the check and loses.
  */
-import { containsScript } from "../../core/script.js";
-import { termsPreserved, translatedTerm } from "../../core/glossary.js";
+import { scriptLeak } from "../../core/script.js";
+import { termsPreserved } from "../../core/glossary.js";
 import { segments } from "../../core/markdown.js";
 import { measured, refused, type Score, type Check } from "../../core/score.js";
 import type { Language } from "../../core/languages.js";
@@ -51,61 +59,57 @@ export function scoreDraft(
       initial ? "identical to the source — not a translation" : "unchanged from original",
     );
   }
-  // The same rule `translate` refuses on, from the same shared module — the
-  // file the terms came from is shared too, so the two duties must not disagree
-  // about what counts as losing one. See `core/glossary.ts`. On an initial
-  // translation the anchor is the source, so a term the source carries must
-  // survive into the first draft too.
-  const lost = translatedTerm(anchor, draft, glossaryTerms);
-  if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
-
-  // Language verification: a draft in the wrong script is refused.
-  const script = foreignScript(source, draft, targetLanguage, languages);
-  if (script !== null) {
-    return refused(`draft contains \`${script}\` script not in source or target language`);
-  }
-
   // --- Measurements (weighted mean, 0-1) ---
   const checks: Check[] = [
     { name: "code", weight: 4, value: codeCheck(draft, anchor), note: "" },
     { name: "links", weight: 3, value: linkCheck(draft, anchor), note: "" },
     { name: "structure", weight: 2, value: structureCheck(draft, anchor), note: "" },
     { name: "length", weight: 1, value: lengthCheck(draft, anchor), note: "" },
+    // On an initial translation the anchor is the source, so a term the source
+    // carries is one the first draft is measured on too.
     { name: "glossary", weight: 3, value: glossaryCheck(draft, anchor, glossaryTerms), note: "" },
   ];
+
+  const script = scriptCheck(draft, source, targetLanguage, languages);
+  if (script !== null) checks.push(script);
 
   return measured(checks);
 }
 
 /**
- * Whether the draft has leaked into a script neither the target language nor
- * the source uses — a script from some other language in this workflow's
- * configuration.
+ * The share of the draft written in a script neither the target language nor
+ * the source uses, as a check — or null when no configured script leaked.
  *
- * The same logic as `translate/score.ts`'s `foreignScript`: a script the
- * source already used is not a leak (the target is supposed to carry it). A
- * script the target's own language uses is not a leak (it is the expected
- * outcome). Anything else is a draft that wrote in the wrong language.
+ * Weighted 3, matched to `translate`'s, because the two duties are answering the
+ * same question about the same repository and a reader meets the result in the
+ * same place. `WHOLLY_FOREIGN` is likewise the same number, and for the same
+ * reason: it is where "the model answered in the wrong language" sits, well
+ * above where "the model left a proper noun alone" does.
  */
-function foreignScript(
-  source: string,
+function scriptCheck(
   draft: string,
-  to: Language,
+  source: string,
+  targetLanguage: Language,
   languages: readonly Language[],
-): string | null {
-  for (const language of languages) {
-    for (const script of language.scripts) {
-      // The target's own scripts are exempted per character rather than skipped
-      // by name, so a workflow that spelled the same script `Latn` here and
-      // `Latin` there still gets one answer. `containsScript` explains why that
-      // works.
-      if (!containsScript(draft, script, to.scripts)) continue;
-      if (containsScript(source, script, to.scripts)) continue;
-      return script;
-    }
-  }
-  return null;
+): Check | null {
+  const leak = scriptLeak(source, draft, targetLanguage.scripts, languages);
+  if (leak === null) return null;
+
+  const length = draft.trim().length;
+  const share = length === 0 ? 1 : leak.chars / length;
+
+  return {
+    name: "script",
+    weight: 3,
+    value: Math.max(0, Math.min(1, 1 - share / WHOLLY_FOREIGN)),
+    note:
+      `${String(leak.chars)} of ${String(length)} characters are ${leak.script}, ` +
+      `a script neither the source nor ${targetLanguage.label} uses`,
+  };
 }
+
+/** The share of a draft that has to be in an unasked-for script to read zero. */
+const WHOLLY_FOREIGN = 0.25;
 
 // --- Individual checks ---
 

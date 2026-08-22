@@ -12,23 +12,34 @@
  * code across untouched and required to leave a URL alone.
  *
  * **Refusal and rank are different answers.** A draft is inadmissible only for
- * something provable — it is empty, it is the source unchanged, it translated a
- * term this project wrote down as one to keep, it closes a section it does not
- * own, it carries letters of a script the source never had, or it is still in
- * the language it was supposed to be translated out of. Everything else lowers
- * the rank instead.
+ * something provable *and* total — it is empty, it is the source unchanged, it
+ * closes a section it does not own, or it is still in the language it was
+ * supposed to be translated out of. Everything else lowers the rank instead.
+ *
+ * **Two rules used to refuse here and now rank instead: the glossary and the
+ * script leak.** Both were provable and neither was total, and that gap is
+ * what made them expensive. With one draft configured — the setup this project
+ * dogfoods and the one a free endpoint forces — a refusal is not "try the other
+ * candidate", it is the whole language dropped from the thread for that run.
+ * Runs 32461467950 and 32560607218 lost Vietnamese exactly that way: once to a
+ * `capability` translated everywhere, once to a handful of Han characters in an
+ * otherwise sound draft. A translation that says "khả năng" where the docs say
+ * `capability` is a worse translation than one that does not; it is a far better
+ * outcome than no Vietnamese at all, and a weighted rank is the structure that
+ * can say both. What is genuinely total still refuses — a draft wholly in the
+ * wrong script lands at zero on the check below and loses to anything else.
  *
  * The glossary is the one measurement here that is not a fact about the two
  * texts alone: it is a list a maintainer committed to the repository, shared
- * with `harmonise` down to the file it is read from, and both duties enforce it
+ * with `harmonise` down to the file it is read from, and both duties measure it
  * through the same shared checks in `core/glossary.ts`.
  */
 import { detectLanguage } from "../../core/detect.js";
-import { termsPreserved, translatedTerm, type GlossaryEntry } from "../../core/glossary.js";
+import { termsPreserved, type GlossaryEntry } from "../../core/glossary.js";
 import type { Language } from "../../core/languages.js";
 import { segments } from "../../core/markdown.js";
 import { measured, overlap, refused, shared, type Check, type Score } from "../../core/score.js";
-import { containsScript } from "../../core/script.js";
+import { scriptLeak } from "../../core/script.js";
 
 /**
  * How much each measurement moves the rank.
@@ -48,6 +59,12 @@ import { containsScript } from "../../core/script.js";
  * unlike length, it measures an equality rather than a plausible range — the
  * only thing separating it from the other three is that it measures nothing at
  * all until a repository has written the list down.
+ *
+ * Script sits at 3 as well, and for the reason the doc comment above gives: a
+ * reader who meets a Han phrase in the middle of a Vietnamese paragraph is
+ * exactly as stuck as one who meets a translated input name — the sentence is
+ * there, and the part they needed is not readable. It is not a 4 because,
+ * unlike a mangled `docker run` line, a leak is visible as a leak.
  */
 const WEIGHTS = {
   code: 4,
@@ -55,7 +72,23 @@ const WEIGHTS = {
   structure: 2,
   length: 1,
   glossary: 3,
+  script: 3,
 } as const;
+
+/**
+ * The share of a draft's prose that has to be in a script nobody asked for
+ * before the check reads zero.
+ *
+ * Set where "this draft is in the wrong language" lives rather than where "this
+ * draft has a stray character" does. A model that answered the whole request in
+ * Chinese produces a draft most of whose letters are Han, far past this; a model
+ * that left a proper noun or an error message in its original script produces a
+ * handful of characters in a body of thousands, which moves the rank by an
+ * amount too small to change any comparison. Between them the value slides,
+ * which is the honest shape: a draft with a leaked paragraph is worse than one
+ * with a leaked word and better than one that is wholly wrong.
+ */
+const WHOLLY_FOREIGN = 0.25;
 
 /**
  * What a translation may do to the length of the prose.
@@ -114,7 +147,7 @@ export async function score(request: Draft): Promise<Score> {
   const before = outline(request.source);
   const after = outline(request.draft);
 
-  const refusal = await refuse(request, before, after);
+  const refusal = await refuse(request, after);
   if (refusal) return refused(refusal);
 
   const checks: Check[] = [
@@ -125,6 +158,8 @@ export async function score(request: Draft): Promise<Score> {
   ];
   const glossary = glossaryCheck(request);
   if (glossary !== null) checks.push(glossary);
+  const script = scriptCheck(request, before, after);
+  if (script !== null) checks.push(script);
 
   return measured(checks);
 }
@@ -142,25 +177,14 @@ function terms({ glossary }: Draft): readonly string[] {
  * fails, and it fails while producing text that every other measurement here
  * scores perfectly — same code, same links, same structure, same length.
  */
-async function refuse(request: Draft, before: Outline, after: Outline): Promise<string | null> {
-  const { source, draft, from, to, languages } = request;
+async function refuse(request: Draft, after: Outline): Promise<string | null> {
+  const { source, draft, from, to } = request;
   if (draft.trim().length === 0) return "the draft is empty";
   if (draft.trim() === source.trim()) return "the draft is the source, unchanged";
-
-  // A term this project wrote down and this chunk's source used, gone from the
-  // draft. Provable in the way the rules above are: the string was there and it
-  // is not, and no reading of the draft makes that a translation choice. The
-  // wording is `harmonise`'s, word for word, because the two duties refuse on
-  // the same rule read out of the same file — see `core/glossary.ts`.
-  const translated = translatedTerm(source, draft, terms(request));
-  if (translated !== null) return `glossary term \`${translated}\` was translated`;
 
   if (closesUnopenedSection(after.prose)) {
     return "the draft closes a `<details>` section it never opened";
   }
-
-  const leaked = foreignScript(before.prose, after.prose, to, languages);
-  if (leaked !== null) return `the draft carries ${leaked} letters the source never had`;
 
   if (!from || from.code.toLowerCase() === to.code.toLowerCase()) return null;
 
@@ -203,46 +227,6 @@ function closesUnopenedSection(prose: string): boolean {
     if (depth < 0) return true;
   }
   return false;
-}
-
-/**
- * The first script the draft carries that neither the target nor the source
- * accounts for, or null.
- *
- * This is the failure a cheap model produces most visibly: a Vietnamese
- * translation with a Chinese phrase left sitting in it. Every other measurement
- * scores it well — the code is intact, the links are intact, the length is
- * plausible — and the detector clears it too, because the draft *is*
- * predominantly Vietnamese. Only the letters give it away.
- *
- * The scripts to look for come from the configured languages and from nowhere
- * else. Unicode has no "every script" query worth running over an issue body,
- * and a list of scripts kept here would be the table Reeve refuses to have — so
- * the rule can only see a leak into a script somebody in this workflow asked
- * for, which is the population it is for.
- *
- * A script the source already used is not a leak. A thread quoting a Chinese
- * error message wants that message carried across intact, and refusing the
- * draft for reproducing it would refuse the correct answer.
- */
-function foreignScript(
-  source: string,
-  draft: string,
-  to: Language,
-  languages: readonly Language[],
-): string | null {
-  for (const language of languages) {
-    for (const script of language.scripts) {
-      // The target's own scripts are exempted per character rather than skipped
-      // by name, so a workflow that spelled the same script `Latn` here and
-      // `Latin` there still gets one answer. `containsScript` explains why that
-      // works.
-      if (!containsScript(draft, script, to.scripts)) continue;
-      if (containsScript(source, script, to.scripts)) continue;
-      return script;
-    }
-  }
-  return null;
 }
 
 /**
@@ -369,11 +353,12 @@ function lengthCheck(before: Outline, after: Outline): Check {
  * so a term inside one is measured twice — which is the correct amount for the
  * one rule a maintainer wrote out by hand.
  *
- * A draft that lost a term never reaches here; `refuse` above already ended it.
- * So what this reports is the ranked draft's own account of the rule it was held
- * to — `2 of 2 glossary terms carried through unchanged` — and the weight is
- * what keeps it a measurement rather than a note if that refusal is ever
- * narrowed to something short of total.
+ * **This is the whole of the rule now, not the note beside it.** A draft that
+ * lost a term used to be refused before reaching here, so the check only ever
+ * reported `2 of 2`. It now reports what actually happened — `1 of 2 glossary
+ * terms carried through unchanged` — and the weight of 3 is what that costs.
+ * The comparison is the same one `harmonise` makes from the same file, and
+ * neither duty may be stricter than the other about it.
  */
 function glossaryCheck(request: Draft): Check | null {
   const { relevant, preserved, value } = termsPreserved(
@@ -388,6 +373,46 @@ function glossaryCheck(request: Draft): Check | null {
     weight: WEIGHTS.glossary,
     value,
     note: `${String(preserved)} of ${String(relevant)} glossary terms carried through unchanged`,
+  };
+}
+
+/**
+ * How much of the draft is written in a script neither the target language nor
+ * the source uses, or null when no configured script leaked at all.
+ *
+ * This is the failure a cheap model produces most visibly: a Vietnamese
+ * translation with a Chinese phrase left sitting in it. Every other measurement
+ * scores it well — the code is intact, the links are intact, the length is
+ * plausible — and the detector clears it too, because the draft *is*
+ * predominantly Vietnamese. Only the letters give it away.
+ *
+ * Null rather than a perfect score, for the reason `glossaryCheck` returns null:
+ * a repository configured for one language, or for several sharing one script,
+ * can never leak, and a check reading 1 for every draft it will ever see moves
+ * every number this duty reports while measuring nothing.
+ *
+ * **Measured against the draft's own length, which is what makes it fair in
+ * both directions.** The finding itself is asymmetric by construction — an
+ * English source exempts every Latin character in a Chinese draft, so only the
+ * Vietnamese direction can ever report a leak. As a refusal that asymmetry
+ * decided whether a language was published. As a proportion it is a few
+ * thousandths of a rank, until the leak is large enough to be the story.
+ */
+function scriptCheck(request: Draft, before: Outline, after: Outline): Check | null {
+  const { to, languages } = request;
+  const leak = scriptLeak(before.prose, after.prose, to.scripts, languages);
+  if (leak === null) return null;
+
+  const prose = after.prose.trim().length;
+  const share = prose === 0 ? 1 : leak.chars / prose;
+
+  return {
+    name: "script",
+    weight: WEIGHTS.script,
+    value: Math.max(0, Math.min(1, 1 - share / WHOLLY_FOREIGN)),
+    note:
+      `${String(leak.chars)} of ${String(prose)} characters of prose are ${leak.script}, ` +
+      `a script neither the source nor ${to.label} uses`,
   };
 }
 

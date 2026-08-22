@@ -247,7 +247,7 @@ describe("scoring a draft of a real issue body", () => {
     expect(result.checks.find((check) => check.name === "length")?.value).toBeLessThan(1);
   });
 
-  it("refuses a translation that left a phrase of another configured language in it", async () => {
+  it("ranks down a translation that left a phrase of another configured language in it", async () => {
     // Observed, not imagined: a Vietnamese translation this action posted came
     // back reading "…等到 trang tải xong…". Every other measurement admits it —
     // the code, the links and the structure are intact, the length is
@@ -264,8 +264,13 @@ describe("scoring a draft of a real issue body", () => {
       languages: [...CONFIGURED, chinese],
     });
 
-    expect(result.admissible).toBe(false);
-    expect(result.reason).toBe("the draft carries Han letters the source never had");
+    // Ranked, not refused. Two characters in a body of hundreds is a defect
+    // worth pricing and not worth losing the language over — which is what
+    // refusing it did on #130, where it was the only draft the run had.
+    expect(result.admissible).toBe(true);
+    const script = result.checks.find((check) => check.name === "script");
+    expect(script?.value).toBeGreaterThan(0.9);
+    expect(script?.value).toBeLessThan(1);
   });
 
   it("admits a translation whose foreign letters came from the source", async () => {

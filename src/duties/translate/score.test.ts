@@ -5,13 +5,20 @@ import type { Language } from "../../core/languages.js";
 import type * as MarkdownModule from "../../core/markdown.js";
 import { segments, type Segment } from "../../core/markdown.js";
 import { score, type Draft } from "./score.js";
-import { containsScript } from "../../core/script.js";
 
 // Every collaborator is stubbed to say as little as possible: the segmenter
-// hands back one prose run, the detector hands back no answer, and no text
-// carries any script. A case that needs one of them to say something says it in
-// the case, which keeps every measurement below readable as the arithmetic it
-// is.
+// hands back one prose run and the detector hands back no answer. A case that
+// needs one of them to say something says it in the case, which keeps every
+// measurement below readable as the arithmetic it is.
+//
+// `core/script.js` is deliberately NOT stubbed. It used to be, through
+// `containsScript`, and that stopped working the moment the leak rule moved
+// into the core as `scriptLeak` — a stub on the module's export cannot reach a
+// call the module makes to itself. Running the real one is also the better
+// test: Unicode's answer about a Han character is not a thing this suite
+// should be able to get wrong on purpose. A case that is not about scripts
+// stays not about them by configuring only Latin languages, which is what
+// `request` below does.
 vi.mock("../../core/detect.js", () => ({ detectLanguage: vi.fn() }));
 // `importOriginal` rather than a bare factory: a module gains exports over
 // time, and a factory that replaces the whole module goes red the moment the
@@ -20,11 +27,9 @@ vi.mock("../../core/markdown.js", async (importOriginal) => ({
   ...(await importOriginal<typeof MarkdownModule>()),
   segments: vi.fn(),
 }));
-vi.mock("../../core/script.js", () => ({ containsScript: vi.fn() }));
 
 const mockedDetect = vi.mocked(detectLanguage);
 const mockedSegments = vi.mocked(segments);
-const mockedContainsScript = vi.mocked(containsScript);
 
 const vietnamese: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latin"] };
 const english: Language = { code: "en", label: "English", scripts: ["Latin"] };
@@ -34,9 +39,6 @@ beforeEach(() => {
   vi.resetAllMocks();
   mockedSegments.mockImplementation((markdown: string) => [{ kind: "prose", text: markdown }]);
   mockedDetect.mockResolvedValue({ language: null, by: "none", candidates: [] });
-  // No script is anywhere, so a case that is not about scripts is not quietly
-  // about them. Unicode's own answer is `script.test.ts`'s subject.
-  mockedContainsScript.mockReturnValue(false);
 });
 
 /** The two `segments` calls a scoring makes, in the order it makes them. */
@@ -140,31 +142,33 @@ describe("score", () => {
       expect(result.admissible).toBe(true);
     });
 
-    it("refuses a draft that translated a glossary term", async () => {
-      // Provable in the way the rules above it are: the string was in the
-      // source and it is not in the draft, and no reading of the draft makes
-      // that a translation choice. The wording is `harmonise`'s word for word,
-      // because both duties refuse on the same rule out of the same file.
+    it("ranks a draft that translated a glossary term rather than refusing it", async () => {
+      // It used to be inadmissible. With one draft configured — the setup this
+      // project dogfoods — that is not "take the other candidate", it is the
+      // language missing from the thread: run 32461467950 lost Vietnamese on
+      // #123 to a `capability` the draft rendered as ordinary prose. The loss
+      // is priced now instead of fatal.
       const result = await score(
         request("Reeve đọc warrant.", "Reeve reads the authority file.", {
           glossary: [{ term: "warrant", note: "The authority file." }],
         }),
       );
 
-      expect(result.admissible).toBe(false);
-      expect(result.reason).toBe("glossary term `warrant` was translated");
+      expect(result.admissible).toBe(true);
+      expect(valueOf(result.checks, "glossary")).toBe(0);
     });
 
-    it("admits a draft for a glossary term this chunk's source never used", async () => {
+    it("measures nothing for a glossary term this chunk's source never used", async () => {
       // Each chunk of a body is scored on its own, against its own source. A
       // term that appears in chunk three is nothing chunk one could have lost,
-      // and charging a draft for every term in the file would refuse every
-      // draft the moment the glossary grew.
+      // and charging a draft for every term in the file would score every
+      // draft down the moment the glossary grew.
       const result = await score(
         request("Có lỗi.", "An error.", { glossary: [{ term: "warrant" }] }),
       );
 
       expect(result.admissible).toBe(true);
+      expect(result.checks.some((check) => check.name === "glossary")).toBe(false);
     });
 
     it("matches a glossary term case-sensitively, because a term is a spelling", async () => {
@@ -172,35 +176,51 @@ describe("score", () => {
         request("Reeve đọc tệp.", "reeve reads the file.", { glossary: [{ term: "Reeve" }] }),
       );
 
-      expect(result.admissible).toBe(false);
-      expect(result.reason).toBe("glossary term `Reeve` was translated");
+      expect(result.admissible).toBe(true);
+      expect(valueOf(result.checks, "glossary")).toBe(0);
     });
 
-    it("refuses a draft carrying a script neither the target nor the source has", async () => {
+    it("ranks down a draft carrying a script neither the target nor the source has", async () => {
       // The failure a cheap model produces most visibly: a phrase of the wrong
       // language left sitting in an otherwise plausible translation. Every
       // other measurement scores it well, and the detector clears it, because
       // the draft really is mostly the language it was asked for.
-      mockedContainsScript.mockImplementation(
-        (text, script) => script === "Han" && text !== "Có lỗi",
-      );
-
+      //
+      // Two characters of it. That used to refuse the draft, and on #130 it
+      // refused the only draft there was, so the pull request was published
+      // with Chinese and no Vietnamese at all.
       const result = await score(
         request("Có lỗi", "An error 等到 while loading.", {
           languages: [vietnamese, english, chinese],
         }),
       );
 
-      expect(result.admissible).toBe(false);
-      expect(result.reason).toBe("the draft carries Han letters the source never had");
+      expect(result.admissible).toBe(true);
+      expect(valueOf(result.checks, "script")).toBeGreaterThan(0.5);
+      expect(valueOf(result.checks, "script")).toBeLessThan(1);
     });
 
-    it("admits a script the source already used", async () => {
-      // A thread quoting a Chinese error message wants that message carried
-      // across intact, and refusing the draft for reproducing it would refuse
-      // the correct answer.
-      mockedContainsScript.mockImplementation((_text, script) => script === "Han");
+    it("scores a draft wholly in a script nobody asked for at zero", async () => {
+      // The far end of the slide the refusal used to be a cliff at. A draft
+      // that answered the whole request in the wrong language loses to
+      // anything else the run produced — without being able to take the
+      // language down with it when it is the only draft there is.
+      const result = await score(
+        request("An error while loading the page.", "加载页面时出错了，请稍后重试。", {
+          from: english,
+          to: vietnamese,
+          languages: [vietnamese, english, chinese],
+        }),
+      );
 
+      expect(result.admissible).toBe(true);
+      expect(valueOf(result.checks, "script")).toBe(0);
+    });
+
+    it("reports no leak for a script the source already used", async () => {
+      // A thread quoting a Chinese error message wants that message carried
+      // across intact, and scoring the draft down for reproducing it would
+      // charge it for the correct answer.
       const result = await score(
         request("Có lỗi 等到", "An error 等到 while loading.", {
           languages: [vietnamese, english, chinese],
@@ -208,24 +228,28 @@ describe("score", () => {
       );
 
       expect(result.admissible).toBe(true);
+      expect(result.checks.some((check) => check.name === "script")).toBe(false);
     });
 
-    it("exempts the target's own scripts by handing them to the matcher", async () => {
+    it("exempts the target's own scripts however the workflow spelled them", async () => {
       // Not by comparing script names: a workflow that wrote `Latn` for one
-      // language and `Latin` for another would then be told its English draft
-      // had leaked into Vietnamese.
-      await score(request("Có lỗi", "An error."));
+      // language and `Latin` for another would otherwise be told its English
+      // draft had leaked into Vietnamese.
+      const latn: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
+      const result = await score(request("Có lỗi", "An error.", { languages: [latn, english] }));
 
-      expect(mockedContainsScript).toHaveBeenCalledWith("An error.", "Latin", english.scripts);
+      expect(result.checks.some((check) => check.name === "script")).toBe(false);
     });
 
     it("looks for no script the workflow did not configure", async () => {
       // There is no table of scripts in this action and there must not become
       // one — the configured languages are the whole population it can name.
-      await score(request("Có lỗi", "An error.", { languages: [chinese] }));
+      // Han is right there in the draft, and nothing asked about Han.
+      const result = await score(
+        request("Có lỗi", "An error 等到 while loading.", { languages: [vietnamese, english] }),
+      );
 
-      const asked = new Set(mockedContainsScript.mock.calls.map(([, script]) => script));
-      expect([...asked]).toEqual(["Han"]);
+      expect(result.checks.some((check) => check.name === "script")).toBe(false);
     });
 
     it("refuses a draft the detector still finds in the source language", async () => {

@@ -32251,17 +32251,17 @@ function parseList(raw) {
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
 var matchers = /* @__PURE__ */ new Map();
-function matcher(script, exempt) {
+function matcher(script, exempt, every = false) {
   const names = [script, ...exempt];
   if (!names.every((name) => SCRIPT_NAME.test(name))) return null;
-  const key = names.join(" ");
+  const key = `${every ? "g " : ""}${names.join(" ")}`;
   const cached = matchers.get(key);
   if (cached !== void 0) return cached;
   let compiled;
   try {
     const excluded = exempt.map((name) => `\\p{Script=${name}}`).join("");
     const guard = excluded.length === 0 ? "" : `(?![${excluded}])`;
-    compiled = new RegExp(`${guard}\\p{Script=${script}}`, "u");
+    compiled = new RegExp(`${guard}\\p{Script=${script}}`, every ? "gu" : "u");
   } catch {
     compiled = null;
   }

@@ -172,12 +172,27 @@ says which translations belong to the same document group; it says nothing
 about what language a contributor may write in. Leave the key out of the
 warrant and the duty's own default answers.
 
-**`provenance-dir` tracks provenance.** `.reeve/provenance/state.json` records
-the source revision and per-locale sync status for each document group. When a
-source file's SHA changes from the recorded revision, target locales are
-marked stale. If a target locale has been edited by a human since the last
-sync, the run reports a conflict — it does not overwrite. Delete the state
-file to force a full re-sync.
+**`provenance-dir` tracks provenance.** `.reeve/provenance/state.json` records,
+for each document group, the source revision and — per locale — the file SHA it
+last wrote and **the source revision that locale is synced to**. A locale is
+stale when its own recorded revision is not the source's current one, which is a
+different question from whether the group's revision moved: a run syncs its
+locales one at a time and any of them may fail alone, so "the group is at `rev-2`"
+and "this locale reached `rev-2`" are not the same fact. If a target locale has
+been edited by a human since the last sync, the run reports a conflict — it does
+not overwrite. Delete the state file to force a full re-sync.
+
+A state file written before per-locale revisions existed is read as fully caught
+up: every locale it records as synced is taken to be synced at the group's
+recorded revision, which is exactly what the older shape meant. Nothing re-syncs
+on the upgrade.
+
+When the stale locales of one group are at **different** revisions — what a
+partially failed earlier run leaves behind — the run diffs the document as new
+rather than from any one of them. Nothing can order two blob SHAs by age, and
+treating the document as new is the only reading that cannot drop a change one
+of those locales still needs. It costs a larger prompt for a single run and
+settles itself once they agree again.
 
 **`state-branch` moves provenance to a review-first path.** When set and
 both `edit-file` and `open-pr` are granted, the state file is committed to
@@ -190,11 +205,14 @@ in a notice, so state may go stale until the pair is configured. Set
 
 **`glossary-dir` enforces project terms.** `.reeve/glossary.yml` lists terms
 that must not be translated — proper nouns, technical jargon, brand names.
-A draft that replaces a glossary term is a bug, not a creative choice. The
-file is read before every translation, not cached between runs. It is shared
-with [`translate`](translate.md), which reads the same path under the same
-input name and refuses a draft on the same rule — one list, so a term that
-stays English in a committed `README.vi.md` stays English in an issue body too.
+A draft that replaces a glossary term is a bug, not a creative choice, and it
+is ranked down for it — a weighted check, not a refusal, because with one draft
+configured a refusal costs the whole locale rather than one candidate. The file
+is read before every translation, not cached between runs. It is shared with
+[`translate`](translate.md), which reads the same path under the same input
+name and measures a draft on the same rule with the same weight — one list, so
+a term that stays English in a committed `README.vi.md` stays English in an
+issue body too.
 
 **`paths` scopes document groups, not raw files.** When empty, the entire
 repository is scanned for the suffix pattern. When set, a document group is
@@ -378,18 +396,28 @@ run where nothing conflicted, never an unset output.
 
 ## Failure behavior
 
-| What happened                               | What you get                                                                    |
-| ------------------------------------------- | ------------------------------------------------------------------------------- |
-| One locale had no working model this run    | Warning, that locale left stale, the others synced, **green**                   |
-| No locale could be synced                   | Warning per locale, `synced: []`, **green**                                     |
-| Human edit in target locale since last sync | Conflict reported, that locale not overwritten, **green**                       |
-| Warrant grants `harmonise` nothing          | Notice, no model calls, **green** — the duty decides nothing when it cannot act |
-| `bootstrap: true` but no `languages:` key   | Warning, no files created, the rest of the run proceeds, **green**              |
-| `dry-run: true`                             | Pipeline runs, nothing committed or PR'd, **green**                             |
-| The provenance state file cannot be read    | **Red** — provenance is how the duty knows what changed                         |
-| The configuration is broken                 | **Red**, naming the input                                                       |
+| What happened                               | What you get                                                                             |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| One locale had no working model this run    | Warning, that locale left stale, the others synced, **green**                            |
+| One chunk of a locale had no working model  | Warning, the rest of that locale published, the locale left behind the source, **green** |
+| No locale could be synced                   | Warning per locale, `synced: []`, **green**                                              |
+| Human edit in target locale since last sync | Conflict reported, that locale not overwritten, **green**                                |
+| Warrant grants `harmonise` nothing          | Notice, no model calls, **green** — the duty decides nothing when it cannot act          |
+| `bootstrap: true` but no `languages:` key   | Warning, no files created, the rest of the run proceeds, **green**                       |
+| `dry-run: true`                             | Pipeline runs, nothing committed or PR'd, **green**                                      |
+| The provenance state file cannot be read    | **Red** — provenance is how the duty knows what changed                                  |
+| The configuration is broken                 | **Red**, naming the input                                                                |
 
-A skipped document group is not re-synced until its source changes again.
+A skipped document group is not re-synced until its source changes again — but
+a locale that fell behind _within_ a group is stale from the moment it falls
+behind, and the next run over that group picks it up whether or not the source
+moved again.
+
+A locale whose draft was assembled with at least one chunk of the original text
+still publishes: half a synced document beats a document with a hole in it. It
+is not recorded as caught up, so a later run comes back for the chunk this one
+lost rather than diffing from a revision that locale never fully saw.
+
 A conflicted locale is reported in the PR body and the summary, and a
 maintainer decides whether to accept the sync or keep the human edit.
 

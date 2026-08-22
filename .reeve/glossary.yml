@@ -2,8 +2,10 @@
 # glossary, read by `harmonise` from this default path (`glossary-dir`).
 #
 # Each key is a term; the value is a note the model sees next to it. A draft
-# that loses a term present in the source is refused outright, so every entry
-# here is a promise: this word stays English in every language we publish.
+# that loses a term present in the source is ranked down for it — a weighted
+# check, not a refusal, because refusing a draft costs the whole language when
+# only one draft is asked for. So every entry here is a preference the ranking
+# enforces rather than a promise the runtime can keep absolutely.
 # The bar for adding one is that translating it makes the docs *harder* to
 # read — the reader cannot map the translated word back to the identifier,
 # input name, or doctrine term the code and reference pages actually use.

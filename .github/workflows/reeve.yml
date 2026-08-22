@@ -51,17 +51,36 @@ name: Reeve
 # `ECOMA_REEVE_MODEL` holds the model ids in preference order (a primary and
 # its capacity fallback), and every job below reads the same secret. That
 # roster is both the `models` chain and, when a duty grades its own drafts,
-# the judge: with `judge-models` unset the judge falls back to `models`, so
-# `translate` and `harmonise` below set `drafts: 1` — one draft is the answer,
-# no panel is ever spent, and no roster is ever split. `screen-models` is
-# likewise deliberately absent: the cheap spam screen is off, and the free
-# screens + language detection still run on `models`. Capacity weather
-# (429/timeout) on the primary now rotates to the fallback instead of starving
-# the run — which is why every size below is bounded by the roster's weakest
-# member, not its strongest (see SIZE). To re-arm the other levers later (a
-# screen roster, a judge panel, a `drafts: 2` spread across two models), set
-# the secret and wire the `with:` key back in below; `action.yml` still
-# documents all three inputs.
+# the judge: with `judge-models` unset the judge falls back to `models`, so a
+# second draft also buys a judge call to choose between the two. `translate`
+# and `harmonise` below set `drafts: 2` deliberately, and it is the only lever
+# in this file that spends more to lose less.
+#
+# It ran at `drafts: 1` until a review of five consecutive dogfood runs found
+# what one draft costs. A single draft is not "the answer" — it is the answer
+# *if nothing goes wrong*, and when it does go wrong the language is not
+# degraded, it is absent. #123 lost Vietnamese to one refused draft, #128 lost
+# Chinese, #129 lost Vietnamese to a provider 502, #130 lost Vietnamese again.
+# Nothing retried any of them: the body edit that publishes is written with
+# `GITHUB_TOKEN`, which by design starts no new workflow run, and the Monday
+# sweep skips any thread already carrying a marker. So the second draft is not
+# a quality lever here, it is the only redundancy the event path has.
+#
+# The bill is real and is stated rather than buried: a language now costs two
+# drafts plus a judge call where it cost one draft, so roughly three times the
+# requests and about three times the wall clock (~15s to ~45s per language,
+# against a 20-minute job timeout). On an endpoint already answering 502 under
+# load, more requests is not free in either direction — if capacity failures
+# rise rather than fall, this number is the first thing to put back.
+#
+# `screen-models` is likewise deliberately absent: the cheap spam screen is
+# off, and the free screens + language detection still run on `models`.
+# Capacity weather (429/timeout) on the primary rotates to the fallback instead
+# of starving the run — which is why every size below is bounded by the
+# roster's weakest member, not its strongest (see SIZE). To re-arm the last
+# lever (a separate judge roster, so the panel is not the drafters grading
+# themselves), set `judge-models` and wire the `with:` key back in below;
+# `action.yml` still documents all three inputs.
 #
 # SIZE — every size input below is derived from the roster's two weakest
 # numbers, never from its strongest member's brochure: the smallest context
@@ -346,7 +365,7 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
-          drafts: "1"
+          drafts: "2"
           max-body-chars: "none"
           chunk-chars: "100000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
@@ -598,7 +617,7 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
-          drafts: "1"
+          drafts: "2"
           source-language: en
           paths: "README.md"
           chunk-chars: "100000"
@@ -920,7 +939,7 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
-          drafts: "1"
+          drafts: "2"
           max-body-chars: "none"
           chunk-chars: "100000"
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run || 'false' }}
@@ -934,7 +953,7 @@ jobs:
           base-url: ${{ secrets.ECOMA_LLM_BASE_URL }}
           api-key: ${{ secrets.ECOMA_LLM_API_KEY }}
           models: ${{ secrets.ECOMA_REEVE_MODEL }}
-          drafts: "1"
+          drafts: "2"
           source-language: en
           paths: "README.md"
           chunk-chars: "100000"

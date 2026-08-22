@@ -180,11 +180,14 @@ appears nowhere else in the repository for a reader to map it back to.
 
 Every draft is asked to carry these terms through unchanged, and then checked
 for it rather than trusted. A draft whose source used a term and whose answer
-does not is **refused** — inadmissible, out of the ranking entirely, the same
-tier as a draft that came back in the source language — and what survives is
-measured as its own weighted check beside code, links, structure and length.
-Matching is a case-sensitive literal substring, so `Reeve` and `reeve` are two
-terms and a glossary that means both says both.
+does not is **ranked down** for it — its own weighted check beside code, links,
+structure, length and script — rather than refused. That is a deliberate
+narrowing: it used to be inadmissible, and with `drafts: 1` an inadmissible
+draft is not a candidate replaced by a better one, it is the language missing
+from the thread. A translation that renders `capability` as an ordinary word is
+worse than one that does not, and much better than nothing. Matching is a
+case-sensitive literal substring, so `Reeve` and `reeve` are two terms and a
+glossary that means both says both.
 
 The check runs **per chunk, against that chunk's own source**, because each
 chunk is drafted and scored on its own: a term that appears in the third chunk
@@ -197,8 +200,8 @@ triggered the workflow, and a missing file is not an error: it means this
 project has no protected terms, which is the common case, and nothing about a
 glossary reaches the prompt at all. It is the same file
 [`harmonise`](harmonise.md) reads — same default path, same grammar, same
-refusal — so a term that stays English in a committed `README.vi.md` stays
-English in the issue body beside it.
+check and same weight — so a term that stays English in a committed
+`README.vi.md` stays English in the issue body beside it.
 
 **`endpoints`, `api-keys`, `request-timeout` and `temperature`** are the
 same four provider inputs every duty takes — the full grammar, the
@@ -344,8 +347,19 @@ line: a language nobody could translate does not fail the job.
 | The configuration is broken                                       | **Red**, naming the input                                                                                                                                                               |
 | The event names no thread and `number` is empty                   | **Red**, naming the event                                                                                                                                                               |
 
-A skipped language is not in the fingerprint, so the next run tries it
-again rather than reading its own claim and stopping.
+A skipped language is not in the fingerprint, so a later run tries it again
+rather than reading its own claim and stopping. That holds for the sweep as
+well as for an event: a sweep skips a thread only when its marker records the
+translation for _this text and these languages_, so a thread whose marker
+records one language of two is work the sweep comes back for.
+
+**Which run is the later one is worth knowing.** Publishing edits the thread
+body, and an edit written with `GITHUB_TOKEN` starts no workflow run — GitHub
+suppresses it to prevent recursion. So on a repository triggering this duty from
+`issues`/`pull_request_target` with the default token, the run that repairs a
+short run is the next _sweep_, not an event. A repository that wants the repair
+to happen immediately passes a GitHub App token, which does re-fire the event;
+see [platform limits](../platform-limits.md).
 
 **Running on the unconfigured `languages` default is noted, once, rather
 than left silent.** `en, vi, zh` is the duty's own default, decided in code —

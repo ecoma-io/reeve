@@ -31861,12 +31861,6 @@ async function loadGlossary(api, at, path, duty) {
     return [];
   }
 }
-function translatedTerm(source, draft, terms) {
-  for (const term of terms) {
-    if (source.includes(term) && !draft.includes(term)) return term;
-  }
-  return null;
-}
 function termsPreserved(source, draft, terms) {
   const relevant = terms.filter((term) => source.includes(term));
   if (relevant.length === 0) return { relevant: 0, preserved: 0, value: 1 };
@@ -32528,17 +32522,17 @@ function bounded(name, raw) {
 // src/core/script.ts
 var SCRIPT_NAME = /^[A-Za-z][A-Za-z_]*$/;
 var matchers = /* @__PURE__ */ new Map();
-function matcher(script, exempt) {
+function matcher(script, exempt, every = false) {
   const names = [script, ...exempt];
   if (!names.every((name) => SCRIPT_NAME.test(name))) return null;
-  const key = names.join(" ");
+  const key = `${every ? "g " : ""}${names.join(" ")}`;
   const cached = matchers.get(key);
   if (cached !== void 0) return cached;
   let compiled;
   try {
     const excluded = exempt.map((name) => `\\p{Script=${name}}`).join("");
     const guard = excluded.length === 0 ? "" : `(?![${excluded}])`;
-    compiled = new RegExp(`${guard}\\p{Script=${script}}`, "u");
+    compiled = new RegExp(`${guard}\\p{Script=${script}}`, every ? "gu" : "u");
   } catch {
     compiled = null;
   }
@@ -32550,6 +32544,23 @@ function isScriptName(script) {
 }
 function containsScript(text2, script, exempt = []) {
   return matcher(script, exempt)?.test(text2) ?? false;
+}
+function countScript(text2, script, exempt = []) {
+  const compiled = matcher(script, exempt, true);
+  if (compiled === null) return 0;
+  let count2 = 0;
+  for (const _ of text2.matchAll(compiled)) count2 += 1;
+  return count2;
+}
+function scriptLeak(source, draft, targetScripts, languages) {
+  for (const language of languages) {
+    for (const script of language.scripts) {
+      if (!containsScript(draft, script, targetScripts)) continue;
+      if (containsScript(source, script, targetScripts)) continue;
+      return { script, chars: countScript(draft, script, targetScripts) };
+    }
+  }
+  return null;
 }
 
 // src/core/languages.ts
@@ -34331,31 +34342,32 @@ function scoreDraft(draft, original, glossaryTerms, source, targetLanguage, lang
       initial ? "identical to the source \u2014 not a translation" : "unchanged from original"
     );
   }
-  const lost = translatedTerm(anchor, draft, glossaryTerms);
-  if (lost !== null) return refused(`glossary term \`${lost}\` was translated`);
-  const script = foreignScript(source, draft, targetLanguage, languages);
-  if (script !== null) {
-    return refused(`draft contains \`${script}\` script not in source or target language`);
-  }
   const checks = [
     { name: "code", weight: 4, value: codeCheck(draft, anchor), note: "" },
     { name: "links", weight: 3, value: linkCheck(draft, anchor), note: "" },
     { name: "structure", weight: 2, value: structureCheck(draft, anchor), note: "" },
     { name: "length", weight: 1, value: lengthCheck(draft, anchor), note: "" },
+    // On an initial translation the anchor is the source, so a term the source
+    // carries is one the first draft is measured on too.
     { name: "glossary", weight: 3, value: glossaryCheck(draft, anchor, glossaryTerms), note: "" }
   ];
+  const script = scriptCheck(draft, source, targetLanguage, languages);
+  if (script !== null) checks.push(script);
   return measured(checks);
 }
-function foreignScript(source, draft, to, languages) {
-  for (const language of languages) {
-    for (const script of language.scripts) {
-      if (!containsScript(draft, script, to.scripts)) continue;
-      if (containsScript(source, script, to.scripts)) continue;
-      return script;
-    }
-  }
-  return null;
+function scriptCheck(draft, source, targetLanguage, languages) {
+  const leak = scriptLeak(source, draft, targetLanguage.scripts, languages);
+  if (leak === null) return null;
+  const length = draft.trim().length;
+  const share = length === 0 ? 1 : leak.chars / length;
+  return {
+    name: "script",
+    weight: 3,
+    value: Math.max(0, Math.min(1, 1 - share / WHOLLY_FOREIGN)),
+    note: `${String(leak.chars)} of ${String(length)} characters are ${leak.script}, a script neither the source nor ${targetLanguage.label} uses`
+  };
 }
+var WHOLLY_FOREIGN = 0.25;
 function codeCheck(draft, original) {
   const originalSegs = segments(original).filter((s) => s.kind === "fence" || s.kind === "code");
   const draftSegs = segments(draft).filter((s) => s.kind === "fence" || s.kind === "code");
@@ -34524,6 +34536,7 @@ async function draftChunked(request2) {
   const exhausted2 = new Set(weather?.starved ?? []);
   const chunkDrafts = [];
   const failures = [];
+  let incomplete = false;
   for (let i = 0; i < count2; i += 1) {
     const sourceChunk = sourceChunks[i] ?? "";
     const targetChunk = targetChunks[i] ?? "";
@@ -34566,8 +34579,9 @@ async function draftChunked(request2) {
     if (chunkText !== null) {
       chunkDrafts.push(chunkText);
     } else {
+      incomplete = true;
       warning(
-        `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count2)}: no draft produced \u2014 keeping original`
+        `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count2)}: no draft produced \u2014 keeping original, and leaving the locale behind the source`
       );
       chunkDrafts.push(targetChunk);
     }
@@ -34588,7 +34602,8 @@ async function draftChunked(request2) {
     // have come from different models.
     model: models.find((m) => !exhausted2.has(m)) ?? models[0] ?? "unknown",
     text: reinserted,
-    score: measured2
+    score: measured2,
+    ...incomplete ? { incomplete: true } : {}
   };
   if (measured2.admissible) {
     return { attempts: [attempt], refused: [], failures };
@@ -35023,6 +35038,14 @@ function parseState(text2, path) {
         if (typeof sha === "string") synced.set(locale, sha);
       }
     }
+    const syncedRevision = /* @__PURE__ */ new Map();
+    if (typeof e.syncedRevision === "object" && e.syncedRevision !== null && !Array.isArray(e.syncedRevision)) {
+      for (const [locale, sha] of Object.entries(e.syncedRevision)) {
+        if (typeof sha === "string") syncedRevision.set(locale, sha);
+      }
+    } else {
+      for (const locale of synced.keys()) syncedRevision.set(locale, e.sourceRevision);
+    }
     const stale = Array.isArray(e.stale) ? e.stale.filter((s) => typeof s === "string") : [];
     const conflicts = Array.isArray(e.conflicts) ? e.conflicts.filter((c) => typeof c === "string") : [];
     state.push({
@@ -35030,6 +35053,7 @@ function parseState(text2, path) {
       files,
       sourceRevision: e.sourceRevision,
       synced,
+      syncedRevision,
       stale,
       conflicts
     });
@@ -35042,6 +35066,7 @@ function serialiseState(state) {
     files: Object.fromEntries(doc.files),
     sourceRevision: doc.sourceRevision,
     synced: Object.fromEntries(doc.synced),
+    syncedRevision: Object.fromEntries(doc.syncedRevision),
     stale: doc.stale,
     conflicts: doc.conflicts
   }));
@@ -35076,6 +35101,7 @@ function findOrCreate(state, id, files) {
     files: new Map(files),
     sourceRevision: "",
     synced: /* @__PURE__ */ new Map(),
+    syncedRevision: /* @__PURE__ */ new Map(),
     stale: [],
     conflicts: []
   };
@@ -35083,38 +35109,36 @@ function findOrCreate(state, id, files) {
   return doc;
 }
 function markStale(doc, currentSourceSha, currentTargetShas, sourceLocale) {
-  if (doc.sourceRevision === currentSourceSha && doc.sourceRevision !== "") {
-    for (const [locale] of doc.files) {
-      if (locale === sourceLocale) continue;
-      if (doc.synced.has(locale)) continue;
-      if (currentTargetShas.has(locale)) continue;
-      if (!doc.stale.includes(locale)) doc.stale = [...doc.stale, locale];
-    }
-    return;
-  }
   const stale = [];
   const conflicts = [];
   for (const [locale] of doc.files) {
     if (locale === sourceLocale) continue;
     const lastSynced = doc.synced.get(locale);
     const currentSha = currentTargetShas.get(locale);
-    if (currentSha !== void 0 && lastSynced !== void 0 && currentSha !== lastSynced) {
-      if (lastSynced === "pending") {
-        stale.push(locale);
-      } else {
-        conflicts.push(locale);
-      }
-    } else {
-      stale.push(locale);
+    if (currentSha !== void 0 && lastSynced !== void 0 && lastSynced !== "pending" && currentSha !== lastSynced) {
+      conflicts.push(locale);
+      continue;
     }
+    if (doc.syncedRevision.get(locale) !== currentSourceSha) stale.push(locale);
   }
   doc.stale = stale;
   doc.conflicts = conflicts;
   doc.sourceRevision = currentSourceSha;
 }
-function markSynced(doc, locale, sha) {
+function sharedBaseline(doc, locales) {
+  const revisions = new Set(locales.map((locale) => doc.syncedRevision.get(locale) ?? ""));
+  if (revisions.size !== 1) return null;
+  const [only] = [...revisions];
+  return only === void 0 || only === "" ? null : only;
+}
+function markSynced(doc, locale, sha, sourceRevision) {
   doc.synced.set(locale, sha);
+  doc.syncedRevision.set(locale, sourceRevision);
   doc.stale = doc.stale.filter((s) => s !== locale);
+  doc.conflicts = doc.conflicts.filter((c) => c !== locale);
+}
+function markPartial(doc, locale, sha) {
+  doc.synced.set(locale, sha);
   doc.conflicts = doc.conflicts.filter((c) => c !== locale);
 }
 
@@ -35808,17 +35832,19 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
   const synced = [];
   const skipped = [];
   const created = [];
+  const partial = /* @__PURE__ */ new Set();
   const staleWithFile = doc.stale.filter((locale) => targetShas.has(locale));
   let classification;
   if (staleWithFile.length > 0) {
     let diffDescription;
-    if (doc.sourceRevision === "" || doc.sourceRevision === sourceFile.sha) {
+    const baseline = sharedBaseline(doc, staleWithFile);
+    if (baseline === null || baseline === sourceFile.sha) {
       diffDescription = formatInitialSync(sourceFile.text);
     } else {
-      const previousContent = await readBlob(api, at, doc.sourceRevision);
+      const previousContent = await readBlob(api, at, baseline);
       if (previousContent === null) {
         warning(
-          `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} for ${group.id} \u2014 skipping. The blob SHA may no longer be reachable.`
+          `harmonise: cannot resolve source revision ${baseline.slice(0, 8)} for ${group.id} \u2014 skipping. The blob SHA may no longer be reachable.`
         );
         return none(group, conflicts, doc.stale);
       }
@@ -35937,7 +35963,15 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
       continue;
     }
     bestDrafts.set(locale, winner);
-    markSynced(doc, locale, "pending");
+    if (winner.incomplete === true) {
+      partial.add(locale);
+      markPartial(doc, locale, "pending");
+      warning(
+        `harmonise: ${locale}: publishing what this run drafted, but the locale is left behind ${sourceFile.sha.slice(0, 8)} \u2014 at least one chunk is the original text.`
+      );
+    } else {
+      markSynced(doc, locale, "pending", sourceFile.sha);
+    }
     synced.push(locale);
     if (isMissingFile) created.push(locale);
   }
@@ -35957,7 +35991,8 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
     const pr = await publishSync(publishApi, at, syncResult, settings.dryRun);
     if (pr !== null) {
       for (const [locale, sha] of pr.shas) {
-        markSynced(doc, locale, sha);
+        if (partial.has(locale)) markPartial(doc, locale, sha);
+        else markSynced(doc, locale, sha, sourceFile.sha);
       }
       info(`harmonise: opened PR #${String(pr.pr)} for ${group.id}`);
     }

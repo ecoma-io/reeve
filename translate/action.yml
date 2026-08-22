@@ -153,10 +153,12 @@ inputs:
       beside it.
 
       Every draft is asked to carry these terms through unchanged and then
-      checked for it, per chunk against that chunk's own source: a draft that
-      lost a term its source used is refused outright, and what is left is
-      measured. Missing at this default path is not a failure — it means this
-      project has no protected terms, which is the common case. The same file
+      checked for it, per chunk against that chunk's own source. A draft that
+      lost a term its source used is ranked down, not thrown out: with one
+      draft configured, refusing it drops the whole language from the thread,
+      and a translation that renders one term is better than no translation.
+      Missing at this default path is not a failure — it means this project
+      has no protected terms, which is the common case. The same file
       `harmonise` reads, so a term that stays English in a committed
       translation stays English in a thread too.
     required: false

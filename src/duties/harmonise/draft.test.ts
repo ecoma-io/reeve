@@ -12,6 +12,7 @@ import type { Language } from "../../core/languages.js";
 import type { Completion, Provider } from "../../core/provider.js";
 import { draftSyncs } from "./draft.js";
 import type { ClassifiedHunk } from "./classify.js";
+import { scored } from "./checks.testing.js";
 
 const vietnamese: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
 const english: Language = { code: "en", label: "English", scripts: ["Latn"] };
@@ -92,7 +93,8 @@ describe("draftSyncs", () => {
   it("includes glossary terms in the prompt when provided", async () => {
     // The scripted provider always returns the same text regardless of prompt
     // content, but we can verify the draft was processed correctly when a
-    // glossary is present — a draft that translates a glossary term is refused.
+    // glossary is present — a draft that translates a glossary term is
+    // admitted and scored zero on the glossary check.
     const draftThatTranslatesGlossary = TARGET.replace("Reeve", "Quan trị");
 
     const result = await draftSyncs({
@@ -110,8 +112,8 @@ describe("draftSyncs", () => {
       ignore: true,
     });
 
-    expect(result.attempts).toEqual([]);
-    expect(result.refused[0]?.score.reason).toContain("Reeve");
+    expect(result.refused).toEqual([]);
+    expect(scored(result.attempts[0], "glossary")).toBe(0);
   });
 
   it("admits a faithful draft with glossary terms preserved", async () => {
@@ -158,7 +160,7 @@ describe("draftSyncs", () => {
     expect(result.attempts[0]?.model).toBe("model-a");
   });
 
-  it("refuses a draft in the wrong script for the target", async () => {
+  it("scores a draft in the wrong script for the target at zero, without refusing", async () => {
     const chineseDraft = "# 开始使用\n\n本指南帮助您设置 Reeve。";
 
     const result = await draftSyncs({
@@ -176,8 +178,8 @@ describe("draftSyncs", () => {
       ignore: true,
     });
 
-    expect(result.attempts).toEqual([]);
-    expect(result.refused[0]?.score.reason).toContain("script");
+    expect(result.refused).toEqual([]);
+    expect(scored(result.attempts[0], "script")).toBe(0);
   });
 });
 
@@ -343,6 +345,75 @@ describe("draftSyncs chunking", () => {
     expect(result.attempts[0]?.score.admissible).toBe(true);
     // Code block preserved byte-for-byte.
     expect(result.attempts[0]?.text).toContain("```bash\nnpm install reeve\n```");
+  });
+
+  it("marks a draft incomplete when one chunk fell back and another did not", async () => {
+    // The silent half-sync, and the reason `Draft.incomplete` exists. The
+    // fallback itself is right — half a synced document beats a document with
+    // a hole in it — but the reassembled draft used to score like any other,
+    // win, publish, and leave the locale recorded as caught up with a source
+    // revision one of its chunks never saw. The next source change then diffs
+    // from that revision, so the hunk the failed chunk was carrying is never
+    // propagated to this locale again.
+    const longSource = [
+      "# Getting Started",
+      "",
+      "This guide helps you set up Reeve.",
+      "",
+      "## Configuration",
+      "",
+      "Configure Reeve in your workflow.",
+    ].join("\n");
+
+    const longTarget = [
+      "# Bắt đầu",
+      "",
+      "Hướng dẫn này giúp bạn thiết lập Reeve.",
+      "",
+      "## Cấu hình",
+      "",
+      "Cấu hình Reeve trong quy trình của bạn.",
+    ].join("\n");
+
+    // Answers the first chunk and nothing after it, so exactly one chunk falls
+    // back to the original text.
+    let asked = 0;
+    const flaky: Provider = {
+      complete(model: string): Promise<Completion> {
+        asked += 1;
+        return Promise.resolve(
+          asked === 1
+            ? {
+                ok: true,
+                model,
+                content: "# Bắt đầu\n\nHướng dẫn này giúp bạn cài đặt Reeve ngay.",
+                finishReason: "stop",
+              }
+            : { ok: false, model, reason: "no answer scripted", kind: "protocol" },
+        );
+      },
+    };
+
+    const result = await draftSyncs({
+      provider: flaky,
+      models: ["model-a"],
+      sourceContent: longSource,
+      targetContent: longTarget,
+      semanticHunks: SEMANTIC_HUNKS,
+      sourceLanguage: english,
+      targetLanguage: vietnamese,
+      languages: CONFIGURED,
+      glossary: [],
+      drafts: 1,
+      chunkChars: 50,
+      ignore: true,
+    });
+
+    // Admitted — the chunk that came back is real work and is published.
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]?.incomplete).toBe(true);
+    // And it still carries the chunk no model replaced.
+    expect(result.attempts[0]?.text).toContain("Cấu hình Reeve trong quy trình của bạn.");
   });
 
   it("keeps the original target chunk when all models fail for a chunk", async () => {

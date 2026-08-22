@@ -771,6 +771,46 @@ describe("the second run over a repository it already synced", () => {
     expect(stub.writes.filter((write) => write.path === "docs/start.vi.md")).toHaveLength(1);
   });
 
+  it("classifies from a diff against the recorded revision, not as a whole new document", async () => {
+    // The branch that could not run. `processGroup` chose between a real diff
+    // and "this is the initial sync" by comparing `doc.sourceRevision` against
+    // the current source SHA — but `markStale` sets those equal at the top of
+    // the run, before any drafting, so the comparison was always true and the
+    // blob read below it was unreachable. Every change harmonise has ever
+    // classified was presented to the model as a whole new document.
+    //
+    // Reading the baseline per locale is what hands the branch a revision that
+    // is not the current one. This is the case that says so: the classifier
+    // must see the changed lines, and must not be told this is an initial sync.
+    const previous = "# Getting started\n\nThis guide explains how to set Reeve up.\n";
+    stub.blobs.set("sha-previous", previous);
+    stub.files.set(
+      STATE_PATH,
+      JSON.stringify([
+        {
+          id: "docs/start",
+          files: { en: "docs/start.md", vi: "docs/start.vi.md" },
+          sourceRevision: "sha-previous",
+          synced: { vi: "sha-docs/start.vi.md" },
+          syncedRevision: { vi: "sha-previous" },
+          stale: [],
+          conflicts: [],
+        },
+      ]),
+    );
+
+    const run = await runAction();
+
+    expect(run.code).toBe(0);
+    const classify = stub.asked[0];
+    expect(classify).toBeDefined();
+    const shown = `${classify?.system ?? ""}${classify?.user ?? ""}`;
+    // The diff's own shape, which `formatInitialSync` can never produce.
+    expect(shown).toContain("+ This guide explains how to set Reeve up in a repository.");
+    expect(shown).toContain("- This guide explains how to set Reeve up.");
+    expect(shown).not.toContain("This is the initial sync");
+  });
+
   it("records the state it read back, so the silence is the state's doing and not an accident", async () => {
     // Without this case the one above would also pass against a duty that had
     // simply stopped working after its first run. Forgetting the state is the

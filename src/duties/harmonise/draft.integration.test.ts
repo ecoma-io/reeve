@@ -14,6 +14,7 @@ import type { Language } from "../../core/languages.js";
 import type { Completion, Provider } from "../../core/provider.js";
 import { draftSyncs } from "./draft.js";
 import type { ClassifiedHunk } from "./classify.js";
+import { scored } from "./checks.testing.js";
 
 const vietnamese: Language = { code: "vi", label: "Tiếng Việt", scripts: ["Latn"] };
 const english: Language = { code: "en", label: "English", scripts: ["Latn"] };
@@ -131,7 +132,7 @@ describe("drafting a harmonisation", () => {
     expect(result.refused[0]?.score.reason).toBe("unchanged from original");
   });
 
-  it("refuses a draft that translates glossary terms", async () => {
+  it("admits a draft that translates glossary terms, ranked down for it", async () => {
     const draft = FAITHFUL.replace("Reeve", "Quan trị");
     const result = await draftSyncs({
       provider: scripted({ "model-a": draft }),
@@ -148,8 +149,12 @@ describe("drafting a harmonisation", () => {
       ignore: true,
     });
 
-    expect(result.attempts).toEqual([]);
-    expect(result.refused[0]?.score.reason).toContain("Reeve");
+    // Admitted rather than refused: with `drafts: 1` a refusal is the locale
+    // left un-synced, not a fallback to a better candidate. The loss shows in
+    // the rank instead — see `score.ts`.
+    expect(result.refused).toEqual([]);
+    expect(result.attempts).toHaveLength(1);
+    expect(scored(result.attempts[0], "glossary")).toBe(0);
   });
 
   it("ranks the draft that preserves code above the one that translates it", async () => {
@@ -227,9 +232,9 @@ describe("drafting a harmonisation", () => {
     expect(result.failures.map((failure) => failure.model)).toEqual(["model-a", "model-b"]);
   });
 
-  it("refuses a draft in the wrong script for the target", async () => {
+  it("admits a draft in the wrong script for the target, scored at zero for it", async () => {
     // A Chinese draft for a Vietnamese target — the Han script is neither the
-    // target's nor present in the source, so foreignScript catches it.
+    // target's nor present in the source, so `scriptLeak` reports it.
     const chineseDraft = "# 开始使用\n\n本指南帮助您设置 Reeve。";
 
     const result = await draftSyncs({
@@ -247,7 +252,10 @@ describe("drafting a harmonisation", () => {
       ignore: true,
     });
 
-    expect(result.attempts).toEqual([]);
-    expect(result.refused[0]?.score.reason).toContain("script");
+    // Wholly foreign, so the check reads zero and this draft loses to any
+    // other the run produced — which is the difference between ranking it and
+    // throwing it out, and the difference between a bad sync and no sync.
+    expect(result.refused).toEqual([]);
+    expect(scored(result.attempts[0], "script")).toBe(0);
   });
 });
