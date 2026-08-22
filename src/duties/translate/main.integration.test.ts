@@ -26,7 +26,8 @@ import { fileURLToPath } from "node:url";
 
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import { marker } from "./publish.js";
+import { parseLanguages } from "../../core/languages.js";
+import { marker, translationFingerprint } from "./publish.js";
 
 // A spawn per case, each loading a 3 MB bundle and identifying a language from
 // bundled profile data. Comfortably under this, and not worth flaking over.
@@ -1447,13 +1448,25 @@ describe("the sweep", () => {
     expect(run.summary).not.toContain("| #403 |");
   });
 
-  it("skips a thread whose body already carries this duty's marker, at no cost", async () => {
-    // A real digest — the shape `fingerprint` produces and nothing narrower is
-    // accepted as "already translated"; see the forged-marker test below.
+  /**
+   * The marker a run leaves when it achieved exactly `codes` on `body` — the
+   * same digest `translationFingerprint` writes, over the same two inputs.
+   *
+   * Built rather than typed, because the whole question the sweep now asks is
+   * whether a marker records *these* languages, and a hand-written digest can
+   * only ever answer "no".
+   */
+  function markerFor(body: string, codes: readonly string[]): string {
+    return marker.render(translationFingerprint(body, parseLanguages([...codes])));
+  }
+
+  it("skips a thread whose marker records every configured language, at no cost", async () => {
+    // The suite's warrant configures `en, vi`. A complete run on a Vietnamese
+    // body posts `en` and has nothing to do for `vi`, so it records both.
     stub.issues = [
       candidate(
         501,
-        `${VIETNAMESE}\n\n<!-- reeve:translate source=deadbeefdeadbeef -->`,
+        `${VIETNAMESE}\n\n${markerFor(VIETNAMESE, ["en", "vi"])}`,
         "2026-01-02T00:00:00Z",
       ),
       candidate(502, VIETNAMESE, "2026-01-01T00:00:00Z"),
@@ -1470,6 +1483,29 @@ describe("the sweep", () => {
     expect(stub.asked).toHaveLength(1);
     expect(run.summary).toContain("| #502 |");
     expect(run.summary).not.toContain("| #501 |");
+  });
+
+  it("comes back for a thread whose marker records fewer languages than are configured", async () => {
+    // The repair path, and the one this sweep did not have. #123 and #130 each
+    // ended up carrying a marker that records one language where the warrant
+    // configures two — a refused draft on one side, a provider out of capacity
+    // on the other. The marker is real and the thread is not done, and asking
+    // only "is there a digest here?" could not tell those apart, so no sweep
+    // would ever have looked at either of them again.
+    //
+    // Here #503 carries a marker recording `vi` alone: the source language it
+    // had nothing to translate into, and no `en`. It is work, not history.
+    stub.issues = [
+      candidate(503, `${VIETNAMESE}\n\n${markerFor(VIETNAMESE, ["vi"])}`, "2026-01-01T00:00:00Z"),
+    ];
+
+    const run = await runAction(stub, sweepInputs());
+
+    expect(run.code).toBe(0);
+    expect(run.outputs.processed).toBe("1");
+    expect(run.outputs.skipped).toBe("0");
+    expect(run.summary).toContain("| #503 |");
+    expect(stub.bodies.get(503) ?? "").toContain("<b>English</b>");
   });
 
   it("does not let a forged marker permanently withhold a thread from sweeps", async () => {

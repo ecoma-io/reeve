@@ -101,7 +101,7 @@ import {
   type EndpointSpec,
 } from "../../core/inputs.js";
 import { type Language, parseLanguages } from "../../core/languages.js";
-import { isFingerprint, isReeveProposalPr } from "../../core/marker.js";
+import { isReeveProposalPr } from "../../core/marker.js";
 import {
   assembleClient,
   createWeather,
@@ -133,10 +133,10 @@ import {
 } from "../../core/warrant.js";
 
 import { type Stages } from "./engine.js";
-import { parseChunkChars } from "./inputs.js";
+import { carriesTranslation, parseChunkChars } from "./inputs.js";
 import { summarize, summarizeSweep, type Run, type SweptThread } from "./summary.js";
 import { processThread, type Report, type ThreadResult } from "./text.js";
-import { marker, type Attribution } from "./publish.js";
+import { type Attribution } from "./publish.js";
 import { DEFAULT_CAPABILITIES } from "./capabilities.js";
 
 /** This sweep's progress: the shared accumulator, holding this duty's own rows. */
@@ -352,24 +352,34 @@ async function runSweep(
 
   await sweepThreads(acc, listed, settings, weather, {
     alreadyDone: (thread) =>
-      // The idempotent skip: a body already carrying this duty's marker has
-      // been translated at least once before, whatever the exact language set
-      // was that run — the same "already decided about" reading triage's own
-      // marker-carrying skip gives it, and free for the same reason: nothing
-      // here calls the tracker or a model, only `marker.split` on text the
+      // The idempotent skip, and it asks the same question `translateText`
+      // asks: does this body already carry the translation for *this text and
+      // these languages*? Free for the reason it always was — nothing here
+      // calls the tracker or a model, only a split and a digest over text the
       // listing already fetched.
       //
-      // The digest, not the marker: the marker's shape is public and anyone
-      // can type it, so `<!-- reeve:translate source= -->` (or any payload that
-      // is not a real digest) carries no evidence a translation exists — and
-      // counts as untranslated, so a forged empty marker cannot permanently
-      // withhold a thread from sweeps. A real 16-hex digest is the only claim
-      // of prior work this line accepts.
+      // **It used to ask a weaker question, and the weakness was the bug.** A
+      // real digest of any kind counted as done, so a thread whose marker
+      // records Chinese alone — because Vietnamese was refused, or its models
+      // were out of capacity — was skipped by every sweep for ever. That is
+      // the one repair path a thread has: the event path cannot supply
+      // another, because the body edit that publishes is written with
+      // `GITHUB_TOKEN` and GitHub starts no workflow run from it. The
+      // fingerprint was already built to record what a run *achieved* rather
+      // than what it was asked for, precisely so a short run could be found
+      // again; this line is where that was being discarded.
+      //
+      // The forged-marker guard survives the change without a shape test in
+      // front of it: a payload that is not the digest of this text and these
+      // languages cannot equal one, so a typed `<!-- reeve:translate
+      // source= -->` still counts as untranslated and still cannot withhold a
+      // thread from sweeps.
       //
       // Recursion guard on the same line: Reeve never translates its own
       // proposal pull request, and the listing already carries `isPullRequest`
-      // and `body`, so this costs nothing beyond the marker check.
-      isFingerprint(marker.split(thread.body).fingerprint ?? "") || isReeveProposalPr(thread),
+      // and `body`, so this costs nothing beyond the digest.
+      carriesTranslation(thread.body, settings.maxBodyChars, settings.languages) ||
+      isReeveProposalPr(thread),
     // The same self-imposed ceiling `translateText` and `translateReplies`
     // check within one thread, checked here as well so a sweep never starts a
     // thread it cannot even begin — leaving it for `remaining` is cheaper

@@ -28,7 +28,7 @@ import { assemble, publish } from "../../core/publish.js";
 import { type Meter } from "../../core/meter.js";
 
 import { translateInto, type Stages, type RosterCheck } from "./engine.js";
-import { readBody, targets } from "./inputs.js";
+import { carriesTranslation, readBody, targets } from "./inputs.js";
 import { type Looked } from "./summary.js";
 import {
   marker,
@@ -84,7 +84,7 @@ export async function translateText(
   budget: Budget,
   onRosterExhausted?: RosterCheck,
 ): Promise<Report> {
-  const { official, source, truncated, published } = readBody(body, settings.maxBodyChars);
+  const { official, source, truncated } = readBody(body, settings.maxBodyChars);
   if (source.trim().length === 0) {
     core.info(`${what} has an empty body — nothing to translate.`);
     return nothing(what, "empty body");
@@ -112,8 +112,7 @@ export async function translateText(
   // and the run skipping, so the tail the block promises to come back for never
   // was. The two are the same string whenever nothing was truncated, which is
   // why a thread translated in full keeps the marker it already has.
-  const wanted = translationFingerprint(source, settings.languages);
-  if (published === wanted) {
+  if (carriesTranslation(body, settings.maxBodyChars, settings.languages)) {
     core.info(`${what} already carries the translation for this text and these languages.`);
     return nothing(what, "already translated");
   }

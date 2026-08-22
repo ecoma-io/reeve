@@ -161,9 +161,19 @@ export function completionRoute(answer: (ask: Ask) => Answer): Route {
 }
 
 /** The git data + contents routes a duty with repository files uses. */
-export function repoRoutes(contents: ContentMap): readonly Route[] {
+/**
+ * @param blobs - Content addressable by SHA but NOT in the tree: a revision of a
+ * file that is no longer the current one. The Git Blobs API can still serve it,
+ * and a duty reading history through a recorded SHA needs exactly that. Kept out
+ * of `contents` because everything in there is listed in the tree, and a
+ * previous revision listed beside its current one would be a second file.
+ */
+export function repoRoutes(contents: ContentMap, blobs: ContentMap = new Map()): readonly Route[] {
   const findBySha = (sha: string): string | undefined => {
     for (const [, file] of contents) {
+      if (file.sha === sha) return file.content;
+    }
+    for (const [, file] of blobs) {
       if (file.sha === sha) return file.content;
     }
     return undefined;
