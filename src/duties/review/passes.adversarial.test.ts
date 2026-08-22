@@ -225,8 +225,43 @@ describe("the system prompt states the rules and the language honestly", () => {
     // The shared discipline survives every lead.
     for (const text of [c, s, a]) {
       expect(text).toContain("The head SHA of the diff you are reviewing is abc123.");
-      expect(text).toContain('{"findings": [], "confidence": 0.0}');
+      expect(text).toContain('{"findings": [], "confidence": 0.75}');
     }
+  });
+
+  it("the_answer_skeleton_never_shows_a_confidence_no_floor_could_admit", () => {
+    // The skeleton is the shape a model copies when it has nothing else to go
+    // on, and it used to read `"confidence": 0.0` — a complete, valid, entirely
+    // plausible all-clear that no floor above zero can ever admit. Three passes
+    // answering readably and all three reporting 0.0 is what that produced on a
+    // real run, and `aggregateConfidence` takes the strongest of them, so the
+    // whole review was withheld for a number nobody had actually judged. The
+    // skeleton must stay a shape, never a usable answer.
+    for (const build of [correctnessPrompt, secondOpinionPrompt]) {
+      const system = halves(build(context())).system;
+      expect(system).not.toContain('"confidence": 0.0');
+      expect(system).not.toContain('"confidence": 0}');
+    }
+  });
+
+  it("every_pass_is_told_what_confidence_measures_and_not_to_copy_the_example", () => {
+    // Before this, `confidence` appeared in the prompt exactly once — as a
+    // value in the skeleton — and was never defined. A number the model is
+    // never asked to judge is not a measurement, which is the one thing the
+    // floor needs it to be.
+    for (const build of [correctnessPrompt, secondOpinionPrompt]) {
+      const system = halves(build(context())).system;
+      expect(system).toContain("how far this whole answer can be relied on");
+      expect(system).toContain("One number for");
+      expect(system).toContain("never one per finding");
+      // An all-clear must not read as a reason to answer low: that is exactly
+      // the reading that withheld a clean review on the run this fixes.
+      expect(system).toContain("empty `findings` list is not a reason to answer low");
+      expect(system).toContain("it is not a default, and copying it is not judging");
+    }
+    expect(halves(adversarialPrompt(context(), [])).system).toContain(
+      "how far this whole answer can be relied on",
+    );
   });
 
   it("each_pass_declares_its_own_identity_and_the_adversarial_one_carries_its_prior", () => {
