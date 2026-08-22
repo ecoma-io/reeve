@@ -12,9 +12,9 @@
  * code across untouched and required to leave a URL alone.
  *
  * **Refusal and rank are different answers.** A draft is inadmissible only for
- * something provable *and* total — it is empty, it is the source unchanged, it
- * closes a section it does not own, or it is still in the language it was
- * supposed to be translated out of. Everything else lowers the rank instead.
+ * something provable *and* total — it is empty, it is the source unchanged, or
+ * it is still in the language it was supposed to be translated out of.
+ * Everything else lowers the rank instead.
  *
  * **Two rules used to refuse here and now rank instead: the glossary and the
  * script leak.** Both were provable and neither was total, and that gap is
@@ -147,7 +147,7 @@ export async function score(request: Draft): Promise<Score> {
   const before = outline(request.source);
   const after = outline(request.draft);
 
-  const refusal = await refuse(request, after);
+  const refusal = await refuse(request);
   if (refusal) return refused(refusal);
 
   const checks: Check[] = [
@@ -177,14 +177,10 @@ function terms({ glossary }: Draft): readonly string[] {
  * fails, and it fails while producing text that every other measurement here
  * scores perfectly — same code, same links, same structure, same length.
  */
-async function refuse(request: Draft, after: Outline): Promise<string | null> {
+async function refuse(request: Draft): Promise<string | null> {
   const { source, draft, from, to } = request;
   if (draft.trim().length === 0) return "the draft is empty";
   if (draft.trim() === source.trim()) return "the draft is the source, unchanged";
-
-  if (closesUnopenedSection(after.prose)) {
-    return "the draft closes a `<details>` section it never opened";
-  }
 
   if (!from || from.code.toLowerCase() === to.code.toLowerCase()) return null;
 
@@ -194,39 +190,6 @@ async function refuse(request: Draft, after: Outline): Promise<string | null> {
   // the source language refuses one.
   const { language } = await detectLanguage(draft, [from, to]);
   return language?.code === from.code ? `the draft is still in ${from.label}` : null;
-}
-
-/**
- * A `<details>` tag, open or closing, with whatever attributes it carries. Only
- * ever run over prose: the same characters inside a fence or a span are a code
- * sample about HTML, and GitHub renders them as text.
- */
-const DETAILS = /<(\/)?details\b[^>]*>/gi;
-
-/**
- * Whether the draft ends a section that was not its to end.
- *
- * Raw HTML is deliberately left in a translation — a draft that dropped the
- * `<details>` block its source used is the worse translation, and the sanitiser
- * says so. But this duty publishes each translation *inside* a `<details>`
- * section of its own, so a stray `</details>` does not merely unbalance the
- * draft: it closes the wrapper early and spills every language after it into
- * the visible part of the thread body.
- *
- * The balance is what distinguishes the two cases, and it is why this counts
- * rather than searching. A source that legitimately used a collapsible section
- * hands the model a `</details>` to reproduce, and reproducing it is correct —
- * it has an opener of its own. Only a closer with no opener before it is
- * reaching outside the draft, and once the running depth has gone negative no
- * later opener can put it back.
- */
-function closesUnopenedSection(prose: string): boolean {
-  let depth = 0;
-  for (const [, closing] of prose.matchAll(DETAILS)) {
-    depth += closing === undefined ? 1 : -1;
-    if (depth < 0) return true;
-  }
-  return false;
 }
 
 /**

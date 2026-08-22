@@ -278,6 +278,101 @@ describe("publication", () => {
   });
 });
 
+describe("a `<details>` tag the translation did not balance", () => {
+  // Each section is a `<details>` block this module opens and closes, so a
+  // stray tag inside a translation reaches outside its own section: a loose
+  // closer ends the wrapper early, and a loose opener spends the wrapper's own
+  // closer on itself. Either way every language after it spills into the
+  // visible body.
+  //
+  // This used to be a refusal in `score.ts` — which protected the body by
+  // dropping the language, and dropped BOTH configured languages on #131 (run
+  // 32563990348) over a pull request that merely quoted the tag while
+  // describing the rule. Escaping is total where the refusal was severe.
+
+  /** The wrapper this module renders around each translation. */
+  const OPENERS = (text: string): number => (text.match(/<details/gi) ?? []).length;
+  const CLOSERS = (text: string): number => (text.match(/<\/details>/gi) ?? []).length;
+
+  it("escapes a closer the translation never opened", () => {
+    const rendered = body({ posted: [posted(english, "An error.\n\n</details>\n")] });
+
+    expect(rendered).toContain("&lt;/details&gt;");
+    // One section, so one wrapper — the stray closer is text and counts for
+    // neither side.
+    expect(OPENERS(rendered)).toBe(1);
+    expect(CLOSERS(rendered)).toBe(1);
+  });
+
+  it("escapes an opener the translation never closed", () => {
+    // The mirror image, and the one the refusal never covered at all: this
+    // draft was admissible before, and its unclosed opener swallowed this
+    // module's own closer.
+    const rendered = body({ posted: [posted(english, "<details>\n\nAn error.\n")] });
+
+    expect(rendered).toContain("&lt;details&gt;");
+    expect(OPENERS(rendered)).toBe(1);
+    expect(CLOSERS(rendered)).toBe(1);
+  });
+
+  it("escapes a closer no later opener can make up for", () => {
+    // Counting tags and comparing totals would let this through: one of each.
+    // The order is what decides it.
+    const rendered = body({ posted: [posted(english, "</details>\n\n<details>\n\nAn error\n")] });
+
+    expect(rendered).toContain("&lt;/details&gt;");
+    expect(rendered).toContain("&lt;details&gt;");
+    expect(OPENERS(rendered)).toBe(1);
+    expect(CLOSERS(rendered)).toBe(1);
+  });
+
+  it("leaves a collapsible section the translation balanced itself exactly as written", () => {
+    // The reason this escapes rather than strips: a source with a `<details>`
+    // block wants it carried across, and both halves are the model's correct
+    // answer.
+    const inner = "<details open><summary>Log</summary>\n\nAn error\n\n</details>";
+    const rendered = body({ posted: [posted(english, inner)] });
+
+    expect(rendered).toContain(inner);
+    expect(rendered).not.toContain("&lt;details");
+    expect(OPENERS(rendered)).toBe(2);
+    expect(CLOSERS(rendered)).toBe(2);
+  });
+
+  it("reads the tags out of prose, so a code sample about HTML is left alone", () => {
+    // The same characters inside a span are a code sample, which GitHub already
+    // renders as text — escaping them would change what the reader sees for no
+    // protection at all.
+    const rendered = body({ posted: [posted(english, "Write `</details>` to close it.")] });
+
+    expect(rendered).toContain("Write `</details>` to close it.");
+    expect(rendered).not.toContain("&lt;/details&gt;");
+  });
+
+  it("carries depth across a fence, so a closer split from its opener is not an orphan", () => {
+    // `mapProse` would rewrite each prose run on its own and see this closer
+    // with no opener before it. The opener is two runs back, with a fence
+    // between, and the pair is correct.
+    const inner = ["<details>", "", "```", "code", "```", "", "</details>"].join("\n");
+    const rendered = body({ posted: [posted(english, inner)] });
+
+    expect(rendered).toContain(inner);
+    expect(rendered).not.toContain("&lt;details");
+  });
+
+  it("keeps a stray tag from reaching the language published after it", () => {
+    // The damage the rule exists to stop, stated as the reader sees it: the
+    // second section's own summary is still inside a wrapper of its own.
+    const rendered = body({
+      posted: [posted(english, "An error.\n\n</details>\n"), posted(chinese)],
+    });
+
+    expect(OPENERS(rendered)).toBe(2);
+    expect(CLOSERS(rendered)).toBe(2);
+    expect(rendered).toContain("&lt;/details&gt;");
+  });
+});
+
 describe("the branding line", () => {
   it("sits between the rule and the first section, where nothing has to be unfolded", () => {
     // The whole point: Reeve already names itself in every section's boundary

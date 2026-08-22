@@ -34904,7 +34904,7 @@ var PLAUSIBLE_LENGTH = {
 async function score(request2) {
   const before = outline(request2.source);
   const after = outline(request2.draft);
-  const refusal = await refuse(request2, after);
+  const refusal = await refuse(request2);
   if (refusal) return refused(refusal);
   const checks = [
     codeCheck(before, after),
@@ -34921,25 +34921,13 @@ async function score(request2) {
 function terms({ glossary }) {
   return (glossary ?? []).map((entry) => entry.term);
 }
-async function refuse(request2, after) {
+async function refuse(request2) {
   const { source, draft, from, to } = request2;
   if (draft.trim().length === 0) return "the draft is empty";
   if (draft.trim() === source.trim()) return "the draft is the source, unchanged";
-  if (closesUnopenedSection(after.prose)) {
-    return "the draft closes a `<details>` section it never opened";
-  }
   if (!from || from.code.toLowerCase() === to.code.toLowerCase()) return null;
   const { language } = await detectLanguage(draft, [from, to]);
   return language?.code === from.code ? `the draft is still in ${from.label}` : null;
-}
-var DETAILS = /<(\/)?details\b[^>]*>/gi;
-function closesUnopenedSection(prose) {
-  let depth = 0;
-  for (const [, closing] of prose.matchAll(DETAILS)) {
-    depth += closing === void 0 ? 1 : -1;
-    if (depth < 0) return true;
-  }
-  return false;
 }
 function outline(markdown) {
   const code = [];
@@ -35973,6 +35961,36 @@ var BRANDING = `<sub>[<img src="${LOGO}" height="14" alt=""> **Reeve**](${HOME})
 function boundary(entry) {
   return `> ${chrome("translateBoundary", entry.to.code)}`;
 }
+var DETAILS = /<(\/)?details\b[^>]*>/gi;
+function contained(text2) {
+  const pieces = [];
+  const opened = [];
+  for (const segment of segments(text2)) {
+    if (segment.kind !== "prose") {
+      pieces.push(segment.text);
+      continue;
+    }
+    let last = 0;
+    for (const match of segment.text.matchAll(DETAILS)) {
+      const tag = match[0];
+      const at = match.index;
+      pieces.push(segment.text.slice(last, at));
+      last = at + tag.length;
+      if (match[1] === void 0) {
+        opened.push(pieces.length);
+        pieces.push(tag);
+      } else if (opened.length > 0) {
+        opened.pop();
+        pieces.push(tag);
+      } else {
+        pieces.push(escapeHtml(tag));
+      }
+    }
+    pieces.push(segment.text.slice(last));
+  }
+  for (const at of opened) pieces[at] = escapeHtml(pieces[at] ?? "");
+  return pieces.join("");
+}
 function section(entry, translated, alone) {
   return [
     `<details${alone ? " open" : ""}>`,
@@ -35984,7 +36002,7 @@ function section(entry, translated, alone) {
     "",
     boundary(entry),
     "",
-    entry.text,
+    contained(entry.text),
     "",
     ...translated.attribution === "detail" ? [provenance(entry), ""] : [],
     footer(entry, translated),
