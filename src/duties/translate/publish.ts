@@ -36,6 +36,7 @@
 import { chrome } from "../../core/chrome.js";
 import type { Language } from "../../core/languages.js";
 import { fingerprint, markerFor, type Marker } from "../../core/marker.js";
+import { segments } from "../../core/markdown.js";
 import type { Publication } from "../../core/publish.js";
 
 /** This duty's marker: `<!-- reeve:translate source=… -->`. */
@@ -300,6 +301,89 @@ function boundary(entry: Posted): string {
   return `> ${chrome("translateBoundary", entry.to.code)}`;
 }
 
+/**
+ * A `<details>` tag, open or closing, with whatever attributes it carries.
+ */
+const DETAILS = /<(\/)?details\b[^>]*>/gi;
+
+/**
+ * The translation with any `<details>` tag that would reach outside this
+ * section turned into visible text.
+ *
+ * **The one tag with teeth, disarmed where the teeth are.** Every section below
+ * is a `<details>` block this module opens and closes, so a stray `</details>`
+ * in a translation does not merely unbalance that translation — it closes the
+ * wrapper early and spills every language after it into the visible part of the
+ * body. An unclosed `<details>` does the mirror image: this module's own closer
+ * ends the model's section instead of its own, and the same spill follows.
+ *
+ * That damage used to be prevented by refusing the draft, in `score.ts`. The
+ * refusal was correct about the danger and far too expensive about it: with one
+ * draft asked for, an otherwise sound translation was dropped whole, and the
+ * language with it. Run 32563990348 lost *both* configured languages on #131
+ * that way — a pull request whose own prose contains the string `</details>`
+ * while describing this very rule, which the model reproduced without the code
+ * span that had been keeping it inert.
+ *
+ * Escaping is the better answer because it is total where the refusal was
+ * merely severe: a tag turned into text cannot reach anything, whatever the
+ * model wrote, and the reader still sees what the author meant them to see. A
+ * refusal only protects the run that happens to notice.
+ *
+ * **Balanced, not stripped.** A translation that reproduces a `<details>` block
+ * its source used has an opener for every closer, and both stay exactly as the
+ * model wrote them — that block is correct and is the reason the sanitiser
+ * leaves raw HTML alone in the first place. Only a tag with no partner is
+ * escaped.
+ *
+ * **Depth is carried across prose runs, which is why this walks segments
+ * itself rather than going through `mapProse`.** A code fence between an opener
+ * and its closer splits the prose into two runs, and a rewrite applied per run
+ * would see the second run's closer as an orphan and escape a tag that was
+ * matched all along. Code segments pass through untouched: the same characters
+ * inside a fence or a span are a code sample about HTML, which GitHub already
+ * renders as text.
+ */
+function contained(text: string): string {
+  const pieces: string[] = [];
+  /** Where in `pieces` each still-unmatched opener sits. */
+  const opened: number[] = [];
+
+  for (const segment of segments(text)) {
+    if (segment.kind !== "prose") {
+      pieces.push(segment.text);
+      continue;
+    }
+
+    let last = 0;
+    for (const match of segment.text.matchAll(DETAILS)) {
+      const tag = match[0];
+      const at = match.index;
+      pieces.push(segment.text.slice(last, at));
+      last = at + tag.length;
+
+      if (match[1] === undefined) {
+        opened.push(pieces.length);
+        pieces.push(tag);
+      } else if (opened.length > 0) {
+        opened.pop();
+        pieces.push(tag);
+      } else {
+        // A closer with nothing of its own to close. Left alone it would close
+        // the section this text is about to be published inside.
+        pieces.push(escapeHtml(tag));
+      }
+    }
+    pieces.push(segment.text.slice(last));
+  }
+
+  // Whatever is still open at the end never got a closer, so this module's own
+  // would be spent on it.
+  for (const at of opened) pieces[at] = escapeHtml(pieces[at] ?? "");
+
+  return pieces.join("");
+}
+
 function section(entry: Posted, translated: Translated, alone: boolean): string {
   return [
     `<details${alone ? " open" : ""}>`,
@@ -311,7 +395,7 @@ function section(entry: Posted, translated: Translated, alone: boolean): string 
     "",
     boundary(entry),
     "",
-    entry.text,
+    contained(entry.text),
     "",
     ...(translated.attribution === "detail" ? [provenance(entry), ""] : []),
     footer(entry, translated),

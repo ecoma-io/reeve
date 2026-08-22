@@ -50,11 +50,23 @@ name: Reeve
 # ONE ROSTER, EXPLICITLY. Every duty runs on the same roster —
 # `ECOMA_REEVE_MODEL` holds the model ids in preference order (a primary and
 # its capacity fallback), and every job below reads the same secret. That
-# roster is both the `models` chain and, when a duty grades its own drafts,
-# the judge: with `judge-models` unset the judge falls back to `models`, so a
-# second draft also buys a judge call to choose between the two. `translate`
-# and `harmonise` below set `drafts: 2` deliberately, and it is the only lever
-# in this file that spends more to lose less.
+# roster is the `models` chain, and only that. `translate` and `harmonise`
+# below set `drafts: 2` deliberately, and it is the only lever in this file
+# that spends more to lose less.
+#
+# **No judge is ever asked here, and an earlier version of this comment said
+# otherwise.** `judge-models` is unset, and it does NOT fall back to `models`:
+# `parseSeats("")` returns no seats, so `judgePanel` returns early and every
+# draft is decided by score alone — which is why every dogfood log line reads
+# `by score` and never `by judges`. The claim was wrong when #131 wrote it,
+# and the run that disproved it is [32568359176](https://github.com/ecoma-io/reeve/actions/runs/32568359176).
+#
+# The second draft still earns its place without a panel: a refused draft is
+# replaced by an admitted one, and between two admitted drafts the higher score
+# wins. What it does not buy is a model's opinion. To buy that, set
+# `judge-models` — and note `warnIfPanelIdle` only catches the opposite
+# mistake (seats configured with `drafts: 1`), so seats absent beside
+# `drafts: 2` passes silently.
 #
 # It ran at `drafts: 1` until a review of five consecutive dogfood runs found
 # what one draft costs. A single draft is not "the answer" — it is the answer
@@ -66,12 +78,14 @@ name: Reeve
 # sweep skips any thread already carrying a marker. So the second draft is not
 # a quality lever here, it is the only redundancy the event path has.
 #
-# The bill is real and is stated rather than buried: a language now costs two
-# drafts plus a judge call where it cost one draft, so roughly three times the
-# requests and about three times the wall clock (~15s to ~45s per language,
-# against a 20-minute job timeout). On an endpoint already answering 502 under
-# load, more requests is not free in either direction — if capacity failures
-# rise rather than fall, this number is the first thing to put back.
+# The bill is real, is stated rather than buried, and is now measured rather
+# than estimated: a language costs two drafts where it cost one, so twice the
+# requests — not the three times #131 predicted, because that prediction
+# counted a judge call that is never made. Measured on run 32568359176: 33s
+# for `vi` and 30s for `zh`, against ~15s per language before, and a 20-minute
+# job timeout. On an endpoint already answering 502 under load, more requests
+# is not free in either direction — if capacity failures rise rather than
+# fall, this number is the first thing to put back.
 #
 # `screen-models` is likewise deliberately absent: the cheap spam screen is
 # off, and the free screens + language detection still run on `models`.

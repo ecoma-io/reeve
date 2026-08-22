@@ -96,48 +96,30 @@ describe("score", () => {
       expect(result.checks).toEqual([]);
     });
 
-    it("refuses a draft that closes a section it never opened", async () => {
-      // This action posts every translation inside a `<details>` block of its
-      // own, so a stray closer does not unbalance the draft — it ends the
-      // wrapper and spills whatever follows into the visible comment.
+    it("admits a draft that closes a section it never opened — publish disarms it", async () => {
+      // This used to be inadmissible, and the danger it named is real: a stray
+      // closer ends the `<details>` wrapper `publish.ts` puts each translation
+      // inside, spilling every language after it into the visible body.
+      //
+      // The answer moved rather than softened. Refusing cost the whole language
+      // for one loose tag — run 32563990348 lost BOTH configured languages on
+      // #131 that way — while `publish.ts` can escape the tag as it assembles
+      // the section, which removes the damage instead of pricing it. Nothing is
+      // left here to refuse, and nothing to measure either: see
+      // `publish.test.ts` for where the rule lives now.
       const result = await score(request("Có lỗi", "An error.\n\n</details>\n"));
-
-      expect(result.admissible).toBe(false);
-      expect(result.reason).toBe("the draft closes a `<details>` section it never opened");
-    });
-
-    it("admits a draft that closes the section it opened itself", async () => {
-      // The source is allowed a collapsible section, and reproducing it is the
-      // correct answer rather than the failure above.
-      const source = "<details><summary>Nhật ký</summary>\n\nCó lỗi\n\n</details>";
-      const draft = "<details open><summary>Log</summary>\n\nAn error\n\n</details>";
-
-      const result = await score(request(source, draft));
 
       expect(result.admissible).toBe(true);
     });
 
-    it("refuses a closer that no later opener can make up for", async () => {
-      // Counting the tags and comparing totals would admit this: one of each.
-      // The order is what decides it, so the depth is refused the moment it
-      // goes negative.
-      const result = await score(request("Có lỗi", "</details>\n\n<details>\n\nAn error\n"));
+    it("admits a draft that closes the section it opened itself", async () => {
+      // Always was admitted, and still is — the source is allowed a collapsible
+      // section and reproducing it is the correct answer. Kept because it is
+      // the case a future re-refusal would have to break to come back.
+      const source = "<details><summary>Nhật ký</summary>\n\nCó lỗi\n\n</details>";
+      const draft = "<details open><summary>Log</summary>\n\nAn error\n\n</details>";
 
-      expect(result.admissible).toBe(false);
-      expect(result.reason).toBe("the draft closes a `<details>` section it never opened");
-    });
-
-    it("reads the tags out of prose, so a code sample about HTML is not a closer", async () => {
-      splitting(
-        [{ kind: "prose", text: "Có lỗi" }],
-        [
-          { kind: "prose", text: "Write " },
-          { kind: "code", text: "`</details>`" },
-          { kind: "prose", text: " to close it." },
-        ],
-      );
-
-      const result = await score(request("Có lỗi", "Write `</details>` to close it."));
+      const result = await score(request(source, draft));
 
       expect(result.admissible).toBe(true);
     });

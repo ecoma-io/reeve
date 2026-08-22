@@ -283,6 +283,22 @@ finishes atomically: what already published stands, and only the work not
 yet started is left for a later run (or, under `sweep`, counted into
 `remaining`). `none`, the default, never trips it.
 
+**A `<details>` tag a translation left unbalanced cannot reach past its own
+section.** Every section is a collapsible block this duty opens and closes, so
+a stray `</details>` in a translation would end that block early and spill every
+language after it into the visible body — and an unclosed `<details>` would
+spend the block's own closer on itself, with the same result. As each section is
+assembled, any `<details>` tag left without a partner is escaped, so it renders
+as visible text and reaches nothing. A section the translation balanced itself —
+reproducing one its source used — is published exactly as the model wrote it,
+and a tag inside a code fence or span is left alone, because GitHub already
+renders those as text.
+
+This used to be a refusal in scoring, which protected the body by dropping the
+language: one loose tag cost the whole translation, and on one pull request it
+cost every configured language at once. Escaping removes the damage rather than
+pricing it, so there is nothing left to refuse.
+
 **`show-branding` is one fixed line, not one per language.** Between the rule
 and the first collapsible section the block carries a single small line — the
 Reeve mark, the name, and _"autonomous repository operations"_ — linking to

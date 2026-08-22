@@ -28,10 +28,13 @@
  *
  * - *Raw HTML tags stay.* GitHub's own sanitizer is the boundary for those, and
  *   a block that loses the `<details>` its source used is worse than one
- *   carrying a tag GitHub already refuses to render. The
- *   one tag with teeth — a `</details>` that closes the section a duty
- *   publishes its own text inside — is refused by the duty's scorer instead, which has
- *   the source in hand and can tell a reproduced section from a stray closer.
+ *   carrying a tag GitHub already refuses to render. The one tag with teeth — a
+ *   `</details>` that closes the section a duty publishes its own text inside —
+ *   is disarmed by the duty that owns that section, at the point where it
+ *   assembles it: `translate/publish.ts` escapes any `<details>` tag left
+ *   without a partner, so a reproduced section survives intact and a stray one
+ *   is text before it can reach anything. It used to be a refusal in the duty's
+ *   scorer, which cost the whole language for one loose tag.
  * - *Commit SHAs stay.* GitHub abbreviates a linked SHA to seven characters, so
  *   defanging one is the single reference form that is *visible* — it would
  *   replace `fca3701` with forty characters of hex to prevent a reference event
