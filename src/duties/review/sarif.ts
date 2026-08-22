@@ -68,11 +68,18 @@ export function buildSarif(reconciled: readonly Reconciled[], headSha: string): 
 
   const results = standing.map((entry) => {
     const { finding } = entry;
+    // Every rung of the fallback chain passes `sanitize`, not just the first.
+    // `ruleName` is the model's own claimed rule id whenever that id names no
+    // rule the repository declared (`toFinding` in `main.ts` falls back to it),
+    // so the rung that catches a model which returned no body is a rung
+    // carrying model prose — and it lands in the same rendered surface the
+    // body would have. Trimming each rung is what makes the chain descend on
+    // whitespace instead of emitting it.
     const prose = sanitize(finding.body).trim();
-    const text = (prose.length > 0 ? prose : finding.ruleName || finding.ruleId).slice(
-      0,
-      MAX_MESSAGE_CHARS,
-    );
+    const named = sanitize(finding.ruleName).trim();
+    const text = (
+      prose.length > 0 ? prose : named.length > 0 ? named : sanitize(finding.ruleId)
+    ).slice(0, MAX_MESSAGE_CHARS);
     return {
       ruleId: finding.ruleId,
       ruleIndex: ruleIds.indexOf(finding.ruleId),

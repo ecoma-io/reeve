@@ -34742,14 +34742,29 @@ var EXPORT_FROM = /\bexport\s+(?:\*|\{[^}]*\})[\s\S]*?\bfrom\s+(["'])([^"']+)\1/
 var REQUIRE_RESOLVE = /\brequire\s*\.?\s*resolve\s*\(\s*(["'])([^"']+)\1/g;
 var REQUIRE = /\brequire\s*\(\s*(["'])([^"']+)\1/g;
 var FROM_CLAUSE = /\bfrom\s+(["'])([^"']+)\1/g;
-function opaqueRanges(line) {
+function opaqueRanges(line, carry = null) {
   const ranges = [];
   let i = 0;
+  if (carry === "block") {
+    const closer = line.indexOf("*/");
+    if (closer < 0) return { ranges: [{ start: 0, end: line.length }], carry: "block" };
+    i = closer + 2;
+    ranges.push({ start: 0, end: i });
+  } else if (carry === "template") {
+    let j = 0;
+    while (j < line.length && line[j] !== "`") {
+      j += line[j] === "\\" ? 2 : 1;
+    }
+    if (j >= line.length) return { ranges: [{ start: 0, end: line.length }], carry: "template" };
+    i = j + 1;
+    ranges.push({ start: 0, end: i });
+  }
   while (i < line.length) {
     const ch = line[i];
     if (ch === '"' || ch === "'" || ch === "`") {
       const start = i;
       const quote = ch;
+      let closed = false;
       i += 1;
       while (i < line.length) {
         if (line[i] === "\\") {
@@ -34758,11 +34773,13 @@ function opaqueRanges(line) {
         }
         if (line[i] === quote) {
           i += 1;
+          closed = true;
           break;
         }
         i += 1;
       }
       ranges.push({ start, end: i });
+      if (!closed && quote === "`") return { ranges, carry: "template" };
       continue;
     }
     if (ch === "/" && line[i + 1] === "/") {
@@ -34771,15 +34788,18 @@ function opaqueRanges(line) {
     }
     if (ch === "/" && line[i + 1] === "*") {
       const start = i;
-      i += 2;
-      while (i < line.length && !(line[i] === "*" && line[i + 1] === "/")) i += 1;
-      i = Math.min(i + 2, line.length);
+      const closer = line.indexOf("*/", i + 2);
+      if (closer < 0) {
+        ranges.push({ start, end: line.length });
+        return { ranges, carry: "block" };
+      }
+      i = closer + 2;
       ranges.push({ start, end: i });
       continue;
     }
     i += 1;
   }
-  return ranges;
+  return { ranges, carry: null };
 }
 function collect(text2, regex, kind, out) {
   for (const match2 of text2.matchAll(regex)) {
@@ -34791,24 +34811,13 @@ function collect(text2, regex, kind, out) {
 }
 function extractEdges(file, aliases = {}) {
   const edges = [];
-  let blockComment = false;
+  let carry = null;
   for (const [line, text2] of file.lines) {
-    const trimmed = text2.trimStart();
-    if (trimmed.startsWith("//")) continue;
-    if (blockComment) {
-      blockComment = !text2.includes("*/");
-      continue;
-    }
-    if (trimmed.startsWith("* ")) continue;
-    if (trimmed.startsWith("/*")) {
-      const closer = text2.indexOf("*/", 2);
-      if (closer < 0) {
-        blockComment = true;
-        continue;
-      }
-      if (trimmed.slice(closer + 2).trim() === "") continue;
-    }
-    const opaque = opaqueRanges(text2);
+    const scan = opaqueRanges(text2, carry);
+    const opening = carry;
+    carry = scan.carry;
+    if (opening === null && text2.trimStart().startsWith("* ")) continue;
+    const opaque = scan.ranges;
     const candidates = [];
     collect(text2, IMPORT_TYPE, "type", candidates);
     collect(text2, IMPORT_FROM, "import", candidates);
@@ -34923,8 +34932,10 @@ function findingFromViolation(violation, architecture) {
   const to = rule?.to ?? "";
   const note = rule?.note ?? "";
   const body = `${from} (${edge.fromFile}) imports ${edge.target ?? edge.specifier} (${edge.kind}) which the repository's architecture rules forbid: ${from} must not depend on ${to}.` + (note.length > 0 ? ` ${note}` : "");
+  const ruleId = `review-arch:${String(violation.ruleIndex)}`;
   return {
-    id: "review-arch",
+    id: `${ruleId}:${edge.fromFile}:${String(edge.line)}`,
+    ruleId,
     kind: "architecture",
     path: edge.fromFile,
     line: edge.line,
@@ -37818,10 +37829,8 @@ function buildSarif(reconciled, headSha) {
   const results = standing.map((entry) => {
     const { finding } = entry;
     const prose = sanitize(finding.body).trim();
-    const text2 = (prose.length > 0 ? prose : finding.ruleName || finding.ruleId).slice(
-      0,
-      MAX_MESSAGE_CHARS
-    );
+    const named = sanitize(finding.ruleName).trim();
+    const text2 = (prose.length > 0 ? prose : named.length > 0 ? named : sanitize(finding.ruleId)).slice(0, MAX_MESSAGE_CHARS);
     return {
       ruleId: finding.ruleId,
       ruleIndex: ruleIds.indexOf(finding.ruleId),
@@ -39090,7 +39099,9 @@ async function decide(api, at, warrant, settings, stages, weather) {
     })),
     ...architectureFindings(bounded2, rules).map((entry) => ({
       id: entry.id,
-      ruleId: entry.id,
+      // Per rule, never the one constant the whole section used to share —
+      // `ArchitectureFinding.ruleId` carries why.
+      ruleId: entry.ruleId,
       ruleName: "Architecture boundary",
       ruleBody: entry.body,
       path: entry.path,

@@ -491,7 +491,9 @@ async function decide(
     })),
     ...architectureFindings(bounded, rules).map((entry) => ({
       id: entry.id,
-      ruleId: entry.id,
+      // Per rule, never the one constant the whole section used to share —
+      // `ArchitectureFinding.ruleId` carries why.
+      ruleId: entry.ruleId,
       ruleName: "Architecture boundary",
       ruleBody: entry.body,
       path: entry.path,

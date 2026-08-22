@@ -397,3 +397,65 @@ describe("duplicate claims in one run", () => {
     }
   });
 });
+
+describe("two architecture breaches in one file stay two claims", () => {
+  // The regression this pins: architecture findings once all carried the id
+  // `review-arch`, so `(ruleId, path)` — the pair a disposition is keyed to and
+  // the pair `sameIntention` compares — collapsed every breach in a file into
+  // one intention. A second breach of a different rule then reconciled as the
+  // first one having MOVED, and inherited the `wont-fix` a maintainer had
+  // granted the first.
+  const accepted: Disposition = {
+    value: "wont-fix",
+    by: "maintainer",
+    at: "2026-01-01T00:00:00Z",
+    replyId: 1,
+    replyUrl: "https://github.com/o/r/pull/1#issuecomment-1",
+  };
+
+  const breach = (ruleIndex: number, line: number): Finding =>
+    finding({
+      id: `review-arch:${String(ruleIndex)}:src/app.ts:${String(line)}`,
+      ruleId: `review-arch:${String(ruleIndex)}`,
+      ruleName: "Architecture boundary",
+      line,
+      body: `breach of rule ${String(ruleIndex)}`,
+      marker: "preflight:arch",
+    });
+
+  it("does not read a breach of another rule as the accepted one having moved", () => {
+    const previous: Previous = {
+      findings: [{ ...breach(0, 3), wasResolved: false, disposition: accepted }],
+      reviewedShas: [SHA1],
+    };
+    const diff: DiffStanding = {
+      files: new Map([["src/app.ts", new Set([3, 9])]]),
+      headSha: SHA2,
+    };
+
+    const out = reconcile([breach(0, 3), breach(1, 9)], previous, diff);
+    const newcomer = out.find((entry) => entry.finding.line === 9);
+
+    expect(newcomer?.status).toBe("created");
+    expect(newcomer?.disposition).toBeNull();
+  });
+
+  it("keeps the accepted breach accepted while the new one stands on its own", () => {
+    const previous: Previous = {
+      findings: [{ ...breach(0, 3), wasResolved: false, disposition: accepted }],
+      reviewedShas: [SHA1],
+    };
+    const diff: DiffStanding = {
+      files: new Map([["src/app.ts", new Set([3, 9])]]),
+      headSha: SHA2,
+    };
+
+    const out = reconcile([breach(0, 3), breach(1, 9)], previous, diff);
+
+    expect(out.find((entry) => entry.finding.line === 3)?.disposition).toEqual(accepted);
+  });
+
+  it("treats two breaches of two rules as two intentions", () => {
+    expect(sameIntention(breach(0, 3), breach(1, 3))).toBe(false);
+  });
+});

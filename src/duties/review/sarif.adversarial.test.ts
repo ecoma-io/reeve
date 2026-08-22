@@ -83,6 +83,58 @@ describe("a finding the model left empty still renders a usable alert", () => {
   });
 });
 
+describe("the model's prose is contained before code scanning renders it", () => {
+  // `message.text` and the rule's `shortDescription` are rendered by GitHub's
+  // own UI, which makes them one more surface an injected diff would like to
+  // reach unescorted. Every reference in them is also a REPOST: an `@name` in
+  // an alert notifies that person again, and a `#42` writes another
+  // cross-reference into issue 42. The publish path defangs both; these cases
+  // pin that this path does too.
+
+  it("defangs the mentions and issue references the model wrote into a finding body", () => {
+    const doc = parse(buildSarif([entry("created", { body: "cc @johnitvn about #42" })], "sha"));
+
+    expect(doc.runs[0]?.results[0]?.message.text).toBe("cc @<!---->johnitvn about #<!---->42");
+  });
+
+  it("defangs them in the rule title as well as in the message", () => {
+    const doc = parse(buildSarif([entry("created", { ruleName: "cc @johnitvn" })], "sha"));
+
+    expect(doc.runs[0]?.tool.driver.rules[0]?.shortDescription.text).toBe("cc @<!---->johnitvn");
+  });
+
+  it("defangs the rule name the message falls back to when the model sent no body", () => {
+    // The rung that used to be raw. `ruleName` is the model's own claimed rule
+    // id whenever that id names no declared rule, so a model that answers with
+    // a mention for a rule id and an empty body reaches `message.text` with it
+    // — through the fallback, past the `sanitize` the body rung applies.
+    const doc = parse(
+      buildSarif([entry("created", { body: "  ", ruleName: "cc @johnitvn" })], "sha"),
+    );
+
+    expect(doc.runs[0]?.results[0]?.message.text).toBe("cc @<!---->johnitvn");
+  });
+
+  it("descends to the rule id when the rule name is nothing but whitespace", () => {
+    // An empty `message.text` is rejected by the upload API, and whitespace is
+    // how a fallback chain that tests truthiness rather than content emits one:
+    // `"   "` is truthy, so the chain used to stop there and ship blanks.
+    const doc = parse(buildSarif([entry("created", { body: "", ruleName: "   " })], "sha"));
+
+    expect(doc.runs[0]?.results[0]?.message.text).toBe("dedup");
+  });
+
+  it("empties a hidden HTML comment the model buried in the body", () => {
+    // An unclosed `<!--` swallows everything after it in GitHub's renderer,
+    // and a closed one hides its payload from the reader entirely.
+    const doc = parse(
+      buildSarif([entry("created", { body: "visible <!-- hidden --> tail" })], "sha"),
+    );
+
+    expect(doc.runs[0]?.results[0]?.message.text).toBe("visible <!-- ------ --> tail");
+  });
+});
+
 describe("emitSarif", () => {
   let runnerTemp: string;
   let previous: string | undefined;

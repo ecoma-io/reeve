@@ -23,6 +23,14 @@
  * the repo, so they can never fire a rule; a rule that must catch an
  * intra-repo package dependency uses an alias or a relative path.
  *
+ * The two constructs that can open on one line and close on another — a block
+ * comment and a template literal — are carried across lines by `opaqueRanges`,
+ * because a scanner that restarts at every line reads their interiors as code.
+ * That carry is only as good as the lines it was given: the patch hands over a
+ * sparse map of what it touched, so a construct whose opener the patch never
+ * proved cannot be carried from, and a `* ` continuation line is recognised by
+ * its shape for exactly that case. Both failures land on the missing side.
+ *
  * ponytail: multiline imports are extracted only when their `from "x"` clause
  * shares a line — the clause line carries the specifier, so the edge still
  * fires there. A specifier broken across lines is missed; add a real parser
@@ -125,15 +133,59 @@ interface Range {
   readonly end: number;
 }
 
-/** Tracks string literals (`"` `'` `` ` ``), line comments, and block comments. */
-function opaqueRanges(line: string): Range[] {
+/**
+ * What a line left open for the next one to continue. Only the two constructs
+ * that can legally span lines carry: a block comment, and a template literal.
+ * A `"` or `'` string cannot, so an unterminated one ends with its line.
+ */
+type Carry = null | "block" | "template";
+
+/** One line's opaque spans, and whatever that line left open. */
+interface Scan {
+  readonly ranges: readonly Range[];
+  readonly carry: Carry;
+}
+
+/**
+ * Tracks string literals (`"` `'` `` ` ``), line comments, and block comments,
+ * resuming whatever the previous line left open.
+ *
+ * The `carry` is the whole point. A construct that opens on one line and closes
+ * on another leaves its interior lines carrying no marker of their own, and a
+ * scanner that starts every line from scratch reads those interiors as code —
+ * so a `import x from "../infra/db"` sitting inside a prompt template or a
+ * mid-line `/*` comment extracts as a real edge and the duty publishes a
+ * deterministic finding about an import that does not exist.
+ *
+ * A template literal is opaque in full, `${...}` substitutions included. That
+ * loses a dynamic `import()` written inside one — the safe direction, and the
+ * same answer this scanner already gave for a single-line template.
+ */
+function opaqueRanges(line: string, carry: Carry = null): Scan {
   const ranges: Range[] = [];
   let i = 0;
+
+  if (carry === "block") {
+    const closer = line.indexOf("*/");
+    if (closer < 0) return { ranges: [{ start: 0, end: line.length }], carry: "block" };
+    i = closer + 2;
+    ranges.push({ start: 0, end: i });
+  } else if (carry === "template") {
+    let j = 0;
+    while (j < line.length && line[j] !== "`") {
+      j += line[j] === "\\" ? 2 : 1;
+    }
+    if (j >= line.length) return { ranges: [{ start: 0, end: line.length }], carry: "template" };
+    i = j + 1;
+    ranges.push({ start: 0, end: i });
+  }
+
   while (i < line.length) {
     const ch = line[i];
     if (ch === '"' || ch === "'" || ch === "`") {
       const start = i;
       const quote = ch;
+      let closed = false;
       i += 1;
       while (i < line.length) {
         if (line[i] === "\\") {
@@ -142,11 +194,13 @@ function opaqueRanges(line: string): Range[] {
         }
         if (line[i] === quote) {
           i += 1;
+          closed = true;
           break;
         }
         i += 1;
       }
       ranges.push({ start, end: i });
+      if (!closed && quote === "`") return { ranges, carry: "template" };
       continue;
     }
     if (ch === "/" && line[i + 1] === "/") {
@@ -155,15 +209,18 @@ function opaqueRanges(line: string): Range[] {
     }
     if (ch === "/" && line[i + 1] === "*") {
       const start = i;
-      i += 2;
-      while (i < line.length && !(line[i] === "*" && line[i + 1] === "/")) i += 1;
-      i = Math.min(i + 2, line.length);
+      const closer = line.indexOf("*/", i + 2);
+      if (closer < 0) {
+        ranges.push({ start, end: line.length });
+        return { ranges, carry: "block" };
+      }
+      i = closer + 2;
       ranges.push({ start, end: i });
       continue;
     }
     i += 1;
   }
-  return ranges;
+  return { ranges, carry: null };
 }
 
 interface Candidate {
@@ -196,31 +253,19 @@ export function extractEdges(
   aliases: Readonly<Record<string, string>> = {},
 ): Edge[] {
   const edges: Edge[] = [];
-  // A `/* ... */` block comment can span lines; interior lines carry no
-  // comment marker of their own, so the opener's state must ride across
-  // lines until its closer appears.
-  let blockComment = false;
+  // Whatever the previous line left open rides into this one — see
+  // `opaqueRanges`, which is where the two multi-line constructs are tracked.
+  let carry: Carry = null;
   for (const [line, text] of file.lines) {
-    const trimmed = text.trimStart();
-    if (trimmed.startsWith("//")) continue;
-    if (blockComment) {
-      blockComment = !text.includes("*/");
-      continue;
-    }
-    if (trimmed.startsWith("* ")) continue;
-    if (trimmed.startsWith("/*")) {
-      // A trimmed line that opens a block comment and never closes it on the
-      // same line leaves the rest of the comment open across the following
-      // lines; one that closes on the same line falls through so code after
-      // the `*/` still extracts.
-      const closer = text.indexOf("*/", 2);
-      if (closer < 0) {
-        blockComment = true;
-        continue;
-      }
-      if (trimmed.slice(closer + 2).trim() === "") continue;
-    }
-    const opaque = opaqueRanges(text);
+    const scan = opaqueRanges(text, carry);
+    const opening = carry;
+    carry = scan.carry;
+    // A JSDoc continuation line whose opener the patch never proved. The lines
+    // reach here as a sparse map of what the patch touched, so an edit inside a
+    // doc comment arrives with no opener to carry from and the shape of the
+    // line is the only evidence there is.
+    if (opening === null && text.trimStart().startsWith("* ")) continue;
+    const opaque = scan.ranges;
     const candidates: Candidate[] = [];
     collect(text, IMPORT_TYPE, "type", candidates);
     collect(text, IMPORT_FROM, "import", candidates);
@@ -376,7 +421,22 @@ export function assess(edges: readonly Edge[], architecture: Architecture): Viol
 
 /** A deterministic architecture finding, mirroring `PreflightFinding`. */
 export interface ArchitectureFinding {
+  /** `${ruleId}:${path}:${line}` — the dedup key, the same shape a model finding's id has. */
   readonly id: string;
+  /**
+   * `review-arch:${ruleIndex}` — one id per rule of the `architecture.edges`
+   * table, because the rule index is that rule's identity (see `Architecture`).
+   *
+   * It is not the constant `review-arch` it used to be, and the reason is the
+   * whole finding lifecycle: a disposition is keyed to `(ruleId, path)` and
+   * `sameIntention` compares the same pair, so one id for every rule made every
+   * architecture violation in a file one intention. A `wont-fix` a maintainer
+   * granted one breach silenced every other breach in that file, a new breach
+   * of a different rule read as the accepted one having moved lines, one
+   * comment thread served them all, and code scanning collapsed them into a
+   * single alert.
+   */
+  readonly ruleId: string;
   readonly kind: "architecture";
   /** The importing file. */
   readonly path: string;
@@ -439,8 +499,10 @@ function findingFromViolation(
     `${from} (${edge.fromFile}) imports ${edge.target ?? edge.specifier} (${edge.kind}) ` +
     `which the repository's architecture rules forbid: ${from} must not depend on ${to}.` +
     (note.length > 0 ? ` ${note}` : "");
+  const ruleId = `review-arch:${String(violation.ruleIndex)}`;
   return {
-    id: "review-arch",
+    id: `${ruleId}:${edge.fromFile}:${String(edge.line)}`,
+    ruleId,
     kind: "architecture",
     path: edge.fromFile,
     line: edge.line,

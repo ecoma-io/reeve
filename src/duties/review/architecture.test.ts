@@ -392,7 +392,10 @@ describe("architectureFindings", () => {
     expect(findings).toHaveLength(1);
     const finding = findings[0];
     expect(finding).toMatchObject({
-      id: "review-arch",
+      // Rule index, file and line — the same id shape a model finding carries,
+      // so the lifecycle can tell two breaches of two rules apart.
+      id: "review-arch:0:src/domain/svc.ts:1",
+      ruleId: "review-arch:0",
       kind: "architecture",
       path: "src/domain/svc.ts",
       line: 1,
@@ -402,6 +405,45 @@ describe("architectureFindings", () => {
     expect(finding?.body).toContain("imports src/infra/db");
     expect(finding?.body).toContain("domain must not depend on infrastructure");
     expect(finding?.body).toContain("Domain must not depend on infra.");
+  });
+
+  it("gives two rules breached at one import two identities, not one", () => {
+    // Both rows of the table fire on the same line: the layer-named one and
+    // the glob-named one. They are two breaches of two rules, and the finding
+    // lifecycle keys on `(ruleId, path)` — so if they shared an id they would
+    // share a disposition, a comment thread and a code-scanning alert, and a
+    // `wont-fix` on either would silence the other.
+    const findings = architectureFindings(
+      {
+        shown: [file("src/domain/svc.ts", { 1: `import { db } from "../infra/db";` })],
+      },
+      rules({
+        ...arch,
+        edges: [
+          ...arch.edges,
+          { from: "src/domain/**", to: "src/infra/**", severity: "warning", note: "by glob" },
+        ],
+      }),
+    );
+
+    expect(findings).toHaveLength(2);
+    expect(new Set(findings.map((entry) => entry.ruleId)).size).toBe(2);
+    expect(new Set(findings.map((entry) => entry.id)).size).toBe(2);
+  });
+
+  it("gives one rule breached in two files two identities", () => {
+    const findings = architectureFindings(
+      {
+        shown: [
+          file("src/domain/a.ts", { 1: `import { db } from "../infra/db";` }),
+          file("src/domain/b.ts", { 1: `import { db } from "../infra/db";` }),
+        ],
+      },
+      rules(arch),
+    );
+
+    expect(findings).toHaveLength(2);
+    expect(new Set(findings.map((entry) => entry.id)).size).toBe(2);
   });
 
   it("caps findings and warns past the cap", () => {
