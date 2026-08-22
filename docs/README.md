@@ -143,3 +143,4 @@ Every page, one row each, for anyone the five paths above didn't fit.
 | [`development/roadmap-2x.md`](development/roadmap-2x.md)                   | roadmap (direction)      | The dependency-ordered phases from today's duties to Agent Mode.                  |
 | [`development/agent-governance.md`](development/agent-governance.md)       | reference (draft)        | The `.reeve/` governance tree, and how a warrant lifts into it.                   |
 | [`development/agent-compatibility.md`](development/agent-compatibility.md) | contract (direction)     | What every 1.x consumer is promised across the 2.x line.                          |
+| [`development/lattice-integration.md`](development/lattice-integration.md) | research (direction)     | What integrating Lattice's architecture governance would cost, measured.          |

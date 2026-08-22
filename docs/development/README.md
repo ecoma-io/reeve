@@ -25,6 +25,7 @@ is allowed to exist at all, and it wins any disagreement.
 | [`roadmap-2x.md`](roadmap-2x.md)                   | The phases from today's explicit duties to Agent Mode, each with its guarantee and its deliberate not-yet.             |
 | [`agent-governance.md`](agent-governance.md)       | Draft spec for the `.reeve/` tree: what grants, what merely informs, and how a warrant lifts in.                       |
 | [`agent-compatibility.md`](agent-compatibility.md) | What every 1.x consumer is promised across the 2.x line, made specific enough to catch a violation.                    |
+| [`lattice-integration.md`](lattice-integration.md) | What it would cost to put this repository's core/duty boundary under Lattice, and what a first run already found.      |
 
 These are normative and written ahead of the code, like
 [North star](../doctrine/north-star.md). Where an implementation disagrees with a
