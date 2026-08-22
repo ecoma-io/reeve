@@ -37818,10 +37818,8 @@ function buildSarif(reconciled, headSha) {
   const results = standing.map((entry) => {
     const { finding } = entry;
     const prose = sanitize(finding.body).trim();
-    const text2 = (prose.length > 0 ? prose : finding.ruleName || finding.ruleId).slice(
-      0,
-      MAX_MESSAGE_CHARS
-    );
+    const named = sanitize(finding.ruleName).trim();
+    const text2 = (prose.length > 0 ? prose : named.length > 0 ? named : sanitize(finding.ruleId)).slice(0, MAX_MESSAGE_CHARS);
     return {
       ruleId: finding.ruleId,
       ruleIndex: ruleIds.indexOf(finding.ruleId),
