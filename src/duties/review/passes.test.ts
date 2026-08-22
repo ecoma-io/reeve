@@ -183,9 +183,7 @@ describe("dedup", () => {
       body: "The claim.",
       snippet: "snippet",
       passId,
-      passName: passId === "correctness" ? "Correctness" : "Security",
       corroboratedBy: [passId],
-      evidence: [],
     });
     const out = dedup([make("correctness"), make("security")]);
     expect(out).toHaveLength(1);
@@ -203,43 +201,9 @@ describe("dedup", () => {
       body: ruleId,
       snippet: "snippet",
       passId: "correctness",
-      passName: "Correctness",
       corroboratedBy: ["correctness"],
-      evidence: [],
     });
     expect(dedup([make("dedup"), make("injection")])).toHaveLength(2);
-  });
-
-  it("merges evidence from both passes without duplicating", () => {
-    const a: ReviewFinding = {
-      id: "dedup:src/a.ts:12",
-      ruleId: "dedup",
-      severity: "warning",
-      path: "src/a.ts",
-      line: 12,
-      body: "a",
-      snippet: "x",
-      passId: "correctness",
-      passName: "Correctness",
-      corroboratedBy: ["correctness"],
-      evidence: [{ kind: "patch", source: "src/a.ts:12", content: "x" }],
-    };
-    const b: ReviewFinding = {
-      ...a,
-      body: "b",
-      passId: "security",
-      passName: "Security",
-      corroboratedBy: ["security"],
-      evidence: [
-        { kind: "patch", source: "src/a.ts:12", content: "x" },
-        { kind: "pass", source: "security", content: "Security" },
-      ],
-    };
-    const out = dedup([a, b]);
-    expect(out[0]?.evidence.map((e) => `${e.kind}:${e.source}`)).toEqual([
-      "patch:src/a.ts:12",
-      "pass:security",
-    ]);
   });
 });
 
@@ -254,9 +218,7 @@ describe("detectContradictions", () => {
       body,
       snippet: "snippet",
       passId: "correctness",
-      passName: "Correctness",
       corroboratedBy: ["correctness"],
-      evidence: [],
     });
     const contradictions = detectContradictions([make("dedup", "a"), make("injection", "b")]);
     expect(contradictions).toHaveLength(1);
@@ -298,9 +260,7 @@ describe("rank", () => {
       body: ruleId,
       snippet: "snippet",
       passId: "correctness",
-      passName: "Correctness",
       corroboratedBy,
-      evidence: [],
     });
     const out = rank([
       make("info", "infoRule", ["correctness"], 13),
@@ -374,7 +334,6 @@ describe("synthesize", () => {
     ];
     const synthesis = synthesize(results);
     expect(synthesis.findings[0]?.passId).toBe("second-opinion");
-    expect(synthesis.findings[0]?.passName).toBe("Second opinion");
   });
 
   it("a prompt injection in the diff cannot change a pass's marker or parse", async () => {

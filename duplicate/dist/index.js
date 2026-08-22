@@ -32517,6 +32517,13 @@ function findClosingRun(text2, from, runLength) {
   }
   return -1;
 }
+function unfenced(answer) {
+  const parts = segments(answer.trim());
+  const [only] = parts;
+  if (parts.length !== 1 || only?.kind !== "fence") return answer;
+  const lines = only.text.split("\n");
+  return lines.slice(1, -1).join("\n");
+}
 
 // src/core/meter.ts
 var STAGE = {
@@ -32589,14 +32596,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -32936,6 +32943,18 @@ function settleAuth(weather) {
   const [first] = weather.authFailures;
   if (first !== void 0) throw new AuthenticationFailure(first);
 }
+async function askWhole(provider, model, messages, noun = "answer") {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: `the ${noun} was cut off before it finished`
+    };
+  }
+  return completion;
+}
 async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
@@ -33034,9 +33053,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer3, code) {
+function spells(answer, code) {
   const escaped = code.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer3);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -33198,9 +33217,7 @@ function readShared(options = {}) {
 function parseAttribution(raw) {
   const value = raw.trim().toLowerCase();
   if (value === "none" || value === "model" || value === "detail") return value;
-  throw new Error(
-    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`
-  );
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
@@ -33448,7 +33465,7 @@ async function translateToPivot(request2) {
   const messages = prompt(title, body, to);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages),
+    (model) => askWhole(provider, model, messages, "rendering"),
     weather
   );
   if (!rotation.success) return { draft: null, failures: rotation.failures };
@@ -33458,18 +33475,6 @@ async function translateToPivot(request2) {
     draft: { title: sanitize(draft.title), body: sanitize(draft.body) },
     failures: rotation.failures
   };
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the rendering was cut off before it finished"
-    };
-  }
-  return completion;
 }
 function prompt(title, body, to) {
   const enclosed = enclose("untrusted-thread", `${title}
@@ -33491,8 +33496,8 @@ ${body}`);
     { role: "user", content: enclosed.block }
   ];
 }
-function unwrapped(answer3) {
-  const trimmed = answer3.trim();
+function unwrapped(answer) {
+  const trimmed = answer.trim();
   const fence = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fence?.[1] ?? trimmed;
 }
@@ -33886,14 +33891,10 @@ function dutyLanguages(warrant, denied, fallback) {
   if (resolution.notice !== null) notice(resolution.notice);
   return resolution.languages;
 }
-function resolvePivot(warrant, languages) {
+function pivotOrNone(warrant, languages) {
   const first = languages[0];
-  if (warrant.pivot === null) {
-    if (first === void 0) {
-      throw new Error("pivot: no languages are configured to choose one from.");
-    }
-    return first;
-  }
+  if (first === void 0) return null;
+  if (warrant.pivot === null) return first;
   const found = findLanguage(languages, warrant.pivot);
   if (found === void 0) {
     throw new Error(
@@ -33901,9 +33902,6 @@ function resolvePivot(warrant, languages) {
     );
   }
   return found;
-}
-function pivotOrNone(warrant, languages) {
-  return languages.length > 0 ? resolvePivot(warrant, languages) : null;
 }
 function load(path, source) {
   let document2;
@@ -35686,7 +35684,7 @@ async function judge(request2) {
   const messages = prompt2(request2);
   const rotation = await rotateModels(
     models,
-    (model) => answer2(provider, model, messages),
+    (model) => askWhole(provider, model, messages),
     weather
   );
   if (!rotation.success) {
@@ -35700,22 +35698,10 @@ async function judge(request2) {
     model: rotation.success.model
   };
 }
-async function answer2(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished"
-    };
-  }
-  return completion;
-}
-function parseVerdict(answer3, candidates) {
+function parseVerdict(answer, candidates) {
   let parsed;
   try {
-    parsed = JSON.parse(unwrapped2(answer3));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -35736,13 +35722,6 @@ function parseVerdict(answer3, candidates) {
     confidence,
     rationale: rationale.trim()
   };
-}
-function unwrapped2(answer3) {
-  const parts = segments(answer3.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer3;
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }
 function prompt2(request2) {
   const { title, body, language, candidates } = request2;
@@ -36111,8 +36090,8 @@ async function act(api, at, outcome, dryRun) {
   const posted = await postOrReplace(api, at, outcome.proposal, outcome.fingerprint);
   return { done: { commented: posted !== "withheld" }, posted };
 }
-function excerpt3(answer3) {
-  const flat = answer3.replace(/\s+/g, " ").trim();
+function excerpt3(answer) {
+  const flat = answer.replace(/\s+/g, " ").trim();
   return flat.length <= 200 ? flat : `${flat.slice(0, 200)}\u2026`;
 }
 await run();

@@ -167,7 +167,7 @@ function readSettings(): Omit<Settings, "languages"> {
   // duty adds on top of it can fail and get quoted into a log.
   const base = readCore();
   const panel = parseSeats(core.getInput("judge-models"));
-  const cheap = parseModels(core.getInput("screen-models"));
+  const cheap = parseModels(core.getInput("screen-models"), "screen-models");
 
   return {
     ...base,
@@ -613,9 +613,8 @@ export async function run(): Promise<void> {
     } else {
       // Same warrant-wins, input-falls-back pattern as `languages` above.
       const about = resolveAbout(authority.warrant, base.about);
-      if (about.notice !== null) core.notice(about.notice);
 
-      settings = { ...base, languages, about: about.about };
+      settings = { ...base, languages, about };
 
       const at: Location = { ...context.repo, number: settings.number };
       outcome = await decide(api, at, authority.warrant, settings, stages, weather);

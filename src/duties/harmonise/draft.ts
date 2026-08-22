@@ -19,7 +19,8 @@ import { enclose } from "../../core/enclose.js";
 import type { GlossaryEntry } from "../../core/glossary.js";
 import type { Language } from "../../core/languages.js";
 import { chunks, isCodeOnly } from "../../core/markdown.js";
-import type { Completion, Failure, Provider, Weather } from "../../core/provider.js";
+import type { Failure, Provider, Weather } from "../../core/provider.js";
+import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
 import type { Score } from "../../core/score.js";
@@ -296,7 +297,7 @@ async function draftChunked(
 
       const rotation = await rotateModels(
         order,
-        (model) => answer(provider, model, messages),
+        (model) => askWhole(provider, model, messages),
         weather,
       );
       for (const failure of rotation.failures) {
@@ -396,7 +397,7 @@ async function draftLoop(params: DraftLoopParams): Promise<DraftResult> {
 
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages),
+      (model) => askWhole(provider, model, messages),
       weather,
     );
     for (const failure of rotation.failures) {
@@ -480,28 +481,6 @@ function remaining(
   // both halves of an empty array are empty.
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
-}
-
-/**
- * `finish_reason: length` means the model stopped because it ran out of room,
- * not because it was done. An answer cut off mid-sentence is a failed model,
- * not a poor draft — the same convention `translate` applies.
- */
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: readonly { role: "system" | "user"; content: string }[],
-): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished",
-    };
-  }
-  return completion;
 }
 
 function formatGlossary(entries: readonly GlossaryEntry[]): string {

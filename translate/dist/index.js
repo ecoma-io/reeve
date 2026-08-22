@@ -31575,6 +31575,83 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// src/core/meter.ts
+var STAGE = {
+  classify: "Classification",
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging",
+  screen: "Screening",
+  triage: "Triage",
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check",
+  risk: "Risk assessment",
+  review: "Review"
+};
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
+// src/core/budget.ts
+function createBudget() {
+  return { denied: false };
+}
+function budgetExhausted(maxRequests, meter, budget) {
+  if (maxRequests === null) return false;
+  if (budget.denied) return true;
+  if (total(meter.spent()).requests < maxRequests) return false;
+  budget.denied = true;
+  return true;
+}
+
 // src/core/forge.ts
 function createThread(api, at) {
   const issue2 = { owner: at.owner, repo: at.repo, issue_number: at.number };
@@ -31829,85 +31906,20 @@ function parseList(raw) {
   return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
-// src/core/meter.ts
-var STAGE = {
-  classify: "Classification",
-  detect: "Detection",
-  draft: "Drafting",
-  judge: "Judging",
-  screen: "Screening",
-  triage: "Triage",
-  pivot: "Pivot translation",
-  duplicate: "Duplicate check",
-  risk: "Risk assessment",
-  review: "Review"
-};
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose, temperature) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(
-        model,
-        messages,
-        temperature === void 0 ? options : { temperature, ...options }
-      );
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
-}
-
 // src/core/provider.ts
 var DEFAULT_TIMEOUT_MS = 12e4;
 var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -32267,6 +32279,18 @@ function settleAuth(weather) {
   const [first] = weather.authFailures;
   if (first !== void 0) throw new AuthenticationFailure(first);
 }
+async function askWhole(provider, model, messages, noun = "answer") {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: `the ${noun} was cut off before it finished`
+    };
+  }
+  return completion;
+}
 async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
@@ -32366,9 +32390,7 @@ function readShared(options = {}) {
 function parseAttribution(raw) {
   const value = raw.trim().toLowerCase();
   if (value === "none" || value === "model" || value === "detail") return value;
-  throw new Error(
-    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`
-  );
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
@@ -33837,16 +33859,6 @@ function describe(value) {
   return "a value of a kind this file cannot hold";
 }
 
-// src/duties/translate/budget.ts
-function createBudget() {
-  return { denied: false };
-}
-function budgetExhausted(settings, meter, budget) {
-  const exhausted2 = settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
-  if (exhausted2) budget.denied = true;
-  return exhausted2;
-}
-
 // src/core/markdown.ts
 function segments(markdown) {
   const out = [];
@@ -34800,9 +34812,9 @@ function question(text2, candidates) {
     { role: "user", content: body.block }
   ];
 }
-function spells(answer2, code) {
+function spells(answer, code) {
   const escaped = code.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
-  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer2);
+  return new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "i").test(answer);
 }
 function detectByProfile(prose, candidates) {
   const codes = candidates.map((language) => language.code.toLowerCase());
@@ -35045,7 +35057,7 @@ async function translate(request2) {
     if (order.length === 0) break;
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages),
+      (model) => askWhole(provider, model, messages),
       weather
     );
     for (const failure of rotation.failures) {
@@ -35072,18 +35084,6 @@ function remaining(models, draft, exhausted2) {
   const live = models.filter((model) => !exhausted2.has(model));
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished"
-    };
-  }
-  return completion;
 }
 function prompt(source, from, to, glossary) {
   const origin = from === null ? "" : ` from ${from.label}`;
@@ -35127,10 +35127,10 @@ function glossarySection(glossary) {
     )
   ];
 }
-function unwrapped(answer2, source) {
-  const trimmed = answer2.trim();
+function unwrapped(answer, source) {
+  const trimmed = answer.trim();
   const wrapper = onlyFence(trimmed);
-  if (wrapper === null || onlyFence(source.trim()) !== null) return answer2;
+  if (wrapper === null || onlyFence(source.trim()) !== null) return answer;
   const lines = wrapper.split("\n");
   return lines.slice(1, -1).join("\n");
 }
@@ -35204,10 +35204,10 @@ function rotated(candidates, start) {
   return [...candidates.slice(at), ...candidates.slice(0, at)];
 }
 var NUMBER = /\d+/g;
-function read(answer2, shown2) {
-  if (!answer2.ok) return answer2;
+function read(answer, shown2) {
+  if (!answer.ok) return answer;
   const named = [];
-  for (const [digits] of answer2.content.matchAll(NUMBER)) {
+  for (const [digits] of answer.content.matchAll(NUMBER)) {
     const picked = shown2[Number(digits) - 1];
     if (picked !== void 0 && !named.includes(picked)) named.push(picked);
   }
@@ -35215,17 +35215,17 @@ function read(answer2, shown2) {
   if (only === void 0) {
     return {
       ok: false,
-      model: answer2.model,
+      model: answer.model,
       kind: "protocol",
-      reason: `answered with no candidate number \u2014 ${excerpt2(answer2.content)}`
+      reason: `answered with no candidate number \u2014 ${excerpt2(answer.content)}`
     };
   }
   if (named.length > 1) {
     return {
       ok: false,
-      model: answer2.model,
+      model: answer.model,
       kind: "protocol",
-      reason: `named more than one candidate \u2014 ${excerpt2(answer2.content)}`
+      reason: `named more than one candidate \u2014 ${excerpt2(answer.content)}`
     };
   }
   return { ok: true, candidate: only };
@@ -36239,7 +36239,7 @@ async function translateText(what, body, thread, branding, settings, stages, wea
       `${what}: only the first ${String(settings.maxBodyChars)} characters were translated. Raise \`max-body-chars\` to translate the rest.`
     );
   }
-  if (budgetExhausted(settings, meter, budget)) {
+  if (budgetExhausted(settings.maxRequests, meter, budget)) {
     warning(`${what}: \`max-requests\` was reached, so this text was not attempted this run.`);
     return nothing(what, "budget exhausted");
   }
@@ -36256,7 +36256,7 @@ async function translateText(what, body, thread, branding, settings, stages, wea
   const skipped = [];
   const budgetSkipped = [];
   for (const [index, to] of toTranslate.entries()) {
-    if (budgetExhausted(settings, meter, budget)) {
+    if (budgetExhausted(settings.maxRequests, meter, budget)) {
       const remaining2 = toTranslate.slice(index);
       skipped.push(...remaining2);
       budgetSkipped.push(...remaining2);
@@ -36366,7 +36366,7 @@ async function translateReplies(api, at, settings, stages, looked, weather, mete
   }
   let published = 0;
   for (const reply of replies) {
-    if (budgetExhausted(settings, meter, budget)) {
+    if (budgetExhausted(settings.maxRequests, meter, budget)) {
       warning(
         `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not attempted this run.`
       );
@@ -36525,7 +36525,7 @@ async function runSweep(acc, api, authority2, settings, stages, weather, meter, 
     // answer, including when the very last candidate is the one that denies
     // work inside its own per-language or per-reply checkpoint with no
     // further iteration left to notice — `budget` already has it by then.
-    exhausted: () => budgetExhausted(settings, meter, budget),
+    exhausted: () => budgetExhausted(settings.maxRequests, meter, budget),
     processOne: async (thread) => {
       const at = { ...context2.repo, number: thread.number };
       const result = await processThread(

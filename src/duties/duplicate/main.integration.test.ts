@@ -980,6 +980,23 @@ describe("the action contract", () => {
    * The shape being read is two levels deep and fully indented — every input is
    * a key at exactly two spaces inside the `inputs:` block.
    */
+  /**
+   * Source text with block comments removed, so a scan sees code and only code.
+   *
+   * These audits prove "every declared input is read" by regex over raw source,
+   * which means a doc comment that *mentions* a reader call is indistinguishable
+   * from one. That is not hypothetical: a comment in `core/inputs.ts` explaining
+   * why an input is parsed a particular way credited three duties with an input
+   * only `harmonise` declares, and turned three suites red for a change that
+   * altered no behaviour at all.
+   *
+   * A scan whose verdict can be flipped by prose is a scan people edit around.
+   * Stripping the comments first costs one line and removes the whole class.
+   */
+  function code(text: string): string {
+    return text.replace(/\/\*[\s\S]*?\*\//g, "");
+  }
+
   async function declaredInputs(): Promise<string[]> {
     const text = await readFile(join(DUTY, "action.yml"), "utf8");
     const block = /\ninputs:\n([\s\S]*?)\noutputs:\n/.exec(text)?.[1] ?? "";
@@ -1000,7 +1017,7 @@ describe("the action contract", () => {
     ]);
     return [
       ...new Set(
-        [...sources.join("\n").matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
+        [...code(sources.join("\n")).matchAll(/get(?:Boolean)?Input\("([^"]+)"/g)].map(
           ([, name]) => name ?? "",
         ),
       ),

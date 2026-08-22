@@ -165,13 +165,6 @@ export function readCore(options?: { modelsOptional?: boolean }): Core {
 }
 
 /**
- * {@link readCore}, plus the three inputs only a sweeping duty declares.
- *
- * The `sweep`/`number` conflict is checked first, ahead of any parsing: it is
- * a workflow that asked for two different runs at once, and no amount of
- * reading the rest tells anyone which one was meant.
- */
-/**
  * Reads `sweep` and `number` together, refusing their combination up front.
  *
  * The `sweep`/`number` conflict is checked before any other parsing: it is a
@@ -233,6 +226,48 @@ export function readShared(options: ReadSharedOptions = {}): Shared {
 export type Attribution = "none" | "model" | "detail";
 
 /**
+ * A boolean input, strictly parsed, with the manifest's default for silence.
+ *
+ * `core.getBooleanInput` is the obvious thing to reach for and it **throws on
+ * an unset or empty input** — including the empty string, which is what
+ * `core.getInput` returns for an input nobody set. On a real runner that never
+ * happens, because GitHub populates `INPUT_*` from `action.yml`'s `default:`
+ * before the action starts. Everywhere else it does: the eval runner drives a
+ * bundle with only the inputs a fixture names, and `pnpm try` sets only what
+ * the `.env` holds.
+ *
+ * That is how this function came to exist. Two `harmonise` inputs were parsed
+ * by comparing the raw input against the literal `"true"`, which reads `True`
+ * as **false** — the opposite of what a maintainer wrote. Swapping in
+ * `getBooleanInput` fixed that and turned every one of the eight `harmonise`
+ * eval fixtures red, because none of them names that input. Trading a silent
+ * wrong answer for a crash is not a fix.
+ *
+ * (The input is deliberately not named in this comment. Six duties' contract
+ * tests prove "every declared input is read" by regex-scanning the raw text of
+ * this file, so a doc comment quoting a reader call credits every one of them
+ * with an input only `harmonise` declares. Those scanners strip block comments
+ * now, so this is belt and braces — but the first draft of this paragraph did
+ * turn three suites red, which is the second time this round a comment quoting
+ * the thing a scanner looks for has cost a green run.)
+ *
+ * So: silence means the documented default, and anything else is parsed against
+ * the same six spellings `getBooleanInput` accepts. A seventh spelling — `yes`,
+ * `1`, `on` — is refused by name rather than quietly read as false, because an
+ * input a maintainer took the trouble to write should never mean its opposite.
+ */
+export function booleanInput(name: string, fallback: boolean): boolean {
+  const raw = core.getInput(name).trim();
+  if (raw.length === 0) return fallback;
+  if (raw === "true" || raw === "True" || raw === "TRUE") return true;
+  if (raw === "false" || raw === "False" || raw === "FALSE") return false;
+
+  throw new Error(
+    `${name}: expected \`true\` or \`false\` (or their \`True\`/\`TRUE\` spellings), got \`${raw}\`.`,
+  );
+}
+
+/**
  * Validates a raw `show-attribution` value against the three spellings.
  *
  * @throws Error naming the offending spelling, so a workflow typo fails on the
@@ -242,9 +277,7 @@ export type Attribution = "none" | "model" | "detail";
 export function parseAttribution(raw: string): Attribution {
   const value = raw.trim().toLowerCase();
   if (value === "none" || value === "model" || value === "detail") return value;
-  throw new Error(
-    `show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${value}\`.`,
-  );
+  throw new Error(`show-attribution: expected \`none\`, \`model\` or \`detail\`, got \`${raw}\`.`);
 }
 
 /**
@@ -338,7 +371,7 @@ export function parseApiKeys(raw: string): readonly ApiKeySpec[] {
  * declared — a key with nowhere to route is a typo, and the honest place to
  * catch it is before either list reaches `resolveEndpoints`.
  */
-function checkApiKeysDeclared(
+export function checkApiKeysDeclared(
   endpoints: readonly EndpointSpec[],
   apiKeys: readonly ApiKeySpec[],
 ): void {

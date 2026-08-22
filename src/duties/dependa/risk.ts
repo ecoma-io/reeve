@@ -17,7 +17,6 @@ import type {
   RiskFacts,
   RiskInterpretation,
   SecurityAdvisory,
-  UpdateProposal,
   UpdateType,
 } from "./model.js";
 import { distance } from "./semver.js";
@@ -113,16 +112,26 @@ export function factsOnly(fields: {
  * The model receives the evidence (enclosed) and the risk facts, and
  * returns a JSON object with `riskLevel`, `summary`, and `hasBreakingChange`.
  * The model's output is enclosed — it is interpretation, never authority.
+ *
+ * The three strings are the whole of what this reads from an update — the
+ * package's name and the two versions. It used to take an `UpdateProposal`,
+ * which meant the only caller that has this information before the proposal
+ * exists had to invent a twelve-field literal with an empty `edits` and a null
+ * `groupName` to get three strings past the type checker. Nine of those fields
+ * were never read, and a synthetic value nothing reads is a lie waiting to be
+ * believed by the next person who adds a field.
  */
 export function interpretationPrompt(
-  proposal: UpdateProposal,
+  name: string,
+  currentVersion: string,
+  targetVersion: string,
   facts: RiskFacts,
   enclosedEvidence: string,
   /**
    * The sentence that tells the model what the evidence boundary MEANS.
    *
    * REQUIRED, deliberately. It used to be optional, and a caller dropping the
-   * argument at `main.ts:379` left third-party advisory text fenced in a tag
+   * argument in `main.ts` left third-party advisory text fenced in a tag
    * with nothing anywhere explaining it — with tsc, eslint, the whole suite,
    * coverage, the mutation table and `eval all` all green. An optional
    * parameter carrying a security guarantee is a footgun the type system was
@@ -133,8 +142,8 @@ export function interpretationPrompt(
 ): string {
   const ruleSection = enclosedRule.length > 0 ? [enclosedRule, ""] : [];
   return [
-    `You are assessing the risk of updating \`${sanitizeForPrompt(proposal.dependency.name)}\` ` +
-      `from \`${sanitizeForPrompt(proposal.currentVersion)}\` to \`${sanitizeForPrompt(proposal.targetVersion)}\`.`,
+    `You are assessing the risk of updating \`${sanitizeForPrompt(name)}\` ` +
+      `from \`${sanitizeForPrompt(currentVersion)}\` to \`${sanitizeForPrompt(targetVersion)}\`.`,
     "",
     ...ruleSection,
     "Risk facts (deterministic, from version metadata):",

@@ -43,6 +43,8 @@ import {
   type Warrant,
 } from "../../core/warrant.js";
 
+import { isShaConflict, WRITE_ATTEMPTS } from "./store.js";
+
 /**
  * The GitHub calls `propose` needs — declared locally, structurally, the
  * same pattern `AtlasApi`/`LifecycleApi` already establish. Deliberately no
@@ -142,7 +144,6 @@ const MARKER = markerFor("propose");
 /** GitHub's own label-name ceiling. A candidate past it cannot be created even if proposed. */
 const LABEL_NAME_MAX = 50;
 const LIST_PAGES = 10;
-const WRITE_ATTEMPTS = 3;
 
 const SCOPE_PREFIX = /^@[^/]+\//;
 
@@ -716,18 +717,6 @@ function renderBody(path: string, entries: readonly Entry[], fp: string): string
   lines.push("");
   lines.push(MARKER.render(fp));
   return lines.join("\n");
-}
-
-function isShaConflict(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("status" in error)) return false;
-  const status = (error as { status?: unknown }).status;
-  if (status === 409) return true;
-  if (status === 422) {
-    const raw = (error as { message?: unknown }).message;
-    const message = error instanceof Error ? error.message : typeof raw === "string" ? raw : "";
-    return message.toLowerCase().includes("sha");
-  }
-  return false;
 }
 
 /** Capacity/timeout-shaped errors — weather, per D12 — downgraded to a green report rather than thrown. The classifier itself is `forge.ts`'s `isCapacityError`, shared with `lifecycle`'s sweep rather than respelled here. */

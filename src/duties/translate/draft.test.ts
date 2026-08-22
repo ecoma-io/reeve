@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Language } from "../../core/languages.js";
+import type * as MarkdownModule from "../../core/markdown.js";
 import { segments, type Segment } from "../../core/markdown.js";
+import type * as ProviderModule from "../../core/provider.js";
 import type { Completion, Failure, Message, Provider } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
@@ -17,8 +19,20 @@ import { score } from "./score.js";
 // usable answer wins, the rest are failures — so a case that reads as "the
 // second model produced the draft" is asserting this module's ordering rather
 // than the provider's loop.
-vi.mock("../../core/markdown.js", () => ({ segments: vi.fn() }));
-vi.mock("../../core/provider.js", () => ({ rotateModels: vi.fn() }));
+// `importOriginal` rather than a bare factory: a module gains exports over
+// time, and a factory that replaces the whole module goes red the moment the
+// code under test uses one it does not list.
+vi.mock("../../core/markdown.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof MarkdownModule>()),
+  segments: vi.fn(),
+}));
+// `importOriginal` rather than a bare factory: this module stubs the
+// rotation, but the callback it hands the rotation is `askWhole`, which
+// is real code and must stay real for the stub to exercise it.
+vi.mock("../../core/provider.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof ProviderModule>()),
+  rotateModels: vi.fn(),
+}));
 vi.mock("../../core/sanitize.js", () => ({ sanitize: vi.fn() }));
 vi.mock("./score.js", () => ({ score: vi.fn() }));
 

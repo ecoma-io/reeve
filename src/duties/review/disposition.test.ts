@@ -3,13 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   dispositionKey,
   isEligibleReply,
-  mergeDispositions,
   parseDispositionLine,
   readDispositions,
-  substantiatedDispositions,
   type ThreadReply,
 } from "./disposition.js";
-import type { Disposition, PreviousFinding } from "./findings.js";
+import type { PreviousFinding } from "./findings.js";
 
 function reply(overrides: Partial<ThreadReply> = {}): ThreadReply {
   return {
@@ -211,78 +209,5 @@ describe("readDispositions", () => {
       readDispositions([reply({ body: "99: wont-fix" })], [previous({ line: 12 })], AT, "pr-author")
         .size,
     ).toBe(0);
-  });
-});
-
-describe("substantiatedDispositions", () => {
-  const disposition: Disposition = {
-    value: "rejected",
-    by: "maintainer",
-    at: "2026-01-01T00:00:00Z",
-    replyId: 9,
-    replyUrl: "https://github.com/ecoma-io/reeve/pull/42#issuecomment-9",
-  };
-
-  it("keeps a mirrored disposition whose reply is still eligible and still the same login", () => {
-    const out = substantiatedDispositions(
-      [previous({ disposition })],
-      [reply({ id: 9, login: "maintainer" })],
-      "pr-author",
-    );
-    expect(out.get(dispositionKey(previous()))).toEqual(disposition);
-  });
-
-  it("drops a mirrored disposition whose reply is gone", () => {
-    expect(substantiatedDispositions([previous({ disposition })], [], "pr-author").size).toBe(0);
-  });
-
-  it("drops a mirrored disposition whose login changed — the forged-envelope defence", () => {
-    const out = substantiatedDispositions(
-      [previous({ disposition })],
-      [reply({ id: 9, login: "attacker" })],
-      "pr-author",
-    );
-    expect(out.size).toBe(0);
-  });
-
-  it("drops a mirrored disposition when the reply turned into a bot's", () => {
-    const out = substantiatedDispositions(
-      [previous({ disposition })],
-      [reply({ id: 9, login: "maintainer", isBot: true })],
-      "pr-author",
-    );
-    expect(out.size).toBe(0);
-  });
-
-  it("leaves findings with no disposition alone", () => {
-    expect(
-      substantiatedDispositions([previous()], [reply({ id: 9, login: "maintainer" })], "pr-author")
-        .size,
-    ).toBe(0);
-  });
-});
-
-describe("mergeDispositions", () => {
-  const a: Disposition = { value: "verified", by: "a", at: "t1", replyId: 1, replyUrl: "u1" };
-  const b: Disposition = { value: "wont-fix", by: "b", at: "t2", replyId: 2, replyUrl: "u2" };
-
-  it("fresh wins, the substantiated mirror fills the gaps", () => {
-    const fresh = new Map<string, Disposition>([["k1", a]]);
-    const substantiated = new Map<string, Disposition>([
-      ["k1", b],
-      ["k2", b],
-    ]);
-    const merged = mergeDispositions(fresh, substantiated);
-    expect(merged.get("k1")).toBe(a);
-    expect(merged.get("k2")).toBe(b);
-    expect(merged.size).toBe(2);
-  });
-
-  it("never mutates its inputs", () => {
-    const fresh = new Map<string, Disposition>([["k1", a]]);
-    const substantiated = new Map<string, Disposition>([["k2", b]]);
-    mergeDispositions(fresh, substantiated);
-    expect(fresh.size).toBe(1);
-    expect(substantiated.size).toBe(1);
   });
 });

@@ -13,8 +13,6 @@ import {
   encloseEvidence,
   escapeMarkdown,
   fromChangelog,
-  fromCommitLog,
-  fromGithubRelease,
   fromSecurityAdvisory,
   gather,
   renderForPr,
@@ -41,20 +39,6 @@ describe("fromChangelog", () => {
     const evidence = fromChangelog("https://example.com", longContent, true);
     expect(evidence.content.length).toBeLessThan(longContent.length);
     expect(evidence.content).toContain("[… truncated]");
-  });
-});
-
-// ── fromGithubRelease ────────────────────────────────────────────────────
-
-describe("fromGithubRelease", () => {
-  it("builds a github-release evidence object", () => {
-    const evidence = fromGithubRelease(
-      "https://github.com/owner/repo/releases/tag/v1",
-      "Release notes here",
-    );
-    expect(evidence.kind).toBe("github-release");
-    expect(evidence.source).toBe("https://github.com/owner/repo/releases/tag/v1");
-    expect(evidence.deterministic).toBe(true);
   });
 });
 
@@ -89,20 +73,6 @@ describe("fromSecurityAdvisory", () => {
     };
     const evidence = fromSecurityAdvisory(advisory);
     expect(evidence.content).not.toContain("Patched in:");
-  });
-});
-
-// ── fromCommitLog ────────────────────────────────────────────────────────
-
-describe("fromCommitLog", () => {
-  it("builds a commit-log evidence object", () => {
-    const evidence = fromCommitLog(
-      "https://github.com/owner/repo/compare/v1...v2",
-      "abc123 def456",
-    );
-    expect(evidence.kind).toBe("commit-log");
-    expect(evidence.source).toBe("https://github.com/owner/repo/compare/v1...v2");
-    expect(evidence.deterministic).toBe(true);
   });
 });
 

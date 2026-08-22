@@ -513,7 +513,7 @@ function describeOutcome(outcome: Outcome, done: Done): string {
  */
 function readSettings(): Omit<Settings, "languages" | "taxonomy"> {
   const shared = readShared();
-  const cheap = parseModels(core.getInput("screen-models"));
+  const cheap = parseModels(core.getInput("screen-models"), "screen-models");
 
   return {
     ...shared,
@@ -572,7 +572,6 @@ export async function run(): Promise<void> {
     // Same warrant-wins, input-falls-back pattern as `languages` above, on the
     // one field the spam screen reads and nothing else does.
     const about = resolveAbout(authority.warrant, base.about);
-    if (about.notice !== null) core.notice(about.notice);
 
     // Guarded the same way `languages` is: a denied run is promised a green
     // no-op, and `labels` is configuration it was never going to use — a typo
@@ -583,7 +582,7 @@ export async function run(): Promise<void> {
     settings = {
       ...base,
       languages,
-      about: about.about,
+      about,
       taxonomy,
     };
 

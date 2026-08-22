@@ -31580,14 +31580,14 @@ var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -33282,6 +33282,13 @@ function parseApiKeys(raw) {
     return { alias, key };
   });
 }
+function checkApiKeysDeclared(endpoints, apiKeys) {
+  for (const { alias } of apiKeys) {
+    if (!endpoints.some((endpoint2) => endpoint2.alias === alias)) {
+      throw new Error(`api-keys: \`${alias}\` is not declared in \`endpoints\`.`);
+    }
+  }
+}
 function parseTimeout(name, raw) {
   const trimmed = raw.trim();
   const match = /^(\d+)(s|m)$/.exec(trimmed);
@@ -33726,6 +33733,9 @@ function providerConfig() {
     return void 0;
   }
   const timeoutRaw = getInput("request-timeout");
+  const endpoints = parseEndpoints(getInput("endpoints"));
+  const apiKeys = parseApiKeys(getInput("api-keys"));
+  checkApiKeysDeclared(endpoints, apiKeys);
   return {
     baseUrl: baseUrl2,
     apiKey,
@@ -33735,8 +33745,8 @@ function providerConfig() {
     ),
     models: roster.models,
     modelNames: roster.names,
-    endpoints: parseEndpoints(getInput("endpoints")),
-    apiKeys: parseApiKeys(getInput("api-keys"))
+    endpoints,
+    apiKeys
   };
 }
 async function runDoctor() {
@@ -33794,17 +33804,7 @@ async function writeExplain(leaf) {
     "",
     table2(
       ["Duty", "Action to write"],
-      [
-        ["translate", "`ecoma-io/reeve/translate@<ref>`"],
-        ["triage", "`ecoma-io/reeve/triage@<ref>`"],
-        ["duplicate", "`ecoma-io/reeve/duplicate@<ref>`"],
-        ["respond", "`ecoma-io/reeve/respond@<ref>`"],
-        ["lifecycle", "`ecoma-io/reeve/lifecycle@<ref>`"],
-        ["harmonise", "`ecoma-io/reeve/harmonise@<ref>`"],
-        ["dependa", "`ecoma-io/reeve/dependa@<ref>`"],
-        ["review", "`ecoma-io/reeve/review@<ref>`"],
-        ["remediation", "`ecoma-io/reeve/remediation@<ref>`"]
-      ]
+      DUTIES.map((duty) => [duty, `\`ecoma-io/reeve/${duty}@<ref>\``])
     ),
     ""
   ];

@@ -264,8 +264,14 @@ export interface Panel {
  * expecting a panel here, which is a misunderstanding worth stopping on the
  * first run rather than one whose only symptom is that the ids all ran
  * together into one that no provider has.
+ *
+ * `inputName` is the input the raw text came from, quoted back in that
+ * refusal. It defaults to `models` because that is what most callers read, but
+ * `respond` and `triage` also parse `screen-models` through here, and a message
+ * naming the wrong input sends a consumer to edit a line that was never the
+ * problem.
  */
-export function parseModels(raw: string): Roster {
+export function parseModels(raw: string, inputName = "models"): Roster {
   const models: string[] = [];
   const names = new Map<string, string>();
 
@@ -273,8 +279,8 @@ export function parseModels(raw: string): Roster {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        "models: `|` separates judge seats — one more voter, one more request — and " +
-          "means nothing here. `models` is a single fallback chain, so separate its " +
+        `${inputName}: \`|\` separates judge seats — one more voter, one more request — and ` +
+          `means nothing here. \`${inputName}\` is a single fallback chain, so separate its ` +
           `ids with \`,\`. Got \`${ids.trim()}\`.`,
       );
     }
@@ -1079,6 +1085,58 @@ export function settleAuth(weather: Weather): void {
   if (!weather.multiEndpoint || !weather.authExhausted) return;
   const [first] = weather.authFailures;
   if (first !== undefined) throw new AuthenticationFailure(first);
+}
+
+/**
+ * One completion, with a truncated answer read as the protocol failure it is.
+ *
+ * `finish_reason: "length"` means the provider stopped emitting before the
+ * model was done. The body that arrives is well-formed and short, which is the
+ * dangerous combination: it parses, and what it parses to is half of what was
+ * asked for. So it is turned into a `protocol` failure here, and the caller
+ * rotates to the next model exactly as it would for a body that never parsed.
+ *
+ * ── Why this is in the core ────────────────────────────────────────────────
+ *
+ * It was written out as a private `answer()` six times: `translate/draft.ts`,
+ * `duplicate/verdict.ts`, `respond/draft.ts`, `harmonise/draft.ts`,
+ * `review/passes.ts` and `core/pivot.ts`, five of them byte-identical. That is
+ * the provider protocol's own semantics, not any duty's policy about its own
+ * work, and `architecture.md` puts model rotation on the core's side of the
+ * boundary precisely so a duty never has to remember a rule like this.
+ *
+ * A seventh site applies the same rule inline rather than through a wrapper:
+ * `review/agentic.ts` checks `finishReason` inside its tool-call loop, where
+ * the completion is one turn of a conversation rather than a whole answer, so
+ * it cannot call this and is left alone.
+ *
+ * Copying a rule around is also how two call sites ended up without it.
+ * `triage/verdict.ts` and `dependa/main.ts` call `provider.complete` directly,
+ * so a truncated answer there is accepted as a rotation *success*, fails its
+ * parser, and becomes a no-verdict — where every other duty would have rotated
+ * to the next model. Those two are deliberately NOT changed here: giving them
+ * the guard changes what a run does, which is a decision of its own and not a
+ * deduplication. They are the argument for this function existing.
+ *
+ * `noun` names the thing that was cut off, for the reason string a maintainer
+ * reads in a log. It is the only thing the six copies disagreed about.
+ */
+export async function askWhole(
+  provider: Provider,
+  model: string,
+  messages: readonly Message[],
+  noun = "answer",
+): Promise<Completion> {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: `the ${noun} was cut off before it finished`,
+    };
+  }
+  return completion;
 }
 
 /**

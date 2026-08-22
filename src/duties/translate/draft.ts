@@ -33,7 +33,8 @@ import { enclose } from "../../core/enclose.js";
 import type { GlossaryEntry } from "../../core/glossary.js";
 import type { Language } from "../../core/languages.js";
 import { segments } from "../../core/markdown.js";
-import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
+import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { sanitize } from "../../core/sanitize.js";
 import type { Score } from "../../core/score.js";
@@ -128,7 +129,7 @@ export async function translate(request: TranslateRequest): Promise<Translation>
 
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages),
+      (model) => askWhole(provider, model, messages),
       weather,
     );
     for (const failure of rotation.failures) {
@@ -175,31 +176,6 @@ function remaining(
   // what the line below already returns is a branch nothing can test.
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
-}
-
-/**
- * One completion, with a truncated answer reported as the failure it is.
- *
- * `finish_reason: length` means the model stopped because it ran out of room,
- * so the translation ends mid-sentence. Posting that is worse than posting
- * nothing, and the next model may have more room — which is exactly what
- * rotation is for.
- */
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: readonly Message[],
-): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished",
-    };
-  }
-  return completion;
 }
 
 /**

@@ -672,6 +672,23 @@ describe("the bootstrap opt-in", () => {
     expect(run.outputs.synced).toContain("docs/start");
   });
 
+  it("reads `True` as on, the way every other boolean input in the tree is read", async () => {
+    // `bootstrap` was once compared against the literal `"true"`, so `True` —
+    // which the runner's own boolean grammar accepts — silently meant `false`,
+    // the exact opposite of what the workflow wrote.
+    const run = await runAction({ bootstrap: "True" });
+
+    expect(run.code).toBe(0);
+    expect(stub.writes.find((w) => w.path === "docs/start.vi.md")).toBeDefined();
+  });
+
+  it("refuses a spelling that is not a boolean at all, rather than reading it as off", async () => {
+    const run = await runAction({ bootstrap: "yes" });
+
+    expect(run.code).not.toBe(0);
+    expect(stub.writes).toEqual([]);
+  });
+
   it("spends no classification request — the whole document is the change", async () => {
     await runAction({ bootstrap: "true" });
 

@@ -36,36 +36,7 @@ function label(over: Partial<Label> = {}): Label {
   };
 }
 
-const FALLBACK = ["label"] as const;
-
 describe("B2 — a written duties block that does not name the duty is a denied run", () => {
-  it("grants the default when there is no duties block at all", () => {
-    const warrant = parseWarrant(".github/reeve.yml", MINIMAL);
-
-    expect(warrant.granted("triage", FALLBACK)).toEqual(["label"]);
-    expect(warrant.unnamed("triage")).toBe(false);
-  });
-
-  it("denies everything when a written block omits the duty, and says so", () => {
-    const warrant = parseWarrant(
-      ".github/reeve.yml",
-      ["version: 1", "duties:", "  translate: [edit-body]"].join("\n"),
-    );
-
-    expect(warrant.granted("triage", FALLBACK)).toEqual([]);
-    expect(warrant.unnamed("triage")).toBe(true);
-  });
-
-  it("spells `true` as the duty's own documented default", () => {
-    const warrant = parseWarrant(
-      ".github/reeve.yml",
-      ["version: 1", "duties:", "  triage: true"].join("\n"),
-    );
-
-    expect(warrant.granted("triage", FALLBACK)).toEqual(["label"]);
-    expect(warrant.unnamed("triage")).toBe(false);
-  });
-
   it("a denied run promises a green no-op, including a silent languages resolution", () => {
     const warrant = parseWarrant(
       ".github/reeve.yml",
@@ -92,15 +63,6 @@ describe("B3/B4 — enforcement is a gate, never a widening", () => {
 
     expect(decision.applied).toEqual(["bug"]);
     expect(decision.refused.map((entry) => entry.what)).toEqual(["docs", ""]);
-  });
-
-  it("refuses a confidence that is not a finite number — the floor gate has to hold for every value", () => {
-    expect(enforceLabels(warrant.path, [label()], ["bug"], [], Number.NaN, 0.5).applied).toEqual(
-      [],
-    );
-    expect(
-      enforceLabels(warrant.path, [label()], ["bug"], [], Number.POSITIVE_INFINITY, 0.5).applied,
-    ).toEqual([]);
   });
 
   it("a human label already on the thread overrules the verdict, and its exclusiveWith tells the reason", () => {

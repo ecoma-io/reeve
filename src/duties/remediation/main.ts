@@ -131,11 +131,6 @@ async function decide(
   return { proposals, note: "" };
 }
 
-/** A real Octokit client satisfies the write-less `CommentApi` port directly. */
-function wrapApi(api: ReturnType<typeof getOctokit>): CommentApi {
-  return api;
-}
-
 export async function run(): Promise<void> {
   const weather = createWeather();
   let settings: ReturnType<typeof readSettings> | null = null;
@@ -157,7 +152,7 @@ export async function run(): Promise<void> {
       };
     } else {
       outcome = await decide(
-        wrapApi(api),
+        api,
         { ...context.repo, number: read.number },
         authority.warrant,
         read.dryRun,

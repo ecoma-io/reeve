@@ -2,11 +2,12 @@ import * as core from "@actions/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  booleanInput,
   bounded,
   counted,
   fraction,
-  parseAttribution,
   parseApiKeys,
+  parseAttribution,
   parseEndpoints,
   parseSince,
   parseTemperature,
@@ -225,6 +226,14 @@ describe("parseAttribution", () => {
   it("refuses a spelling no duty documents", () => {
     expect(() => parseAttribution("detailed")).toThrow(
       /expected `none`, `model` or `detail`, got `detailed`/,
+    );
+  });
+
+  it("quotes back what the workflow wrote, not what this normalised it into", () => {
+    // Every sibling parser quotes `raw`. Quoting the folded value sends a
+    // maintainer looking for `detai` in a file that says `Detai`.
+    expect(() => parseAttribution("  Detai ")).toThrow(
+      "show-attribution: expected `none`, `model` or `detail`, got `  Detai `.",
     );
   });
 });
@@ -700,5 +709,50 @@ describe("input classes a workflow file produces by accident", () => {
     expect(parseSince("2024-02-29")?.toISOString()).toBe("2024-02-29T00:00:00.000Z");
     expect(parseSince("2026-12-31")?.toISOString()).toBe("2026-12-31T00:00:00.000Z");
     expect(parseSince("2026-01-01")?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
+
+describe("booleanInput", () => {
+  it("reads the manifest's default when the input was never set", () => {
+    // The case that matters, and the one `core.getBooleanInput` gets wrong:
+    // an input nobody wrote is the empty string, and `getBooleanInput` throws
+    // on it. On a runner GitHub fills `INPUT_*` from `action.yml`'s `default:`
+    // first, so this only bites where nothing does — the eval runner, which
+    // drives a bundle with just the inputs a fixture names, and `pnpm try`.
+    // Every `harmonise` eval fixture went red on exactly this.
+    expect(booleanInput("bootstrap", false)).toBe(false);
+    expect(booleanInput("ignore", true)).toBe(true);
+  });
+
+  it("reads whitespace as silence too", () => {
+    given({ bootstrap: "   " });
+    expect(booleanInput("bootstrap", false)).toBe(false);
+  });
+
+  it.each([
+    ["true", true],
+    ["True", true],
+    ["TRUE", true],
+    ["false", false],
+    ["False", false],
+    ["FALSE", false],
+  ])("reads %s as %s, the same six spellings the runner accepts", (written, expected) => {
+    given({ bootstrap: written });
+    expect(booleanInput("bootstrap", !expected)).toBe(expected);
+  });
+
+  it("refuses a seventh spelling by name rather than reading it as false", () => {
+    // The defect this replaced: `core.getInput("bootstrap") === "true"` read
+    // `True` as false — the opposite of what was written — and `yes` likewise.
+    // An input somebody took the trouble to write must never mean its opposite,
+    // so an unrecognised one is refused out loud.
+    given({ bootstrap: "yes" });
+    expect(() => booleanInput("bootstrap", false)).toThrow(/bootstrap: expected `true` or `false`/);
+    expect(() => booleanInput("bootstrap", false)).toThrow(/got `yes`/);
+  });
+
+  it("quotes what was written, not what it was trimmed to", () => {
+    given({ bootstrap: "  Yes  " });
+    expect(() => booleanInput("bootstrap", false)).toThrow(/got `Yes`/);
   });
 });

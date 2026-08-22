@@ -31575,6 +31575,83 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
+// src/core/meter.ts
+var STAGE = {
+  classify: "Classification",
+  detect: "Detection",
+  draft: "Drafting",
+  judge: "Judging",
+  screen: "Screening",
+  triage: "Triage",
+  pivot: "Pivot translation",
+  duplicate: "Duplicate check",
+  risk: "Risk assessment",
+  review: "Review"
+};
+function createMeter() {
+  const spends = /* @__PURE__ */ new Map();
+  const meter = {
+    record(purpose, completion) {
+      const key = `${purpose}::${completion.model}`;
+      const kept = spends.get(key) ?? {
+        purpose,
+        model: completion.model,
+        endpoint: completion.endpoint ?? null,
+        requests: 0,
+        failed: 0,
+        unreported: 0,
+        prompt: 0,
+        completion: 0
+      };
+      const usage = completion.usage ?? null;
+      spends.set(key, {
+        ...kept,
+        requests: kept.requests + 1,
+        failed: kept.failed + (completion.ok ? 0 : 1),
+        unreported: kept.unreported + (usage === null ? 1 : 0),
+        prompt: kept.prompt + (usage?.prompt ?? 0),
+        completion: kept.completion + (usage?.completion ?? 0)
+      });
+    },
+    spent: () => [...spends.values()]
+  };
+  return meter;
+}
+function metered(provider, meter, purpose, temperature) {
+  return {
+    async complete(model, messages, options) {
+      const completion = await provider.complete(
+        model,
+        messages,
+        temperature === void 0 ? options : { temperature, ...options }
+      );
+      meter.record(purpose, completion);
+      return completion;
+    }
+  };
+}
+function total(spent) {
+  return {
+    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
+    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
+    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
+    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
+    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
+  };
+}
+
+// src/core/budget.ts
+function createBudget() {
+  return { denied: false };
+}
+function budgetExhausted(maxRequests, meter, budget) {
+  if (maxRequests === null) return false;
+  if (budget.denied) return true;
+  if (total(meter.spent()).requests < maxRequests) return false;
+  budget.denied = true;
+  return true;
+}
+
 // src/core/forge.ts
 var LABEL_PAGE = 100;
 var LABEL_PAGES = 10;
@@ -31802,85 +31879,20 @@ function parseList(raw) {
   return raw.split(/[\n,]/).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
 }
 
-// src/core/meter.ts
-var STAGE = {
-  classify: "Classification",
-  detect: "Detection",
-  draft: "Drafting",
-  judge: "Judging",
-  screen: "Screening",
-  triage: "Triage",
-  pivot: "Pivot translation",
-  duplicate: "Duplicate check",
-  risk: "Risk assessment",
-  review: "Review"
-};
-function createMeter() {
-  const spends = /* @__PURE__ */ new Map();
-  const meter = {
-    record(purpose, completion) {
-      const key = `${purpose}::${completion.model}`;
-      const kept = spends.get(key) ?? {
-        purpose,
-        model: completion.model,
-        endpoint: completion.endpoint ?? null,
-        requests: 0,
-        failed: 0,
-        unreported: 0,
-        prompt: 0,
-        completion: 0
-      };
-      const usage = completion.usage ?? null;
-      spends.set(key, {
-        ...kept,
-        requests: kept.requests + 1,
-        failed: kept.failed + (completion.ok ? 0 : 1),
-        unreported: kept.unreported + (usage === null ? 1 : 0),
-        prompt: kept.prompt + (usage?.prompt ?? 0),
-        completion: kept.completion + (usage?.completion ?? 0)
-      });
-    },
-    spent: () => [...spends.values()]
-  };
-  return meter;
-}
-function metered(provider, meter, purpose, temperature) {
-  return {
-    async complete(model, messages, options) {
-      const completion = await provider.complete(
-        model,
-        messages,
-        temperature === void 0 ? options : { temperature, ...options }
-      );
-      meter.record(purpose, completion);
-      return completion;
-    }
-  };
-}
-function total(spent) {
-  return {
-    requests: spent.reduce((sum, entry) => sum + entry.requests, 0),
-    failed: spent.reduce((sum, entry) => sum + entry.failed, 0),
-    unreported: spent.reduce((sum, entry) => sum + entry.unreported, 0),
-    prompt: spent.reduce((sum, entry) => sum + entry.prompt, 0),
-    completion: spent.reduce((sum, entry) => sum + entry.completion, 0)
-  };
-}
-
 // src/core/provider.ts
 var DEFAULT_TIMEOUT_MS = 12e4;
 var EXCERPT_CHARS = 200;
 function shown(names, id) {
   return names.get(id) ?? id;
 }
-function parseModels(raw) {
+function parseModels(raw, inputName = "models") {
   const models = [];
   const names = /* @__PURE__ */ new Map();
   for (const entry of parseList(raw)) {
     const { ids, name } = split(entry);
     if (ids.includes("|")) {
       throw new Error(
-        `models: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`models\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
+        `${inputName}: \`|\` separates judge seats \u2014 one more voter, one more request \u2014 and means nothing here. \`${inputName}\` is a single fallback chain, so separate its ids with \`,\`. Got \`${ids.trim()}\`.`
       );
     }
     const id = ids.trim();
@@ -32240,6 +32252,18 @@ function settleAuth(weather) {
   const [first] = weather.authFailures;
   if (first !== void 0) throw new AuthenticationFailure(first);
 }
+async function askWhole(provider, model, messages, noun = "answer") {
+  const completion = await provider.complete(model, messages);
+  if (completion.ok && completion.finishReason === "length") {
+    return {
+      ok: false,
+      model,
+      kind: "protocol",
+      reason: `the ${noun} was cut off before it finished`
+    };
+  }
+  return completion;
+}
 async function rotateModels(models, attempt, weather) {
   const failures = [];
   for (const model of models) {
@@ -32335,6 +32359,15 @@ function readShared(options = {}) {
     since: parseSince(getInput("since")),
     limit: bounded("limit", getInput("limit"))
   };
+}
+function booleanInput(name, fallback) {
+  const raw = getInput(name).trim();
+  if (raw.length === 0) return fallback;
+  if (raw === "true" || raw === "True" || raw === "TRUE") return true;
+  if (raw === "false" || raw === "False" || raw === "FALSE") return false;
+  throw new Error(
+    `${name}: expected \`true\` or \`false\` (or their \`True\`/\`TRUE\` spellings), got \`${raw}\`.`
+  );
 }
 function parseEndpoints(raw) {
   const seen = /* @__PURE__ */ new Set();
@@ -33745,16 +33778,6 @@ function describe(value) {
   return "a value of a kind this file cannot hold";
 }
 
-// src/duties/harmonise/budget.ts
-function createBudget() {
-  return { denied: false };
-}
-function budgetExhausted(settings, meter, budget) {
-  const exhausted2 = settings.maxRequests !== null && total(meter.spent()).requests >= settings.maxRequests;
-  if (exhausted2) budget.denied = true;
-  return exhausted2;
-}
-
 // src/duties/harmonise/capabilities.ts
 var DEFAULT_CAPABILITIES = [];
 
@@ -34522,7 +34545,7 @@ async function draftChunked(request2) {
       if (order.length === 0) break;
       const rotation = await rotateModels(
         order,
-        (model) => answer(provider, model, messages),
+        (model) => askWhole(provider, model, messages),
         weather
       );
       for (const failure of rotation.failures) {
@@ -34599,7 +34622,7 @@ async function draftLoop(params) {
     if (order.length === 0) break;
     const rotation = await rotateModels(
       order,
-      (model) => answer(provider, model, messages),
+      (model) => askWhole(provider, model, messages),
       weather
     );
     for (const failure of rotation.failures) {
@@ -34647,18 +34670,6 @@ function remaining(models, draft, exhausted2) {
   const live = models.filter((model) => !exhausted2.has(model));
   const start = draft % live.length;
   return [...live.slice(start), ...live.slice(0, start)];
-}
-async function answer(provider, model, messages) {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished"
-    };
-  }
-  return completion;
 }
 function formatGlossary(entries) {
   if (entries.length === 0) return "";
@@ -34736,7 +34747,7 @@ Produce the complete updated target translation incorporating only the semantic 
 
 // src/duties/harmonise/inputs.ts
 function parsePaths(raw) {
-  return parseList(raw).filter((p) => p.length > 0);
+  return parseList(raw);
 }
 
 // src/duties/harmonise/links.ts
@@ -34874,10 +34885,10 @@ function rotated(candidates, start) {
   return [...candidates.slice(at), ...candidates.slice(0, at)];
 }
 var NUMBER = /\d+/g;
-function read(answer2, shown2) {
-  if (!answer2.ok) return answer2;
+function read(answer, shown2) {
+  if (!answer.ok) return answer;
   const named = [];
-  for (const [digits] of answer2.content.matchAll(NUMBER)) {
+  for (const [digits] of answer.content.matchAll(NUMBER)) {
     const picked = shown2[Number(digits) - 1];
     if (picked !== void 0 && !named.includes(picked)) named.push(picked);
   }
@@ -34885,17 +34896,17 @@ function read(answer2, shown2) {
   if (only === void 0) {
     return {
       ok: false,
-      model: answer2.model,
+      model: answer.model,
       kind: "protocol",
-      reason: `answered with no candidate number \u2014 ${excerpt2(answer2.content)}`
+      reason: `answered with no candidate number \u2014 ${excerpt2(answer.content)}`
     };
   }
   if (named.length > 1) {
     return {
       ok: false,
-      model: answer2.model,
+      model: answer.model,
       kind: "protocol",
-      reason: `named more than one candidate \u2014 ${excerpt2(answer2.content)}`
+      reason: `named more than one candidate \u2014 ${excerpt2(answer.content)}`
     };
   }
   return { ok: true, candidate: only };
@@ -35354,6 +35365,38 @@ async function ensureBranch(api, at, branchName) {
     throw error2;
   }
 }
+async function openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody) {
+  const { data: existing } = await api.rest.pulls.list({
+    owner: at.owner,
+    repo: at.repo,
+    state: "open",
+    head: `${at.owner}:${branchName}`,
+    per_page: 1
+  });
+  const existingPr = existing[0];
+  if (existingPr !== void 0) {
+    await api.rest.pulls.update({
+      owner: at.owner,
+      repo: at.repo,
+      pull_number: existingPr.number,
+      title: prTitle,
+      body: prBody
+    });
+    info(`state-branch: updated PR #${String(existingPr.number)}`);
+    return { pr: existingPr.number };
+  }
+  const { data: pr } = await api.rest.pulls.create({
+    owner: at.owner,
+    repo: at.repo,
+    title: prTitle,
+    head: branchName,
+    base: defaultBranch,
+    body: prBody,
+    draft: true
+  });
+  info(`state-branch: opened PR #${String(pr.number)}`);
+  return { pr: pr.number };
+}
 async function publishState(api, at, branchName, files, prTitle, prBody, dryRun) {
   if (files.length === 0) return null;
   if (dryRun) {
@@ -35394,36 +35437,7 @@ async function publishState(api, at, branchName, files, prTitle, prBody, dryRun)
       written += 1;
       info(`state-branch: wrote ${file.path} on \`${branchName}\``);
     }
-    const { data: existing } = await api.rest.pulls.list({
-      owner: at.owner,
-      repo: at.repo,
-      state: "open",
-      head: `${at.owner}:${branchName}`,
-      per_page: 1
-    });
-    const existingPr = existing[0];
-    if (existingPr !== void 0) {
-      await api.rest.pulls.update({
-        owner: at.owner,
-        repo: at.repo,
-        pull_number: existingPr.number,
-        title: prTitle,
-        body: prBody
-      });
-      info(`state-branch: updated PR #${String(existingPr.number)}`);
-      return { pr: existingPr.number };
-    }
-    const { data: pr } = await api.rest.pulls.create({
-      owner: at.owner,
-      repo: at.repo,
-      title: prTitle,
-      head: branchName,
-      base: defaultBranch,
-      body: prBody,
-      draft: true
-    });
-    info(`state-branch: opened PR #${String(pr.number)}`);
-    return { pr: pr.number };
+    return await openOrUpdatePr(api, at, branchName, defaultBranch, prTitle, prBody);
   } catch (error2) {
     if (isCapacityError(error2)) {
       warning(
@@ -35490,10 +35504,10 @@ function readSettings() {
     stateBranch: getInput("state-branch"),
     glossaryDir: getInput("glossary-dir", { required: true }),
     paths: parsePaths(getInput("paths")),
-    bootstrap: getInput("bootstrap") === "true",
+    bootstrap: booleanInput("bootstrap", false),
     maxRequests: bounded("max-requests", getInput("max-requests")),
     chunkChars: counted("chunk-chars", getInput("chunk-chars")),
-    ignore: getInput("ignore") !== "false"
+    ignore: booleanInput("ignore", true)
   };
 }
 function notGranted(warrant) {
@@ -35626,7 +35640,7 @@ async function run() {
         );
         break;
       }
-      if (budgetExhausted(settings, meter, budget)) {
+      if (budgetExhausted(settings.maxRequests, meter, budget)) {
         warning(
           "`max-requests` was reached, so remaining document groups were not attempted this run. What was already drafted still publishes."
         );
@@ -35851,7 +35865,7 @@ async function processGroup(group, state, targetLanguages, sourceLanguage, gloss
   for (const path of group.files.values()) linkTargets.add(path);
   const bestDrafts = /* @__PURE__ */ new Map();
   for (const locale of doc.stale) {
-    if (budgetExhausted(settings, meter, budget)) {
+    if (budgetExhausted(settings.maxRequests, meter, budget)) {
       const remaining2 = doc.stale.slice(doc.stale.indexOf(locale));
       skipped.push(...remaining2);
       warning(

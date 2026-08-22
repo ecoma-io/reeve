@@ -19,6 +19,7 @@
 import * as core from "@actions/core";
 import { type getOctokit } from "@actions/github";
 
+import { budgetExhausted, type Budget } from "../../core/budget.js";
 import { createLanguagePicker, detectLanguage, residue } from "../../core/detect.js";
 import { createReply, createThread, listReplies, type Thread } from "../../core/forge.js";
 import { type Language } from "../../core/languages.js";
@@ -26,7 +27,6 @@ import { type Weather } from "../../core/provider.js";
 import { assemble, publish } from "../../core/publish.js";
 import { type Meter } from "../../core/meter.js";
 
-import { budgetExhausted, type Budget } from "./budget.js";
 import { translateInto, type Stages, type RosterCheck } from "./engine.js";
 import { readBody, targets } from "./inputs.js";
 import { type Looked } from "./summary.js";
@@ -130,7 +130,7 @@ export async function translateText(
   // detection is the first thing that would actually spend a request, and a
   // budget already at its ceiling has no business starting a text it cannot
   // finish deciding about.
-  if (budgetExhausted(settings, meter, budget)) {
+  if (budgetExhausted(settings.maxRequests, meter, budget)) {
     core.warning(`${what}: \`max-requests\` was reached, so this text was not attempted this run.`);
     return nothing(what, "budget exhausted");
   }
@@ -154,7 +154,7 @@ export async function translateText(
     // Checked before spending the request a language is about to cost, not
     // after — so a budget set tight enough to stop mid-thread stops before
     // the request that would have gone over it, not after.
-    if (budgetExhausted(settings, meter, budget)) {
+    if (budgetExhausted(settings.maxRequests, meter, budget)) {
       const remaining = toTranslate.slice(index);
       skipped.push(...remaining);
       budgetSkipped.push(...remaining);
@@ -331,7 +331,7 @@ export async function translateReplies(
     // Checked before the reply's own first request, same as the per-language
     // check inside `translateText` — a reply not yet started is cheaper to
     // leave for a later run than one translated into half its languages.
-    if (budgetExhausted(settings, meter, budget)) {
+    if (budgetExhausted(settings.maxRequests, meter, budget)) {
       core.warning(
         `#${String(at.number)}: \`max-requests\` was reached, so its remaining replies were not ` +
           "attempted this run.",

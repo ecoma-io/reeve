@@ -26,8 +26,9 @@
  * outage do not clear inside one run.
  */
 import { enclose } from "../../core/enclose.js";
-import { segments } from "../../core/markdown.js";
-import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
+import { unfenced } from "../../core/markdown.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
+import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import type { Candidate } from "./rank.js";
 
@@ -98,7 +99,7 @@ export async function judge(request: JudgeRequest): Promise<Judged> {
   const messages = prompt(request);
   const rotation = await rotateModels(
     models,
-    (model) => answer(provider, model, messages),
+    (model) => askWhole(provider, model, messages),
     weather,
   );
   if (!rotation.success) {
@@ -115,35 +116,6 @@ export async function judge(request: JudgeRequest): Promise<Judged> {
 }
 
 /**
- * One completion, with a truncated answer reported as the failure it is —
- * the same rule `core/pivot.ts`'s own `answer` follows and for the same
- * reason. `finish_reason: length` means the model ran out of room before the
- * JSON closed, which is unparseable the same as a malformed body, not merely
- * a short verdict — a truncated `{"duplicate_of": 7, "confid` could still
- * happen to satisfy `parseVerdict` on a shorter field or a lucky cutoff, and
- * "best-effort parsed" is exactly the leniency this duty's own doc comment
- * refuses everywhere else. Caught here, before `rotateModels` ever calls this
- * a success, so rotation's next model gets the same chance a capacity failure
- * gives it, and the caller never has to check `finishReason` itself.
- */
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: readonly Message[],
-): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished",
-    };
-  }
-  return completion;
-}
-
-/**
  * The answer, or null when it is not a verdict.
  *
  * `candidates` is what makes this stricter than `triage/verdict.ts`'s own
@@ -157,7 +129,7 @@ async function answer(
 export function parseVerdict(answer: string, candidates: readonly Candidate[]): Verdict | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(unwrapped(answer));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -182,21 +154,6 @@ export function parseVerdict(answer: string, candidates: readonly Candidate[]): 
     confidence,
     rationale: rationale.trim(),
   };
-}
-
-/**
- * A whole answer wrapped in one fence, unwrapped — the same indulgence
- * `triage/verdict.ts` makes and for the same reason: a model asked for JSON
- * hands back ```` ```json ```` around it often enough that refusing the
- * answer would be refusing the model rather than the content.
- */
-function unwrapped(answer: string): string {
-  const parts = segments(answer.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer;
-
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }
 
 /**

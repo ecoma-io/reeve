@@ -627,7 +627,7 @@ describe("the model roster", () => {
 // and npm release notes, written by people this repository has never met and
 // fetched over the network. `enclose()` wraps it in a nonce boundary AND
 // returns the sentence that tells the model what the boundary means. Both
-// halves are handed to `interpretationPrompt` at `main.ts:377-379`.
+// halves are handed to `interpretationPrompt` by `main.ts`.
 //
 // The `rule` half was passed as an OPTIONAL argument, and deleting it left
 // tsc, eslint, 4972 tests, coverage, the 60-row mutation table and `eval all`

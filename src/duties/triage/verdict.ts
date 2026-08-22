@@ -28,7 +28,7 @@
  */
 import { enclose } from "../../core/enclose.js";
 import type { Correction } from "../../core/memory.js";
-import { segments } from "../../core/markdown.js";
+import { unfenced } from "../../core/markdown.js";
 import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { renderRecall } from "../../core/recall.js";
@@ -119,7 +119,7 @@ export async function triage(request: TriageRequest): Promise<Triaged> {
 export function parseVerdict(answer: string): Verdict | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(unwrapped(answer));
+    parsed = JSON.parse(unfenced(answer));
   } catch {
     return null;
   }
@@ -152,25 +152,6 @@ export function parseVerdict(answer: string): Verdict | null {
     duplicateOf: duplicate as number | null,
     rationale: rationale.trim(),
   };
-}
-
-/**
- * A whole answer wrapped in one fence, unwrapped.
- *
- * A model asked for JSON hands back ```` ```json ```` around it often enough
- * that refusing the answer would be refusing the model rather than the content.
- * This is the only reshaping done before parsing, and it is safe in a way a
- * "find the first `{`" scan is not: it accepts an answer that is one fenced
- * block and nothing else, so an answer carrying prose beside the JSON is still
- * unreadable — which is what an answer carrying prose beside the JSON is.
- */
-function unwrapped(answer: string): string {
-  const parts = segments(answer.trim());
-  const [only] = parts;
-  if (parts.length !== 1 || only?.kind !== "fence") return answer;
-
-  const lines = only.text.split("\n");
-  return lines.slice(1, -1).join("\n");
 }
 
 /**

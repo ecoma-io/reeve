@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { detectLanguage } from "../../core/detect.js";
 import type { Language } from "../../core/languages.js";
+import type * as MarkdownModule from "../../core/markdown.js";
 import { segments, type Segment } from "../../core/markdown.js";
 import { score, type Draft } from "./score.js";
 import { containsScript } from "../../core/script.js";
@@ -12,7 +13,13 @@ import { containsScript } from "../../core/script.js";
 // the case, which keeps every measurement below readable as the arithmetic it
 // is.
 vi.mock("../../core/detect.js", () => ({ detectLanguage: vi.fn() }));
-vi.mock("../../core/markdown.js", () => ({ segments: vi.fn() }));
+// `importOriginal` rather than a bare factory: a module gains exports over
+// time, and a factory that replaces the whole module goes red the moment the
+// code under test uses one it does not list.
+vi.mock("../../core/markdown.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof MarkdownModule>()),
+  segments: vi.fn(),
+}));
 vi.mock("../../core/script.js", () => ({ containsScript: vi.fn() }));
 
 const mockedDetect = vi.mocked(detectLanguage);

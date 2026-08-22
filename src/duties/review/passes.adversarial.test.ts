@@ -79,9 +79,7 @@ function reviewFinding(overrides: Partial<ReviewFinding> = {}): ReviewFinding {
     body: "Repeated logic.",
     snippet: "const a = 1;",
     passId: "correctness",
-    passName: "Correctness",
     corroboratedBy: ["correctness"],
-    evidence: [{ kind: "patch", source: "src/a.ts:12", content: "const a = 1;" }],
     ...overrides,
   };
 }
@@ -242,10 +240,7 @@ describe("the system prompt states the rules and the language honestly", () => {
 
 describe("duplicate findings merge, they never overwrite", () => {
   it("the_same_claim_from_two_passes_becomes_one_finding_recording_both", () => {
-    const out = dedup([
-      reviewFinding(),
-      reviewFinding({ passId: "second-opinion", passName: "Second opinion" }),
-    ]);
+    const out = dedup([reviewFinding(), reviewFinding({ passId: "second-opinion" })]);
     expect(out).toHaveLength(1);
     expect(out[0]?.corroboratedBy).toEqual(["correctness", "second-opinion"]);
   });
@@ -277,23 +272,6 @@ describe("duplicate findings merge, they never overwrite", () => {
     // Self-corroboration would let one noisy pass promote its own claim.
     const out = dedup([reviewFinding(), reviewFinding()]);
     expect(out[0]?.corroboratedBy).toEqual(["correctness"]);
-  });
-
-  it("merged_evidence_is_unioned_without_duplicating_a_source", () => {
-    const out = dedup([
-      reviewFinding(),
-      reviewFinding({
-        passId: "second-opinion",
-        passName: "Second opinion",
-        evidence: [
-          { kind: "patch", source: "src/a.ts:12", content: "const a = 1;" },
-          { kind: "pass", source: "second-opinion", content: "Second opinion" },
-        ],
-      }),
-    ]);
-    const keys = out[0]?.evidence.map((e) => `${e.kind}:${e.source}`) ?? [];
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(keys).toContain("pass:second-opinion");
   });
 
   it("two_claims_at_the_same_place_under_different_rules_are_never_merged", () => {
@@ -483,7 +461,6 @@ describe("three passes agreeing, and one disagreeing beside them", () => {
     const second = reviewFinding({
       body: "Said second.",
       passId: "second-opinion",
-      passName: "Second opinion",
       corroboratedBy: ["second-opinion"],
     });
     expect(dedup([first, second])[0]).toMatchObject({

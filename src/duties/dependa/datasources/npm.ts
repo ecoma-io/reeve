@@ -16,7 +16,13 @@
  * to propose it — the policy decides.
  */
 import type { Release, ResolutionResult } from "../model.js";
-import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
+import {
+  byVersionDescending,
+  parseDate,
+  temporarilyUnavailable,
+  type Datasource,
+  type DatasourceId,
+} from "./types.js";
 
 /** The npm datasource identifier. */
 const ID: DatasourceId = "npm";
@@ -54,7 +60,7 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
       signal: AbortSignal.timeout(30_000), // 30s timeout
     });
   } catch (error) {
-    return temporarilyUnavailable(error);
+    return temporarilyUnavailable("npm registry", error);
   }
 
   if (response.status === 404) {
@@ -173,24 +179,6 @@ function isPrereleaseVersion(version: string): boolean {
 }
 
 /**
- * Parse a date string from the npm registry's `time` field.
- *
- * npm uses ISO 8601 format. Returns null when parsing fails.
- */
-function parseDate(value: unknown): Date | null {
-  if (typeof value !== "string") return null;
-
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-    // Not a valid date
-  }
-
-  return null;
-}
-
-/**
  * Extract a changelog URL from repository/homepage metadata.
  *
  * Looks for GitHub repositories and constructs a GitHub release URL.
@@ -275,15 +263,4 @@ function extractGithubUrl(raw: string): string | null {
   }
 
   return null;
-}
-
-/**
- * Convert a fetch error to a `temporarily-unavailable` result.
- */
-function temporarilyUnavailable(error: unknown): ResolutionResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    status: "temporarily-unavailable",
-    reason: `npm registry unreachable: ${message}`,
-  };
 }

@@ -32,7 +32,8 @@
  * nobody actually reviewed is never stamped all-clear.
  */
 import { enclose } from "../../core/enclose.js";
-import type { Completion, Failure, Message, Provider, Weather } from "../../core/provider.js";
+import type { Failure, Message, Provider, Weather } from "../../core/provider.js";
+import { askWhole } from "../../core/provider.js";
 import { rotateModels } from "../../core/provider.js";
 import { agenticAnswer } from "./agentic.js";
 import type { ToolBudget, ToolExecutor } from "./tools.js";
@@ -112,7 +113,7 @@ export interface PassResult {
   readonly model: string | null;
 }
 
-/** One finding a pass produced, carrying its provenance and evidence. */
+/** One finding a pass produced, carrying its provenance. */
 export interface ReviewFinding {
   /** Stable identity: `${rule}:${path}:${line ?? 0}` — the dedup key. */
   readonly id: string;
@@ -124,20 +125,8 @@ export interface ReviewFinding {
   readonly snippet: string;
   /** Which pass produced it. */
   readonly passId: string;
-  readonly passName: string;
   /** Every pass that independently found the same thing, first = producer. */
   readonly corroboratedBy: readonly string[];
-  /** The load-bearing facts that make the finding verifiable at synthesis. */
-  readonly evidence: readonly ReviewEvidence[];
-}
-
-/** A load-bearing fact behind a finding: the diff proof, the rule text, the pass. */
-export interface ReviewEvidence {
-  readonly kind: "patch" | "rule" | "pass";
-  /** e.g. `src/a.ts:13`, a rule id, a pass id. */
-  readonly source: string;
-  /** The snippet, the rule text, or the pass name. */
-  readonly content: string;
 }
 
 /** One per-pass row of the synthesis report. */
@@ -209,7 +198,7 @@ export async function runPasses(
     let rotation = await rotateModels(
       roster,
       (model) => {
-        if (agentic === undefined) return answer(provider, model, pass.prompt(context));
+        if (agentic === undefined) return askWhole(provider, model, pass.prompt(context));
         const executor = agentic.makeExecutor();
         return agenticAnswer(provider, model, pass.prompt(context), executor, agentic.budget).then(
           (completion) => {
@@ -237,7 +226,7 @@ export async function runPasses(
       const assembled: PassContext = { ...context, agentic: false };
       const retry = await rotateModels(
         roster,
-        (model) => answer(provider, model, pass.prompt(assembled)),
+        (model) => askWhole(provider, model, pass.prompt(assembled)),
         weather,
       );
       if (retry.success) {
@@ -268,24 +257,6 @@ export async function runPasses(
     });
   }
   return results;
-}
-
-/** One completion, with a truncated answer reported as the failure it is. */
-async function answer(
-  provider: Provider,
-  model: string,
-  messages: readonly Message[],
-): Promise<Completion> {
-  const completion = await provider.complete(model, messages);
-  if (completion.ok && completion.finishReason === "length") {
-    return {
-      ok: false,
-      model,
-      kind: "protocol",
-      reason: "the answer was cut off before it finished",
-    };
-  }
-  return completion;
 }
 
 /**
@@ -517,7 +488,7 @@ export function synthesize(results: readonly PassResult[]): ReviewSynthesis {
   for (const result of results) {
     if (result.verdict === null) continue;
     for (const raw of result.verdict.findings) {
-      findings.push(toReviewFinding(raw, result.pass, result.verdict.findings.length));
+      findings.push(toReviewFinding(raw, result.pass));
     }
   }
 
@@ -555,18 +526,9 @@ export function synthesize(results: readonly PassResult[]): ReviewSynthesis {
   return { findings: ranked, confidence, measured, passes, failedPasses };
 }
 
-/** A pass's raw finding, wrapped in its provenance and its evidence. */
-function toReviewFinding(raw: RawFinding, pass: ReviewPass, _passFindings: number): ReviewFinding {
+/** A pass's raw finding, wrapped in its provenance. */
+function toReviewFinding(raw: RawFinding, pass: ReviewPass): ReviewFinding {
   const line = raw.line;
-  const evidence: ReviewEvidence[] = [
-    {
-      kind: "patch",
-      source: line === null ? raw.path : `${raw.path}:${String(line)}`,
-      content: raw.snippet,
-    },
-    { kind: "rule", source: raw.rule, content: "" },
-    { kind: "pass", source: pass.id, content: pass.name },
-  ];
   return {
     id: `${raw.rule}:${raw.path}:${String(line ?? 0)}`,
     ruleId: raw.rule,
@@ -576,17 +538,14 @@ function toReviewFinding(raw: RawFinding, pass: ReviewPass, _passFindings: numbe
     body: raw.body,
     snippet: raw.snippet,
     passId: pass.id,
-    passName: pass.name,
     corroboratedBy: [pass.id],
-    evidence,
   };
 }
 
 /**
  * Dedup: the same rule, file and line found by more than one pass is one
  * finding. The producer is the pass with the strongest severity (ties to the
- * earliest pass); every pass that found it is recorded in `corroboratedBy`,
- * and their evidence is merged without duplication.
+ * earliest pass); every pass that found it is recorded in `corroboratedBy`.
  */
 export function dedup(findings: readonly ReviewFinding[]): ReviewFinding[] {
   const out: ReviewFinding[] = [];
@@ -616,23 +575,7 @@ function merge(a: ReviewFinding, b: ReviewFinding): ReviewFinding {
   const corroboratedBy = a.corroboratedBy.includes(b.passId)
     ? [...a.corroboratedBy]
     : [...a.corroboratedBy, b.passId];
-  return {
-    ...primary,
-    corroboratedBy,
-    evidence: mergeEvidence([...a.evidence, ...b.evidence]),
-  };
-}
-
-function mergeEvidence(all: readonly ReviewEvidence[]): ReviewEvidence[] {
-  const seen = new Set<string>();
-  const out: ReviewEvidence[] = [];
-  for (const evidence of all) {
-    const key = `${evidence.kind}:${evidence.source}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(evidence);
-  }
-  return out;
+  return { ...primary, corroboratedBy };
 }
 
 /** A disagreement: two passes claiming different problems at the same place. */
@@ -681,8 +624,10 @@ function applyContradictions(
         .filter((f) => f.ruleId !== finding.ruleId)
         .map((f) => f.ruleId)
         .join(", ");
-      const key = finding.id;
-      others.set(key, `${others.get(key) ?? ""}${other}`.trim());
+      // One entry per id, never an accumulation: findings arrive deduped by
+      // `id`, and a bucket is keyed by the `path`/`line` that id already
+      // carries — so each id lands in exactly one bucket, exactly once.
+      others.set(finding.id, other);
     }
   }
   return findings.map((finding) => {

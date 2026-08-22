@@ -777,18 +777,37 @@ describe("renderReportMarkdown — edge cases", () => {
   });
 
   it("escapes pipe characters in reason strings", () => {
+    // The reason is the seventh and last cell of the discrepancy row. A raw
+    // `|` inside it opens an eighth column and shears the table from that row
+    // down, so the renderer escapes it — and only a fixture that actually
+    // holds a pipe can tell whether it still does. A group name is the way one
+    // gets there in practice: it is a maintainer-written string that reaches
+    // the reason verbatim, and `chore | deps` is an ordinary thing to call a
+    // group.
     const renovate: RenovateFinding[] = [
-      makeRenovateNpm("pkg-a", "^1.0.0", "1.0.0", "2.0.0", "major"),
+      { ...makeRenovateNpm("pkg-a", "^1.0.0", "1.0.0", "2.0.0", "major"), group: "chore | deps" },
     ];
     const dependa: DependaFinding[] = [
-      makeDependaNpm("pkg-a", "^1.0.0", "1.0.0", "1.5.0", "minor"),
+      { ...makeDependaNpm("pkg-a", "^1.0.0", "1.0.0", "2.0.0", "major"), group: null },
     ];
     const dataset = compare(renovate, dependa, CONTEXT);
     const report = generateReport(dataset);
     const md = renderReportMarkdown(report);
-    // The table should not be broken by unescaped pipes
-    const lines = md.split("\n").filter((l) => l.includes("pkg-a"));
-    expect(lines.length).toBeGreaterThan(0);
+
+    const lines = md.split("\n");
+    const header = lines.find((line) => line.startsWith("| Ecosystem | Dependency |"));
+    const row = lines.find((line) => line.startsWith("| npm | `pkg-a` |"));
+    expect(header).toBeDefined();
+    expect(row).toBeDefined();
+
+    // The pipe survives — escaped, not dropped and not passed through raw.
+    expect(row).toContain("chore \\| deps");
+    expect(row).not.toContain("chore | deps");
+
+    // And the row still parses as the same number of columns as its header,
+    // which is the thing the escaping exists to protect.
+    const columns = (line: string): number => line.split(/(?<!\\)\|/).length;
+    expect(columns(row ?? "")).toBe(columns(header ?? ""));
   });
 });
 

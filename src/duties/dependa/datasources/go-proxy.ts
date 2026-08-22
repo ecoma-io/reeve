@@ -14,7 +14,13 @@
  * **External metadata is evidence, never authority.**
  */
 import type { Release, ResolutionResult } from "../model.js";
-import { byVersionDescending, type Datasource, type DatasourceId } from "./types.js";
+import {
+  byVersionDescending,
+  parseDate,
+  temporarilyUnavailable,
+  type Datasource,
+  type DatasourceId,
+} from "./types.js";
 
 /** The Go proxy datasource identifier. */
 const ID: DatasourceId = "go-proxy";
@@ -52,7 +58,7 @@ async function resolve(packageName: string): Promise<ResolutionResult> {
       signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
-    return temporarilyUnavailable(error);
+    return temporarilyUnavailable("Go proxy", error);
   }
 
   if (listResponse.status === 404) {
@@ -195,28 +201,4 @@ function buildDiffUrl(modulePath: string, version: string): string | null {
   }
 
   return null;
-}
-
-/**
- * Parse a date string from the Go proxy's `.info` endpoint.
- */
-function parseDate(value: string): Date | null {
-  try {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) return date;
-  } catch {
-    // Not a valid date
-  }
-  return null;
-}
-
-/**
- * Convert a fetch error to a `temporarily-unavailable` result.
- */
-function temporarilyUnavailable(error: unknown): ResolutionResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    status: "temporarily-unavailable",
-    reason: `Go proxy unreachable: ${message}`,
-  };
 }
