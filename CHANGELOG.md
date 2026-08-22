@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.1](https://github.com/ecoma-io/reeve/compare/v0.9.0...v0.9.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **review:** the answer skeleton that taught 0.0, and the labels that said dry-run ([#130](https://github.com/ecoma-io/reeve/issues/130)) ([45ba283](https://github.com/ecoma-io/reeve/commit/45ba2832d5a502bf4b5637958c62c52f6ba910a9))
+* **translate,harmonise:** rank what a draft lost, and make a language a run lost findable again ([#131](https://github.com/ecoma-io/reeve/issues/131)) ([17f85e9](https://github.com/ecoma-io/reeve/commit/17f85e9e59dfa91c0feba64622c8b039d31bb92e))
+* **translate:** escape an unbalanced `<details>` tag instead of refusing the draft ([#133](https://github.com/ecoma-io/reeve/issues/133)) ([29c290b](https://github.com/ecoma-io/reeve/commit/29c290b1128232180eae731339ad209b13ab9613))
+* **workspace:** seven defects a hardening round found, and the tests that caught them ([#126](https://github.com/ecoma-io/reeve/issues/126)) ([99ca6b0](https://github.com/ecoma-io/reeve/commit/99ca6b0082163e67d7e791407e25de6a0e6e6ecd))
+* **workspace:** what run 48 was actually for, and the four defects between it and that ([#128](https://github.com/ecoma-io/reeve/issues/128)) ([0decf5b](https://github.com/ecoma-io/reeve/commit/0decf5b1cfdc07caa441301cb2e6b21afec1773a))
+
 ## [0.9.0](https://github.com/ecoma-io/reeve/compare/v0.8.0...v0.9.0) (2026-08-21)
 
 
