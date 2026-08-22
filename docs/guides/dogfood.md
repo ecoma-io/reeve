@@ -3,12 +3,13 @@
 _How Reeve runs on itself, and how the feedback loop works. Prerequisites: [The authority model](../concepts/authority-model.md), [The warrant](warrant.md)._
 
 Reeve is dogfooded: its duties run against this repository's own
-issues, pull requests, and dependencies. `triage` and `translate` act on
-real threads; `duplicate`, `respond` and `review` run in report-only mode,
-writing verdicts to job summaries and touching nothing; `lifecycle` observes
-in dry-run; and `dependa` acts on its grant — committing manifest updates and
-opening draft PRs alongside Renovate, whose comparison run still measures it
-weekly. `harmonise` is configured to watch `README.md`,
+issues, pull requests, and dependencies. `triage`, `translate` and `review` act
+on real threads — `review` answers every pull request here with a real summary
+comment and real inline threads; `duplicate` and `respond` run in report-only
+mode, writing verdicts to job summaries and touching nothing; `lifecycle`
+observes in dry-run; and `dependa` acts on its grant — committing manifest
+updates and opening draft PRs alongside Renovate, whose comparison run still
+measures it weekly. `harmonise` is configured to watch `README.md`,
 whose sync to Vietnamese/Chinese is pending the bootstrap of its first
 translations — see [the harmonise reference](../reference/duties/harmonise.md#bootstrap).
 This is not self-modification; it is **proving the execution path**. A duty
@@ -35,26 +36,33 @@ Every duty is dogfooded by one workflow —
 whose one config table answers, in a glance, which repository, which duty,
 which event, which mode and which result a run produced:
 
-| Duty      | Event                                         | Mode       | Status      |
-| --------- | --------------------------------------------- | ---------- | ----------- |
-| triage    | `opened`, `labeled`, `unlabeled`, `reopened`  | controlled | Active      |
-| translate | issue `opened`/`edited`, PR `opened`/`edited` | propose    | Active      |
-| duplicate | `opened`                                      | observe    | Report-only |
-| respond   | `opened`                                      | observe    | Report-only |
-| lifecycle | daily schedule                                | observe    | Observing   |
-| harmonise | `push` (README.md)                            | propose    | Active      |
-| review    | PR `opened`/`ready_for_review`/`synchronize`  | observe    | Report-only |
-| dependa   | Wednesday (drafting), Thursday (conformance)  | observe    | Shadow      |
-| sweep     | Monday schedule                               | propose    | Active      |
+| Duty      | Event                                         | Mode       | Status                    |
+| --------- | --------------------------------------------- | ---------- | ------------------------- |
+| triage    | `opened`, `labeled`, `unlabeled`, `reopened`  | controlled | Active                    |
+| translate | issue `opened`/`edited`, PR `opened`/`edited` | propose    | Active                    |
+| duplicate | `opened`                                      | observe    | Report-only               |
+| respond   | `opened`                                      | observe    | Report-only               |
+| lifecycle | daily schedule                                | observe    | Observing                 |
+| harmonise | `push` (README.md)                            | propose    | Active                    |
+| review    | PR `opened`/`ready_for_review`/`synchronize`  | controlled | Active                    |
+| dependa   | Wednesday (drafting), Thursday (conformance)  | controlled | Active (Thursday shadows) |
+| sweep     | Monday schedule                               | propose    | Active                    |
 
 The three modes are what a job may write, and the boundary between them is a
 deliberate act, never a default — see the workflow header for the full
 definitions. `observe` is write-safe by construction (`duplicate`, `respond`,
-`lifecycle` and `review` run `dry-run: true`; `dependa` is omitted from the
-warrant's `duties:` block); `propose` (translate, harmonise) withholds nothing
-and lets the warrant decide; `controlled` (triage) writes what the warrant
-grants. A manual `workflow_dispatch` defaults to observation and needs
-`dry-run: false` to act — write authority is never granted by accident.
+`lifecycle` and the Thursday `dependa` conformance row run `dry-run: true`);
+`propose` (translate, harmonise) withholds nothing and lets the warrant decide;
+`controlled` (triage, review, and the Wednesday `dependa` drafting row) writes
+what the warrant grants. A manual `workflow_dispatch` defaults to observation
+and needs `dry-run: false` to act — write authority is never granted by
+accident.
+
+`review` and `dependa` both arrived at `controlled`; neither started there.
+Each ran report-only first, and each was moved in one deliberate commit that
+wrote the warrant grant and opened the matching job's write path together —
+#114 for `review`, #125 for `dependa`. A mode is where a duty ends up, never
+where it begins.
 
 Every job runs the real public leaf action — `uses: ecoma-io/reeve/<duty>@main`
 — so the committed `dist/` bundle CI proves matches `src/` is what is exercised,

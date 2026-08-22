@@ -21,17 +21,19 @@ name: Reeve
 # boundary between modes is a deliberate act, never a default:
 #
 #   observe    — dry-run or shadow. The pipeline runs whole; nothing is written.
-#                `duplicate`, `respond`, `lifecycle`, `review` and the Thursday
-#                dependa conformance row live here until a maintainer has read
-#                enough job summaries to trust them.
+#                `duplicate`, `respond`, `lifecycle` and the Thursday dependa
+#                conformance row live here until a maintainer has read enough
+#                job summaries to trust them.
 #   propose    — the duty drafts (and judges) but the warrant is what decides
 #                whether a draft becomes a write: translate's edit-body,
 #                harmonise's edit-file + open-pr. The workflow withholds nothing;
 #                the warrant does.
 #   controlled — the duty writes what the warrant grants, narrowed by its own
-#                `dry-run`. `triage` (label, record) and the Wednesday dependa
-#                drafting row (edit-file, open-pr) are configured here, and only
-#                on the repository that owns the warrant.
+#                `dry-run`. `triage` (label, record), `review` (comment) and the
+#                Wednesday dependa drafting row (edit-file, open-pr) are
+#                configured here, and only on the repository that owns the
+#                warrant. `review` moved here from `observe` when #114 granted
+#                it `comment` and dropped its `dry-run`; it posts for real.
 #
 # `observe` is the only mode that is write-safe BY CONSTRUCTION — dry-run cannot
 # be turned off from a matrix row. `propose` and `controlled` are write modes
@@ -136,9 +138,10 @@ on:
   pull_request_target:
     types: [opened, edited]
   # review dogfoods on `pull_request` (not `_target`): it checks out the base
-  # ref explicitly so the rules file it reads is the trusted one, and it runs
-  # `dry-run: true` (the warrant grants review nothing), so the write token the
-  # `_target` event would provide is not needed yet.
+  # ref explicitly so the rules file it reads is the trusted one. It posts for
+  # real — the warrant grants `review: [comment]` and the job carries no
+  # `dry-run` — and `pull_request` is enough for that write, because the comment
+  # goes to a pull request in this repository under this repository's own token.
   pull_request:
     types: [opened, ready_for_review, synchronize]
   # harmonise syncs locale files when the source locale changes on main.
@@ -619,11 +622,16 @@ jobs:
           echo "| outcome | ${{ steps.harmonise.outcome }} — synced: ${{ steps.harmonise.outputs.synced }} |" >> "$GITHUB_STEP_SUMMARY"
 
   # ────────────────────────────── review ─────────────────────────────────────
-  # The newest duty, exercised here as a live dogfood for the first time. It
-  # answers a pull request with findings — in MODE: observe, because the warrant
-  # grants review nothing yet, so the verdict and findings stay on the job
-  # summary. This is the exact "watch a few synchronize events before granting
-  # comment" start the duty's own docs recommend.
+  # The newest duty, and the one dogfooded hardest. It answers a pull request
+  # with findings — in MODE: controlled, because #114 granted `review: [comment]`
+  # in the warrant and dropped this job's `dry-run` together. The summary comment
+  # and the inline threads are real writes to a real pull request; the job
+  # summary reports what was actually written rather than asserting a mode.
+  #
+  # It ran report-only from #91 until #114, which turned the post on once #113's
+  # budget bump let a 1M-token provider see a whole diff — a short observation,
+  # and a deliberate one. Withdrawing it is one line — restore `dry-run: true`
+  # below — but the warrant is the authority either way.
   review:
     name: Review
     if: |
@@ -633,7 +641,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: write # dry-run posts nothing, but the duty needs the scope to read
+      pull-requests: write # the summary comment and the inline threads are real writes
     concurrency:
       group: reeve-dogfood-review-${{ github.event.pull_request.number || inputs.number || 'dispatch' }}
       cancel-in-progress: true
@@ -684,7 +692,7 @@ jobs:
         env:
           DUTY: review
           REPOSITORY: ecoma-io/reeve
-          MODE: observe
+          MODE: controlled
         run: |
           echo "## Dogfood — $DUTY" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -693,8 +701,13 @@ jobs:
           echo "| repository | $REPOSITORY |" >> "$GITHUB_STEP_SUMMARY"
           echo "| duty | $DUTY |" >> "$GITHUB_STEP_SUMMARY"
           echo "| event | ${{ github.event_name }} ${{ github.event.action }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| mode | $MODE (dry-run — nothing posted) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| mode | $MODE (the warrant grants \`comment\`; this job posts) |" >> "$GITHUB_STEP_SUMMARY"
           echo "| thread | ${{ github.event.pull_request.number || inputs.number || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
+          # `commented` is the duty's own output, so this row says what the run
+          # actually wrote rather than repeating what the mode above claims: it
+          # is `false` on every path the warrant, the confidence floor or a
+          # no-verdict guard withheld, and empty when the step never ran.
+          echo "| commented | ${{ steps.review.outputs.commented || '-' }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| outcome | ${{ steps.review.outcome }} — findings: ${{ steps.review.outputs.findings }} |" >> "$GITHUB_STEP_SUMMARY"
 
   # ────────────────────────────── dependa ────────────────────────────────────
