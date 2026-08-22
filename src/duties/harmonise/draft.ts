@@ -36,6 +36,23 @@ export interface Draft {
   /** The draft text, sanitized — ready to be published. */
   readonly text: string;
   readonly score: Score;
+  /**
+   * True when at least one chunk of this draft is the ORIGINAL target text,
+   * kept because no model produced a replacement for it.
+   *
+   * The fallback itself is right: half a synced document beats a document with
+   * a hole in it, and the chunks that did come back are real work. What was
+   * wrong is that it was silent — the reassembled draft scores like any other,
+   * wins, publishes, and the locale is then recorded as synced to a source
+   * revision it never fully saw. The next source change diffs from *that*
+   * revision, so the hunk the failed chunk was carrying is never propagated to
+   * that locale again.
+   *
+   * So the fact travels with the draft, and `main.ts` publishes it while
+   * leaving the locale's recorded revision where it was. A later run sees the
+   * locale is behind and redrafts it.
+   */
+  readonly incomplete?: boolean;
 }
 
 /** The outcome of the draft loop for one stale locale. */
@@ -268,6 +285,8 @@ async function draftChunked(
   const exhausted = new Set<string>(weather?.starved ?? []);
   const chunkDrafts: string[] = [];
   const failures: Failure[] = [];
+  // Set by the fallback below, and carried out on the draft. See `Draft.incomplete`.
+  let incomplete = false;
 
   for (let i = 0; i < count; i += 1) {
     const sourceChunk = sourceChunks[i] ?? "";
@@ -321,9 +340,14 @@ async function draftChunked(
     if (chunkText !== null) {
       chunkDrafts.push(chunkText);
     } else {
-      // Fallback: keep the original target chunk when drafting fails.
+      // Fallback: keep the original target chunk when drafting fails. The
+      // locale keeps whatever this run did manage — and is recorded as still
+      // behind, so a later run comes back for the chunk this one lost rather
+      // than treating the document as synced. See `Draft.incomplete`.
+      incomplete = true;
       core.warning(
-        `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count)}: no draft produced — keeping original`,
+        `harmonise: ${targetLanguage.code}: chunk ${String(i + 1)}/${String(count)}: ` +
+          "no draft produced — keeping original, and leaving the locale behind the source",
       );
       chunkDrafts.push(targetChunk);
     }
@@ -354,6 +378,7 @@ async function draftChunked(
     model: models.find((m) => !exhausted.has(m)) ?? models[0] ?? "unknown",
     text: reinserted,
     score: measured,
+    ...(incomplete ? { incomplete: true } : {}),
   };
 
   if (measured.admissible) {

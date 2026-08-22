@@ -15,7 +15,7 @@
  */
 import type { Language } from "../../core/languages.js";
 
-import { marker } from "./publish.js";
+import { marker, translationFingerprint } from "./publish.js";
 
 /**
  * The author's own words, and whether the tail of them was left behind.
@@ -36,6 +36,40 @@ export function readBody(
     truncated: limit !== null && official.length > limit,
     published,
   };
+}
+
+/**
+ * Whether this body already carries a translation for *this text and these
+ * languages* — the one question a run may answer without spending anything.
+ *
+ * **The languages, not just the marker.** A body carrying a real digest has
+ * been translated at least once, and that used to be the whole of what a sweep
+ * asked. It is the wrong question, and the fingerprint was already built to
+ * answer the right one: `translationFingerprint` is computed over what a run
+ * *achieved* rather than what it was asked for, precisely so a run that fell
+ * short leaves a marker the next run does not match. A sweep that stops at
+ * "there is a digest here" throws that distinction away and skips exactly the
+ * threads the distinction exists to find — #123 and #130 each carry a valid
+ * marker recording Chinese alone, and no sweep would ever have looked at them
+ * again.
+ *
+ * A forged marker is still no evidence of anything: a payload that is not the
+ * digest of this text and these languages cannot equal one, so the withholding
+ * attack `isFingerprint` guarded against is closed by the comparison itself
+ * rather than by a shape test in front of it.
+ *
+ * Same three inputs as `translateText`'s own checkpoint, through the same two
+ * functions, because they are one rule: the sweep decides whether to start a
+ * thread and the thread decides whether to spend a request, and a sweep that
+ * disagreed would either re-translate everything or skip what it should not.
+ */
+export function carriesTranslation(
+  body: string,
+  limit: number | null,
+  languages: readonly Language[],
+): boolean {
+  const { source, published } = readBody(body, limit);
+  return published !== null && published === translationFingerprint(source, languages);
 }
 
 /**

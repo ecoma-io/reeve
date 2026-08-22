@@ -153,7 +153,7 @@ async function runHarmonise(fixture: string, scratch: string): Promise<Line> {
 
 function harmoniseStub(scenario: Scenario): StubOptions {
   const routes: Route[] = [
-    ...repoRoutes(scenario.contents),
+    ...repoRoutes(scenario.contents, scenario.blobs),
     ...publishRoutes(scenario.contents),
     completionRoute((ask) => answering(scenario, ask)),
   ];

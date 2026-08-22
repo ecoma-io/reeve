@@ -159,6 +159,12 @@ export async function scenarioOf(name: string, directory: string): Promise<Scena
     },
   ];
 
+  // The previous source revision, reachable by SHA and absent from the tree —
+  // exactly what a recorded `sourceRevision` describes.
+  const blobs = new Map<string, { content: string; sha: string }>([
+    [currentPath, { content: en.content, sha: shaOf(en.content) }],
+  ]);
+
   const contents = new Map<string, { content: string; sha: string }>([
     [currentPath, { content: currentSource.content, sha: shaOf(currentSource.content) }],
     // The run reads its provenance state from the repo, so the seed is a file
@@ -174,6 +180,7 @@ export async function scenarioOf(name: string, directory: string): Promise<Scena
   const scenario: Scenario = {
     name,
     contents,
+    blobs,
     state,
     languages: locales.join(", "),
     classify: "",
@@ -196,6 +203,18 @@ async function expectedOf(directory: string): Promise<FixtureExpected> {
 export interface Scenario {
   readonly name: string;
   readonly contents: ContentMap;
+  /**
+   * The previous revision of the source, addressable by its blob SHA but not
+   * listed in the tree — what `sourceRevision` in the seeded state points at.
+   *
+   * A fixture never needed this before, because nothing ever read it: the diff
+   * branch in `processGroup` compared `doc.sourceRevision` against the current
+   * SHA *after* `markStale` had already set them equal, so every change was
+   * classified from the whole document and the blob read was unreachable. With
+   * the baseline read per locale that branch runs, and a fixture that seeds a
+   * previous revision has to be able to serve it.
+   */
+  readonly blobs?: ContentMap;
   readonly state: SeededState[];
   readonly languages: string;
   readonly classify: string;

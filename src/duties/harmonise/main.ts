@@ -83,8 +83,10 @@ import { localiseLinks } from "./links.js";
 import { judge as judgePanel, type Verdict } from "./judge.js";
 import {
   findOrCreate,
+  markPartial,
   markStale,
   markSynced,
+  sharedBaseline,
   readState,
   serialiseState,
   writeState,
@@ -595,6 +597,8 @@ async function processGroup(
   const synced: string[] = [];
   const skipped: string[] = [];
   const created: string[] = [];
+  /** Locales written this run that are still behind the source. See `Draft.incomplete`. */
+  const partial = new Set<string>();
 
   // Stale locales split by whether their file exists. A missing file is the
   // bootstrap case — nothing to diff against, nothing to classify: the whole
@@ -611,13 +615,20 @@ async function processGroup(
     // stored sourceRevision blob SHA, then diff it against the current
     // content. On first run (sourceRevision is empty), everything is new.
     let diffDescription: string;
-    if (doc.sourceRevision === "" || doc.sourceRevision === sourceFile.sha) {
+    // The revision every stale locale shares, or null when they disagree —
+    // which is what an earlier run that synced one locale and lost another
+    // leaves behind. Nothing can order two blob SHAs by age, so a group whose
+    // locales are at different revisions is diffed as a new document: the only
+    // reading that cannot silently drop a change one of them still needs. It
+    // costs a larger prompt for one run and settles itself once they agree.
+    const baseline = sharedBaseline(doc, staleWithFile);
+    if (baseline === null || baseline === sourceFile.sha) {
       diffDescription = formatInitialSync(sourceFile.text);
     } else {
-      const previousContent = await readBlob(api, at, doc.sourceRevision);
+      const previousContent = await readBlob(api, at, baseline);
       if (previousContent === null) {
         core.warning(
-          `harmonise: cannot resolve source revision ${doc.sourceRevision.slice(0, 8)} ` +
+          `harmonise: cannot resolve source revision ${baseline.slice(0, 8)} ` +
             `for ${group.id} — skipping. The blob SHA may no longer be reachable.`,
         );
         return none(group, conflicts, doc.stale);
@@ -780,7 +791,21 @@ async function processGroup(
     // Marked as pending in provenance — the real SHA comes from the write's
     // response, applied once `publishSync` returns below. Recording "pending"
     // now keeps the state honest if the run dies before the write.
-    markSynced(doc, locale, "pending");
+    //
+    // A draft at least one of whose chunks is the original target text is
+    // written like any other — it is still the better file — but it is not
+    // recorded as caught up with the source, so a later run comes back for the
+    // chunk this one lost. See `Draft.incomplete`.
+    if (winner.incomplete === true) {
+      partial.add(locale);
+      markPartial(doc, locale, "pending");
+      core.warning(
+        `harmonise: ${locale}: publishing what this run drafted, but the locale is left ` +
+          `behind ${sourceFile.sha.slice(0, 8)} — at least one chunk is the original text.`,
+      );
+    } else {
+      markSynced(doc, locale, "pending", sourceFile.sha);
+    }
     synced.push(locale);
     if (isMissingFile) created.push(locale);
   }
@@ -813,7 +838,8 @@ async function processGroup(
       // known", which the next source change treats as stale rather than as a
       // false conflict.
       for (const [locale, sha] of pr.shas) {
-        markSynced(doc, locale, sha);
+        if (partial.has(locale)) markPartial(doc, locale, sha);
+        else markSynced(doc, locale, sha, sourceFile.sha);
       }
       core.info(`harmonise: opened PR #${String(pr.pr)} for ${group.id}`);
     }

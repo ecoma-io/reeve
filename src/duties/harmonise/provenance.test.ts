@@ -6,10 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import { type ContentsApi } from "../../core/forge.js";
 import {
   findOrCreate,
+  markPartial,
   markStale,
   markSynced,
   readState,
   serialiseState,
+  sharedBaseline,
   type DocumentState,
 } from "./provenance.js";
 
@@ -58,6 +60,7 @@ describe("findOrCreate", () => {
       files: new Map([["en", "docs/guide.md"]]),
       sourceRevision: "abc123",
       synced: new Map(),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: [],
     };
@@ -79,6 +82,7 @@ describe("markStale", () => {
       ]),
       sourceRevision: "old123",
       synced: new Map([["vi", "sha-vi-old"]]),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: [],
     };
@@ -99,6 +103,7 @@ describe("markStale", () => {
       ]),
       sourceRevision: "old123",
       synced: new Map([["vi", "sha-vi-old"]]),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: [],
     };
@@ -119,6 +124,7 @@ describe("markStale", () => {
       ]),
       sourceRevision: "same123",
       synced: new Map([["vi", "sha-vi"]]),
+      syncedRevision: new Map([["vi", "same123"]]),
       stale: [],
       conflicts: [],
     };
@@ -139,6 +145,7 @@ describe("markStale", () => {
       ]),
       sourceRevision: "",
       synced: new Map(),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: [],
     };
@@ -163,6 +170,7 @@ describe("markStale", () => {
       ]),
       sourceRevision: "old123",
       synced: new Map([["vi", "pending"]]),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: [],
     };
@@ -189,12 +197,13 @@ describe("markStale", () => {
       ]),
       sourceRevision: "old123",
       synced: new Map(),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: [],
     };
 
     // Sync: the real SHA the write returned, replacing the "pending" placeholder.
-    markSynced(doc, "vi", "sha-vi-synced");
+    markSynced(doc, "vi", "sha-vi-synced", "old123");
 
     // The source changes next run, and a human has meanwhile edited the target.
     markStale(doc, "new456", new Map([["vi", "sha-vi-human-edit"]]), "en");
@@ -211,11 +220,12 @@ describe("markSynced", () => {
       files: new Map([["en", "docs/guide.md"]]),
       sourceRevision: "abc",
       synced: new Map(),
+      syncedRevision: new Map(),
       stale: ["vi"],
       conflicts: [],
     };
 
-    markSynced(doc, "vi", "sha-new");
+    markSynced(doc, "vi", "sha-new", "abc");
 
     expect(doc.synced.get("vi")).toBe("sha-new");
     expect(doc.stale).toHaveLength(0);
@@ -227,11 +237,12 @@ describe("markSynced", () => {
       files: new Map([["en", "docs/guide.md"]]),
       sourceRevision: "abc",
       synced: new Map(),
+      syncedRevision: new Map(),
       stale: [],
       conflicts: ["vi"],
     };
 
-    markSynced(doc, "vi", "sha-new");
+    markSynced(doc, "vi", "sha-new", "abc");
 
     expect(doc.conflicts).toHaveLength(0);
   });
@@ -245,6 +256,7 @@ describe("serialiseState", () => {
         files: new Map([["en", "docs/guide.md"]]),
         sourceRevision: "abc123",
         synced: new Map([["vi", "sha-vi"]]),
+        syncedRevision: new Map([["vi", "abc123"]]),
         stale: ["zh"],
         conflicts: [],
       },
@@ -259,6 +271,7 @@ describe("serialiseState", () => {
         files: { en: "docs/guide.md" },
         sourceRevision: "abc123",
         synced: { vi: "sha-vi" },
+        syncedRevision: { vi: "abc123" },
         stale: ["zh"],
         conflicts: [],
       },
@@ -287,6 +300,50 @@ describe("readState", () => {
     expect(result.branchSha).toBeNull();
     expect(result.state).toHaveLength(1);
     expect(result.state[0]?.id).toBe("docs/guide");
+  });
+
+  it("reads a state file written before per-locale revisions as fully caught up", async () => {
+    // The migration, and the reason it is not "nothing is synced": the old
+    // shape carried exactly one fact — this group was last synced at this
+    // revision — and reading it faithfully means every locale it recorded as
+    // synced was synced there. Reading it as unknown would be safe and would
+    // re-sync every locale of every document the first time a repository runs
+    // this version, for no information gained.
+    const text = JSON.stringify([
+      {
+        id: "docs/guide",
+        sourceRevision: "abc",
+        files: { en: "docs/guide.md", vi: "docs/guide.vi.md" },
+        synced: { vi: "sha-vi" },
+        stale: [],
+        conflicts: [],
+      },
+    ]);
+    const api = contentsOf(vi.fn(() => Promise.resolve(encode(text, "sha-123"))));
+
+    const result = await readState(api, AT, STATE_PATH);
+
+    expect(result.state[0]?.syncedRevision.get("vi")).toBe("abc");
+  });
+
+  it("prefers a per-locale revision the file actually carries over the migration reading", async () => {
+    const text = JSON.stringify([
+      {
+        id: "docs/guide",
+        sourceRevision: "rev-2",
+        files: { en: "docs/guide.md", vi: "docs/guide.vi.md", zh: "docs/guide.zh.md" },
+        synced: { vi: "sha-vi", zh: "sha-zh" },
+        syncedRevision: { vi: "rev-2", zh: "rev-1" },
+        stale: [],
+        conflicts: [],
+      },
+    ]);
+    const api = contentsOf(vi.fn(() => Promise.resolve(encode(text, "sha-123"))));
+
+    const result = await readState(api, AT, STATE_PATH);
+
+    expect(result.state[0]?.syncedRevision.get("vi")).toBe("rev-2");
+    expect(result.state[0]?.syncedRevision.get("zh")).toBe("rev-1");
   });
 
   it("returns empty state when the file does not exist and no state branch is given", async () => {
@@ -400,6 +457,7 @@ describe("findOrCreate folding in newly discovered locales", () => {
         ]),
         sourceRevision: "rev-1",
         synced: new Map([["vi", "sha-vi"]]),
+        syncedRevision: new Map(),
         stale: [],
         conflicts: [],
       },
@@ -427,6 +485,7 @@ describe("findOrCreate folding in newly discovered locales", () => {
         files,
         sourceRevision: "rev-1",
         synced: new Map(),
+        syncedRevision: new Map(),
         stale: [],
         conflicts: [],
       },
@@ -448,6 +507,7 @@ describe("markStale on an unchanged source", () => {
       ]),
       sourceRevision: "rev-1",
       synced: new Map([["vi", "sha-vi"]]),
+      syncedRevision: new Map([["vi", "rev-1"]]),
       stale: [],
       conflicts: [],
     };
@@ -468,6 +528,7 @@ describe("markStale on an unchanged source", () => {
       ]),
       sourceRevision: "rev-1",
       synced: new Map([["vi", "sha-vi"]]),
+      syncedRevision: new Map([["vi", "rev-1"]]),
       stale: [],
       conflicts: [],
     };
@@ -479,6 +540,50 @@ describe("markStale on an unchanged source", () => {
     expect(doc.stale).toEqual([]);
   });
 
+  it("keeps a locale that missed an earlier run stale, though the source has not moved", () => {
+    // The defect this pair of fields exists to fix. A run took the document to
+    // `rev-2`, synced `vi` and lost `zh` — a refused draft, a roster out of
+    // capacity, either way `zh` never saw the change. The group's own revision
+    // advanced regardless, because `markStale` advances it before any drafting.
+    //
+    // Under the old shape the next run compared that one revision against the
+    // tree, found them equal, and returned early: `zh` was indistinguishable
+    // from a locale that had taken the change. The hunk it missed was never
+    // propagated, and nothing anywhere said so.
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([
+        ["en", "docs/guide.md"],
+        ["vi", "docs/guide.vi.md"],
+        ["zh", "docs/guide.zh.md"],
+      ]),
+      sourceRevision: "rev-2",
+      synced: new Map([
+        ["vi", "sha-vi"],
+        ["zh", "sha-zh"],
+      ]),
+      syncedRevision: new Map([
+        ["vi", "rev-2"],
+        ["zh", "rev-1"],
+      ]),
+      stale: [],
+      conflicts: [],
+    };
+
+    markStale(
+      doc,
+      "rev-2",
+      new Map([
+        ["vi", "sha-vi"],
+        ["zh", "sha-zh"],
+      ]),
+      "en",
+    );
+
+    expect(doc.stale).toEqual(["zh"]);
+    expect(doc.conflicts).toEqual([]);
+  });
+
   it("does not double-mark a locale already stale", () => {
     const doc: DocumentState = {
       id: "docs/guide",
@@ -488,6 +593,7 @@ describe("markStale on an unchanged source", () => {
       ]),
       sourceRevision: "rev-1",
       synced: new Map(),
+      syncedRevision: new Map(),
       stale: ["zh"],
       conflicts: [],
     };
@@ -495,5 +601,72 @@ describe("markStale on an unchanged source", () => {
     markStale(doc, "rev-1", new Map(), "en");
 
     expect(doc.stale).toEqual(["zh"]);
+  });
+});
+
+describe("sharedBaseline", () => {
+  function doc(syncedRevision: Map<string, string>): DocumentState {
+    return {
+      id: "docs/guide",
+      files: new Map([["en", "docs/guide.md"]]),
+      sourceRevision: "rev-2",
+      synced: new Map(),
+      syncedRevision,
+      stale: [],
+      conflicts: [],
+    };
+  }
+
+  it("names the revision when every locale is at the same one", () => {
+    const revisions = new Map([
+      ["vi", "rev-1"],
+      ["zh", "rev-1"],
+    ]);
+
+    expect(sharedBaseline(doc(revisions), ["vi", "zh"])).toBe("rev-1");
+  });
+
+  it("answers null when the locales disagree, which is what a short run leaves", () => {
+    // No way exists to order two blob SHAs by age — git hands out content
+    // digests and nothing in them says which came first. So a caller cannot
+    // pick "the older one" and has to treat the document as new, which is the
+    // only reading that cannot drop a change one locale still needs.
+    const revisions = new Map([
+      ["vi", "rev-2"],
+      ["zh", "rev-1"],
+    ]);
+
+    expect(sharedBaseline(doc(revisions), ["vi", "zh"])).toBeNull();
+  });
+
+  it("answers null for a locale with no revision at all — the cold start", () => {
+    expect(sharedBaseline(doc(new Map()), ["vi"])).toBeNull();
+  });
+});
+
+describe("markPartial", () => {
+  it("records what was written without recording that the locale caught up", () => {
+    // A draft one of whose chunks is the original text is still the better
+    // file and is still published — its SHA has to be recorded or a later
+    // human edit cannot be told from Reeve's own bytes. What must not be
+    // recorded is a revision, or the next run diffs from a revision this
+    // locale never fully saw.
+    const doc: DocumentState = {
+      id: "docs/guide",
+      files: new Map([["vi", "docs/guide.vi.md"]]),
+      sourceRevision: "rev-2",
+      synced: new Map(),
+      syncedRevision: new Map([["vi", "rev-1"]]),
+      stale: ["vi"],
+      conflicts: ["vi"],
+    };
+
+    markPartial(doc, "vi", "sha-written");
+
+    expect(doc.synced.get("vi")).toBe("sha-written");
+    expect(doc.syncedRevision.get("vi")).toBe("rev-1");
+    expect(doc.conflicts).toEqual([]);
+    // Still behind, and still reported as such by this run.
+    expect(doc.stale).toEqual(["vi"]);
   });
 });

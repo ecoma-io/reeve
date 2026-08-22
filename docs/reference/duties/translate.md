@@ -347,8 +347,19 @@ line: a language nobody could translate does not fail the job.
 | The configuration is broken                                       | **Red**, naming the input                                                                                                                                                               |
 | The event names no thread and `number` is empty                   | **Red**, naming the event                                                                                                                                                               |
 
-A skipped language is not in the fingerprint, so the next run tries it
-again rather than reading its own claim and stopping.
+A skipped language is not in the fingerprint, so a later run tries it again
+rather than reading its own claim and stopping. That holds for the sweep as
+well as for an event: a sweep skips a thread only when its marker records the
+translation for _this text and these languages_, so a thread whose marker
+records one language of two is work the sweep comes back for.
+
+**Which run is the later one is worth knowing.** Publishing edits the thread
+body, and an edit written with `GITHUB_TOKEN` starts no workflow run — GitHub
+suppresses it to prevent recursion. So on a repository triggering this duty from
+`issues`/`pull_request_target` with the default token, the run that repairs a
+short run is the next _sweep_, not an event. A repository that wants the repair
+to happen immediately passes a GitHub App token, which does re-fire the event;
+see [platform limits](../platform-limits.md).
 
 **Running on the unconfigured `languages` default is noted, once, rather
 than left silent.** `en, vi, zh` is the duty's own default, decided in code —
